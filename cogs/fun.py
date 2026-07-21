@@ -1,6 +1,7 @@
 """
 Fun cog — assorted novelty commands: dice rolls, roasts, fortune/tarot, random
-facts, inspirational images and (owner-only) AI image generation.
+facts, inspirational images and (owner-only) AI image generation. Text lives in
+``lang``.
 """
 
 import asyncio
@@ -37,10 +38,7 @@ class Fun(commands.Cog, name="fun"):
         """Draft a random member for a random cringe challenge."""
         user = await self.bot.fetch_user(random.choice(config_py.CRINGE))
         challenge = random.choice(config_py.CHALLENGES)
-        await context.send(
-            f"{user.mention} You have been chosen for the cringe team! \n"
-            f"HEED THE CALL, your cringe challenge is: {challenge}! Good luck, and may the cringe be with you!"
-        )
+        await context.send(lang.FUN_CRINGE.format(user=user.mention, challenge=challenge))
 
     @commands.hybrid_command(name="d20", description="Roll a 20-sided die with an optional modifier.")
     @checks.not_blacklisted()
@@ -48,20 +46,22 @@ class Fun(commands.Cog, name="fun"):
         """Roll a d20, applying an optional modifier."""
         roll = random.randint(1, 20)
         if modifier == 0:
-            message = f"You rolled: **{roll}**"
+            message = lang.FUN_D20_PLAIN.format(roll=roll)
         else:
-            message = f"You rolled: **{roll}** {'+' if modifier > 0 else ''}{modifier} = **{roll + modifier}**"
+            message = lang.FUN_D20_MODIFIED.format(
+                roll=roll, sign="+" if modifier > 0 else "", modifier=modifier, total=roll + modifier
+            )
         if roll == 20:
-            message += "\n **Critical Success!**"
+            message += lang.FUN_D20_CRIT_SUCCESS
         elif roll == 1:
-            message += "\n **Critical Failure!**"
+            message += lang.FUN_D20_CRIT_FAILURE
         await context.send(message)
 
     @commands.hybrid_command(name="d20m", description="Gather players and roll a d20 for everyone who joins.")
     @checks.not_blacklisted()
     async def d20m(self, context: Context) -> None:
         """Collect dice reactions for 7s, then roll a d20 for each participant."""
-        join_msg = await context.send("React with the dice emoji within 7 seconds to join the d20 roll!")
+        join_msg = await context.send(lang.FUN_D20M_JOIN)
         await join_msg.add_reaction("\U0001F3B2")
         await asyncio.sleep(7)
 
@@ -74,7 +74,7 @@ class Fun(commands.Cog, name="fun"):
             pass
 
         if not players:
-            await context.send("No one joined the roll in time.")
+            await context.send(lang.FUN_D20M_NONE)
             return
 
         results = {player: random.randint(1, 20) for player in players}
@@ -83,14 +83,16 @@ class Fun(commands.Cog, name="fun"):
 
         embed = messages.embed(
             "\n".join(f"{p.mention}: **{r}**" for p, r in sorted(results.items(), key=lambda i: i[1], reverse=True)),
-            title="Multiplayer d20 Results",
+            title=lang.FUN_D20M_TITLE,
             color=discord.Color.blurple(),
         )
         if len(winners) == 1:
-            embed.add_field(name="Winner", value=f"{winners[0].mention} wins with a roll of {max_roll}!", inline=False)
+            embed.add_field(name="Winner", value=lang.FUN_D20M_WINNER.format(winner=winners[0].mention, roll=max_roll), inline=False)
         else:
             embed.add_field(
-                name="Tie!", value=f"{', '.join(w.mention for w in winners)} tied with a roll of {max_roll}!", inline=False
+                name="Tie!",
+                value=lang.FUN_D20M_TIE.format(winners=", ".join(w.mention for w in winners), roll=max_roll),
+                inline=False,
             )
         await context.send(embed=embed)
 
@@ -100,12 +102,12 @@ class Fun(commands.Cog, name="fun"):
         """Deliver a Shakespearean roast (Dodo defends itself if roasted)."""
         if member is None:
             member = context.author
-            await context.send("Do you really wanna insult yourself? Even to a Dodo like me, it's a bit too much.")
+            await context.send(lang.FUN_ROAST_SELF)
         elif member.id == 824171812518494238:
             await context.send(random.choice(lang.DODO_INSULT))
             return
         insult = f"{random.choice(lang.INSULT_1)} {random.choice(lang.INSULT_2)} {random.choice(lang.INSULT_3)}"
-        await context.send(f"{member.display_name}, thou {insult}!")
+        await context.send(lang.FUN_ROAST.format(name=member.display_name, insult=insult))
 
     @commands.hybrid_command(name="gay", description="Check how gay someone is at this very moment.")
     @checks.not_blacklisted()
@@ -113,43 +115,22 @@ class Fun(commands.Cog, name="fun"):
         """Roll a light-hearted 'gayness' percentage with a matching joke."""
         member = member or context.author
         gayness = random.randint(0, 100)
-        jokes_by_tier = {
-            "straight": [
-                "The only thing you see in the LGBT flag are straight lines...",
-                "When you play chess you only use rooks, because they go straight.",
-                "When someone asks you directions, you always tell them to go straight",
-                "Straighter than a ruler!",
-                "You must be really good at playing poker, since you always keep a straight face",
-                "Keep it up, breeder :heart: ",
-            ],
-            "slight": ["You are on the right path!"],
-            "medium": ["That actually explains so much... :open_mouth: "],
-            "heavy": [
-                "I hope you never have to pass the walk and turn test :pleading_face: ",
-                "It made me remember that argument we had, when we were constantly going in circles...",
-            ],
-            "full": [
-                "You look fantastic, no hetero :smirk: Must be all the time you've spent in the closet!",
-                "The time has come for the Vestige to know the truth!",
-                "I would ask you how it feels to be so gay, but I'm afraid I wouldn't get a straight answer",
-            ],
-        }
         if gayness == 4:
-            phrase = "I once yelled COW! at a woman on a bicycle and she gave me the middle finger. Then she plowed her bike straight into the cow... I know it's unrelated, just wanted to share"
+            phrase = lang.FUN_GAY_FOUR
         elif gayness < 20:
-            phrase = random.choice(jokes_by_tier["straight"])
+            phrase = random.choice(lang.FUN_GAY_STRAIGHT)
         elif gayness < 40:
-            phrase = random.choice(jokes_by_tier["slight"])
+            phrase = random.choice(lang.FUN_GAY_SLIGHT)
         elif gayness < 60:
-            phrase = random.choice(jokes_by_tier["medium"])
+            phrase = random.choice(lang.FUN_GAY_MEDIUM)
         elif gayness < 80:
-            phrase = random.choice(jokes_by_tier["heavy"])
+            phrase = random.choice(lang.FUN_GAY_HEAVY)
         else:
-            phrase = random.choice(jokes_by_tier["full"])
+            phrase = random.choice(lang.FUN_GAY_FULL)
         await context.send(
             embed=messages.warning(
-                f"{member.display_name}, you are {gayness}% gay! {phrase}",
-                title=f"{member.display_name}, we checked your momentary gayness, and here's the result!",
+                lang.FUN_GAY_RESULT.format(name=member.display_name, gayness=gayness, phrase=phrase),
+                title=lang.FUN_GAY_TITLE.format(name=member.display_name),
             )
         )
 
@@ -160,9 +141,9 @@ class Fun(commands.Cog, name="fun"):
         member = member or context.author
         inspirobot.HTTPS = False
         quote = inspirobot.generate()
-        embed = messages.success(title="This may change your life")
+        embed = messages.success(title=lang.FUN_WISDOM_TITLE)
         embed.set_image(url=quote.url)
-        embed.set_author(name=f"{member.display_name},")
+        embed.set_author(name=lang.FUN_WISDOM_AUTHOR.format(name=member.display_name))
         await context.send(embed=embed)
 
     @commands.hybrid_command(name="future", description="Draw a random tarot card to predict a future.")
@@ -175,7 +156,7 @@ class Fun(commands.Cog, name="fun"):
         side = "inverted" if random.randint(0, 10) > 5 else "not inverted"
         name = tarot[0].contents[0].next_sibling.get_text()
         description = tarot[0].contents[0].next_sibling.next_sibling.next_sibling
-        await context.send(f"{member.display_name}, I see {name}. The card is {side}")
+        await context.send(lang.FUN_TAROT_CARD.format(name=member.display_name, card=name, side=side))
         await context.send(description)
 
     @commands.hybrid_command(name="fact", description="Get a random fact.")
@@ -196,9 +177,9 @@ class Fun(commands.Cog, name="fun"):
     async def imagine(self, context: Context, *, message: str) -> None:
         """Generate a DALL·E image from a prompt."""
         if self.client is None:
-            await context.send("Image generation isn't configured.")
+            await context.send(lang.FUN_IMAGINE_UNCONFIGURED)
             return
-        thinking = await context.send(":thinking: Give me a few seconds please, I'm gonna do my very best!")
+        thinking = await context.send(lang.FUN_IMAGINE_THINKING)
         response = self.client.images.generate(model="dall-e-3", prompt=message, n=1, size="1024x1024")
         await thinking.edit(content=response.data[0].url)
 

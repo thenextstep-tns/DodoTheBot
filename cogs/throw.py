@@ -1,7 +1,7 @@
 """
 Throw cog — ``throw`` launches another member a physics-derived distance after
 the thrower solves a timed multiplication puzzle. Throwers gain power, targets
-lose it, and each throw is logged.
+lose it, and each throw is logged. Text lives in ``lang``.
 """
 
 import asyncio
@@ -14,9 +14,9 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import database as db
 
-_GRAVITY = 9.8  # m/s^2 (flavour constant)
 _MAX_DISTANCE = 5.0  # metres at the ideal 45° angle
 _PUZZLE_TIMEOUT = 5
 _POWER_STEP = 0.05
@@ -35,7 +35,7 @@ class Throw(commands.Cog, name="throw"):
         correct_answer = num1 * num2 * num3
 
         puzzle_message = await context.send(
-            f"To charge your throw, solve this puzzle within {_PUZZLE_TIMEOUT} seconds: {num1} * {num2} * {num3}"
+            lang.THROW_PUZZLE.format(timeout=_PUZZLE_TIMEOUT, num1=num1, num2=num2, num3=num3)
         )
         countdown = asyncio.create_task(self._countdown(puzzle_message, num1, num2, num3))
 
@@ -47,10 +47,9 @@ class Throw(commands.Cog, name="throw"):
             user_answer = int(answer_msg.content)
             countdown.cancel()
         except asyncio.TimeoutError:
-            await puzzle_message.edit(content=f"{context.author.mention}, you took too long!")
+            await puzzle_message.edit(content=lang.THROW_TIMEOUT.format(mention=context.author.mention))
             return
 
-        # Closer answers aim nearer the ideal 45° launch angle.
         angle = 45.0
         if user_answer > correct_answer:
             angle = min(90, 45 + (user_answer - correct_answer) / correct_answer * 45)
@@ -62,10 +61,10 @@ class Throw(commands.Cog, name="throw"):
         target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
         total_force = distance * thrower_power
 
-        gif_url = "https://tenor.com/bkIHP.gif"
         await puzzle_message.edit(
-            content=f"The correct answer was {correct_answer}!\n"
-            f"THROWING {member.mention} AT AN ANGLE OF {round(angle, 2)} degrees...\n{gif_url}"
+            content=lang.THROW_THROWING.format(
+                answer=correct_answer, member=member.mention, angle=round(angle, 2), gif="https://tenor.com/bkIHP.gif"
+            )
         )
         await asyncio.sleep(random.randint(3, 5))
 
@@ -80,10 +79,14 @@ class Throw(commands.Cog, name="throw"):
         db.upsert(config_py.user_power, member.id, {"power": new_target_power})
 
         await puzzle_message.edit(
-            content=f"{member.mention} landed {round(landing, 2)} meters away!\n"
-            f"{self._funny_description(member)}\n"
-            f"{context.author.mention}'s power increased to {round(new_thrower_power, 2)}!\n"
-            f"{member.mention}'s power decreased to {round(new_target_power, 2)}."
+            content=lang.THROW_RESULT.format(
+                member=member.mention,
+                distance=round(landing, 2),
+                funny=self._funny_description(member),
+                thrower=context.author.mention,
+                new_thrower_power=round(new_thrower_power, 2),
+                new_target_power=round(new_target_power, 2),
+            )
         )
 
     async def _countdown(self, puzzle_message: discord.Message, num1: int, num2: int, num3: int) -> None:
@@ -91,8 +94,7 @@ class Throw(commands.Cog, name="throw"):
         try:
             for remaining in range(_PUZZLE_TIMEOUT, 0, -1):
                 await puzzle_message.edit(
-                    content=f"To charge your throw, solve this puzzle: {num1} * {num2} * {num3}\n"
-                    f"Time left: {remaining} seconds"
+                    content=lang.THROW_COUNTDOWN.format(num1=num1, num2=num2, num3=num3, remaining=remaining)
                 )
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
@@ -101,27 +103,12 @@ class Throw(commands.Cog, name="throw"):
     @staticmethod
     def _funny_description(member: discord.Member) -> str:
         """Build a randomized flavour sentence for where the target landed."""
-        part1 = [
-            f"{member.mention} was launched with tremendous force!",
-            f"{member.mention} was thrown into the great unknown!",
-            f"{member.mention} took off like a rocket!",
-        ]
-        part2 = [
-            "They were seen soaring through the sky,",
-            "They disappeared into the clouds,",
-            "They flew straight past the stratosphere,",
-        ]
-        part3 = [
-            "defying all known laws of physics.",
-            "creating a new constellation in the process.",
-            "breaking the sound barrier on the way.",
-        ]
-        part4 = [
-            "Authorities are still investigating the exact trajectory.",
-            "It's unlikely they'll return anytime soon.",
-            "Observers are in shock and awe.",
-        ]
-        return f"{random.choice(part1)} {random.choice(part2)} {random.choice(part3)} {random.choice(part4)}"
+        return (
+            f"{random.choice(lang.THROW_FUNNY_PART1).format(member=member.mention)} "
+            f"{random.choice(lang.THROW_FUNNY_PART2)} "
+            f"{random.choice(lang.THROW_FUNNY_PART3)} "
+            f"{random.choice(lang.THROW_FUNNY_PART4)}"
+        )
 
 
 async def setup(bot):

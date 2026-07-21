@@ -201,3 +201,82 @@ RACESTATS_MICE_LINE = "{index}. **{mouse}**, Wins: {wins}, Avg Position: {avg:.2
 RACESTATS_TOP_TITLE = "Top 10 Mice!"
 RACESTATS_TOP_DESCRIPTION = "Only showing mice who participated in 5 or more races:"
 RACESTATS_TOP_LINE = "Starts: {starts}, Avg. Position: {avg:.2f}, Fav. Handler: {handler}"
+
+# --------------------------------------------------------------------------- #
+#  Fun cog (non-insult text)
+# --------------------------------------------------------------------------- #
+FUN_CRINGE = (
+    "{user} You have been chosen for the cringe team! \n"
+    "HEED THE CALL, your cringe challenge is: {challenge}! Good luck, and may the cringe be with you!"
+)
+FUN_D20_PLAIN = "You rolled: **{roll}**"
+FUN_D20_MODIFIED = "You rolled: **{roll}** {sign}{modifier} = **{total}**"
+FUN_D20_CRIT_SUCCESS = "\n **Critical Success!**"
+FUN_D20_CRIT_FAILURE = "\n **Critical Failure!**"
+FUN_D20M_JOIN = "React with the dice emoji within 7 seconds to join the d20 roll!"
+FUN_D20M_NONE = "No one joined the roll in time."
+FUN_D20M_TITLE = "Multiplayer d20 Results"
+FUN_D20M_WINNER = "{winner} wins with a roll of {roll}!"
+FUN_D20M_TIE = "{winners} tied with a roll of {roll}!"
+FUN_ROAST_SELF = "Do you really wanna insult yourself? Even to a Dodo like me, it's a bit too much."
+FUN_ROAST = "{name}, thou {insult}!"
+FUN_GAY_FOUR = "I once yelled COW! at a woman on a bicycle and she gave me the middle finger. Then she plowed her bike straight into the cow... I know it's unrelated, just wanted to share"
+FUN_GAY_STRAIGHT = [
+    "The only thing you see in the LGBT flag are straight lines...",
+    "When you play chess you only use rooks, because they go straight.",
+    "When someone asks you directions, you always tell them to go straight",
+    "Straighter than a ruler!",
+    "You must be really good at playing poker, since you always keep a straight face",
+    "Keep it up, breeder :heart: ",
+]
+FUN_GAY_SLIGHT = ["You are on the right path!"]
+FUN_GAY_MEDIUM = ["That actually explains so much... :open_mouth: "]
+FUN_GAY_HEAVY = [
+    "I hope you never have to pass the walk and turn test :pleading_face: ",
+    "It made me remember that argument we had, when we were constantly going in circles...",
+]
+FUN_GAY_FULL = [
+    "You look fantastic, no hetero :smirk: Must be all the time you've spent in the closet!",
+    "The time has come for the Vestige to know the truth!",
+    "I would ask you how it feels to be so gay, but I'm afraid I wouldn't get a straight answer",
+]
+FUN_GAY_TITLE = "{name}, we checked your momentary gayness, and here's the result!"
+FUN_GAY_RESULT = "{name}, you are {gayness}% gay! {phrase}"
+FUN_WISDOM_TITLE = "This may change your life"
+FUN_WISDOM_AUTHOR = "{name},"
+FUN_TAROT_CARD = "{name}, I see {card}. The card is {side}"
+FUN_IMAGINE_UNCONFIGURED = "Image generation isn't configured."
+FUN_IMAGINE_THINKING = ":thinking: Give me a few seconds please, I'm gonna do my very best!"
+
+# --------------------------------------------------------------------------- #
+#  Throw cog
+# --------------------------------------------------------------------------- #
+THROW_PUZZLE = "To charge your throw, solve this puzzle within {timeout} seconds: {num1} * {num2} * {num3}"
+THROW_COUNTDOWN = "To charge your throw, solve this puzzle: {num1} * {num2} * {num3}\nTime left: {remaining} seconds"
+THROW_TIMEOUT = "{mention}, you took too long!"
+THROW_THROWING = "The correct answer was {answer}!\nTHROWING {member} AT AN ANGLE OF {angle} degrees...\n{gif}"
+THROW_RESULT = (
+    "{member} landed {distance} meters away!\n{funny}\n"
+    "{thrower}'s power increased to {new_thrower_power}!\n"
+    "{member}'s power decreased to {new_target_power}."
+)
+THROW_FUNNY_PART1 = [
+    "{member} was launched with tremendous force!",
+    "{member} was thrown into the great unknown!",
+    "{member} took off like a rocket!",
+]
+THROW_FUNNY_PART2 = [
+    "They were seen soaring through the sky,",
+    "They disappeared into the clouds,",
+    "They flew straight past the stratosphere,",
+]
+THROW_FUNNY_PART3 = [
+    "defying all known laws of physics.",
+    "creating a new constellation in the process.",
+    "breaking the sound barrier on the way.",
+]
+THROW_FUNNY_PART4 = [
+    "Authorities are still investigating the exact trajectory.",
+    "It's unlikely they'll return anytime soon.",
+    "Observers are in shock and awe.",
+]
