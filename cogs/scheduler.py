@@ -17,11 +17,11 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import messages
 
 _PROXY_BASE_URL = "https://api.proxyapi.ru/openai/v1"
 _MODEL = "gpt-4o-mini"
-_RUN_TYPES = ["free for all", "vet training", "hm training", "farm run", "farm hm run", "achievement run"]
 
 
 class Scheduler(commands.Cog, name="scheduler"):
@@ -39,13 +39,14 @@ class Scheduler(commands.Cog, name="scheduler"):
 
         trials = list(config_py.trial_ping_roles.keys())
         trial = await messages.prompt_select(
-            context, "Please select the trial:", [(t, t) for t in trials], placeholder="Select a trial"
+            context, lang.SCHED_SELECT_TRIAL, [(t, t) for t in trials], placeholder=lang.SCHED_SELECT_TRIAL_PLACEHOLDER
         )
         if not trial:
             return
 
         run_type = await messages.prompt_select(
-            context, "Please select the type of run:", [(r, r) for r in _RUN_TYPES], placeholder="Select the type of run"
+            context, lang.SCHED_SELECT_RUN, [(r, r) for r in lang.SCHED_RUN_TYPES],
+            placeholder=lang.SCHED_SELECT_RUN_PLACEHOLDER,
         )
         if not run_type:
             return
@@ -62,31 +63,27 @@ class Scheduler(commands.Cog, name="scheduler"):
 
     async def _ask_raid_time(self, context: Context) -> dict | None:
         """Prompt for and parse a raid date/time into a timestamp."""
-        await context.send(
-            "Please enter the date and time for the raid (e.g., `2023-10-12 18:30` or `next Friday at 6pm`):"
-        )
+        await context.send(lang.SCHED_ASK_TIME)
         reply = await self._await_reply(context)
         if reply is None:
             return None
 
         timestamp = self._parse_timestamp(reply)
         if timestamp is None:
-            await context.send("Sorry, I couldn't parse the date and time. Please try again.")
+            await context.send(lang.SCHED_TIME_PARSE_FAILED)
             return None
         return {"datetime": datetime.fromtimestamp(timestamp), "timestamp": f"<t:{timestamp}:R>"}
 
     async def _ask_group_composition(self, context: Context) -> dict | None:
         """Prompt for and parse the group composition into tank/heal/dd counts."""
-        await context.send(
-            "Please enter the group composition (e.g., `2 tanks, 2 heals, 8 dds` or `1 tank 3 heal 8 dd`):"
-        )
+        await context.send(lang.SCHED_ASK_COMP)
         reply = await self._await_reply(context)
         if reply is None:
             return None
 
         comp = self._parse_composition(reply)
         if comp is None:
-            await context.send("Sorry, I couldn't parse the group composition. Please try again.")
+            await context.send(lang.SCHED_COMP_PARSE_FAILED)
             return None
         return comp
 
@@ -99,7 +96,7 @@ class Scheduler(commands.Cog, name="scheduler"):
             message = await self.bot.wait_for("message", check=check, timeout=300)
             return message.content.strip()
         except TimeoutError:
-            await context.send("You took too long to respond. Please try scheduling the raid again.")
+            await context.send(lang.SCHED_TIMEOUT)
             return None
 
     def _complete(self, prompt: str, *, as_json: bool) -> str | None:
@@ -145,7 +142,7 @@ class Scheduler(commands.Cog, name="scheduler"):
         """Create the forum thread with the roster embed and sign-up buttons."""
         forum_channel = self.bot.get_channel(config_py.OPEN_RAID_CHANNEL)
         if not forum_channel:
-            await context.send("Could not find the raid forum channel.")
+            await context.send(lang.SCHED_NO_FORUM)
             return
 
         date_str = raid_time["datetime"].strftime("%Y-%m-%d %H:%M")
@@ -153,7 +150,9 @@ class Scheduler(commands.Cog, name="scheduler"):
         channel_name = f"{date_str} {trial_abbr} {run_type}"
 
         embed = messages.embed(
-            f"Raid scheduled for {raid_time['timestamp']}", title=f"{trial} - {run_type}", color=discord.Color.blue()
+            lang.SCHED_RAID_DESCRIPTION.format(timestamp=raid_time["timestamp"]),
+            title=f"{trial} - {run_type}",
+            color=discord.Color.blue(),
         )
         if trial_image := config_py.raid_pictures.get(trial):
             embed.set_image(url=trial_image)
@@ -168,7 +167,7 @@ class Scheduler(commands.Cog, name="scheduler"):
             embed=embed,
             view=RaidSignUpView(group_comp),
         )
-        await context.send("Raid scheduled successfully.")
+        await context.send(lang.SCHED_SUCCESS)
 
 
 class RaidSignUpView(discord.ui.View):
@@ -213,15 +212,15 @@ class RoleButton(discord.ui.Button):
                     view.signups[role].remove(user)
                     removed = True
             if removed:
-                await interaction.response.send_message("You have been removed from the sign-up.", ephemeral=True)
+                await interaction.response.send_message(lang.SCHED_SIGNUP_REMOVED, ephemeral=True)
                 await view.update_embed(interaction.message)
             else:
-                await interaction.response.send_message("You are not signed up.", ephemeral=True)
+                await interaction.response.send_message(lang.SCHED_SIGNUP_NOT_SIGNED, ephemeral=True)
             return
 
         role = self.custom_id.split("_")[-1] + "s"  # signup_tank -> tanks
         if user in view.signups[role]:
-            await interaction.response.send_message("You are already signed up for this role.", ephemeral=True)
+            await interaction.response.send_message(lang.SCHED_SIGNUP_ALREADY, ephemeral=True)
             return
 
         if len(view.signups[role]) < view.group_comp[role]:
@@ -229,12 +228,12 @@ class RoleButton(discord.ui.Button):
                 if user in view.signups[other_role]:
                     view.signups[other_role].remove(user)
             view.signups[role].append(user)
-            await interaction.response.send_message(f"You have signed up as a {self.label}.", ephemeral=True)
+            await interaction.response.send_message(lang.SCHED_SIGNUP_DONE.format(role=self.label), ephemeral=True)
         elif user not in view.signups["reserves"]:
             view.signups["reserves"].append(user)
-            await interaction.response.send_message("All slots are full. You have been added to reserves.", ephemeral=True)
+            await interaction.response.send_message(lang.SCHED_SIGNUP_RESERVES, ephemeral=True)
         else:
-            await interaction.response.send_message("You are already in the reserves.", ephemeral=True)
+            await interaction.response.send_message(lang.SCHED_SIGNUP_ALREADY_RESERVE, ephemeral=True)
         await view.update_embed(interaction.message)
 
 

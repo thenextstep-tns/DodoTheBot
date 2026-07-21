@@ -325,3 +325,50 @@ TALKENGINE_THINKING = "🤔 Hmmmm let me think... "
 TALKENGINE_NO_MESSAGES = "No public messages found for user {name}."
 TALKENGINE_FAILED = "Unable to generate a coherent message for {name}."
 TALKENGINE_RESULT = "Hi, my name is {name}, and this is what I think:"
+
+# --------------------------------------------------------------------------- #
+#  Gym cog
+# --------------------------------------------------------------------------- #
+GYM_NO_PETS = "You do not own any pets eligible for the gym."
+GYM_SELECT_PET_PROMPT = "Select your pet:"
+GYM_SELECT_PET_PLACEHOLDER = "Choose your pet for the gym"
+GYM_SELECT_PET_TIMEOUT = "You took too long to choose a pet."
+GYM_SELECT_TRAIN_PROMPT = "Select what you wanna train today!"
+GYM_SELECT_TRAIN_PLACEHOLDER = "What do you wanna train today?"
+GYM_TRAINING_STARTED = "{name}'s pet is now training their {muscle_group}."
+GYM_MUSCLE_GROUPS = [
+    "Chest and Arms",
+    "Core and Cardio",
+    "Brain by reading clever books",
+    "Beauty by attending the Grooming center",
+]
+
+# --------------------------------------------------------------------------- #
+#  Chat cog (user-facing replies; the LLM system prompt stays in the cog)
+# --------------------------------------------------------------------------- #
+CHAT_API_ERROR = "Oh dear, my brain feels a bit fuzzy... I couldn't connect to my thoughts. (Error: {error})"
+CHAT_REPLY_FALLBACK = "I... I think I forgot what I was saying. My apologies!"
+CHAT_PARSE_ERROR = "My thoughts got all tangled up! Could you say that again?"
+
+# --------------------------------------------------------------------------- #
+#  Scheduler cog
+# --------------------------------------------------------------------------- #
+SCHED_SELECT_TRIAL = "Please select the trial:"
+SCHED_SELECT_TRIAL_PLACEHOLDER = "Select a trial"
+SCHED_SELECT_RUN = "Please select the type of run:"
+SCHED_SELECT_RUN_PLACEHOLDER = "Select the type of run"
+SCHED_RUN_TYPES = ["free for all", "vet training", "hm training", "farm run", "farm hm run", "achievement run"]
+SCHED_ASK_TIME = "Please enter the date and time for the raid (e.g., `2023-10-12 18:30` or `next Friday at 6pm`):"
+SCHED_TIME_PARSE_FAILED = "Sorry, I couldn't parse the date and time. Please try again."
+SCHED_ASK_COMP = "Please enter the group composition (e.g., `2 tanks, 2 heals, 8 dds` or `1 tank 3 heal 8 dd`):"
+SCHED_COMP_PARSE_FAILED = "Sorry, I couldn't parse the group composition. Please try again."
+SCHED_TIMEOUT = "You took too long to respond. Please try scheduling the raid again."
+SCHED_NO_FORUM = "Could not find the raid forum channel."
+SCHED_RAID_DESCRIPTION = "Raid scheduled for {timestamp}"
+SCHED_SUCCESS = "Raid scheduled successfully."
+SCHED_SIGNUP_REMOVED = "You have been removed from the sign-up."
+SCHED_SIGNUP_NOT_SIGNED = "You are not signed up."
+SCHED_SIGNUP_ALREADY = "You are already signed up for this role."
+SCHED_SIGNUP_DONE = "You have signed up as a {role}."
+SCHED_SIGNUP_RESERVES = "All slots are full. You have been added to reserves."
+SCHED_SIGNUP_ALREADY_RESERVE = "You are already in the reserves."

@@ -11,13 +11,8 @@ from discord.ext import commands, tasks
 from discord.ext.commands import Context
 
 import config_py
+import lang
 
-_MUSCLE_GROUPS = [
-    "Chest and Arms",
-    "Core and Cardio",
-    "Brain by reading clever books",
-    "Beauty by attending the Grooming center",
-]
 # NOTE (pre-existing): these mapping keys don't match the muscle-group labels
 # above ('Library'/'Grooming' vs 'Brain…'/'Beauty…'), so intellect/charm training
 # currently can't resolve. Preserved as-is — behaviour unchanged.
@@ -34,7 +29,7 @@ class _PetSelect(discord.ui.Select):
 
     def __init__(self, pets: list[dict]):
         options = [discord.SelectOption(label=pet["name"], description=str(pet["_id"])) for pet in pets]
-        super().__init__(placeholder="Choose your pet for the gym", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder=lang.GYM_SELECT_PET_PLACEHOLDER, min_values=1, max_values=1, options=options)
         self.selected: str | None = None
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -47,8 +42,8 @@ class _MuscleGroupSelect(discord.ui.Select):
     """Dropdown for choosing what to train, which starts the session."""
 
     def __init__(self, cog: "Gym", user_id: int, pet_id: str, member: discord.Member):
-        options = [discord.SelectOption(label=group) for group in _MUSCLE_GROUPS]
-        super().__init__(placeholder="What do you wanna train today?", min_values=1, max_values=1, options=options)
+        options = [discord.SelectOption(label=group) for group in lang.GYM_MUSCLE_GROUPS]
+        super().__init__(placeholder=lang.GYM_SELECT_TRAIN_PLACEHOLDER, min_values=1, max_values=1, options=options)
         self.cog = cog
         self.user_id = user_id
         self.pet_id = pet_id
@@ -58,7 +53,7 @@ class _MuscleGroupSelect(discord.ui.Select):
         muscle_group = self.values[0]
         await self.cog.register_gym_session(self.user_id, self.pet_id, muscle_group)
         await interaction.response.send_message(
-            f"{self.member.display_name}'s pet is now training their {muscle_group}.", ephemeral=True
+            lang.GYM_TRAINING_STARTED.format(name=self.member.display_name, muscle_group=muscle_group), ephemeral=True
         )
         self.view.stop()
 
@@ -78,7 +73,7 @@ class Gym(commands.Cog, name="gym"):
 
         pets = await self.fetch_gym_eligible_pets(member.id)
         if not pets:
-            await context.send("You do not own any pets eligible for the gym.")
+            await context.send(lang.GYM_NO_PETS)
             return
 
         pet_id = await self._select_pet(pets, context)
@@ -87,17 +82,17 @@ class Gym(commands.Cog, name="gym"):
 
         view = discord.ui.View(timeout=180)
         view.add_item(_MuscleGroupSelect(self, member.id, pet_id, member))
-        await context.send("Select what you wanna train today!", view=view)
+        await context.send(lang.GYM_SELECT_TRAIN_PROMPT, view=view)
 
     async def _select_pet(self, pets: list[dict], context: Context) -> str | None:
         """Show the pet dropdown and return the chosen pet's identifier (or None)."""
         select = _PetSelect(pets)
         view = discord.ui.View(timeout=60)
         view.add_item(select)
-        await context.send("Select your pet:", view=view)
+        await context.send(lang.GYM_SELECT_PET_PROMPT, view=view)
         await view.wait()
         if select.selected is None:
-            await context.send("You took too long to choose a pet.")
+            await context.send(lang.GYM_SELECT_PET_TIMEOUT)
         return select.selected
 
     async def fetch_gym_eligible_pets(self, user_id: int) -> list[dict]:

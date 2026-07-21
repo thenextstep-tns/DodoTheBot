@@ -14,6 +14,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 
 _PROXY_BASE_URL = "https://api.proxyapi.ru/openai/v1"
 _MODEL = "gpt-4o-mini"
@@ -147,19 +148,17 @@ The "new_rumour" key should be `null` or an object like `{{"target_index": 0, "r
                     ],
                 )
             except OpenAIError as error:
-                await context.send(
-                    f"Oh dear, my brain feels a bit fuzzy... I couldn't connect to my thoughts. (Error: {error})"
-                )
+                await context.send(lang.CHAT_API_ERROR.format(error=error))
                 return
 
             try:
                 data = json.loads(completion.choices[0].message.content)
-                bot_reply = data.get("chat_reply", "I... I think I forgot what I was saying. My apologies!")
+                bot_reply = data.get("chat_reply", lang.CHAT_REPLY_FALLBACK)
                 sentiment_score = int(data.get("sentiment_score", 0))
                 new_memory = data.get("updated_memory", current_memory).strip()
                 new_rumour = data.get("new_rumour")
             except (json.JSONDecodeError, ValueError, TypeError):
-                bot_reply = "My thoughts got all tangled up! Could you say that again?"
+                bot_reply = lang.CHAT_PARSE_ERROR
                 sentiment_score, new_memory, new_rumour = 0, current_memory, None
 
             for chunk in range(0, len(bot_reply), 2000):
