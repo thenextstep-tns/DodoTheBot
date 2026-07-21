@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands
 
 import config_py
+import lang
 from helpers import messages
 
 _CHECKBOX_POSITIVE = {"✓", "✔", "✅", "v"}
@@ -114,7 +115,7 @@ class PATRoleAssigner(commands.Cog, name="pat"):
 
         image_data = await self._download(message.attachments[0].url)
         if image_data is None:
-            await message.channel.send("Failed to download image.")
+            await message.channel.send(lang.PAT_DOWNLOAD_FAILED)
             return
 
         lines = self._extract_lines(self._preprocess(image_data))
@@ -122,12 +123,12 @@ class PATRoleAssigner(commands.Cog, name="pat"):
         roles = list(dict.fromkeys(self._roles_from_lines(lines, guild_roles)))  # de-dupe, keep order
 
         if not roles:
-            await message.channel.send(f"{message.author.mention}, no roles detected from this image.")
+            await message.channel.send(lang.PAT_NO_ROLES.format(mention=message.author.mention))
             return
 
         await message.author.add_roles(*roles)
         embed = messages.success(
-            f"{message.author.mention}, you've been assigned the following roles:", title="Assigned Roles"
+            lang.PAT_ASSIGNED_DESCRIPTION.format(mention=message.author.mention), title=lang.PAT_ASSIGNED_TITLE
         )
         embed.add_field(name="Roles", value="\n".join(role.name for role in roles), inline=False)
         await message.channel.send(embed=embed)

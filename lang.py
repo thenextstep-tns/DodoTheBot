@@ -280,3 +280,48 @@ THROW_FUNNY_PART4 = [
     "It's unlikely they'll return anytime soon.",
     "Observers are in shock and awe.",
 ]
+
+# --------------------------------------------------------------------------- #
+#  Owner cog
+# --------------------------------------------------------------------------- #
+OWNER_SHUTDOWN = "Ah shit, not again! Family, here I come :wave:"
+OWNER_SYNCED = "Synced {count} command(s)."
+OWNER_CLEANROLE_NOT_FOUND = "Role '{role}' not found."
+OWNER_CLEANROLE_DONE = "Role '{role}' removed from all members who had it."
+OWNER_ADDONS_TITLE = "Hey! Here's the list of add-ons that we would recommend!"
+OWNER_ADDONS_URL = "http://dodos.fun/add-ons/"
+OWNER_ADDONS_IMAGE = "http://dodos.fun/wp-content/uploads/2022/03/unknown-4-1-1024x579-1.png"
+OWNER_BLACKLIST_TITLE = "There are currently {count} blacklisted IDs"
+OWNER_BLACKLIST_ADD_ALREADY = "**{name}** is already blacklisted."
+OWNER_BLACKLIST_ADD_TITLE = "User Blacklisted"
+OWNER_BLACKLIST_ADD_DONE = "**{name}** has been added to the blacklist."
+OWNER_BLACKLIST_FOOTER = "There are now {count} users in the blacklist."
+OWNER_BLACKLIST_REMOVE_NONE = "**{name}** is not in the blacklist."
+OWNER_BLACKLIST_REMOVE_TITLE = "User removed from blacklist"
+OWNER_BLACKLIST_REMOVE_DONE = "**{name}** has been removed from the blacklist."
+
+# --------------------------------------------------------------------------- #
+#  Spam cog
+# --------------------------------------------------------------------------- #
+SPAM_ALERT = (
+    "🛡️ **Anti-Spam Triggered!**\n"
+    "I have banned {mention} (`{user_id}`).\n"
+    "**Reason:** {reason}\n"
+    "Their recent messages have been purged."
+)
+
+# --------------------------------------------------------------------------- #
+#  PAT cog
+# --------------------------------------------------------------------------- #
+PAT_DOWNLOAD_FAILED = "Failed to download image."
+PAT_NO_ROLES = "{mention}, no roles detected from this image."
+PAT_ASSIGNED_TITLE = "Assigned Roles"
+PAT_ASSIGNED_DESCRIPTION = "{mention}, you've been assigned the following roles:"
+
+# --------------------------------------------------------------------------- #
+#  Talk-engine cog
+# --------------------------------------------------------------------------- #
+TALKENGINE_THINKING = "🤔 Hmmmm let me think... "
+TALKENGINE_NO_MESSAGES = "No public messages found for user {name}."
+TALKENGINE_FAILED = "Unable to generate a coherent message for {name}."
+TALKENGINE_RESULT = "Hi, my name is {name}, and this is what I think:"

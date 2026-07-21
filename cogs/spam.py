@@ -12,6 +12,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config_py
+import lang
 
 _DAY_IN_SECONDS = 86400
 
@@ -62,10 +63,7 @@ class SpamProtector(commands.Cog, name="spam"):
             alert_channel_id = getattr(config_py, "ALERT_CHANNEL_ID", None)
             if alert_channel_id and (alert_channel := guild.get_channel(int(alert_channel_id))):
                 await alert_channel.send(
-                    f"🛡️ **Anti-Spam Triggered!**\n"
-                    f"I have banned {member.mention} (`{member.id}`).\n"
-                    f"**Reason:** {reason_public}\n"
-                    f"Their recent messages have been purged."
+                    lang.SPAM_ALERT.format(mention=member.mention, user_id=member.id, reason=reason_public)
                 )
             self._user_msg_data.pop(member.id, None)
             return True

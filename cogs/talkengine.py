@@ -13,6 +13,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 
 
 class MessageImitator(commands.Cog, name="talkengine"):
@@ -31,7 +32,7 @@ class MessageImitator(commands.Cog, name="talkengine"):
     async def imitate(self, context: Context, user: discord.User = None) -> None:
         """Imitate ``user`` (or the caller) using a Markov model of their messages."""
         user = user or context.author
-        thinking = await context.send("🤔 Hmmmm let me think... ")
+        thinking = await context.send(lang.TALKENGINE_THINKING)
 
         history = [
             msg["message"]
@@ -40,7 +41,7 @@ class MessageImitator(commands.Cog, name="talkengine"):
             ).limit(10000)
         ]
         if not history:
-            await thinking.edit(content=f"No public messages found for user {user.display_name}.")
+            await thinking.edit(content=lang.TALKENGINE_NO_MESSAGES.format(name=user.display_name))
             return
 
         random.shuffle(history)
@@ -71,12 +72,12 @@ class MessageImitator(commands.Cog, name="talkengine"):
                 break
 
         if not imitation:
-            await thinking.edit(content=f"Unable to generate a coherent message for {user.display_name}.")
+            await thinking.edit(content=lang.TALKENGINE_FAILED.format(name=user.display_name))
             return
 
         embed = discord.Embed(description=imitation, color=discord.Color.random())
         embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-        await thinking.edit(content=f"Hi, my name is {user.display_name}, and this is what I think:", embed=embed)
+        await thinking.edit(content=lang.TALKENGINE_RESULT.format(name=user.display_name), embed=embed)
 
 
 async def setup(bot):
