@@ -1,7 +1,7 @@
 """
 General cog — bot/server info, command listing, usage stats, reminders and the
 guide-link helper. All user-facing commands are hybrid (usable as ``/slash`` and
-via a text prefix).
+via a text prefix). User-facing text lives in ``lang``.
 """
 
 import asyncio
@@ -15,9 +15,9 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks
 
-# Reusable page-turner buttons cap.
 _VIEW_TIMEOUT = 180.0
 _EMBED_CHAR_LIMIT = 4096
 
@@ -57,20 +57,16 @@ class General(commands.Cog, name="general"):
     @checks.not_blacklisted()
     async def botinfo(self, context: Context) -> None:
         """Show basic information about Dodo."""
-        prefixes = self.bot.config["prefix"]
-        embed = discord.Embed(
-            description="This is our personal mentally challenged Instagram blog",
-            color=config_py.success,
-        )
-        embed.set_author(name="Dodo, the almost useless helper")
-        embed.add_field(name="Owner:", value="Salvy and Fox", inline=True)
+        embed = discord.Embed(description=lang.GENERAL_INFO_DESCRIPTION, color=config_py.success)
+        embed.set_author(name=lang.GENERAL_INFO_AUTHOR)
+        embed.add_field(name="Owner:", value=lang.GENERAL_INFO_OWNERS, inline=True)
         embed.add_field(name="Python Version:", value=platform.python_version(), inline=True)
         embed.add_field(
             name="Prefix:",
-            value=f"/ (Slash Commands) or {prefixes} for normal commands",
+            value=lang.GENERAL_INFO_PREFIX_VALUE.format(prefixes=self.bot.config["prefix"]),
             inline=False,
         )
-        embed.set_footer(text="Powered by electricity. Thank you, electricity")
+        embed.set_footer(text=lang.GENERAL_INFO_FOOTER)
         await context.send(embed=embed)
 
     @commands.hybrid_command(name="commands", description="Lists all loaded commands.")
@@ -88,7 +84,7 @@ class General(commands.Cog, name="general"):
             if not command_list:
                 continue
 
-            cog_block = f"**Category: {cog_name}**\n" + "\n".join(command_list)
+            cog_block = lang.GENERAL_COMMANDS_CATEGORY.format(cog_name=cog_name) + "\n" + "\n".join(command_list)
             separator = 2 if current_parts else 0
             if current_length + separator + len(cog_block) > _EMBED_CHAR_LIMIT:
                 pages.append("\n\n".join(current_parts))
@@ -102,13 +98,13 @@ class General(commands.Cog, name="general"):
             pages.append("\n\n".join(current_parts))
 
         if not pages:
-            await context.send("No commands loaded.")
+            await context.send(lang.GENERAL_COMMANDS_NONE)
             return
 
         embeds = []
         for page in pages:
-            embed = discord.Embed(title="List of Loaded Commands", description=page, color=0x3498DB)
-            embed.set_footer(text="Add dodo/gib/any other prefix before it and enjoy the weirdness!")
+            embed = discord.Embed(title=lang.GENERAL_COMMANDS_TITLE, description=page, color=0x3498DB)
+            embed.set_footer(text=lang.GENERAL_COMMANDS_FOOTER)
             embeds.append(embed)
 
         view = _Paginator(embeds) if len(embeds) > 1 else None
@@ -126,11 +122,11 @@ class General(commands.Cog, name="general"):
         try:
             response = requests.get(search_url)
         except requests.RequestException:
-            await context.send("Something went wrong, let's try again!")
+            await context.send(lang.GENERAL_GUIDE_ERROR)
             return []
 
         if response.status_code != 200:
-            await context.send("Something went wrong, let's try again!")
+            await context.send(lang.GENERAL_GUIDE_ERROR)
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -143,16 +139,16 @@ class General(commands.Cog, name="general"):
         """Show basic information about the current server."""
         roles = [role.name for role in context.guild.roles]
         if len(roles) > 50:
-            roles = roles[:50] + [f">>>> Displaying [50/{len(context.guild.roles)}] Roles"]
+            roles = roles[:50] + [lang.GENERAL_SERVER_ROLES_OVERFLOW.format(total=len(context.guild.roles))]
 
-        embed = discord.Embed(title="**Server Name:**", description=str(context.guild), color=0x9C84EF)
+        embed = discord.Embed(title=lang.GENERAL_SERVER_TITLE, description=str(context.guild), color=0x9C84EF)
         if context.guild.icon:
             embed.set_thumbnail(url=context.guild.icon.url)
         embed.add_field(name="Server ID", value=context.guild.id)
         embed.add_field(name="Member Count", value=context.guild.member_count)
         embed.add_field(name="Text/Voice Channels", value=len(context.guild.channels))
         embed.add_field(name=f"Roles ({len(context.guild.roles)})", value=", ".join(roles))
-        embed.set_footer(text=f"Created at: {context.guild.created_at}")
+        embed.set_footer(text=lang.GENERAL_SERVER_CREATED_AT.format(created_at=context.guild.created_at))
         await context.send(embed=embed)
 
     @commands.hybrid_command(name="dodostats", description="Show how many times someone has used commands.")
@@ -163,27 +159,23 @@ class General(commands.Cog, name="general"):
 
         total_used = commands_use.count_documents({"User ID": member.id})
         if total_used == 0:
-            await context.send(f"{member.display_name}, you haven't used our Dodo yet! She's waiting!")
+            await context.send(lang.GENERAL_STATS_NONE.format(name=member.display_name))
             return
 
-        # Count usage per distinct command, most-used first.
         command_stats = [
             (command, commands_use.count_documents({"User ID": member.id, "Command": command}))
             for command in commands_use.distinct("Command")
         ]
         command_stats = sorted((c for c in command_stats if c[1] > 0), key=lambda item: item[1], reverse=True)
 
-        header = (
-            f"Since we started counting, {member.display_name} has used "
-            f"**{total_used} dodo commands**! :dodo:\n\n"
-        )
+        header = lang.GENERAL_STATS_HEADER.format(name=member.display_name, total=total_used)
         char_limit = 1999
         pages: list[str] = []
         current_parts: list[str] = []
         current_length = 0
 
         for command, count in command_stats:
-            line = f"**{command}** command - **{count}** times"
+            line = lang.GENERAL_STATS_LINE.format(command=command, count=count)
             separator = 1 if current_parts else 0
             if current_length + separator + len(line) + len(header) > char_limit:
                 pages.append("\n".join(current_parts))
@@ -197,7 +189,9 @@ class General(commands.Cog, name="general"):
             pages.append("\n".join(current_parts))
 
         embeds = [
-            discord.Embed(title=f"{member.display_name}'s Dodo Stats", description=header + page, color=0x3498DB)
+            discord.Embed(
+                title=lang.GENERAL_STATS_TITLE.format(name=member.display_name), description=header + page, color=0x3498DB
+            )
             for page in pages
         ]
         view = _Paginator(embeds) if len(embeds) > 1 else None
@@ -211,11 +205,10 @@ class General(commands.Cog, name="general"):
     @checks.not_blacklisted()
     async def reminder(self, context: Context, minutes: int, *, reminder_text: str) -> None:
         """Remind the caller of ``reminder_text`` after ``minutes`` minutes."""
-        await context.send(f"Ok! I will remind you of this: '{reminder_text}' in {minutes} minute(s)!")
+        await context.send(lang.GENERAL_REMIND_SET.format(text=reminder_text, minutes=minutes))
         await asyncio.sleep(minutes * 60)
-        # Use the channel (not the interaction) so long delays don't hit the token expiry.
         await context.channel.send(
-            f"Hey {context.author.mention}, you asked me to remind you of this: {reminder_text} :heart: :dodo: "
+            lang.GENERAL_REMIND_FIRE.format(mention=context.author.mention, text=reminder_text)
         )
 
     @commands.hybrid_command(name="schedule123", description="Sends you the current schedule in DMs.")
@@ -226,9 +219,9 @@ class General(commands.Cog, name="general"):
         schedule = await weekly_channel.fetch_message(config_py.WEEKLY_MESSAGE)
         try:
             await context.author.send(schedule.content)
-            await context.send("I sent you our current schedule in a private message!")
+            await context.send(lang.GENERAL_SCHEDULE_SENT_DM)
         except discord.Forbidden:
-            await context.send("I couldn't send you our schedule in DMs, so I will send it in here:")
+            await context.send(lang.GENERAL_SCHEDULE_DM_FAILED)
             await context.send(schedule.content)
 
     @commands.hybrid_command(name="ping", description="Check if the bot is alive.")
@@ -236,8 +229,8 @@ class General(commands.Cog, name="general"):
     async def ping(self, context: Context) -> None:
         """Report the bot's gateway latency."""
         embed = discord.Embed(
-            title="🏓 Pong!",
-            description=f"The bot latency is {round(self.bot.latency * 1000)}ms.",
+            title=lang.GENERAL_PING_TITLE,
+            description=lang.GENERAL_PING_DESCRIPTION.format(latency=round(self.bot.latency * 1000)),
             color=config_py.success,
         )
         await context.send(embed=embed)
@@ -248,17 +241,14 @@ class General(commands.Cog, name="general"):
         """DM the caller the bot's invite link."""
         config = self.bot.config
         embed = discord.Embed(
-            description=(
-                "Invite me to your server by clicking "
-                f"[here](https://discordapp.com/oauth2/authorize?&client_id={config['application_id']}"
-                f"&scope=bot+applications.commands&permissions={config['permissions']}). "
-                "Except it won't work if you're not Fox. For now."
+            description=lang.GENERAL_INVITE_DESCRIPTION.format(
+                application_id=config["application_id"], permissions=config["permissions"]
             ),
             color=config_py.warning,
         )
         try:
             await context.author.send(embed=embed)
-            await context.send("I sent you a private message!")
+            await context.send(lang.GENERAL_INVITE_SENT_DM)
         except discord.Forbidden:
             await context.send(embed=embed)
 

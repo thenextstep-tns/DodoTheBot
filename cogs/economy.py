@@ -1,5 +1,6 @@
 """
 Economy cog — the Dodo Bank ``wallet`` and the ``sweetrolls`` collectible stats.
+User-facing text lives in ``lang``.
 """
 
 import discord
@@ -7,6 +8,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks
 
 
@@ -22,11 +24,9 @@ class Economy(commands.Cog, name="economy"):
         member = member or context.author
         wallet = config_py.wallets.find_one({"user_id": member.id})
         if wallet:
-            await context.send(f"You have {wallet['balance']} coins in your wallet!")
+            await context.send(lang.ECONOMY_WALLET_BALANCE.format(balance=wallet["balance"]))
         else:
-            await context.send(
-                "Looks like you don't really have a wallet! But fear not! We will make you one this instant :dodo: "
-            )
+            await context.send(lang.ECONOMY_WALLET_CREATED)
             config_py.wallets.insert_one({"user_id": member.id, "balance": 0})
 
     async def _top_counterpart(self, match_field: str, group_field: str, user_id: int):
@@ -52,31 +52,33 @@ class Economy(commands.Cog, name="economy"):
         member = member or context.author
         rolls = config_py.sweetrolls
         user_id = member.id
-
-        stolen_by = rolls.count_documents({"thief": user_id})
-        golden = rolls.count_documents({"thief": user_id, "golden": 1})
-        stolen_from = rolls.count_documents({"stolen_from": user_id})
-        gifted_by = rolls.count_documents({"gifter": user_id})
-        gifted_to = rolls.count_documents({"gifted_to": user_id})
-        rhubarb = rolls.count_documents({"victim": user_id, "rhubarb": 1})
+        name = member.display_name
 
         nemesis, nemesis_count = await self._top_counterpart("stolen_from", "thief", user_id)
         sugar_daddy, sugar_count = await self._top_counterpart("gifted_to", "gifter", user_id)
 
         lines = [
-            f"{member.display_name} stole **{stolen_by}** sweetrolls including **{golden}** golden sweetrolls...",
-            f"People stole **{stolen_from}** sweetrolls from {member.display_name}. :pleading_face: ",
-            f"{member.display_name} has given away **{gifted_by}** sweetrolls and received **{gifted_to}** as gifts!",
-            f"{member.display_name} has suffered **{rhubarb}** rhubarb betrayal(s)!",
+            lang.SWEETROLLS_STOLEN.format(
+                name=name,
+                stolen=rolls.count_documents({"thief": user_id}),
+                golden=rolls.count_documents({"thief": user_id, "golden": 1}),
+            ),
+            lang.SWEETROLLS_STOLEN_FROM.format(name=name, stolen_from=rolls.count_documents({"stolen_from": user_id})),
+            lang.SWEETROLLS_GIFTS.format(
+                name=name,
+                given=rolls.count_documents({"gifter": user_id}),
+                received=rolls.count_documents({"gifted_to": user_id}),
+            ),
+            lang.SWEETROLLS_RHUBARB.format(name=name, count=rolls.count_documents({"victim": user_id, "rhubarb": 1})),
         ]
         if nemesis_count > 0:
-            lines.append(f"{member.display_name}'s arch-nemesis is **{nemesis.display_name}** with **{nemesis_count}** stolen sweetrolls. :smirk:")
+            lines.append(lang.SWEETROLLS_NEMESIS.format(name=name, nemesis=nemesis.display_name, count=nemesis_count))
         else:
-            lines.append(f"{member.display_name} don't have an arch-nemesis (yet). ")
+            lines.append(lang.SWEETROLLS_NO_NEMESIS.format(name=name))
         if sugar_count > 0:
-            lines.append(f"{member.display_name}'s sugar doddy is **{sugar_daddy.display_name}** with **{sugar_count}** sweetrolls gifted. :smirk:")
+            lines.append(lang.SWEETROLLS_SUGAR_DADDY.format(name=name, daddy=sugar_daddy.display_name, count=sugar_count))
         else:
-            lines.append(f"{member.display_name} don't have a sugar doddy (yet). ")
+            lines.append(lang.SWEETROLLS_NO_SUGAR_DADDY.format(name=name))
 
         await context.send("\n".join(lines))
 
