@@ -1,110 +1,83 @@
-import os
-import sys
-import json
-import disnake
-from disnake.ext import commands
+"""
+Talk-engine cog — the ``imitate`` command builds a Markov chain from a user's
+public message history and generates a sentence in their "voice".
+"""
+
 import random
-import markovify
 import re
 
-if not os.path.isfile("config.json"):
-    sys.exit("'config.json' not found! Please add it and try again.")
-else:
-    with open("config.json") as file:
-        config = json.load(file)
+import markovify
 
-if not os.path.isfile("config_py.py"):
-    sys.exit("'config_py.py' not found! Please add it and try again.")
-else:
-    import config_py
+import discord
+from discord.ext import commands
+from discord.ext.commands import Context
 
-class MessageImitator(commands.Cog, name="MessageImitator"):
+import config_py
+
+
+class MessageImitator(commands.Cog, name="talkengine"):
+    """Generate Markov-chain imitations of a user's messages."""
+
     def __init__(self, bot):
         self.bot = bot
 
-    # Helper function to remove any symbols that can ping people
-    def remove_ping_symbols(self, text):
-        text = re.sub(r'[@#&!<>]', '', text)  # Remove common ping-related symbols
-        text = re.sub(r'@everyone|@here', '', text)  # Remove special mentions
-        return text
+    @staticmethod
+    def _strip_pings(text: str) -> str:
+        """Remove characters and keywords that could ping people."""
+        text = re.sub(r"[@#&!<>]", "", text)
+        return re.sub(r"@everyone|@here", "", text)
 
-    @commands.command()
-    async def imitate(self, ctx, user: disnake.User = None):
-        """Imitate the specified user's messages found in public channels"""
-        if user is None:
-            user = ctx.author
+    @commands.hybrid_command(name="imitate", description="Imitate a user based on their public messages.")
+    async def imitate(self, context: Context, user: discord.User = None) -> None:
+        """Imitate ``user`` (or the caller) using a Markov model of their messages."""
+        user = user or context.author
+        thinking = await context.send("🤔 Hmmmm let me think... ")
 
-        # Send a quick "thinking" message
-        thinking_message = await ctx.send("🤔 Hmmmm let me think... ")
-
-        # Fetch all messages from the specified user that were sent in public channels
-        messages_collection = config_py.messages
-        user_messages_cursor = messages_collection.find({
-            "author": user.id,
-            "channel": {"$in": config_py.public_channels}
-        }).limit(10000)
-
-        # Convert cursor to a list of message texts
-        messages_list = [msg['message'] for msg in user_messages_cursor]
-
-        # If no messages found, bail out
-        if not messages_list:
-            await thinking_message.edit(content=f"No public messages found for user {user.display_name}.")
+        history = [
+            msg["message"]
+            for msg in config_py.messages.find(
+                {"author": user.id, "channel": {"$in": config_py.public_channels}}
+            ).limit(10000)
+        ]
+        if not history:
+            await thinking.edit(content=f"No public messages found for user {user.display_name}.")
             return
 
-        # Shuffle messages to introduce randomness in how they're concatenated
-        random.shuffle(messages_list)
+        random.shuffle(history)
 
-        # ---- RANDOM PARAMS FOR MARKOVIFY ----
+        # Randomize the model each run so the same user reads differently over time.
         state_size = random.choice([1, 2, 3, 4])
         max_overlap_ratio = random.uniform(0.3, 0.9)
         max_overlap_total = random.randint(5, 15)
         min_words = random.randint(10, 24)
         max_words = random.randint(25, 50)
 
-        # Grab the context of the current command, cleaned up to remove pings
-        context_message = ctx.message.content
-        cleaned_context_message = self.remove_ping_symbols(context_message)
+        # Seed with the invoking message's text when available (prefix invocation only).
+        seed = self._strip_pings(context.message.content) if context.message else ""
+        corpus = " ".join([seed] + [self._strip_pings(msg) for msg in history])
+        text_model = markovify.Text(corpus, state_size=state_size)
 
-        # Combine the user’s message history and the current context message
-        combined_messages = ' '.join(
-            [cleaned_context_message] +
-            [self.remove_ping_symbols(msg) for msg in messages_list]
-        )
-
-        # Build a Markov chain model based on the combined text
-        text_model = markovify.Text(combined_messages, state_size=state_size)
-
-        # Try to generate a coherent sentence multiple times
-        imitation_message = None
+        imitation = None
         for _ in range(150):
-            imitation_message = text_model.make_sentence(
+            imitation = text_model.make_sentence(
                 tries=1000,
                 max_overlap_ratio=max_overlap_ratio,
                 max_overlap_total=max_overlap_total,
                 min_words=min_words,
                 max_words=max_words,
-                test_output=False  # set to True if you want to avoid direct duplicates
+                test_output=False,
             )
-            if imitation_message:
+            if imitation:
                 break
 
-        if not imitation_message:
-            await thinking_message.edit(content=f"Unable to generate a coherent message for {user.display_name}.")
+        if not imitation:
+            await thinking.edit(content=f"Unable to generate a coherent message for {user.display_name}.")
             return
-        
-        # --- CREATE AN EMBED FOR THE IMITATION MESSAGE ---
-        embed = disnake.Embed(
-            description=imitation_message,
-            color=disnake.Color.random()
-        )
+
+        embed = discord.Embed(description=imitation, color=discord.Color.random())
         embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
+        await thinking.edit(content=f"Hi, my name is {user.display_name}, and this is what I think:", embed=embed)
 
-        # Update the "thinking" message to show final result
-        await thinking_message.edit(
-            content=f"Hi, my name is {user.display_name}, and this is what I think:",
-            embed=embed
-        )
 
-def setup(bot):
-    bot.add_cog(MessageImitator(bot))
+async def setup(bot):
+    await bot.add_cog(MessageImitator(bot))
