@@ -1,0 +1,55 @@
+Name,Image,ItemQuality,ItemType,ItemSourcing,StrengthModifier,AgilityModifier,IntellectModifier,CharmModifier,HPModifier,BiteModifier,CritchanceModifier,ClaimresModifier,ConversionchanceModifier,Cost,Weight,StrengthRequired,AgilityRequired,IntellectRequired,CharmRequired,BiteRequired,FightswonRequired,FightslostRequired
+The Waddlebrim,item_imgs/The Waddlebrim.png,Unique,Armor Head,Fishing,15,-15,-10,20,0,0,0,0,0,150,1,0,0,0,0,0,0,0
+Dodo Fish,item_imgs/Dodo Fish.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+Stale bread,item_imgs/Stale bread.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0
+Moldy Apple,item_imgs/Moldy Apple.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0
+Slug,item_imgs/Slug.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0
+Protesting rooster,item_imgs/Protesting rooster.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,50,3,0,0,0,0,0,0,0
+Enormous inflatable banana,item_imgs/Enormous inflatable banana.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,5,2,0,0,0,0,0,0,0
+Rainbow-coloured clown wig,item_imgs/Rainbow-coloured clown wig.png,Decent,Armor Head,Fishing,0,0,0,3,0,0,0,0,0,10,1,0,0,0,0,0,0,0
+Neon orange traffic cone,item_imgs/Neon orange traffic cone.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,3,1,0,0,0,0,0,0,0
+Disco ball,item_imgs/Disco ball.png,Broken,Treasure,Fishing,0,0,0,0,0,0,0,0,0,10,3,0,0,0,0,0,0,0
+Unicycle from the 1900s,item_imgs/Unicycle from the 1900s.png,Broken,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,40,10,0,0,0,0,0,0,0
+Hula hoop,item_imgs/Hula hoop.png,Decent,Armor Body,Fishing,1,3,0,0,0,0,0,0,0,20,1,0,0,0,0,0,0,0
+Suitcase filled with spaghetti,item_imgs/Suitcase filled with spaghetti.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,25,4,0,0,0,0,0,0,0
+Fluffy feather boa,item_imgs/Fluffy feather boa.png,Decent,Armor Head,Fishing,0,0,0,3,0,0,0,0,0,15,1,0,0,0,0,0,0,0
+Juggling pin,item_imgs/Juggling pin.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0
+Festive party hat,item_imgs/Festive party hat.png,Broken,Armor Head,Fishing,0,0,0,2,0,0,0,0,0,10,1,0,0,0,0,0,0,0
+Cactus plant,item_imgs/Cactus plant.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,3,2,0,0,0,0,0,0,0
+Deflated rubber tire,item_imgs/Deflated rubber tire.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,7,10,0,0,0,0,0,0,0
+Oversized guitar pick,item_imgs/Oversized guitar pick.png,Superb,Trash,Fishing,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0,0
+Bag of confetti,item_imgs/Bag of confetti.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0
+Polished bowling ball,item_imgs/Polished bowling ball.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,9,4,0,0,0,0,0,0,0
+Fake mustache,item_imgs/Fake mustache.png,Decent,Armor Head,Fishing,0,0,2,1,0,0,0,0,0,10,0,0,0,0,0,0,0,0
+Squishy stress ball,item_imgs/Squishy stress ball.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0
+Lava lamp,item_imgs/Lava lamp.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,7,2,0,0,0,0,0,0,0
+Reflective disco pants,item_imgs/Reflective disco pants.png,Superb,Armor Paws,Fishing,0,2,0,3,0,0,0,0,0,35,2,0,0,0,0,0,0,0
+Corroded saxophone of Kenny G,item_imgs/Corroded saxophone of Kenny G.png,Broken,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,50,3,0,0,0,0,0,0,0
+Gummy worm,item_imgs/Gummy worm.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+Glowing radioactive frisbee,item_imgs/Glowing radioactive frisbee.png,Superb,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,45,1,0,0,0,0,0,0,0
+Broken sunglasses,item_imgs/Broken sunglasses.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+Waterlogged book,item_imgs/Waterlogged book.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0
+Old rusty key,item_imgs/Old rusty key.png,Broken,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,35,0,0,0,0,0,0,0,0
+Muddy boot,item_imgs/Muddy boot.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0
+Ancient treasure chest,item_imgs/Ancient treasure chest.png,Unique,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,250,15,0,0,0,0,0,0,0
+Soggy wallet filled with dodo coins,item_imgs/Soggy wallet filled with dodo coins.png,Broken,Treasure,Fishing,0,0,0,0,0,0,0,0,0,47,2,0,0,0,0,0,0,0
+Pocket knife,item_imgs/Pocket knife.png,Decent,Weapon Fangs,Fishing,2,2,0,0,0,0,0,0,0,22,1,0,0,0,0,0,0,0
+Broken cellphone,item_imgs/Broken cellphone.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,3,1,0,0,0,0,0,0,0
+Lost car keys,item_imgs/Lost car keys.png,Decent,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,38,1,0,0,0,0,0,0,0
+Glass bottle,item_imgs/Glass bottle.png,Decent,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0
+Abandoned crab trap,item_imgs/Abandoned crab trap.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,5,7,0,0,0,0,0,0,0
+Picnic blanket,item_imgs/Picnic blanket.png,Decent,Armor Body,Fishing,0,0,0,2,5,0,0,0,0,12,1,0,0,0,0,0,0,0
+Anchor,item_imgs/Anchor.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,5000,4320,0,0,0,0,0,0,0
+Bag of coins,item_imgs/Bag of coins.png,Decent,Treasure,Fishing,0,0,0,0,0,0,0,0,0,20,2,0,0,0,0,0,0,0
+Broken umbrella,item_imgs/Broken umbrella.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,3,2,0,0,0,0,0,0,0
+Sodden tennis ball,item_imgs/Sodden tennis ball.png,Broken,Trash,Fishing,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0
+Vintage pocket watch,item_imgs/Vintage pocket watch.png,Superb,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,54,1,0,0,0,0,0,0,0
+Treasure map,item_imgs/Treasure map.png,Perfect,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,130,1,0,0,0,0,0,0,0
+Diamond-studded tiara,item_imgs/Diamond-studded tiara.png,Perfect,Armor Head,Fishing,5,5,5,5,10,0,0,0,0,115,1,0,0,0,0,0,0,0
+Silver pocket mirror,item_imgs/Silver pocket mirror.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,45,1,0,0,0,0,0,0,0
+Pearl necklace,item_imgs/Pearl necklace.png,Perfect,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,115,1,0,0,0,0,0,0,0
+Antique brass compass,item_imgs/Antique brass compass.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,30,1,0,0,0,0,0,0,0
+Crystal paperweight,item_imgs/Crystal paperweight.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,40,5,0,0,0,0,0,0,0
+Antique porcelain figurine,item_imgs/Antique porcelain figurine.png,Superb,Treasure,Fishing,0,0,0,0,0,0,0,0,0,20,2,0,0,0,0,0,0,0
+Leather-bound journal,item_imgs/Leather-bound journal.png,Broken,Treasure,Fishing,0,0,0,0,0,0,0,0,0,5,1,0,0,0,0,0,0,0
+Hand-carved figurine of Tomtem,item_imgs/Hand-carved figurine of Tomtem.png,Unique,Rare Treasure,Fishing,0,0,0,0,0,0,0,0,0,200,5,0,0,0,0,0,0,0
