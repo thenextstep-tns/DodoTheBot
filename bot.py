@@ -1,10 +1,10 @@
 """
 DodoTheBot — entry point.
 
-Defines the ``DodoBot`` client (a ``commands.Bot`` subclass), wires up logging,
-loads every cog under ``cogs/``, registers the global event handlers, and starts
-the bot. Feature commands live in their own cogs; this file only holds the
-client, the shared background tasks, and the server-wide event listeners.
+Defines the ``DodoBot`` client (a discord.py ``commands.Bot`` subclass), wires up
+logging, loads every cog under ``cogs/``, syncs the application-command tree, and
+registers the server-wide event listeners. Feature commands live in their own
+cogs as hybrid commands (usable both as ``/slash`` and via a text prefix).
 """
 
 import asyncio
@@ -17,10 +17,9 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-import disnake
-from disnake import ApplicationCommandInteraction
-from disnake.ext import commands, tasks
-from disnake.ext.commands import Context
+import discord
+from discord import app_commands
+from discord.ext import commands, tasks
 
 import config_py
 import exceptions
@@ -36,18 +35,17 @@ with open("config.json", encoding="utf-8") as file:
 
 logger = setup_logger()
 
-# Populated hourly from the WordPress guide API; consumed by the tag-reaction
-# helpers below. Kept module-level so both the task and the listeners share it.
+# Populated hourly from the WordPress guide API; consumed by the tag helpers below.
 tag_dict: dict = {}
 
 
 # --------------------------------------------------------------------------- #
 #  Client
 # --------------------------------------------------------------------------- #
-def _build_intents() -> disnake.Intents:
+def _build_intents() -> discord.Intents:
     """Intents the bot needs. ``message_content`` is required for prefix commands
     and for the message-scanning listeners to see message text."""
-    intents = disnake.Intents.default()
+    intents = discord.Intents.default()
     intents.reactions = True
     intents.members = True
     intents.messages = True
@@ -59,13 +57,26 @@ class DodoBot(commands.Bot):
     """The Dodo client."""
 
     def __init__(self) -> None:
-        super().__init__(command_prefix=config["prefix"], intents=_build_intents())
+        super().__init__(command_prefix=config["prefix"], intents=_build_intents(), help_command=None)
         self.logger = logger
         self.config = config
-        # We provide a custom help command elsewhere; drop the built-in one.
-        self.remove_command("help")
 
-    def load_all_cogs(self) -> None:
+    async def setup_hook(self) -> None:
+        """Runs once before ``on_ready``: load cogs and sync the command tree."""
+        await self.load_all_cogs()
+        # Sync hybrid/app commands. If a dev guild is configured, sync there for
+        # instant availability; otherwise sync globally (can take up to an hour).
+        dev_guild_id = self.config.get("test_guild_id")
+        if dev_guild_id:
+            guild = discord.Object(id=int(dev_guild_id))
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            self.logger.info(f"Synced {len(synced)} app command(s) to dev guild {dev_guild_id}.")
+        else:
+            synced = await self.tree.sync()
+            self.logger.info(f"Synced {len(synced)} global app command(s).")
+
+    async def load_all_cogs(self) -> None:
         """Recursively load every cog under ``cogs/``.
 
         Files that are plain helper modules (no ``setup`` function) are skipped
@@ -77,7 +88,7 @@ class DodoBot(commands.Bot):
                     continue
                 extension = os.path.join(root_dir, filename[:-3]).replace(os.sep, ".")
                 try:
-                    self.load_extension(extension)
+                    await self.load_extension(extension)
                     self.logger.info(f"Loaded cog '{extension}'")
                 except commands.errors.NoEntryPointError:
                     self.logger.debug(f"Skipped non-cog module '{extension}'")
@@ -94,7 +105,7 @@ bot = DodoBot()
 @tasks.loop(minutes=3.0)
 async def status_task() -> None:
     """Rotate the bot's 'Playing …' status every few minutes."""
-    await bot.change_presence(activity=disnake.Game(random.choice(config_py.statuses)))
+    await bot.change_presence(activity=discord.Game(random.choice(config_py.statuses)))
 
 
 @tasks.loop(minutes=60.0)
@@ -117,7 +128,7 @@ async def check_reactions() -> None:
             if not await _bot_already_reacted(message, emoji):
                 try:
                     await message.add_reaction(emoji)
-                except disnake.HTTPException as error:
+                except discord.HTTPException as error:
                     bot.logger.error(f"Failed to add reaction {emoji} to {message_id}: {error}")
 
 
@@ -127,14 +138,12 @@ async def _find_message(message_id: int):
         for channel in guild.text_channels:
             try:
                 return await channel.fetch_message(message_id)
-            except disnake.NotFound:
-                continue
-            except (disnake.Forbidden, disnake.HTTPException):
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 continue
     return None
 
 
-async def _bot_already_reacted(message: disnake.Message, emoji: str) -> bool:
+async def _bot_already_reacted(message: discord.Message, emoji: str) -> bool:
     """Return whether the bot has already reacted to ``message`` with ``emoji``."""
     for reaction in message.reactions:
         if str(reaction.emoji) == emoji:
@@ -150,31 +159,28 @@ async def _bot_already_reacted(message: disnake.Message, emoji: str) -> bool:
 @bot.event
 async def on_ready() -> None:
     """Log connection details and start the background tasks."""
-    bot.logger.info(f"Logged in as {bot.user} (disnake {disnake.__version__})")
+    bot.logger.info(f"Logged in as {bot.user} (discord.py {discord.__version__})")
     bot.logger.info(f"Python {platform.python_version()} on {platform.system()} {platform.release()}")
-    status_task.start()
-    api_import.start()
-    check_reactions.start()
+    if not status_task.is_running():
+        status_task.start()
+    if not api_import.is_running():
+        api_import.start()
+    if not check_reactions.is_running():
+        check_reactions.start()
 
 
 # --------------------------------------------------------------------------- #
 #  Member events
 # --------------------------------------------------------------------------- #
 @bot.event
-async def on_member_join(member: disnake.Member) -> None:
+async def on_member_join(member: discord.Member) -> None:
     """Handle a new (or returning) member joining.
 
-    Order of operations:
     1. If they arrive already carrying the bot-trap role, ban immediately.
     2. Grant the configured starter roles.
-    3. If we have saved roles from a previous membership, restore them and post a
-       'welcome back' message; otherwise post a first-time welcome.
-
-    (This merges two previously-separate ``on_member_join`` handlers — the second
-    used to silently override the first, so the welcome/returning-player logic
-    never actually ran.)
+    3. Restore saved roles from a previous membership (welcome-back) or post a
+       first-time welcome.
     """
-    # 1. Trap role check.
     try:
         trap_role_id = int(config_py.TRAP_ROLE_ID)
         if any(role.id == trap_role_id for role in member.roles):
@@ -183,13 +189,11 @@ async def on_member_join(member: disnake.Member) -> None:
     except (AttributeError, ValueError):
         pass
 
-    # 2. Starter roles.
     starter_roles = [member.guild.get_role(rid) for rid in config_py.starter_roles]
     starter_roles = [role for role in starter_roles if role is not None]
     if starter_roles:
         await member.add_roles(*starter_roles, reason="Automatic starter roles on join")
 
-    # 3. Welcome / returning-player restoration.
     channel = bot.get_channel(config_py.WAYSHRINE)
     if not channel:
         return
@@ -216,11 +220,8 @@ async def on_member_join(member: disnake.Member) -> None:
 
 
 @bot.event
-async def on_member_remove(member: disnake.Member) -> None:
-    """Save a leaving member's roles so they can be restored if they return.
-
-    Reaction-role-managed roles and @everyone are excluded from the snapshot.
-    """
+async def on_member_remove(member: discord.Member) -> None:
+    """Save a leaving member's roles so they can be restored if they return."""
     excluded_role_ids = set()
     for role_mapping in config_py.reaction_roles.values():
         excluded_role_ids.update(role_mapping.values())
@@ -230,22 +231,17 @@ async def on_member_remove(member: disnake.Member) -> None:
         for role in member.roles
         if role.id != member.guild.default_role.id and role.id not in excluded_role_ids
     ]
-    config_py.left_roles.update_one(
-        {"_id": member.id}, {"$set": {"roles": roles}}, upsert=True
-    )
+    config_py.left_roles.update_one({"_id": member.id}, {"$set": {"roles": roles}}, upsert=True)
 
 
 @bot.event
-async def on_member_update(before: disnake.Member, after: disnake.Member) -> None:
+async def on_member_update(before: discord.Member, after: discord.Member) -> None:
     """Catch users who gain the bot-trap role after joining (e.g. via onboarding)."""
     try:
         trap_role_id = int(config_py.TRAP_ROLE_ID)
     except (AttributeError, ValueError):
         return
-
-    had_role = any(role.id == trap_role_id for role in before.roles)
-    has_role = any(role.id == trap_role_id for role in after.roles)
-    if not had_role and has_role:
+    if not any(r.id == trap_role_id for r in before.roles) and any(r.id == trap_role_id for r in after.roles):
         await handle_trap_trigger(after)
 
 
@@ -253,12 +249,11 @@ async def on_member_update(before: disnake.Member, after: disnake.Member) -> Non
 #  Message events
 # --------------------------------------------------------------------------- #
 @bot.event
-async def on_message(message: disnake.Message) -> None:
+async def on_message(message: discord.Message) -> None:
     """Main message listener: moderation, logging, fun reactions and command dispatch."""
     source_channel_id = 1109080900030955604  # ATG sign-up channel.
     mod_channel_id = 1113035754923368478  # Moderator notification channel.
 
-    # Relay ATG sign-ups (from non-bot authors) to the mod channel.
     if message.channel.id == source_channel_id:
         if message.author.id != 824171812518494238:
             source_channel = bot.get_channel(source_channel_id)
@@ -272,7 +267,6 @@ async def on_message(message: disnake.Message) -> None:
 
     await check_for_harmful_messages(message)
 
-    # Archive every message for analytics.
     try:
         config_py.messages.insert_one(
             {
@@ -288,7 +282,6 @@ async def on_message(message: disnake.Message) -> None:
 
     content = message.content.lower()
 
-    # "no u" call-and-response.
     if "no u" in content or "no you" in content:
         channel = bot.get_channel(message.channel.id)
         nou_answers = [
@@ -300,14 +293,10 @@ async def on_message(message: disnake.Message) -> None:
             "...", "it's time to stop", "http://dodos.fun/wp-content/uploads/2021/05/angy.jpg",
             "a trolling is happening",
         ]
-        if random.randint(0, 10) < 5:
-            await channel.send(random.choice(taunted_answers))
-        else:
-            await channel.send(random.choice(nou_answers))
+        await channel.send(random.choice(taunted_answers if random.randint(0, 10) < 5 else nou_answers))
 
-    # Offer the schedule when raid-related keywords show up.
     elif (
-        any(keyword in content for keyword in ("schedule", "trials", "chappelles-tyrone-tyrone-biggums-gif", "raids", "happening"))
+        any(kw in content for kw in ("schedule", "trials", "chappelles-tyrone-tyrone-biggums-gif", "raids", "happening"))
         and not message.author.bot
     ):
         for reaction in config_py.addons:
@@ -320,45 +309,56 @@ async def on_message(message: disnake.Message) -> None:
             reaction, _user = await bot.wait_for("reaction_add", timeout=15, check=check)
             if config_py.addons[reaction.emoji] == 0:
                 context = await bot.get_context(message)
-                await context.invoke(bot.get_command("schedule123"))
+                await _invoke_command(context, "schedule123")
                 await message.clear_reactions()
         except asyncio.TimeoutError:
             await message.clear_reactions()
 
-    # Summon the support cat on request.
     elif any(phrase in content for phrase in ("support cat", "goodnight cat", "good night cat")):
         context = await bot.get_context(message)
-        await context.invoke(bot.get_command("cat"))
+        await _invoke_command(context, "cat")
 
-    # Shower loved-ones with heart reactions.
     if message.author.id in config_py.DODOLOVE:
         await message.add_reaction(random.choice(["❤️", "💖", "💕", "💞", "💘", "❣️"]))
 
     bot.logger.debug(f"{message.guild}: {message.channel}: {message.author}: {message.content}")
 
-    # Reply when the bot is mentioned directly (invokes the chat command).
     if bot.user.id in (user.id for user in message.mentions) and message.author.id != bot.user.id:
         context = await bot.get_context(message)
         if message.reference:
             replied = await message.channel.fetch_message(message.reference.message_id)
-            await context.invoke(
-                bot.get_command("chat"),
+            await _invoke_command(
+                context,
+                "chat",
                 message=f"{replied.author.display_name} previously said: {replied.content}. "
                 f"Then {message.author} said: {message.content}",
             )
         else:
-            await context.invoke(bot.get_command("chat"), message=message.content)
+            await _invoke_command(context, "chat", message=message.content)
 
     await check_sweetroll_chance(message)
     await bot.process_commands(message)
     await check_tags(message)
 
 
+async def _invoke_command(context: commands.Context, name: str, **kwargs) -> None:
+    """Invoke a registered command by name, no-op (with a log) if it isn't loaded.
+
+    Guards the on_message hooks while cogs are being migrated to discord.py — a
+    not-yet-loaded command simply does nothing instead of raising.
+    """
+    command = bot.get_command(name)
+    if command is None:
+        bot.logger.debug(f"Command '{name}' is not loaded; skipping invoke.")
+        return
+    await context.invoke(command, **kwargs)
+
+
 @bot.event
-async def on_message_delete(message: disnake.Message) -> None:
+async def on_message_delete(message: discord.Message) -> None:
     """Log deleted messages to the audit channel."""
     channel = bot.get_channel(config_py.LOG_CHANNEL)
-    embed = disnake.Embed(
+    embed = discord.Embed(
         title=f"{message.author.display_name} just deleted a message in #{message.channel}",
         description=f"**{message.content}**",
         color=config_py.error,
@@ -371,7 +371,7 @@ async def on_message_delete(message: disnake.Message) -> None:
 #  Reaction events
 # --------------------------------------------------------------------------- #
 @bot.event
-async def on_reaction_add(reaction: disnake.Reaction, user: disnake.User) -> None:
+async def on_reaction_add(reaction: discord.Reaction, user: discord.User) -> None:
     """When an author reacts with 📖 to their own message, surface matching guide links."""
     if user.bot or str(reaction.emoji) != "\U0001F4D6":
         return
@@ -385,10 +385,14 @@ async def on_reaction_add(reaction: disnake.Reaction, user: disnake.User) -> Non
         await message.clear_reactions()
         return
 
-    embed = disnake.Embed(title="📚 Potentially helpful resources found!", color=disnake.Color.brand_green())
+    guide = bot.get_command("guide")
+    if guide is None:
+        return
+
+    embed = discord.Embed(title="📚 Potentially helpful resources found!", color=discord.Color.brand_green())
     for tag in tags:
         try:
-            links = await context.invoke(bot.get_command("guide"), tag=tag)
+            links = await context.invoke(guide, tag=tag)
             if links:
                 embed.add_field(
                     name=f"✨ {tag.capitalize()}",
@@ -405,7 +409,7 @@ async def on_reaction_add(reaction: disnake.Reaction, user: disnake.User) -> Non
 
 
 @bot.event
-async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent) -> None:
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent) -> None:
     """Grant a reaction-role when a tracked emoji is added."""
     if payload.message_id not in config_py.reaction_roles:
         return
@@ -419,7 +423,7 @@ async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent) -> None:
 
 
 @bot.event
-async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent) -> None:
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent) -> None:
     """Remove a reaction-role when its tracked emoji is removed."""
     if payload.message_id not in config_py.reaction_roles:
         return
@@ -437,74 +441,46 @@ async def on_raw_reaction_remove(payload: disnake.RawReactionActionEvent) -> Non
 #  Command lifecycle & error handling
 # --------------------------------------------------------------------------- #
 @bot.event
-async def on_slash_command(interaction: ApplicationCommandInteraction) -> None:
-    """Log every successful slash command."""
-    bot.logger.info(
-        f"Executed /{interaction.data.name} in {interaction.guild.name} "
-        f"(ID: {interaction.guild.id}) by {interaction.author} (ID: {interaction.author.id})"
-    )
-
-
-@bot.event
-async def on_slash_command_error(interaction: ApplicationCommandInteraction, error: Exception) -> None:
-    """Turn slash-command errors into friendly, ephemeral responses."""
-    if isinstance(error, exceptions.UserBlacklisted):
-        bot.logger.info("A blacklisted user tried to run a slash command.")
-        return await interaction.send(
-            embed=disnake.Embed(title="Error!", description=error.message, color=0xE02B2B),
-            ephemeral=True,
-        )
-    if isinstance(error, commands.errors.MissingPermissions):
-        return await interaction.send(
-            embed=disnake.Embed(
-                title="Error!",
-                description="You are missing the permission(s) `"
-                + ", ".join(error.missing_permissions)
-                + "` to run this command!",
-                color=0xE02B2B,
-            ),
-            ephemeral=True,
-        )
-    raise error
-
-
-@bot.event
-async def on_command_completion(context: Context) -> None:
-    """Log every successful prefix command to the DB and the audit channel."""
+async def on_command_completion(context: commands.Context) -> None:
+    """Log every successful command (hybrid commands fire this for both slash and prefix)."""
+    if context.command is None:
+        return
     executed_command = context.command.qualified_name.split(" ")[0]
-    channel = bot.get_channel(config_py.LOG_CHANNEL)
     config_py.commands_use.insert_one(
         {
             "Command": executed_command,
-            "Guild": context.guild.name,
-            "Name": context.message.author.display_name,
-            "User ID": context.message.author.id,
+            "Guild": context.guild.name if context.guild else "DM",
+            "Name": context.author.display_name,
+            "User ID": context.author.id,
             "Date": date.today().isoformat(),
         }
     )
-    await channel.send(
-        f"Executed {executed_command} command in {context.guild.name} "
-        f"(ID: {context.guild.id}) by {context.author} (ID: {context.author.id})"
-    )
-    bot.logger.info(f"Executed {executed_command} by {context.author} in {context.guild.name}")
+    channel = bot.get_channel(config_py.LOG_CHANNEL)
+    if channel and context.guild:
+        await channel.send(
+            f"Executed {executed_command} command in {context.guild.name} "
+            f"(ID: {context.guild.id}) by {context.author} (ID: {context.author.id})"
+        )
+    bot.logger.info(f"Executed {executed_command} by {context.author}")
 
 
 @bot.event
-async def on_command_error(context: Context, error) -> None:
-    """Turn common prefix-command errors into friendly responses."""
-    if isinstance(error, commands.CommandOnCooldown):
+async def on_command_error(context: commands.Context, error: commands.CommandError) -> None:
+    """Friendly responses for common prefix / hybrid-text command errors."""
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, (exceptions.UserBlacklisted, exceptions.UserNotOwner)):
+        await context.send(embed=discord.Embed(title="Error!", description=error.message, color=0xE02B2B))
+    elif isinstance(error, commands.CommandOnCooldown):
         minutes, seconds = divmod(error.retry_after, 60)
         hours, minutes = divmod(minutes, 60)
-        hours = hours % 24
-        parts = []
-        if round(hours):
-            parts.append(f"{round(hours)} hours")
-        if round(minutes):
-            parts.append(f"{round(minutes)} minutes")
-        if round(seconds):
-            parts.append(f"{round(seconds)} seconds")
+        parts = [
+            f"{round(v)} {unit}"
+            for v, unit in ((hours % 24, "hours"), (minutes, "minutes"), (seconds, "seconds"))
+            if round(v)
+        ]
         await context.send(
-            embed=disnake.Embed(
+            embed=discord.Embed(
                 title="Hey, please slow down!",
                 description=f"You can use this command again in {' '.join(parts)}.",
                 color=0xE02B2B,
@@ -512,7 +488,7 @@ async def on_command_error(context: Context, error) -> None:
         )
     elif isinstance(error, commands.MissingPermissions):
         await context.send(
-            embed=disnake.Embed(
+            embed=discord.Embed(
                 title="Error!",
                 description="You are missing the permission(s) `"
                 + ", ".join(error.missing_permissions)
@@ -521,11 +497,28 @@ async def on_command_error(context: Context, error) -> None:
             )
         )
     elif isinstance(error, commands.MissingRequiredArgument):
-        await context.send(
-            embed=disnake.Embed(title="Error!", description=str(error).capitalize(), color=0xE02B2B)
-        )
+        await context.send(embed=discord.Embed(title="Error!", description=str(error).capitalize(), color=0xE02B2B))
     else:
         raise error
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+    """Friendly ephemeral responses for slash-command errors."""
+    original = getattr(error, "original", error)
+    if isinstance(original, (exceptions.UserBlacklisted, exceptions.UserNotOwner)):
+        message = original.message
+    elif isinstance(error, app_commands.MissingPermissions):
+        message = "You are missing the permission(s) `" + ", ".join(error.missing_permissions) + "` to run this command!"
+    else:
+        bot.logger.error(f"Unhandled app command error: {error}")
+        message = "Something went wrong running that command."
+
+    embed = discord.Embed(title="Error!", description=message, color=0xE02B2B)
+    if interaction.response.is_done():
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -553,7 +546,7 @@ async def get_tags_from_wordpress_api() -> dict:
     return tags
 
 
-async def check_for_harmful_messages(message: disnake.Message) -> None:
+async def check_for_harmful_messages(message: discord.Message) -> None:
     """Delete (and, for invite+@everyone spam, ban) messages with restricted content."""
     if any(link in message.content for link in config_py.allowed_links):
         return
@@ -565,44 +558,42 @@ async def check_for_harmful_messages(message: disnake.Message) -> None:
         return
 
     log_channel = bot.get_channel(config_py.E4D_LOG)
-    embed = disnake.Embed(
+    embed = discord.Embed(
         title="Oi!!",
         description=f"**User:** {message.author}\n**Content:** {message.content}",
-        color=disnake.Color.red(),
+        color=discord.Color.red(),
     )
 
-    # Invite link + @everyone = immediate ban.
     if "@everyone" in message.content and "discord.gg" in message.content.lower():
-        user_embed = disnake.Embed(
+        user_embed = discord.Embed(
             title="You have been banned!",
             description=f"You have been banned from {message.guild.name} for unauthorized activities.",
-            color=disnake.Color.dark_red(),
+            color=discord.Color.dark_red(),
         )
         user_embed.set_thumbnail(url=message.guild.icon.url if message.guild.icon else None)
         user_embed.add_field(name="Reason", value="Unauthorized invite link with @everyone mention", inline=False)
         user_embed.set_footer(text="Contact the server admin for more information.")
         try:
             await message.author.send(embed=user_embed)
-        except disnake.errors.HTTPException:
+        except discord.HTTPException:
             bot.logger.warning("Failed to DM the banned user.")
         embed.title = "Immediate Ban for Unauthorized Mention and Link"
         embed.description = (
             f"**User:** {message.author}\n**Content:** {message.content}\n"
             f"**Action:** Banned for an unauthorized invite link together with '@everyone'."
         )
-        embed.color = disnake.Color.dark_red()
+        embed.color = discord.Color.dark_red()
         await log_channel.send(embed=embed)
         await message.guild.ban(message.author, reason="Unauthorized invite link with @everyone mention")
         await message.delete()
         return
 
-    # Otherwise just delete and warn.
     embed.title = "Deleted Message with Restricted Content"
     embed.description = (
         f"**User:** {message.author}\n**Content:** {message.content}\n"
         f"**Action:** Message deleted due to restricted content."
     )
-    embed.color = disnake.Color.orange()
+    embed.color = discord.Color.orange()
     await log_channel.send(embed=embed)
     await message.delete()
     await message.channel.send(
@@ -611,7 +602,7 @@ async def check_for_harmful_messages(message: disnake.Message) -> None:
     )
 
 
-async def check_tags(message: disnake.Message) -> None:
+async def check_tags(message: discord.Message) -> None:
     """Briefly react with 📖 to messages that mention a known guide tag."""
     if message.author == bot.user:
         return
@@ -627,7 +618,7 @@ async def check_tags(message: disnake.Message) -> None:
         await message.remove_reaction(reaction, bot.user)
 
 
-async def add_role_to_user(member: disnake.Member, role_id: int, message: disnake.Message) -> None:
+async def add_role_to_user(member: discord.Member, role_id: int, message: discord.Message) -> None:
     """Add a reaction-role, log it, and (for the in-game guild role) ping moderators."""
     role = message.guild.get_role(role_id)
     if not role:
@@ -646,7 +637,7 @@ async def add_role_to_user(member: disnake.Member, role_id: int, message: disnak
     await temp_message.delete()
 
 
-async def remove_role_from_user(member: disnake.Member, role_id: int, message: disnake.Message) -> None:
+async def remove_role_from_user(member: discord.Member, role_id: int, message: discord.Message) -> None:
     """Remove a reaction-role and log it."""
     role = message.guild.get_role(role_id)
     if not role:
@@ -659,27 +650,23 @@ async def remove_role_from_user(member: disnake.Member, role_id: int, message: d
     await temp_message.delete()
 
 
-async def remove_role_later(member: disnake.Member, role: disnake.Role) -> None:
+async def remove_role_later(member: discord.Member, role: discord.Role) -> None:
     """Remove ``role`` from ``member`` after one hour (non-persistent across restarts)."""
     await asyncio.sleep(3600)
     try:
         if role in member.roles:
             await member.remove_roles(role)
-    except disnake.HTTPException:
+    except discord.HTTPException:
         pass
 
 
 async def run_pumpkin_game(
-    channel: disnake.TextChannel,
-    original_message: disnake.Message,
-    discoverer: disnake.User,
-    bot: "DodoBot",
-    config_py,
+    channel: discord.TextChannel, original_message: discord.Message, discoverer: discord.User, bot: "DodoBot", config_py
 ) -> None:
     """Run the cooperative 'pull the giant pumpkin' minigame."""
     pumpkins = config_py.pumpkins
     pull_collection = config_py.pull
-    weight = random.randint(5, 800)  # Pumpkin weight in kg.
+    weight = random.randint(5, 800)
     explosion_time = datetime.now() + timedelta(minutes=weight / 8)
 
     discoverer_data = pull_collection.find_one({"_id": discoverer.id})
@@ -693,13 +680,13 @@ async def run_pumpkin_game(
     if not guild:
         return
 
-    embed = disnake.Embed(
+    embed = discord.Embed(
         title="🎃 A GIANT PUMPKIN APPEARS! 🎃",
         description=(
             "A massive pumpkin just burst from the ground! It looks unstable...\n"
             "React with 🎃 to help pull it out before it explodes!"
         ),
-        color=disnake.Color.orange(),
+        color=discord.Color.orange(),
         timestamp=datetime.now(),
     )
     embed.add_field(name="Discovered by", value=discoverer.mention, inline=False)
@@ -713,7 +700,7 @@ async def run_pumpkin_game(
     await game_message.add_reaction(GAME_EMOJI)
     try:
         await original_message.remove_reaction(GAME_EMOJI, bot.user)
-    except disnake.HTTPException:
+    except discord.HTTPException:
         pass
 
     while datetime.now() < explosion_time:
@@ -737,10 +724,10 @@ async def run_pumpkin_game(
 
             if total_strength >= weight:
                 reward_per_person = round(weight / len(pullers))
-                win_embed = disnake.Embed(
+                win_embed = discord.Embed(
                     title="🎃 SUCCESS! 🎃",
                     description=f"You did it! The **{weight}kg** pumpkin was pulled from the ground!",
-                    color=disnake.Color.green(),
+                    color=discord.Color.green(),
                 )
                 win_embed.add_field(name="Total Pullers", value=str(len(pullers)), inline=True)
                 win_embed.add_field(name="Reward Each", value=f"**{reward_per_person} kg** of pumpkin!", inline=True)
@@ -766,7 +753,7 @@ async def run_pumpkin_game(
                                 await channel.send(
                                     f"**Wow!** <@{user_id}> has collected 50 pumpkins and earned the **{role.name}** role!"
                                 )
-                        except disnake.Forbidden:
+                        except discord.Forbidden:
                             await channel.send(f"I tried to give <@{user_id}> the pumpkin role, but I don't have permissions!")
                         except Exception as error:
                             bot.logger.error(f"Error adding pumpkin role: {error}")
@@ -774,20 +761,17 @@ async def run_pumpkin_game(
         except asyncio.TimeoutError:
             break
 
-    # Explosion (nobody managed to pull it out in time).
     if total_strength < weight:
-        explode_embed = disnake.Embed(
+        explode_embed = discord.Embed(
             title="💥 BOOOOOOM! 💥",
             description=(
                 f"Oh no! The **{weight}kg** pumpkin was too strong!\n"
                 f"It exploded, covering everyone in pumpkin guts!"
             ),
-            color=disnake.Color.red(),
+            color=discord.Color.red(),
         )
         explode_embed.add_field(
-            name="Covered in Guts",
-            value="\n".join(f"<@{uid}>" for uid in pullers) or "Nobody...",
-            inline=False,
+            name="Covered in Guts", value="\n".join(f"<@{uid}>" for uid in pullers) or "Nobody...", inline=False
         )
         explode_embed.set_footer(text="You've... earned a temporary role. Your strength (+5kg!) has been saved.")
         await game_message.edit(embed=explode_embed)
@@ -808,15 +792,13 @@ async def run_pumpkin_game(
                     if role_to_give not in member.roles:
                         await member.add_roles(role_to_give)
                         bot.loop.create_task(remove_role_later(member, role_to_give))
-                except disnake.Forbidden:
+                except discord.Forbidden:
                     await channel.send(f"I tried to give <@{user_id}> the sticky pumpkin role, but I don't have permissions!")
                 except Exception as error:
                     bot.logger.error(f"Error adding temporary pumpkin role: {error}")
 
 
-async def _run_sweetroll_event(
-    message: disnake.Message, sweetrolls, pumpkins, channel, spawn_emoji, is_rhubarb, is_pumpkin
-) -> None:
+async def _run_sweetroll_event(message, sweetrolls, pumpkins, channel, spawn_emoji, is_rhubarb, is_pumpkin) -> None:
     """Run a single sweetroll / rhubarb / pumpkin spawn as a non-blocking task."""
     try:
         await message.add_reaction(spawn_emoji)
@@ -827,7 +809,6 @@ async def _run_sweetroll_event(
         try:
             reaction, user = await bot.wait_for("reaction_add", timeout=config_py.SWEETROLL_COOLDOWN, check=check)
 
-            # Rhubarb betrayal.
             if is_rhubarb:
                 rhubarb_messages = [
                     "The sweetroll cackled, morphed into rhubarb, and your taste-buds filed a complaint!",
@@ -853,12 +834,10 @@ async def _run_sweetroll_event(
                 await message.remove_reaction(spawn_emoji, bot.user)
                 return
 
-            # Pumpkin minigame.
             if is_pumpkin:
                 await run_pumpkin_game(channel, message, user, bot, config_py)
                 return
 
-            # Normal sweetroll — owner reclaims it.
             if user and user.id == message.author.id:
                 await channel.send(
                     "A sweetroll fell out but the owner picked it up before anyone else could! Great job! :cupcake:"
@@ -866,9 +845,7 @@ async def _run_sweetroll_event(
                 await message.remove_reaction(spawn_emoji, bot.user)
                 return
 
-            # Someone else grabbed it.
             if user and user.id != message.author.id:
-                # Amulet protection.
                 if message.author.id in config_py.SWEETROLLAMULET:
                     if random.randint(1, 100) <= 98:
                         protective_messages = [
@@ -908,7 +885,6 @@ async def _run_sweetroll_event(
                     await message.remove_reaction(spawn_emoji, bot.user)
                     return
 
-                # Steal-or-gift roll.
                 target_is_ghost = message.author.id == 305162419733397505
                 target_name = "Ghost" if target_is_ghost else message.author.mention
                 if random.randint(1, 100) < config_py.SWEETROLL_GIFTING:
@@ -918,24 +894,22 @@ async def _run_sweetroll_event(
                 else:
                     sweetrolls.insert_one({"gifted_to": message.author.id, "gifter": user.id, "date": datetime.now()})
                     await message.remove_reaction(spawn_emoji, bot.user)
-                    await channel.send(
-                        f"{user.mention} suddenly gifted a sweetroll to {target_name}! Extreme generosity!"
-                    )
+                    await channel.send(f"{user.mention} suddenly gifted a sweetroll to {target_name}! Extreme generosity!")
 
         except asyncio.TimeoutError:
             try:
                 await message.remove_reaction(spawn_emoji, bot.user)
-            except disnake.HTTPException:
+            except discord.HTTPException:
                 pass
     except Exception as error:
         bot.logger.error(f"Error in sweetroll event: {error}")
         try:
             await message.remove_reaction(spawn_emoji, bot.user)
-        except disnake.HTTPException:
+        except discord.HTTPException:
             pass
 
 
-async def check_sweetroll_chance(message: disnake.Message) -> None:
+async def check_sweetroll_chance(message: discord.Message) -> None:
     """Roll for a sweetroll/rhubarb/pumpkin spawn and, if it hits, launch the event."""
     channel = bot.get_channel(config_py.PET_CHANNEL)
     if random.randint(1, 100) <= config_py.SWEETROLL_NEEDED:
@@ -952,7 +926,7 @@ async def check_sweetroll_chance(message: disnake.Message) -> None:
     )
 
 
-async def handle_trap_trigger(member: disnake.Member) -> None:
+async def handle_trap_trigger(member: discord.Member) -> None:
     """Ban a member who took the bot-trap role, alert admins, and allow a reaction-undo."""
     try:
         alert_channel_id = int(config_py.ALERT_CHANNEL_ID)
@@ -972,12 +946,12 @@ async def handle_trap_trigger(member: disnake.Member) -> None:
     try:
         await guild.ban(member, reason="Triggered bot trap role")
         bot.logger.info(f"Banned {member} (ID: {member.id}) for triggering the trap role.")
-    except disnake.Forbidden:
+    except discord.Forbidden:
         await alert_channel.send(
             f"⚠️ I caught {member.mention} triggering the trap role, but I lack permissions to ban them!"
         )
         return
-    except disnake.HTTPException as error:
+    except discord.HTTPException as error:
         bot.logger.error(f"HTTP error while banning trap trigger: {error}")
         return
 
@@ -1000,7 +974,7 @@ async def handle_trap_trigger(member: disnake.Member) -> None:
         reaction, user = await bot.wait_for("reaction_add", timeout=wait_duration, check=check)
         try:
             await alert_message.clear_reactions()
-        except (disnake.Forbidden, disnake.NotFound):
+        except (discord.Forbidden, discord.NotFound):
             pass
 
         if str(reaction.emoji) == str(check_emoji):
@@ -1010,7 +984,7 @@ async def handle_trap_trigger(member: disnake.Member) -> None:
                     f"✅ Ban revoked for **{member.name}** by {user.mention}.\n"
                     f"*Note: they were removed from the server and will need a new invite to rejoin.*"
                 )
-            except disnake.Forbidden:
+            except discord.Forbidden:
                 await alert_channel.send(
                     f"⚠️ I don't have permission to unban {member.name}! {user.mention}, please do it manually."
                 )
@@ -1019,7 +993,7 @@ async def handle_trap_trigger(member: disnake.Member) -> None:
     except asyncio.TimeoutError:
         try:
             await alert_message.clear_reactions()
-        except (disnake.Forbidden, disnake.NotFound):
+        except (discord.Forbidden, discord.NotFound):
             pass
 
 
@@ -1027,5 +1001,4 @@ async def handle_trap_trigger(member: disnake.Member) -> None:
 #  Entry point
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    bot.load_all_cogs()
     bot.run(config["token"])
