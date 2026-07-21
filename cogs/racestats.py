@@ -1,6 +1,6 @@
 """
 Race-stats cog — read-only leaderboards for the mouse races: a user's most
-successful mice, and the top mice server-wide.
+successful mice, and the top mice server-wide. Text lives in ``lang``.
 """
 
 from collections import defaultdict
@@ -10,6 +10,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks, messages
 
 
@@ -50,14 +51,14 @@ class RaceStats(commands.Cog, name="racestats"):
         member = member or context.author
         sorted_mice = self._most_successful_mice(member.id)
         if not sorted_mice:
-            await context.send(
-                "Looks like you don't have any race records yet! Start participating in races to see your stats :dodo:"
-            )
+            await context.send(lang.RACESTATS_MICE_NONE)
             return
 
-        response = f"**{member.display_name}'s Most Successful Mice:**\n"
+        response = lang.RACESTATS_MICE_HEADER.format(name=member.display_name)
         for index, (mouse, stats) in enumerate(sorted_mice, start=1):
-            response += f"{index}. **{mouse}**, Wins: {stats['races_won']}, Avg Position: {stats['average_position']:.2f}\n"
+            response += lang.RACESTATS_MICE_LINE.format(
+                index=index, mouse=mouse, wins=stats["races_won"], avg=stats["average_position"]
+            )
         for chunk in range(0, len(response), 1999):
             await context.send(response[chunk : chunk + 1999])
 
@@ -88,15 +89,16 @@ class RaceStats(commands.Cog, name="racestats"):
             {"$sort": {"average_position": 1}},
             {"$limit": 10},
         ]
-        embed = messages.embed(
-            "Only showing mice who participated in 5 or more races:", title="Top 10 Mice!", color=0x00FF00
-        )
+        embed = messages.embed(lang.RACESTATS_TOP_DESCRIPTION, title=lang.RACESTATS_TOP_TITLE, color=0x00FF00)
         for index, stats in enumerate(config_py.races.aggregate(pipeline), start=1):
             handler = context.guild.get_member(int(stats["favorite_handler"]))
             embed.add_field(
                 name=f"{index}. {stats['mouse_name']}",
-                value=f"Starts: {stats['starts']}, Avg. Position: {stats['average_position']:.2f}, "
-                f"Fav. Handler: {handler.display_name if handler else 'Unknown'}",
+                value=lang.RACESTATS_TOP_LINE.format(
+                    starts=stats["starts"],
+                    avg=stats["average_position"],
+                    handler=handler.display_name if handler else "Unknown",
+                ),
                 inline=False,
             )
         await context.send(embed=embed)

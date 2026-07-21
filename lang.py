@@ -133,3 +133,71 @@ INSULT_3 = ["apple-john","baggage","barnacle", "bladder", "boar-pig", "bugbear",
 "harpy", "hedge-pig", "horn-beast", "hugger-mugger", "joithead", "lout", "maggot-pie", "malt-worm",
 "mammet", "measle", "minnow", "miscreant", "moldwarp", "mumble-news", "nut-hook", "pigeon-egg",
 "pignut", "puttock", "pumpion", "ratsbane", "scut", "skainmate", "varlot", "vassal", "whey-face", "wagtail"]
+
+# --------------------------------------------------------------------------- #
+#  Moderation cog
+# --------------------------------------------------------------------------- #
+MOD_KICK_ADMIN = "You can't kick other admins like that, ask Fox, he will gladly do it."
+MOD_KICK_TITLE = "User Kicked!"
+MOD_KICK_DESCRIPTION = "**{member}** was kicked by **{author}**!"
+MOD_KICK_DM = "You were kicked by **{author}**!\nReason: {reason}"
+MOD_KICK_ERROR = "An error occurred while trying to kick the user. Make sure my role is above theirs."
+MOD_BAN_ADMIN = "Don't ban admins! Do you have any idea how hard it is to find a good admin?"
+MOD_BAN_TITLE = "User Banned!"
+MOD_BAN_DESCRIPTION = "**{member}** was banned by **{author}**!"
+MOD_BAN_DM = "You were banned by **{author}**!\nReason: {reason}"
+MOD_BAN_ERROR = "An error occurred while trying to ban the user. Make sure my role is above theirs."
+MOD_ZOOMIES_DM = "There is an urgent task for you! Activate your SalvyFoxBumblephant and start the ZOOMIES at zoomies.dodos.fun"
+MOD_NICK_TITLE = "Changed Nickname!"
+MOD_NICK_DESCRIPTION = "**{member}'s** new nickname is **{nickname}**!"
+MOD_NICK_ERROR = "An error occurred while changing the nickname. Make sure my role is above theirs."
+MOD_PURGE_INVALID = "`{amount}` is not a valid number."
+MOD_PURGE_TOO_MANY = "Oi, chief, if you wanna sabotage the whole server, at least suffer and delete it in small chunks"
+MOD_PURGE_ALERT_FOX = "Someone is trying to purge more than 50 messages at once, check on them"
+MOD_PURGE_TITLE = "Purged!"
+MOD_PURGE_DESCRIPTION = "**{author}** has purged the chat from the filth and deleted **{count}** message(s)!"
+MOD_PIN_ANNOYED = [
+    "You really don't have permission to pin messages here.",
+    "Still not allowed.",
+    "Nope. Try asking someone with permissions.",
+    "Persistent, aren't you? Still no.",
+    "This isn't working, stop.",
+    "Seriously, stop.",
+    "You're starting to annoy me.",
+    "Enough already.",
+    "Final warning: stop it.",
+    "STOP.",
+]
+MOD_PIN_RAGE = "I won't be gentle. On your knees."
+MOD_PIN_THREAT = "Try to pin me once more, and I'll pin you so hard you won't even be able to squeak."
+MOD_PIN_NO_PERMISSION = "You do not have permission to pin messages."
+MOD_PIN_NO_REFERENCE = ":shrug: I have no idea which message to pin, please reply to a message."
+MOD_PIN_FAILED = "Something went wrong, I couldn't pin that."
+MOD_UNPIN_NO_PERMISSION = "You do not have permission to unpin messages."
+MOD_UNPIN_NO_REFERENCE = ":shrug: I have no idea which message to unpin, please reply to a message."
+MOD_UNPIN_DONE = "Message unpinned by {mention}."
+
+# --------------------------------------------------------------------------- #
+#  PP cog
+# --------------------------------------------------------------------------- #
+PP_BAR = "8{bars}D"
+PP_TOO_SMALL_TITLE = "{name}'s pp when thinking of {target}! Oops!"
+PP_TOO_SMALL = "This pp is too small to display. Maybe it's cold where you are?"
+PP_RESULT_TITLE = "We caught {name} thinking of {target}! :smirk: "
+PP_CHECK_NONE = "We haven't checked how this combination would affect their pps yet! Use dodo pp to check it!"
+PP_CHECK_TITLE = "How much does {name} like {target} on average??"
+PP_NONE = "You haven't used our dodo pp command yet! Never late to start! :eggplant:"
+PP_PRIORITIES = "Here are your priorities, {mention}:\n{ranking}"
+PP_HOTTIES_NONE = "Nobody has been thought of yet! :thinking:"
+PP_HOTTIES = "Here are the most desired hot girls in your area :tired_face: :\n{ranking}"
+PP_RANKING_LINE = "{index}. **{name}**: \n {bar}"
+
+# --------------------------------------------------------------------------- #
+#  Race-stats cog
+# --------------------------------------------------------------------------- #
+RACESTATS_MICE_NONE = "Looks like you don't have any race records yet! Start participating in races to see your stats :dodo:"
+RACESTATS_MICE_HEADER = "**{name}'s Most Successful Mice:**\n"
+RACESTATS_MICE_LINE = "{index}. **{mouse}**, Wins: {wins}, Avg Position: {avg:.2f}\n"
+RACESTATS_TOP_TITLE = "Top 10 Mice!"
+RACESTATS_TOP_DESCRIPTION = "Only showing mice who participated in 5 or more races:"
+RACESTATS_TOP_LINE = "Starts: {starts}, Avg. Position: {avg:.2f}, Fav. Handler: {handler}"
