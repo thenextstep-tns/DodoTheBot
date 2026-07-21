@@ -1,185 +1,122 @@
-import disnake
-import time
+"""
+Anti-spam cog — bans users who post too fast or across too many channels at
+once, alerts the mod channel, and keeps a small rolling per-user message log in
+memory (periodically pruned).
+"""
+
 import asyncio
-from disnake.ext import commands, tasks
+import time
 from collections import defaultdict
+
+import discord
+from discord.ext import commands, tasks
+
 import config_py
 
-# =========================================================
-# ANTISPAM BOT PROTECTOR (COG EDITION)
-# =========================================================
+_DAY_IN_SECONDS = 86400
 
-class SpamProtector(commands.Cog):
+
+class SpamProtector(commands.Cog, name="spam"):
+    """Detects and bans spam bots based on message rate and channel spread."""
+
     def __init__(self, bot):
         self.bot = bot
-        # Store message data: {user_id: [(timestamp, channel_id), ...]}
-        self._user_msg_data = defaultdict(list)
-        # Start the background cleanup task
+        # {user_id: [(timestamp, channel_id), ...]}
+        self._user_msg_data: dict[int, list[tuple[float, int]]] = defaultdict(list)
         self.background_ram_cleanup.start()
-        print("DEBUG: Anti-Spam Cog loaded and RAM cleanup task started.")
 
-    def cog_unload(self):
-        """Clean up when the cog is unloaded."""
+    def cog_unload(self) -> None:
         self.background_ram_cleanup.cancel()
-        print("DEBUG: Anti-Spam Cog unloaded.")
 
     @tasks.loop(seconds=30)
-    async def background_ram_cleanup(self):
-        """
-        Background task to clear memory of users who are no longer active.
-        """
+    async def background_ram_cleanup(self) -> None:
+        """Drop message records that are older than the longest detection window."""
         try:
-            # Load all windows to find the maximum time we need to keep data
-            spam_window = getattr(config_py, "SPAM_TIME_WINDOW", 2.0)
-            multi_window = getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0)
-            max_window = max(spam_window, multi_window)
-            
-            current_time = time.time()
-            users_in_memory = list(self._user_msg_data.keys())
-            
-            for i, user_id in enumerate(users_in_memory):
-                if i % 100 == 0: await asyncio.sleep(0)
-
-                # Filter keeps only recent messages based on the largest window
-                recent_data = [
-                    (t, c) for (t, c) in self._user_msg_data[user_id] 
-                    if current_time - t <= max_window
-                ]
-                
-                if not recent_data:
-                    del self._user_msg_data[user_id]
+            max_window = max(
+                getattr(config_py, "SPAM_TIME_WINDOW", 2.0),
+                getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0),
+            )
+            now = time.time()
+            for index, user_id in enumerate(list(self._user_msg_data.keys())):
+                if index % 100 == 0:
+                    await asyncio.sleep(0)
+                recent = [(t, c) for (t, c) in self._user_msg_data[user_id] if now - t <= max_window]
+                if recent:
+                    self._user_msg_data[user_id] = recent
                 else:
-                    self._user_msg_data[user_id] = recent_data
-                    
-        except Exception as e:
-            print(f"ERROR: Error in spam RAM cleanup task: {e}")
+                    del self._user_msg_data[user_id]
+        except Exception as error:
+            self.bot.logger.error(f"Error in spam RAM cleanup task: {error}")
 
     @background_ram_cleanup.before_loop
-    async def before_cleanup(self):
+    async def before_cleanup(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def _ban_and_alert(self, message, reason_log, reason_public):
-        """Helper function to ban a user and send an alert."""
-        guild = message.guild
-        member = message.author
-        alert_channel_id = getattr(config_py, "ALERT_CHANNEL_ID", None)
-        
-        if alert_channel_id:
-            alert_channel_id = int(alert_channel_id)
-
+    async def _ban_and_alert(self, message: discord.Message, reason_log: str, reason_public: str) -> bool:
+        """Ban the message author, purge a day of their messages, and alert the mods."""
+        guild, member = message.guild, message.author
         try:
-            # Ban and purge
-            await guild.ban(
-                member, 
-                delete_message_days=1, 
-                reason=reason_log
-            )
-            print(f"DEBUG: Banned spammer {member.name} - Reason: {reason_log}")
+            await guild.ban(member, delete_message_seconds=_DAY_IN_SECONDS, reason=reason_log)
+            self.bot.logger.info(f"Banned spammer {member} — {reason_log}")
 
-            if alert_channel_id:
-                alert_channel = guild.get_channel(alert_channel_id)
-                if alert_channel:
-                    await alert_channel.send(
-                        f"🛡️ **Anti-Spam Triggered!**\n"
-                        f"I have banned {member.mention} (`{member.id}`).\n"
-                        f"**Reason:** {reason_public}\n"
-                        f"Their recent messages have been purged."
-                    )
-            
-            # Clear memory
-            if member.id in self._user_msg_data:
-                del self._user_msg_data[member.id]
+            alert_channel_id = getattr(config_py, "ALERT_CHANNEL_ID", None)
+            if alert_channel_id and (alert_channel := guild.get_channel(int(alert_channel_id))):
+                await alert_channel.send(
+                    f"🛡️ **Anti-Spam Triggered!**\n"
+                    f"I have banned {member.mention} (`{member.id}`).\n"
+                    f"**Reason:** {reason_public}\n"
+                    f"Their recent messages have been purged."
+                )
+            self._user_msg_data.pop(member.id, None)
             return True
-
-        except disnake.Forbidden:
-            print(f"ERROR: Lack permission to ban spammer {member.name}")
+        except discord.Forbidden:
+            self.bot.logger.error(f"Lack permission to ban spammer {member}")
             return False
-        except disnake.HTTPException as e:
-            print(f"ERROR: HTTP error banning spammer: {e}")
+        except discord.HTTPException as error:
+            self.bot.logger.error(f"HTTP error banning spammer: {error}")
             return False
 
     @commands.Cog.listener()
-    async def on_message(self, message: disnake.Message):
-        """
-        Listener to detect and ban spam bots.
-        """
-        # 1. Ignore bots
-        if message.author.bot:
+    async def on_message(self, message: discord.Message) -> None:
+        """Record each message and ban on volume or multi-channel spam."""
+        if message.author.bot or not message.guild:
             return
-
-        # 2. Ignore Direct Messages
-        if not message.guild:
-            return
-
-        # 3. Security Bypass: Ignore Admins
-        # I HAVE COMMENTED THIS OUT SO YOU CAN TEST IT. 
-        # UNCOMMENT IT WHEN YOU ARE DONE TESTING TO PROTECT ADMINS.
         if getattr(message.author.guild_permissions, "administrator", False):
             return
 
-        # Load configuration
-        try:
-            # Standard Rate Limit
-            spam_threshold = getattr(config_py, "SPAM_THRESHOLD", 3)
-            spam_window = getattr(config_py, "SPAM_TIME_WINDOW", 2.0)
-            
-            # Multi-Channel Limit
-            multi_threshold = getattr(config_py, "MULTI_CHANNEL_THRESHOLD", 3)
-            multi_window = getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0)
-            
-        except AttributeError:
-            # Defaults
-            spam_threshold, spam_window = 5, 5.0
-            multi_threshold, multi_window = 3, 1.0
-
-        user_id = message.author.id
-        current_time = time.time()
-        
-        # Calculate max window to clean up lists efficiently
+        spam_threshold = getattr(config_py, "SPAM_THRESHOLD", 3)
+        spam_window = getattr(config_py, "SPAM_TIME_WINDOW", 2.0)
+        multi_threshold = getattr(config_py, "MULTI_CHANNEL_THRESHOLD", 3)
+        multi_window = getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0)
         max_window = max(spam_window, multi_window)
 
-        # 4. Record timestamp AND channel
-        self._user_msg_data[user_id].append((current_time, message.channel.id))
-
-        # 5. Filter list (keep data relevant to the longest check)
+        user_id = message.author.id
+        now = time.time()
+        self._user_msg_data[user_id].append((now, message.channel.id))
         self._user_msg_data[user_id] = [
-            (t, c) for (t, c) in self._user_msg_data[user_id] 
-            if current_time - t <= max_window
+            (t, c) for (t, c) in self._user_msg_data[user_id] if now - t <= max_window
         ]
-        
         user_data = self._user_msg_data[user_id]
 
-        # --- CHECK 1: Multi-Channel Spam ---
-        # "3 channels within 1s"
-        msgs_in_multi_window = [
-            c for (t, c) in user_data 
-            if current_time - t <= multi_window
-        ]
-        unique_channels = len(set(msgs_in_multi_window))
-        
+        # Multi-channel spam: posting across many channels within a short window.
+        unique_channels = len({c for (t, c) in user_data if now - t <= multi_window})
         if unique_channels >= multi_threshold:
-            print(f"DEBUG: Multi-channel spam detected from {message.author.name}")
             await self._ban_and_alert(
-                message, 
+                message,
                 reason_log="Anti-Spam: Multi-channel spam detected",
-                reason_public=f"Spamming across {unique_channels} channels in {multi_window}s."
+                reason_public=f"Spamming across {unique_channels} channels in {multi_window}s.",
             )
             return
 
-        # --- CHECK 2: Volume Spam ---
-        # "5 messages within 5s"
-        msgs_in_spam_window = [
-            t for (t, c) in user_data 
-            if current_time - t <= spam_window
-        ]
-        
-        if len(msgs_in_spam_window) > spam_threshold:
-            print(f"DEBUG: Volume spam detected from {message.author.name}")
+        # Volume spam: too many messages within the rate window.
+        recent_count = sum(1 for (t, c) in user_data if now - t <= spam_window)
+        if recent_count > spam_threshold:
             await self._ban_and_alert(
                 message,
                 reason_log="Anti-Spam: Rate limit exceeded",
-                reason_public=f"Sending {len(msgs_in_spam_window)} messages in {spam_window}s."
+                reason_public=f"Sending {recent_count} messages in {spam_window}s.",
             )
-            return
-def setup(bot):
-    bot.add_cog(SpamProtector(bot))
+
+
+async def setup(bot):
+    await bot.add_cog(SpamProtector(bot))

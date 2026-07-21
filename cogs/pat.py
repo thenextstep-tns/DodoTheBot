@@ -1,186 +1,137 @@
-import disnake
-from disnake.ext import commands
-import aiohttp
+"""
+PAT decoder cog — reads a screenshot of a trial-clear (PAT) table posted in the
+decode channel, OCRs it, fuzzy-matches trial names, and assigns the matching
+clear roles to the poster.
+
+Requires the Tesseract OCR binary to be installed on the host at runtime.
+"""
+
+import difflib
 import io
+import re
+
+import aiohttp
 import cv2
 import numpy as np
-from PIL import Image
 import pytesseract
-import re
+from PIL import Image
+
+import discord
+from discord.ext import commands
+
 import config_py
+from helpers import messages
 
-# We'll use Python's built-in "difflib" for fuzzy matching
-import difflib
+_CHECKBOX_POSITIVE = {"✓", "✔", "✅", "v"}
+_OCR_SCALE_PERCENT = 300
+_OCR_CONFIG = r"--psm 6"
 
-class PATRoleAssignerFuzzy(commands.Cog):
+
+class PATRoleAssigner(commands.Cog, name="pat"):
+    """Assigns trial-clear roles by OCR-decoding a posted PAT screenshot."""
+
     def __init__(self, bot):
         self.bot = bot
+        self.known_trials = sorted(
+            set(config_py.vet_clears)
+            | set(config_py.hm_partial_clears_1_boss)
+            | set(config_py.hm_partial_clears_2_boss)
+            | set(config_py.hm_clears)
+        )
 
-        # Prepare a list of known trial names from your dictionaries
-        self.known_trials = set()
-        self.known_trials.update(config_py.vet_clears.keys())
-        self.known_trials.update(config_py.hm_partial_clears_1_boss.keys())
-        self.known_trials.update(config_py.hm_partial_clears_2_boss.keys())
-        self.known_trials.update(config_py.hm_clears.keys())
-        # Convert to a sorted list so difflib can operate on it
-        self.known_trials = sorted(self.known_trials)
-
-        # Symbols considered "checked"
-        self.checkbox_positive = ['✓', '✔', '✅', 'v']
-
-    @commands.Cog.listener()
-    async def on_message(self, message: disnake.Message):
-        # Only proceed if this is in the specific channel and not from a bot
-        if message.channel.id != config_py.PAT_DECODE_CHANNEL or message.author.bot:
-            return
-
-        if not message.attachments:
-            return
-
-        image_url = message.attachments[0].url
-
-        # Download the image
+    @staticmethod
+    async def _download(url: str) -> io.BytesIO | None:
+        """Download an image URL into an in-memory buffer."""
         async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as resp:
+            async with session.get(url) as resp:
                 if resp.status != 200:
-                    await message.channel.send('Failed to download image.')
-                    return
-                image_data = io.BytesIO(await resp.read())
+                    return None
+                return io.BytesIO(await resp.read())
 
-        # ============= PREPROCESSING WITH OPENCV =============
-        pil_image = Image.open(image_data)
-        cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-
-        # 1) Convert to grayscale
+    @staticmethod
+    def _preprocess(image_data: io.BytesIO) -> Image.Image:
+        """Grayscale, upscale and threshold the image so OCR reads it better."""
+        cv_image = cv2.cvtColor(np.array(Image.open(image_data)), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-
-        # 2) Resize (scale up) so Tesseract sees bigger text
-        scale_percent = 300  # adjust as needed
-        width = int(gray.shape[1] * scale_percent / 100)
-        height = int(gray.shape[0] * scale_percent / 100)
+        width = int(gray.shape[1] * _OCR_SCALE_PERCENT / 100)
+        height = int(gray.shape[0] * _OCR_SCALE_PERCENT / 100)
         gray = cv2.resize(gray, (width, height), interpolation=cv2.INTER_CUBIC)
-
-        # 3) Threshold
-        # You can tweak the threshold value or use adaptive threshold
         _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-
-        # (Optional) morphological clean-up
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1,1))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=1)
+        return Image.fromarray(thresh)
 
-        # Convert back to PIL
-        processed_image = Image.fromarray(thresh)
+    def _extract_lines(self, processed_image: Image.Image) -> list[str]:
+        """Run Tesseract and return the non-empty OCR lines."""
+        text = pytesseract.image_to_string(processed_image, lang="eng", config=_OCR_CONFIG)
+        lines = text.splitlines()
+        self.bot.logger.debug(f"PAT OCR lines: {lines}")
+        return lines
 
-        # 4) Tesseract config
-        custom_config = r'--psm 6'
-        extracted_text = pytesseract.image_to_string(processed_image, lang='eng', config=custom_config)
-        lines = extracted_text.splitlines()
-
-        # Debug
-        print("DEBUG OCR LINES (after preprocessing):")
-        for idx, line in enumerate(lines, start=1):
-            print(f"Line {idx}: {repr(line)}")
-
-        roles_to_assign = []
-        guild_roles = {role.id: role for role in message.guild.roles}
-
+    def _roles_from_lines(self, lines: list[str], guild_roles: dict[int, discord.Role]) -> list[discord.Role]:
+        """Parse each OCR line into a matched trial and its highest-cleared role."""
+        roles: list[discord.Role] = []
         for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                continue
-
-            # Split into tokens
-            tokens = line.split()
-            # We expect at least 5 tokens: e.g.
-            #   "Aetherian Archive 123,456 ✓ x x ✓"
-            # => tokens = ["Aetherian", "Archive", "123,456", "✓", "x", "x", "✓"]
-            # The last 4 tokens we interpret as vet/hm1/hm2/hm3 (or possibly there's a number in between).
+            tokens = raw_line.strip().split()
             if len(tokens) < 5:
                 continue
 
-            # The last 4 tokens should be the columns
-            maybe_cols = tokens[-4:]  # e.g. ["✓", "x", "x", "✓"]
-            # The rest is the trial name plus possibly a score
-            maybe_name_tokens = tokens[:-4]
+            columns = tokens[-4:]  # vet / hm1 / hm2 / hm3 checkboxes
+            name_tokens = tokens[:-4]
+            # Drop a trailing numeric score token if present.
+            while name_tokens and re.match(r"^[\d,.\']+$", name_tokens[-1]):
+                name_tokens.pop()
 
-            # We might see a numeric score at the end of the name tokens, so let's
-            # remove trailing purely-numeric tokens if present. We'll keep it simple:
-            while maybe_name_tokens and re.match(r'^[\d,.\']+$', maybe_name_tokens[-1]):
-                maybe_name_tokens.pop()
-
-            # Now whatever remains should be the trial name (fuzzy match it)
-            trial_name_candidate = " ".join(maybe_name_tokens)
-
-            # Use difflib to find the best match from self.known_trials
-            best_match = difflib.get_close_matches(trial_name_candidate, self.known_trials, n=1, cutoff=0.5)
-            # 'cutoff=0.5' means we accept a match if similarity >= 50%. Adjust as needed.
-
-            if not best_match:
-                # No fuzzy match found, skip
+            match = difflib.get_close_matches(" ".join(name_tokens), self.known_trials, n=1, cutoff=0.5)
+            if not match:
                 continue
+            trial = match[0]
 
-            matched_trial = best_match[0]
-            # Now parse the columns
-            vet_sym, hm1_sym, hm2_sym, hm3_sym = maybe_cols
+            vet, hm1, hm2, hm3 = (symbol in _CHECKBOX_POSITIVE for symbol in columns)
+            # Highest clear wins.
+            if hm3:
+                role_id = config_py.hm_clears.get(trial)
+            elif hm2:
+                role_id = config_py.hm_partial_clears_2_boss.get(trial)
+            elif hm1:
+                role_id = config_py.hm_partial_clears_1_boss.get(trial)
+            elif vet:
+                role_id = config_py.vet_clears.get(trial)
+            else:
+                role_id = None
 
-            vet_checked = vet_sym in self.checkbox_positive
-            hm1_checked = hm1_sym in self.checkbox_positive
-            hm2_checked = hm2_sym in self.checkbox_positive
-            hm3_checked = hm3_sym in self.checkbox_positive
+            if role_id and (role := guild_roles.get(role_id)):
+                roles.append(role)
+        return roles
 
-            # Tiered logic
-            if hm3_checked:
-                # Full HM
-                hm_full_role_id = config_py.hm_clears.get(matched_trial)
-                if hm_full_role_id:
-                    role = guild_roles.get(hm_full_role_id)
-                    if role:
-                        roles_to_assign.append(role)
-            elif hm2_checked:
-                # Partial HM (2-boss)
-                hm2_role_id = config_py.hm_partial_clears_2_boss.get(matched_trial)
-                if hm2_role_id:
-                    role = guild_roles.get(hm2_role_id)
-                    if role:
-                        roles_to_assign.append(role)
-            elif hm1_checked:
-                # Partial HM (1-boss)
-                hm1_role_id = config_py.hm_partial_clears_1_boss.get(matched_trial)
-                if hm1_role_id:
-                    role = guild_roles.get(hm1_role_id)
-                    if role:
-                        roles_to_assign.append(role)
-            elif vet_checked:
-                # Vet
-                vet_role_id = config_py.vet_clears.get(matched_trial)
-                if vet_role_id:
-                    role = guild_roles.get(vet_role_id)
-                    if role:
-                        roles_to_assign.append(role)
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.channel.id != config_py.PAT_DECODE_CHANNEL or message.author.bot:
+            return
+        if not message.attachments:
+            return
 
-        if not roles_to_assign:
+        image_data = await self._download(message.attachments[0].url)
+        if image_data is None:
+            await message.channel.send("Failed to download image.")
+            return
+
+        lines = self._extract_lines(self._preprocess(image_data))
+        guild_roles = {role.id: role for role in message.guild.roles}
+        roles = list(dict.fromkeys(self._roles_from_lines(lines, guild_roles)))  # de-dupe, keep order
+
+        if not roles:
             await message.channel.send(f"{message.author.mention}, no roles detected from this image.")
             return
 
-        # Remove duplicates
-        roles_to_assign = list(set(roles_to_assign))
-
-        # Assign all roles
-        await message.author.add_roles(*roles_to_assign)
-
-        embed = disnake.Embed(
-            title="Assigned Roles",
-            description=f"{message.author.mention}, you've been assigned the following roles:",
-            color=disnake.Color.green()
+        await message.author.add_roles(*roles)
+        embed = messages.success(
+            f"{message.author.mention}, you've been assigned the following roles:", title="Assigned Roles"
         )
-        embed.add_field(
-            name="Roles",
-            value="\n".join(role.name for role in roles_to_assign),
-            inline=False
-        )
-
+        embed.add_field(name="Roles", value="\n".join(role.name for role in roles), inline=False)
         await message.channel.send(embed=embed)
 
-def setup(bot):
-    bot.add_cog(PATRoleAssignerFuzzy(bot))
+
+async def setup(bot):
+    await bot.add_cog(PATRoleAssigner(bot))
