@@ -18,6 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config_py
+import lang
 
 # Separate logical database for DnD data (re-uses the shared Mongo client).
 _db = config_py.client["dodo_dnd"]
@@ -62,7 +63,7 @@ class SessionCreationModal(discord.ui.Modal, title="Create New Session"):
         )
         channel = self.bot.get_channel(config_py.DND_FORUM_CHANNEL_ID)
         if channel is None:
-            await interaction.response.send_message("Error: Session channel not found.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_NO_SESSION_CHANNEL, ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -73,7 +74,7 @@ class SessionCreationModal(discord.ui.Modal, title="Create New Session"):
         message = await channel.send(embed=embed, view=SessionJoinView(self.bot, session_id))
         sessions_collection.update_one({"session_id": session_id}, {"$set": {"message_id": message.id}})
         await interaction.response.send_message(
-            f"Session **{self.session_title}** created and posted in {channel.mention}.", ephemeral=True
+            lang.DND_SESSION_CREATED.format(title=self.session_title, channel=channel.mention), ephemeral=True
         )
 
 
@@ -109,7 +110,7 @@ class CharacterCreationModal(discord.ui.Modal, title="Create Your Character"):
         )
         sessions_collection.update_one({"session_id": self.session_id}, {"$addToSet": {"players": self.user.id}})
         await interaction.response.send_message(
-            f"Character **{self.char_name}** created and added to session {self.session_id}!", ephemeral=True
+            lang.DND_CHARACTER_CREATED.format(name=self.char_name, session_id=self.session_id), ephemeral=True
         )
 
 
@@ -140,7 +141,7 @@ class ActionModal(discord.ui.Modal, title="Take an Action"):
         action_desc = str(self.action)
         character = characters_collection.find_one({"player_id": self.user.id, "session_id": self.session_id})
         if not character:
-            await interaction.response.send_message("No character found in this session. Please sign up first.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_NO_CHARACTER, ephemeral=True)
             return
 
         session_doc = sessions_collection.find_one({"session_id": self.session_id})
@@ -154,7 +155,7 @@ class ActionModal(discord.ui.Modal, title="Take an Action"):
             "You are a genius Dungeon Master for a DnD 5e game. You keep a detailed but concise history of the session "
             "and each character. Provide an immersive and context-aware narrative resolution for the following action.",
             context_block, 1.0,
-        ) or "Error generating GM response. Please try again."
+        ) or lang.DND_GM_ERROR
 
         summary = self._complete(
             "You produce concise bullet-point summaries for game events.",
@@ -195,7 +196,7 @@ class ActionModal(discord.ui.Modal, title="Take an Action"):
                 except discord.HTTPException as error:
                     self.bot.logger.error(f"Failed to send reply in session channel: {error}")
 
-        await interaction.response.send_message("Action submitted! Check the session channel for the outcome.", ephemeral=True)
+        await interaction.response.send_message(lang.DND_ACTION_SUBMITTED, ephemeral=True)
 
 
 class InitiativeModal(discord.ui.Modal, title="Enter Initiative"):
@@ -209,12 +210,12 @@ class InitiativeModal(discord.ui.Modal, title="Enter Initiative"):
         try:
             value = int(str(self.initiative))
         except ValueError:
-            await interaction.response.send_message("Invalid input. Please enter a numeric value.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_INITIATIVE_INVALID, ephemeral=True)
             return
 
         session = sessions_collection.find_one({"session_id": self.session_id})
         if not session:
-            await interaction.response.send_message("Session not found.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_SESSION_NOT_FOUND, ephemeral=True)
             return
 
         combat = session.get("combat") or {"active": True, "initiative_order": [], "current_turn": 0}
@@ -225,7 +226,7 @@ class InitiativeModal(discord.ui.Modal, title="Enter Initiative"):
         )
         combat["initiative_order"].sort(key=lambda x: x["initiative"], reverse=True)
         sessions_collection.update_one({"session_id": self.session_id}, {"$set": {"combat": combat}})
-        await interaction.response.send_message(f"Your initiative ({value}) has been recorded.", ephemeral=True)
+        await interaction.response.send_message(lang.DND_INITIATIVE_RECORDED.format(value=value), ephemeral=True)
 
 
 class DiceRollModal(discord.ui.Modal, title="Roll Dice"):
@@ -234,11 +235,13 @@ class DiceRollModal(discord.ui.Modal, title="Roll Dice"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         match = re.match(r"(\d+)d(\d+)", str(self.dice).lower())
         if not match:
-            await interaction.response.send_message("Invalid dice format. Please use NdM (e.g., 1d20).", ephemeral=True)
+            await interaction.response.send_message(lang.DND_DICE_INVALID, ephemeral=True)
             return
         num_dice, dice_size = int(match.group(1)), int(match.group(2))
         results = [random.randint(1, dice_size) for _ in range(num_dice)]
-        await interaction.response.send_message(f"Rolled {self.dice}: {results} (Total: {sum(results)})", ephemeral=True)
+        await interaction.response.send_message(
+            lang.DND_DICE_RESULT.format(dice=self.dice, results=results, total=sum(results)), ephemeral=True
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -255,18 +258,14 @@ class SessionJoinView(discord.ui.View):
     async def sign_up(self, interaction: discord.Interaction, button: discord.ui.Button):
         existing = characters_collection.find_one({"player_id": interaction.user.id, "session_id": self.session_id})
         if existing:
-            await interaction.response.send_message(
-                f"You are already signed up as **{existing['name']}**. Use Sign Off to remove yourself.", ephemeral=True
-            )
+            await interaction.response.send_message(lang.DND_ALREADY_SIGNED.format(name=existing["name"]), ephemeral=True)
             return
         await interaction.response.send_modal(CharacterCreationModal(self.bot, self.session_id, interaction.user))
 
     @discord.ui.button(label="Sign Off", style=discord.ButtonStyle.red, custom_id="session_join_sign_off")
     async def sign_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         sessions_collection.update_one({"session_id": self.session_id}, {"$pull": {"players": interaction.user.id}})
-        await interaction.response.send_message(
-            "You have been signed off from this session. Your character data remains saved.", ephemeral=True
-        )
+        await interaction.response.send_message(lang.DND_SIGNED_OFF, ephemeral=True)
 
 
 class SessionControlView(discord.ui.View):
@@ -294,20 +293,22 @@ class SessionControlView(discord.ui.View):
         combat = session.get("combat") if session else None
         order = combat.get("initiative_order", []) if combat else []
         if not order:
-            await interaction.response.send_message("No initiative order recorded.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_NO_INITIATIVE, ephemeral=True)
             return
         combat["current_turn"] = (combat.get("current_turn", 0) + 1) % len(order)
         sessions_collection.update_one({"session_id": self.session_id}, {"$set": {"combat": combat}})
         entry = order[combat["current_turn"]]
         await interaction.response.send_message(
-            f"Next turn: **{entry['character_name']}** (Player ID: {entry['player_id']}) with initiative {entry['initiative']}.",
+            lang.DND_NEXT_TURN.format(
+                name=entry["character_name"], player_id=entry["player_id"], initiative=entry["initiative"]
+            ),
             ephemeral=True,
         )
 
     @discord.ui.button(label="End Combat", style=discord.ButtonStyle.danger)
     async def end_combat(self, interaction: discord.Interaction, button: discord.ui.Button):
         sessions_collection.update_one({"session_id": self.session_id}, {"$set": {"combat": None}})
-        await interaction.response.send_message("Combat ended.", ephemeral=True)
+        await interaction.response.send_message(lang.DND_COMBAT_ENDED, ephemeral=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -322,7 +323,7 @@ class DodoDnD(commands.Cog, name="dnd"):
     @app_commands.command(name="start_session", description="(GM only) Start a new DnD session in DM.")
     async def start_session(self, interaction: discord.Interaction) -> None:
         if not isinstance(interaction.channel, discord.DMChannel):
-            await interaction.response.send_message("Please use this command in DMs with the bot.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_DM_ONLY, ephemeral=True)
             return
         await interaction.response.send_modal(SessionCreationModal(self.bot))
 
@@ -335,24 +336,24 @@ class DodoDnD(commands.Cog, name="dnd"):
     @app_commands.command(name="end_session", description="End an active DnD session.")
     async def end_session(self, interaction: discord.Interaction, session_id: int) -> None:
         if not sessions_collection.find_one({"session_id": session_id}):
-            await interaction.response.send_message("Session not found.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_SESSION_NOT_FOUND, ephemeral=True)
             return
         sessions_collection.update_one({"session_id": session_id}, {"$set": {"status": "completed"}})
-        await interaction.response.send_message(f"Session {session_id} has ended.", ephemeral=True)
+        await interaction.response.send_message(lang.DND_SESSION_ENDED.format(session_id=session_id), ephemeral=True)
 
     @app_commands.command(name="save_stats", description="Display final stats for a session.")
     async def save_stats(self, interaction: discord.Interaction, session_id: int) -> None:
         actions = list(actions_collection.find({"session_id": session_id}))
         if not actions:
-            await interaction.response.send_message("No actions recorded for this session.", ephemeral=True)
+            await interaction.response.send_message(lang.DND_NO_ACTIONS, ephemeral=True)
             return
         counts: dict[int, int] = {}
         for action in actions:
             counts[action["player_id"]] = counts.get(action["player_id"], 0) + 1
-        summary = "Session Stats:\n"
+        summary = lang.DND_STATS_HEADER
         for player_id, count in counts.items():
             user = await self.bot.fetch_user(player_id)
-            summary += f"- {user.display_name}: {count} actions\n"
+            summary += lang.DND_STATS_LINE.format(name=user.display_name, count=count)
         await interaction.response.send_message(summary, ephemeral=True)
 
 

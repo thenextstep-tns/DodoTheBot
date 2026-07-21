@@ -1,9 +1,7 @@
 """
 Seasonal cog — thread-based seasonal events: ``love`` (Valentine messages) and
-``vote`` (Dodo of the Year nominations), plus an owner ``resetvote``.
-
-Each command opens a private thread and asks the user a short series of
-questions, then posts the result to the relevant public channel.
+``vote`` (Dodo of the Year nominations), plus an owner ``resetvote``. User-facing
+text lives in ``lang``.
 """
 
 import asyncio
@@ -14,9 +12,8 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks, messages
-
-_THREAD_GONE = "Just like my family, this thread will now disappear. Thank you! :heart: "
 
 
 class Seasonal(commands.Cog, name="seasonal"):
@@ -38,7 +35,7 @@ class Seasonal(commands.Cog, name="seasonal"):
         except asyncio.TimeoutError:
             return None
 
-    async def _close_thread(self, thread: discord.Thread, farewell: str = _THREAD_GONE) -> None:
+    async def _close_thread(self, thread: discord.Thread, farewell: str = lang.SEASONAL_THREAD_GONE) -> None:
         """Send a farewell and delete the thread after a short delay."""
         await thread.send(farewell)
         await asyncio.sleep(10)
@@ -58,43 +55,36 @@ class Seasonal(commands.Cog, name="seasonal"):
         await context.defer(ephemeral=True)
         valentine_channel = self.bot.get_channel(config_py.VALENTINE_CHANNEL)
         thread = await self._open_thread(context, f"Sending a love letter to a very special someone at {time.time()}")
-        await thread.send(
-            f"Hey there, {context.author.mention}! I created this private thread for you to send a message. "
-            f"I will memorise it and send it to <#{config_py.VALENTINE_CHANNEL}>, which will be available on "
-            "Valentine's day! This thread is private. I'll ask a few questions, then save it all and delete the thread :heart: "
-        )
+        await thread.send(lang.LOVE_INTRO.format(mention=context.author.mention, channel=config_py.VALENTINE_CHANNEL))
 
         if member:
             who = member.name
         else:
-            who = await self._ask(thread, context.author, "QUESTION 1: **Who is your message for?**", 30)
+            who = await self._ask(thread, context.author, lang.LOVE_Q_WHO, 30)
             if who is None:
                 await self._close_thread(thread)
                 return
 
-        sender = await self._ask(
-            thread, context.author, "Now I need to know **who is the message FROM?** You can stay anonymous if you want to!", 30
-        )
+        sender = await self._ask(thread, context.author, lang.LOVE_Q_FROM, 30)
         if sender is None:
             await self._close_thread(thread)
             return
-        message = await self._ask(thread, context.author, "Nice! **Now is the time to write and send your message!**", 120)
+        message = await self._ask(thread, context.author, lang.LOVE_Q_MESSAGE, 120)
         if message is None:
             await self._close_thread(thread)
             return
 
-        await thread.send(f"Perfection! I will send a message from {sender} to {who}! The message will be:")
+        await thread.send(lang.LOVE_CONFIRM.format(sender=sender, who=who))
         await thread.send(message)
 
-        embed = messages.success(f"To: {who}! From: {sender}", title=message)
+        embed = messages.success(lang.LOVE_EMBED_DESCRIPTION.format(who=who, sender=sender), title=message)
         if member:
-            await valentine_channel.send(f"<@{member.id}>! You got a valentine! :heart:")
+            await valentine_channel.send(lang.LOVE_NOTIFY.format(member_id=member.id))
         await valentine_channel.send(embed=embed)
-        await valentine_channel.send("= :heart: =")
+        await valentine_channel.send(lang.LOVE_HEARTS)
 
         await self.bot.get_channel(config_py.LOG_CHANNEL).send(
-            f"New valentine added! :smirk: {context.author} who said their name was {sender} "
-            f"sent this message to {who}: {message}"
+            lang.LOVE_LOG.format(author=context.author, sender=sender, who=who, message=message)
         )
         await self._close_thread(thread)
 
@@ -102,47 +92,27 @@ class Seasonal(commands.Cog, name="seasonal"):
     async def vote(self, context: Context) -> None:
         """Collect three DOTY nominations in a private thread and record them."""
         if config_py.votes.find_one({"user_id": str(context.author.id)}):
-            await context.send(
-                "Looks like you have already voted in this round! If you feel like you did some oopsie :dodo: "
-                "in your votes, please poke Fox!"
-            )
+            await context.send(lang.VOTE_ALREADY)
             return
 
         await context.defer(ephemeral=True)
         doty_channel = self.bot.get_channel(config_py.DOTY_CHANNEL)
         thread = await self._open_thread(context, f"Vote at {time.time()}")
-        await thread.send(
-            f"Hey there, {context.author.mention}! This private thread collects your nominations. "
-            f"They'll be posted to <#{config_py.DOTY_CHANNEL}> at the end of round 1.\n"
-            "## Please note that both Salvy and Fox are not participating in the votes.\n"
-            "Don't vote for them even if you really want to :hearts: You have 180 seconds per question."
-        )
+        await thread.send(lang.VOTE_INTRO.format(mention=context.author.mention, channel=config_py.DOTY_CHANNEL))
 
-        role_model = await self._ask(
-            thread, context.author,
-            "# NOMINATION 1: **THE ROLE MODEL**\nThe person who sets an example with exceptional skills, knowledge and "
-            "dedication, always ready to support others.", 180,
-        )
-        progress = role_model and await self._ask(
-            thread, context.author,
-            "# NOMINATION 2: **THE PROGRESS OF THE YEAR**\nThe person who achieved a breakthrough in their progress or "
-            "found a fundamentally new role in the community.", 180,
-        )
-        community = progress and await self._ask(
-            thread, context.author,
-            "# NOMINATION 3: **THE COMMUNITY BUILDER OF THE YEAR**\nThe special someone who creates the cosiness and "
-            "respect that made you find your place here.", 180,
-        )
+        role_model = await self._ask(thread, context.author, lang.VOTE_Q1, 180)
+        progress = role_model and await self._ask(thread, context.author, lang.VOTE_Q2, 180)
+        community = progress and await self._ask(thread, context.author, lang.VOTE_Q3, 180)
         if not community:
             await self._close_thread(thread)
             return
 
         embed = messages.success(
-            f"THE ROLE MODEL: {role_model}!\nPROGRESS OF THE YEAR: {progress}\nCOMMUNITY BUILDER: {community}",
-            title=f"Nominations from {context.author}",
+            lang.VOTE_EMBED_DESCRIPTION.format(role_model=role_model, progress=progress, community=community),
+            title=lang.VOTE_EMBED_TITLE.format(author=context.author),
         )
         await doty_channel.send(embed=embed)
-        await doty_channel.send("= :heart: =")
+        await doty_channel.send(lang.LOVE_HEARTS)
         config_py.votes.insert_one(
             {
                 "user_id": str(context.author.id),
@@ -151,9 +121,7 @@ class Seasonal(commands.Cog, name="seasonal"):
                 "community_builder": community,
             }
         )
-        await self._close_thread(
-            thread, "The first round of the votes closes on 17.12! Thank you for participating! :heart: "
-        )
+        await self._close_thread(thread, lang.VOTE_CLOSE)
 
     @commands.hybrid_command(name="resetvote", aliases=["resetdoty"], description="Reset a user's vote (owner only).")
     @checks.is_owner()
@@ -161,9 +129,9 @@ class Seasonal(commands.Cog, name="seasonal"):
         """Clear ``user``'s recorded DOTY vote so they can vote again."""
         result = config_py.votes.delete_one({"user_id": str(user.id)})
         if result.deleted_count:
-            await context.send(f"Vote status for {user.mention} has been reset.")
+            await context.send(lang.RESETVOTE_DONE.format(mention=user.mention))
         else:
-            await context.send("User not found in the voting status records.")
+            await context.send(lang.RESETVOTE_NONE)
 
 
 async def setup(bot):

@@ -16,6 +16,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks, messages
 
 _DIFFICULTY_LEVELS = {
@@ -62,16 +63,13 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
     async def parse(self, context: Context, max_attempts: int = 1) -> None:
         """Open sign-ups for a parse championship."""
         if max_attempts < 1 or max_attempts > 3:
-            await context.send("The number of attempts must be between 1 and 3. Usage: dodo parse <1-3>")
+            await context.send(lang.PARSEFEST_INVALID_ATTEMPTS)
             return
 
         self.reset_state()
         self.max_attempts = max_attempts
 
-        embed = messages.warning(
-            f"React with ✅ to participate! You have 20 seconds to join.\nEach player has {max_attempts} attempts.",
-            title="Dodos Parse Championship",
-        )
+        embed = messages.warning(lang.PARSEFEST_LOBBY.format(max_attempts=max_attempts), title=lang.PARSEFEST_TITLE)
         embed.add_field(name="Participants", value="No one yet!", inline=False)
         self.main_message = await context.send(embed=embed)
         await self.main_message.add_reaction("✅")
@@ -83,7 +81,7 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         """Abort the current championship."""
         message = self.main_message
         self.reset_state()
-        await context.send("The parsefest has been stopped.")
+        await context.send(lang.PARSEFEST_STOPPED)
         if message:
             await message.clear_reactions()
 
@@ -97,9 +95,9 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         world_record = config_py.parses.find_one({"Championship Parse": 1}, sort=[("Parse", -1)])
         embed = self.main_message.embeds[0]
         embed.description = (
-            f"World Record: {world_record['Parse']} DPS by {world_record['Name']}"
+            lang.PARSEFEST_WR.format(parse=world_record["Parse"], name=world_record["Name"])
             if world_record
-            else "No world record set yet."
+            else lang.PARSEFEST_NO_WR
         )
         await self.main_message.edit(embed=embed)
         await self.main_message.clear_reactions()
@@ -128,22 +126,12 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         user_data["attempts"] += 1
 
         # 1. Choose difficulty.
-        difficulty_message = await channel.send(
-            f"{user.display_name}, choose your difficulty level:\n"
-            "1️⃣ - Easy (-2 actions, -35000 from max DPS)\n"
-            "2️⃣ - Medium (-1 action, -25000 from max DPS)\n"
-            "3️⃣ - Baseline (5 actions, no changes)\n"
-            "4️⃣ - Very Hard (+2 actions, +25000 to max DPS)\n"
-            "5️⃣ - Insane (+4 actions, +40000 to max DPS)"
-        )
+        difficulty_message = await channel.send(lang.PARSEFEST_DIFFICULTY_MENU.format(name=user.display_name))
         chosen_level, _ = await messages.wait_for_reaction(
             self.bot, difficulty_message, _DIFFICULTY_LEVELS, member=user, timeout=15.0
         )
         if chosen_level is None:
-            await channel.send(
-                f"{user.display_name}, you took too long to choose! Defaulting to the normal difficulty.",
-                delete_after=5,
-            )
+            await channel.send(lang.PARSEFEST_DIFFICULTY_TIMEOUT.format(name=user.display_name), delete_after=5)
             chosen_level = "3️⃣"
         difficulty = _DIFFICULTY_LEVELS[chosen_level]
         await difficulty_message.delete()
@@ -152,26 +140,27 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         num_actions, dps_mod = difficulty["actions"], difficulty["dps_mod"]
         available_actions = dict(list(self._actions.items())[:num_actions])
 
-        user_message = await channel.send(f"{user.display_name}, prebuff and get ready to parse!")
+        user_message = await channel.send(lang.PARSEFEST_PREBUFF.format(name=user.display_name))
         for emoji in available_actions:
             await user_message.add_reaction(emoji)
         await asyncio.sleep(2)
-        await user_message.edit(content=f"{user.display_name}, click the right emoji as fast as you can once you see it here!")
+        await user_message.edit(content=lang.PARSEFEST_GO.format(name=user.display_name))
 
         reaction_times = []
         for i in range(num_actions):
             target_emoji, target_action = random.choice(list(available_actions.items()))
             await asyncio.sleep(random.uniform(2, 3))
             await user_message.edit(
-                content=f"{user.mention}, click the right emoji as fast as you can once you see it here!\n"
-                f"Action #{i + 1}: {target_action} ({target_emoji})"
+                content=lang.PARSEFEST_ACTION.format(
+                    mention=user.mention, index=i + 1, action=target_action, emoji=target_emoji
+                )
             )
             start_time = time.time()
             clicked, _ = await messages.wait_for_reaction(
                 self.bot, user_message, available_actions, member=user, timeout=3.0, add=False
             )
             if clicked is None:
-                await channel.send(f"{user.display_name}, you missed the action!", delete_after=5)
+                await channel.send(lang.PARSEFEST_MISSED.format(name=user.display_name), delete_after=5)
                 reaction_times.append(3.0)
                 continue
             react_time = time.time() - start_time
@@ -205,11 +194,12 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         if final_parse > current_wr:
             new_wr = " **WR**"
             embed = self.main_message.embeds[0]
-            embed.description = f"World Record: {final_parse} DPS by {user.display_name} (Difficulty: {chosen_level})"
+            embed.description = lang.PARSEFEST_WR_UPDATE.format(parse=final_parse, name=user.display_name, difficulty=chosen_level)
             await self.main_message.edit(embed=embed)
 
         await channel.send(
-            f"{user.display_name}, your DPS was: {final_parse}{new_wr} (Difficulty: {chosen_level})", delete_after=5
+            lang.PARSEFEST_DPS.format(name=user.display_name, parse=final_parse, wr=new_wr, difficulty=chosen_level),
+            delete_after=5,
         )
         await user_message.delete()
         await self.update_main_message(user)
@@ -239,13 +229,13 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
         sorted_lines = sorted(
             current_text.splitlines(), key=lambda x: int(re.search(r"(\d+) DPS", x).group(1)), reverse=True
         )
-        embed.set_field_at(0, name="Participants and Scores", value="\n".join(sorted_lines), inline=False)
+        embed.set_field_at(0, name=lang.PARSEFEST_SCORES, value="\n".join(sorted_lines), inline=False)
 
         if not self.signups_open and all(
             self.parse_data[uid]["attempts"] >= self.max_attempts for uid in self.participants
         ):
-            embed.title = "Dodos Parse Championship - Final Results"
-            embed.description = "Here are the final results of the parse competition."
+            embed.title = lang.PARSEFEST_FINAL_TITLE
+            embed.description = lang.PARSEFEST_FINAL_DESCRIPTION
 
         await self.main_message.edit(embed=embed)
 

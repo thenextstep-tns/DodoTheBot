@@ -372,3 +372,102 @@ SCHED_SIGNUP_ALREADY = "You are already signed up for this role."
 SCHED_SIGNUP_DONE = "You have signed up as a {role}."
 SCHED_SIGNUP_RESERVES = "All slots are full. You have been added to reserves."
 SCHED_SIGNUP_ALREADY_RESERVE = "You are already in the reserves."
+
+# --------------------------------------------------------------------------- #
+#  Seasonal cog
+# --------------------------------------------------------------------------- #
+SEASONAL_THREAD_GONE = "Just like my family, this thread will now disappear. Thank you! :heart: "
+LOVE_INTRO = (
+    "Hey there, {mention}! I created this private thread for you to send a message. "
+    "I will memorise it and send it to <#{channel}>, which will be available on "
+    "Valentine's day! This thread is private. I'll ask a few questions, then save it all and delete the thread :heart: "
+)
+LOVE_Q_WHO = "QUESTION 1: **Who is your message for?**"
+LOVE_Q_FROM = "Now I need to know **who is the message FROM?** You can stay anonymous if you want to!"
+LOVE_Q_MESSAGE = "Nice! **Now is the time to write and send your message!**"
+LOVE_CONFIRM = "Perfection! I will send a message from {sender} to {who}! The message will be:"
+LOVE_EMBED_DESCRIPTION = "To: {who}! From: {sender}"
+LOVE_NOTIFY = "<@{member_id}>! You got a valentine! :heart:"
+LOVE_HEARTS = "= :heart: ="
+LOVE_LOG = "New valentine added! :smirk: {author} who said their name was {sender} sent this message to {who}: {message}"
+
+VOTE_ALREADY = (
+    "Looks like you have already voted in this round! If you feel like you did some oopsie :dodo: "
+    "in your votes, please poke Fox!"
+)
+VOTE_INTRO = (
+    "Hey there, {mention}! This private thread collects your nominations. "
+    "They'll be posted to <#{channel}> at the end of round 1.\n"
+    "## Please note that both Salvy and Fox are not participating in the votes.\n"
+    "Don't vote for them even if you really want to :hearts: You have 180 seconds per question."
+)
+VOTE_Q1 = (
+    "# NOMINATION 1: **THE ROLE MODEL**\nThe person who sets an example with exceptional skills, knowledge and "
+    "dedication, always ready to support others."
+)
+VOTE_Q2 = (
+    "# NOMINATION 2: **THE PROGRESS OF THE YEAR**\nThe person who achieved a breakthrough in their progress or "
+    "found a fundamentally new role in the community."
+)
+VOTE_Q3 = (
+    "# NOMINATION 3: **THE COMMUNITY BUILDER OF THE YEAR**\nThe special someone who creates the cosiness and "
+    "respect that made you find your place here."
+)
+VOTE_EMBED_TITLE = "Nominations from {author}"
+VOTE_EMBED_DESCRIPTION = "THE ROLE MODEL: {role_model}!\nPROGRESS OF THE YEAR: {progress}\nCOMMUNITY BUILDER: {community}"
+VOTE_CLOSE = "The first round of the votes closes on 17.12! Thank you for participating! :heart: "
+RESETVOTE_DONE = "Vote status for {mention} has been reset."
+RESETVOTE_NONE = "User not found in the voting status records."
+
+# --------------------------------------------------------------------------- #
+#  Parse-tournament cog
+# --------------------------------------------------------------------------- #
+PARSEFEST_INVALID_ATTEMPTS = "The number of attempts must be between 1 and 3. Usage: dodo parse <1-3>"
+PARSEFEST_LOBBY = "React with ✅ to participate! You have 20 seconds to join.\nEach player has {max_attempts} attempts."
+PARSEFEST_TITLE = "Dodos Parse Championship"
+PARSEFEST_STOPPED = "The parsefest has been stopped."
+PARSEFEST_WR = "World Record: {parse} DPS by {name}"
+PARSEFEST_NO_WR = "No world record set yet."
+PARSEFEST_DIFFICULTY_MENU = (
+    "{name}, choose your difficulty level:\n"
+    "1️⃣ - Easy (-2 actions, -35000 from max DPS)\n"
+    "2️⃣ - Medium (-1 action, -25000 from max DPS)\n"
+    "3️⃣ - Baseline (5 actions, no changes)\n"
+    "4️⃣ - Very Hard (+2 actions, +25000 to max DPS)\n"
+    "5️⃣ - Insane (+4 actions, +40000 to max DPS)"
+)
+PARSEFEST_DIFFICULTY_TIMEOUT = "{name}, you took too long to choose! Defaulting to the normal difficulty."
+PARSEFEST_PREBUFF = "{name}, prebuff and get ready to parse!"
+PARSEFEST_GO = "{name}, click the right emoji as fast as you can once you see it here!"
+PARSEFEST_ACTION = "{mention}, click the right emoji as fast as you can once you see it here!\nAction #{index}: {action} ({emoji})"
+PARSEFEST_MISSED = "{name}, you missed the action!"
+PARSEFEST_DPS = "{name}, your DPS was: {parse}{wr} (Difficulty: {difficulty})"
+PARSEFEST_WR_UPDATE = "World Record: {parse} DPS by {name} (Difficulty: {difficulty})"
+PARSEFEST_SCORES = "Participants and Scores"
+PARSEFEST_FINAL_TITLE = "Dodos Parse Championship - Final Results"
+PARSEFEST_FINAL_DESCRIPTION = "Here are the final results of the parse competition."
+
+# --------------------------------------------------------------------------- #
+#  DnD cog
+# --------------------------------------------------------------------------- #
+DND_SESSION_CREATED = "Session **{title}** created and posted in {channel}."
+DND_NO_SESSION_CHANNEL = "Error: Session channel not found."
+DND_CHARACTER_CREATED = "Character **{name}** created and added to session {session_id}!"
+DND_NO_CHARACTER = "No character found in this session. Please sign up first."
+DND_ACTION_SUBMITTED = "Action submitted! Check the session channel for the outcome."
+DND_GM_ERROR = "Error generating GM response. Please try again."
+DND_INITIATIVE_INVALID = "Invalid input. Please enter a numeric value."
+DND_SESSION_NOT_FOUND = "Session not found."
+DND_INITIATIVE_RECORDED = "Your initiative ({value}) has been recorded."
+DND_DICE_INVALID = "Invalid dice format. Please use NdM (e.g., 1d20)."
+DND_DICE_RESULT = "Rolled {dice}: {results} (Total: {total})"
+DND_ALREADY_SIGNED = "You are already signed up as **{name}**. Use Sign Off to remove yourself."
+DND_SIGNED_OFF = "You have been signed off from this session. Your character data remains saved."
+DND_NO_INITIATIVE = "No initiative order recorded."
+DND_NEXT_TURN = "Next turn: **{name}** (Player ID: {player_id}) with initiative {initiative}."
+DND_COMBAT_ENDED = "Combat ended."
+DND_DM_ONLY = "Please use this command in DMs with the bot."
+DND_SESSION_ENDED = "Session {session_id} has ended."
+DND_NO_ACTIONS = "No actions recorded for this session."
+DND_STATS_HEADER = "Session Stats:\n"
+DND_STATS_LINE = "- {name}: {count} actions\n"
