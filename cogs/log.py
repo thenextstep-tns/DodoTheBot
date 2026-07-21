@@ -1,25 +1,19 @@
 """
-Version 1.0
+Log cog — a comprehensive server audit logger. Per-guild log channels are read
+from ``guilds.json``; events are batched to avoid rate limits and also archived
+to MongoDB. ``/setlogchannel`` and ``/setdeletechannel`` configure destinations.
 """
 
+import asyncio
 import json
 import os
-import sys
-import asyncio
 from collections import defaultdict
-import disnake
-from disnake.ext import commands, tasks
 
-if not os.path.isfile("config.json"):
-    sys.exit("'config.json' not found! Please add it and try again.")
-else:
-    with open("config.json") as file:
-        config = json.load(file)
+import discord
+from discord.ext import commands, tasks
+from discord.ext.commands import Context
 
-if not os.path.isfile("config_py.py"):
-    sys.exit("'config_py.py' not found! Please add it and try again.")
-else:
-    import config_py
+import config_py
 
 # Colors for consistent visual logging
 COLOR_JOIN = 0x43b581     # Green
@@ -109,9 +103,9 @@ class Log(commands.Cog, name="log"):
         try:
             async for entry in guild.audit_logs(action=action, limit=10):
                 if target_id is None or entry.target.id == target_id:
-                    if (disnake.utils.utcnow() - entry.created_at).total_seconds() < max_age_sec:
+                    if (discord.utils.utcnow() - entry.created_at).total_seconds() < max_age_sec:
                         return entry
-        except disnake.Forbidden:
+        except discord.Forbidden:
             pass
         return None
 
@@ -125,8 +119,8 @@ class Log(commands.Cog, name="log"):
             # Assumes config_py has a 'logs' collection defined (e.g. config_py.logs)
             if hasattr(config_py, "logs"):
                 config_py.logs.insert_one(data)
-        except Exception as e:
-            print(f"[Log DB Error] Failed to insert log to DB: {e}")
+        except Exception as error:
+            self.bot.logger.error(f"Failed to insert log to DB: {error}")
 
     async def send_log(self, channel, embed, event_type, guild):
         """Queues an embed for batch sending and sends data to the database."""
@@ -142,7 +136,7 @@ class Log(commands.Cog, name="log"):
             "event_type": event_type,
             "description": embed.description,
             "fields": {field.name: field.value for field in embed.fields},
-            "timestamp": disnake.utils.utcnow().isoformat()
+            "timestamp": discord.utils.utcnow().isoformat()
         }
         self.bot.loop.run_in_executor(None, self._insert_db, db_data)
 
@@ -166,11 +160,11 @@ class Log(commands.Cog, name="log"):
                 if not final_added and not final_removed:
                     continue
 
-                now = int(disnake.utils.utcnow().timestamp())
+                now = int(discord.utils.utcnow().timestamp())
                 actor_str = f" by {data['actor']}" if data['actor'] != "Unknown" else ""
                 desc = f"👤 **{member.mention}** (`{member.id}`) roles updated{actor_str} - <t:{now}:f>"
                 
-                embed = disnake.Embed(description=desc, color=COLOR_INFO)
+                embed = discord.Embed(description=desc, color=COLOR_INFO)
                 
                 if final_added:
                     embed.add_field(name="➕ Added", value=" ".join(final_added)[:1024], inline=False)
@@ -197,8 +191,8 @@ class Log(commands.Cog, name="log"):
                 chunk = embeds[i:i+10]
                 try:
                     await channel.send(embeds=chunk)
-                except Exception as e:
-                    print(f"[Log Send Error] Failed to send log batch to {channel.id}: {e}")
+                except Exception as error:
+                    self.bot.logger.error(f"Failed to send log batch to {channel.id}: {error}")
 
     @batch_logger.before_loop
     async def before_batch_logger(self):
@@ -208,44 +202,35 @@ class Log(commands.Cog, name="log"):
     #                 COMMANDS                  #
     #############################################
 
-    @commands.slash_command(name="setlogchannel", description="Sets the standard channel where server logs will be sent.")
+    @commands.hybrid_command(name="setlogchannel", description="Set the channel where server logs are sent.")
     @commands.has_permissions(administrator=True)
-    async def set_log_channel(self, inter: disnake.ApplicationCommandInteraction, channel: disnake.TextChannel):
-        """Slash command to configure the standard log channel for the current guild."""
+    async def set_log_channel(self, context: Context, channel: discord.TextChannel) -> None:
+        """Configure the standard log channel for this guild."""
         log_channels = load_guilds()
-        guild_id = str(inter.guild.id)
-        
+        guild_id = str(context.guild.id)
         guild_data = log_channels.get(guild_id, {})
-        # Convert legacy integer config to dictionary format if encountered
-        if not isinstance(guild_data, dict):
+        if not isinstance(guild_data, dict):  # migrate legacy integer config
             guild_data = {"channel_id": guild_data}
-            
         guild_data["channel_id"] = channel.id
-        guild_data["guild_name"] = inter.guild.name
-        
+        guild_data["guild_name"] = context.guild.name
         log_channels[guild_id] = guild_data
         save_guilds(log_channels)
-        
-        await inter.response.send_message(f"✅ Standard server logs will now be sent to {channel.mention}.", ephemeral=True)
+        await context.send(f"✅ Standard server logs will now be sent to {channel.mention}.", ephemeral=True)
 
-    @commands.slash_command(name="setdeletechannel", description="Sets a separate channel for message edit and deletion logs.")
+    @commands.hybrid_command(name="setdeletechannel", description="Set a separate channel for edit/deletion logs.")
     @commands.has_permissions(administrator=True)
-    async def set_delete_channel(self, inter: disnake.ApplicationCommandInteraction, channel: disnake.TextChannel):
-        """Slash command to configure a dedicated log channel for message edits and deletions."""
+    async def set_delete_channel(self, context: Context, channel: discord.TextChannel) -> None:
+        """Configure a dedicated log channel for message edits and deletions."""
         log_channels = load_guilds()
-        guild_id = str(inter.guild.id)
-        
+        guild_id = str(context.guild.id)
         guild_data = log_channels.get(guild_id, {})
         if not isinstance(guild_data, dict):
             guild_data = {"channel_id": guild_data}
-            
         guild_data["delete_channel_id"] = channel.id
-        guild_data["guild_name"] = inter.guild.name
-        
+        guild_data["guild_name"] = context.guild.name
         log_channels[guild_id] = guild_data
         save_guilds(log_channels)
-        
-        await inter.response.send_message(f"✅ Message edit and deletion logs will now be sent to {channel.mention}.", ephemeral=True)
+        await context.send(f"✅ Message edit and deletion logs will now be sent to {channel.mention}.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -256,7 +241,7 @@ class Log(commands.Cog, name="log"):
             if str(guild.id) in log_channels:
                 try:
                     self.invites[guild.id] = await guild.invites()
-                except disnake.Forbidden:
+                except discord.Forbidden:
                     pass
 
     #############################################
@@ -268,7 +253,7 @@ class Log(commands.Cog, name="log"):
         channel = self.get_log_channel(member.guild)
         if not channel: return
 
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         desc = f"📥 **{member.mention}** (`{member.id}`) joined the server - <t:{now}:f>"
 
         # Check which invite was used
@@ -282,10 +267,10 @@ class Log(commands.Cog, name="log"):
                         used_invite = new_inv
                         break
             self.invites[member.guild.id] = new_invites
-        except disnake.Forbidden:
+        except discord.Forbidden:
             pass
 
-        embed = disnake.Embed(description=desc, color=COLOR_JOIN)
+        embed = discord.Embed(description=desc, color=COLOR_JOIN)
         
         if used_invite:
             inviter = used_invite.inviter
@@ -301,14 +286,14 @@ class Log(commands.Cog, name="log"):
 
         # Wait briefly for audit logs to populate
         await asyncio.sleep(1.5)
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
 
-        ban_entry = await self._get_audit_entry(member.guild, disnake.AuditLogAction.ban, member.id)
+        ban_entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.ban, member.id)
         if ban_entry:
             # Let on_member_ban handle the logging
             return
 
-        kick_entry = await self._get_audit_entry(member.guild, disnake.AuditLogAction.kick, member.id)
+        kick_entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.kick, member.id)
         if kick_entry:
             actor = kick_entry.user.mention if kick_entry.user else "Unknown"
             reason = kick_entry.reason or "No reason provided"
@@ -318,7 +303,7 @@ class Log(commands.Cog, name="log"):
             desc = f"📤 **{member.mention}** left the server - <t:{now}:f>"
             event_type = "MEMBER_LEAVE"
 
-        embed = disnake.Embed(description=desc, color=COLOR_LEAVE)
+        embed = discord.Embed(description=desc, color=COLOR_LEAVE)
         embed.set_author(name=f"{member.name} ({member.id})", icon_url=member.display_avatar.url if member.display_avatar else None)
         
         roles = [role.mention for role in member.roles if role.name != "@everyone"]
@@ -333,14 +318,14 @@ class Log(commands.Cog, name="log"):
         if not channel: return
 
         await asyncio.sleep(1.5)
-        now = int(disnake.utils.utcnow().timestamp())
-        ban_entry = await self._get_audit_entry(guild, disnake.AuditLogAction.ban, user.id)
+        now = int(discord.utils.utcnow().timestamp())
+        ban_entry = await self._get_audit_entry(guild, discord.AuditLogAction.ban, user.id)
         
         actor = ban_entry.user.mention if ban_entry and ban_entry.user else "Unknown"
         reason = ban_entry.reason if ban_entry and ban_entry.reason else "No reason provided"
         
         desc = f"🔨 **{user.mention}** was banned by {actor} - <t:{now}:f>\n**Reason:** {reason}"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url if user.display_avatar else None)
         
         await self.send_log(channel, embed, "MEMBER_BAN", guild)
@@ -351,13 +336,13 @@ class Log(commands.Cog, name="log"):
         if not channel: return
 
         await asyncio.sleep(1.5)
-        now = int(disnake.utils.utcnow().timestamp())
-        unban_entry = await self._get_audit_entry(guild, disnake.AuditLogAction.unban, user.id)
+        now = int(discord.utils.utcnow().timestamp())
+        unban_entry = await self._get_audit_entry(guild, discord.AuditLogAction.unban, user.id)
         
         actor = unban_entry.user.mention if unban_entry and unban_entry.user else "Unknown"
         
         desc = f"🔓 **{user.mention}** was unbanned by {actor} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_JOIN)
+        embed = discord.Embed(description=desc, color=COLOR_JOIN)
         embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url if user.display_avatar else None)
         
         await self.send_log(channel, embed, "MEMBER_UNBAN", guild)
@@ -366,7 +351,7 @@ class Log(commands.Cog, name="log"):
     async def on_member_update(self, before, after):
         channel = self.get_log_channel(before.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
 
         # Role updates (debounced)
         if before.roles != after.roles:
@@ -374,7 +359,7 @@ class Log(commands.Cog, name="log"):
             removed = [role.mention for role in before.roles if role not in after.roles]
 
             if added or removed:
-                entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.member_role_update, after.id)
+                entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_role_update, after.id)
                 actor = entry.user.mention if entry and entry.user else "Unknown"
 
                 key = (after.guild.id, after.id)
@@ -388,19 +373,19 @@ class Log(commands.Cog, name="log"):
 
         # Nickname changes
         if before.nick != after.nick:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.member_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_update, after.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             
             old_nick = before.nick if before.nick else before.name
             new_nick = after.nick if after.nick else after.name
             
             desc = f"✏️ **{after.mention}** (`{after.id}`) nickname changed by {actor} - <t:{now}:f>\n\n**From:** `{old_nick}`\n**To:** `{new_nick}`"
-            embed = disnake.Embed(description=desc, color=COLOR_INFO)
+            embed = discord.Embed(description=desc, color=COLOR_INFO)
             await self.send_log(channel, embed, "MEMBER_NICK_UPDATE", before.guild)
 
         # Timeout changes
         if before.current_timeout != after.current_timeout:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.member_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_update, after.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             reason = entry.reason if entry and entry.reason else "No reason provided"
 
@@ -414,7 +399,7 @@ class Log(commands.Cog, name="log"):
                 color = COLOR_JOIN
                 event_type = "MEMBER_TIMEOUT_REMOVE"
                 
-            embed = disnake.Embed(description=desc, color=color)
+            embed = discord.Embed(description=desc, color=color)
             await self.send_log(channel, embed, event_type, before.guild)
 
     #############################################
@@ -425,7 +410,7 @@ class Log(commands.Cog, name="log"):
     async def on_automod_action(self, execution):
         channel = self.get_log_channel(execution.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         user = execution.member or execution.user
         user_mention = user.mention if user else "Unknown User"
@@ -435,7 +420,7 @@ class Log(commands.Cog, name="log"):
         action_type = execution.action.type.name.replace("_", " ").title() if getattr(execution, "action", None) else "Unknown Action"
         
         desc = f"🛡️ **AutoMod Executed:** {action_type} on **{user_mention}** (`{user_id}`) - <t:{now}:f>\n**Rule:** `{rule_name}`"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         
         if getattr(execution, "matched_keyword", None):
             embed.add_field(name="Keyword", value=f"`{execution.matched_keyword}`", inline=True)
@@ -459,10 +444,10 @@ class Log(commands.Cog, name="log"):
 
         try:
             self.invites[invite.guild.id] = await invite.guild.invites()
-        except disnake.Forbidden:
+        except discord.Forbidden:
             pass
 
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         if invite.inviter:
             inviter = f"**{invite.inviter.name}** (`{invite.inviter.id}`)"
@@ -486,20 +471,20 @@ class Log(commands.Cog, name="log"):
         
         desc = f"✉️ **Invite Created** by {inviter} in {invite.channel.mention} - <t:{now}:f>\n**Code:** `{invite.code}` | **Age:** {max_age} | **Uses:** {max_uses}"
         
-        embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+        embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "INVITE_CREATE", invite.guild)
 
     @commands.Cog.listener()
     async def on_invite_delete(self, invite):
         channel = self.get_log_channel(invite.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
-        entry = await self._get_audit_entry(invite.guild, disnake.AuditLogAction.invite_delete)
+        entry = await self._get_audit_entry(invite.guild, discord.AuditLogAction.invite_delete)
         actor_str = f" by **{entry.user.name}**" if entry and entry.user else ""
         
         desc = f"🗑️ **Invite Deleted:** `{invite.code}`{actor_str} - <t:{now}:f>\n**Channel:** {invite.channel.mention if invite.channel else 'Unknown'}"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "INVITE_DELETE", invite.guild)
 
     #############################################
@@ -514,10 +499,10 @@ class Log(commands.Cog, name="log"):
         channel = self.get_delete_log_channel(before.guild)
         if not channel: return
 
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         desc = f"✏️ **{before.author.mention}** (`{before.author.id}`) edited a message in {before.channel.mention} - <t:{now}:f> [Jump]({after.jump_url})"
         
-        embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+        embed = discord.Embed(description=desc, color=COLOR_EDIT)
         embed.add_field(name="Before", value=self.truncate(before.content) or "*[Empty]*", inline=False)
         embed.add_field(name="After", value=self.truncate(after.content) or "*[Empty]*", inline=False)
 
@@ -533,19 +518,19 @@ class Log(commands.Cog, name="log"):
 
         deleter = None
         try:
-            async for entry in message.guild.audit_logs(action=disnake.AuditLogAction.message_delete, limit=5):
+            async for entry in message.guild.audit_logs(action=discord.AuditLogAction.message_delete, limit=5):
                 if entry.target.id == message.author.id and entry.extra.channel.id == message.channel.id:
-                    if (disnake.utils.utcnow() - entry.created_at).total_seconds() < 15:
+                    if (discord.utils.utcnow() - entry.created_at).total_seconds() < 15:
                         deleter = entry.user
                     break
-        except disnake.Forbidden:
+        except discord.Forbidden:
             pass
 
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         deleter_text = f" (Deleted by {deleter.mention})" if deleter and deleter.id != message.author.id else ""
         desc = f"🗑️ **{message.author.mention}** (`{message.author.id}`) message deleted in {message.channel.mention}{deleter_text} - <t:{now}:f>"
 
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         
         content = self.truncate(message.content)
         if content:
@@ -566,12 +551,12 @@ class Log(commands.Cog, name="log"):
         log_channel = self.get_delete_log_channel(first_msg.guild)
         if not log_channel: return
         
-        entry = await self._get_audit_entry(first_msg.guild, disnake.AuditLogAction.message_bulk_delete)
+        entry = await self._get_audit_entry(first_msg.guild, discord.AuditLogAction.message_bulk_delete)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         desc = f"🧹 **Bulk Delete:** {len(messages)} messages purged in {first_msg.channel.mention}{actor_str} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(log_channel, embed, "MESSAGE_BULK_DELETE", first_msg.guild)
 
     #############################################
@@ -583,13 +568,13 @@ class Log(commands.Cog, name="log"):
         channel = self.get_log_channel(role.guild)
         if not channel: return
 
-        entry = await self._get_audit_entry(role.guild, disnake.AuditLogAction.role_create, role.id)
+        entry = await self._get_audit_entry(role.guild, discord.AuditLogAction.role_create, role.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         desc = f"🏷️ **Role Created:** {role.mention} (`{role.name}`){actor_str} - <t:{now}:f>"
         
-        embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+        embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "ROLE_CREATE", role.guild)
 
     @commands.Cog.listener()
@@ -597,13 +582,13 @@ class Log(commands.Cog, name="log"):
         channel = self.get_log_channel(role.guild)
         if not channel: return
 
-        entry = await self._get_audit_entry(role.guild, disnake.AuditLogAction.role_delete, role.id)
+        entry = await self._get_audit_entry(role.guild, discord.AuditLogAction.role_delete, role.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         desc = f"🗑️ **Role Deleted:** `{role.name}`{actor_str} - <t:{now}:f>"
         
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "ROLE_DELETE", role.guild)
 
     @commands.Cog.listener()
@@ -622,12 +607,12 @@ class Log(commands.Cog, name="log"):
             changes.append(f"**Mentionable:** `{before.mentionable}` ➔ `{after.mentionable}`")
 
         if changes:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.role_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.role_update, after.id)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-            now = int(disnake.utils.utcnow().timestamp())
+            now = int(discord.utils.utcnow().timestamp())
             
             desc = f"✏️ **Role Updated:** {after.mention}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
-            embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+            embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "ROLE_UPDATE", before.guild)
 
     #############################################
@@ -639,16 +624,16 @@ class Log(commands.Cog, name="log"):
         log_channel = self.get_log_channel(channel.guild)
         if not log_channel: return
 
-        entry = await self._get_audit_entry(channel.guild, disnake.AuditLogAction.channel_create, channel.id)
+        entry = await self._get_audit_entry(channel.guild, discord.AuditLogAction.channel_create, channel.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        now = int(disnake.utils.utcnow().timestamp())
-        is_cat = channel.type == disnake.ChannelType.category
+        now = int(discord.utils.utcnow().timestamp())
+        is_cat = channel.type == discord.ChannelType.category
         entity = "Category" if is_cat else "Channel"
         display = channel.name if is_cat else channel.mention
 
         desc = f"📁 **{entity} Created:** {display}{actor_str} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+        embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(log_channel, embed, "CHANNEL_CREATE", channel.guild)
 
     @commands.Cog.listener()
@@ -656,14 +641,14 @@ class Log(commands.Cog, name="log"):
         log_channel = self.get_log_channel(channel.guild)
         if not log_channel: return
 
-        entry = await self._get_audit_entry(channel.guild, disnake.AuditLogAction.channel_delete, channel.id)
+        entry = await self._get_audit_entry(channel.guild, discord.AuditLogAction.channel_delete, channel.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        now = int(disnake.utils.utcnow().timestamp())
-        entity = "Category" if channel.type == disnake.ChannelType.category else "Channel"
+        now = int(discord.utils.utcnow().timestamp())
+        entity = "Category" if channel.type == discord.ChannelType.category else "Channel"
 
         desc = f"🗑️ **{entity} Deleted:** `#{channel.name}`{actor_str} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(log_channel, embed, "CHANNEL_DELETE", channel.guild)
 
     @commands.Cog.listener()
@@ -684,16 +669,16 @@ class Log(commands.Cog, name="log"):
             changes.append(f"**Slowmode:** `{before.slowmode_delay}s` ➔ `{after.slowmode_delay}s`")
 
         if changes:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.channel_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.channel_update, after.id)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-            now = int(disnake.utils.utcnow().timestamp())
+            now = int(discord.utils.utcnow().timestamp())
             
-            is_cat = after.type == disnake.ChannelType.category
+            is_cat = after.type == discord.ChannelType.category
             entity = "Category" if is_cat else "Channel"
             display = after.name if is_cat else after.mention
 
             desc = f"✏️ **{entity} Updated:** {display}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
-            embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+            embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(log_channel, embed, "CHANNEL_UPDATE", before.guild)
 
     #############################################
@@ -704,24 +689,24 @@ class Log(commands.Cog, name="log"):
     async def on_thread_create(self, thread):
         channel = self.get_log_channel(thread.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         actor_str = f" by {thread.owner.mention}" if thread.owner else ""
         desc = f"🧵 **Thread Created:** {thread.mention} (`{thread.name}`){actor_str} - <t:{now}:f>\n**Parent:** {thread.parent.mention}"
-        embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+        embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "THREAD_CREATE", thread.guild)
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread):
         channel = self.get_log_channel(thread.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
-        entry = await self._get_audit_entry(thread.guild, disnake.AuditLogAction.thread_delete, thread.id)
+        entry = await self._get_audit_entry(thread.guild, discord.AuditLogAction.thread_delete, thread.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
         desc = f"🗑️ **Thread Deleted:** `#{thread.name}`{actor_str} - <t:{now}:f>\n**Parent:** {thread.parent.mention}"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "THREAD_DELETE", thread.guild)
 
     @commands.Cog.listener()
@@ -738,12 +723,12 @@ class Log(commands.Cog, name="log"):
             changes.append(f"**Locked:** `{before.locked}` ➔ `{after.locked}`")
             
         if changes:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.thread_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.thread_update, after.id)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-            now = int(disnake.utils.utcnow().timestamp())
+            now = int(discord.utils.utcnow().timestamp())
             
             desc = f"✏️ **Thread Updated:** {after.mention}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
-            embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+            embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "THREAD_UPDATE", before.guild)
 
     #############################################
@@ -754,7 +739,7 @@ class Log(commands.Cog, name="log"):
     async def on_voice_state_update(self, member, before, after):
         channel = self.get_log_channel(member.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         # Channel Join / Leave / Move
         if before.channel != after.channel:
@@ -771,34 +756,34 @@ class Log(commands.Cog, name="log"):
                 color = COLOR_INFO
                 event_type = "VOICE_MOVE"
                 
-            embed = disnake.Embed(description=desc, color=color)
+            embed = discord.Embed(description=desc, color=color)
             await self.send_log(channel, embed, event_type, member.guild)
 
         # Server Mute / Deafen
         if before.mute != after.mute:
-            entry = await self._get_audit_entry(member.guild, disnake.AuditLogAction.member_update, member.id)
+            entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.member_update, member.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             action = "server muted" if after.mute else "server unmuted"
             desc = f"🔇 **{member.mention}** (`{member.id}`) was {action} by {actor} in {after.channel.mention} - <t:{now}:f>"
-            await self.send_log(channel, disnake.Embed(description=desc, color=COLOR_EDIT if after.mute else COLOR_INFO), "VOICE_MUTE", member.guild)
+            await self.send_log(channel, discord.Embed(description=desc, color=COLOR_EDIT if after.mute else COLOR_INFO), "VOICE_MUTE", member.guild)
             
         if before.deaf != after.deaf:
-            entry = await self._get_audit_entry(member.guild, disnake.AuditLogAction.member_update, member.id)
+            entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.member_update, member.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             action = "server deafened" if after.deaf else "server undeafened"
             desc = f"🎧 **{member.mention}** (`{member.id}`) was {action} by {actor} in {after.channel.mention} - <t:{now}:f>"
-            await self.send_log(channel, disnake.Embed(description=desc, color=COLOR_EDIT if after.deaf else COLOR_INFO), "VOICE_DEAFEN", member.guild)
+            await self.send_log(channel, discord.Embed(description=desc, color=COLOR_EDIT if after.deaf else COLOR_INFO), "VOICE_DEAFEN", member.guild)
 
         # Self Streaming / Video
         if before.self_stream != after.self_stream:
             action = "started" if after.self_stream else "stopped"
             desc = f"📺 **{member.mention}** (`{member.id}`) {action} streaming in {after.channel.mention} - <t:{now}:f>"
-            await self.send_log(channel, disnake.Embed(description=desc, color=COLOR_INFO), "VOICE_STREAM", member.guild)
+            await self.send_log(channel, discord.Embed(description=desc, color=COLOR_INFO), "VOICE_STREAM", member.guild)
 
         if before.self_video != after.self_video:
             action = "turned on" if after.self_video else "turned off"
             desc = f"📷 **{member.mention}** (`{member.id}`) {action} their camera in {after.channel.mention} - <t:{now}:f>"
-            await self.send_log(channel, disnake.Embed(description=desc, color=COLOR_INFO), "VOICE_CAMERA", member.guild)
+            await self.send_log(channel, discord.Embed(description=desc, color=COLOR_INFO), "VOICE_CAMERA", member.guild)
 
     #############################################
     #       EMOJI & STICKER EVENTS              #
@@ -808,7 +793,7 @@ class Log(commands.Cog, name="log"):
     async def on_guild_emojis_update(self, guild, before, after):
         channel = self.get_log_channel(guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         before_dict = {e.id: e for e in before}
         after_dict = {e.id: e for e in after}
@@ -818,32 +803,32 @@ class Log(commands.Cog, name="log"):
         edited = [e for e in after if e.id in before_dict and e.name != before_dict[e.id].name]
 
         if added:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.emoji_create)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.emoji_create)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in added:
-                embed = disnake.Embed(description=f"😀 **Emoji Created:** {e} (`{e.name}`){actor_str} - <t:{now}:f>", color=COLOR_CREATE)
+                embed = discord.Embed(description=f"😀 **Emoji Created:** {e} (`{e.name}`){actor_str} - <t:{now}:f>", color=COLOR_CREATE)
                 await self.send_log(channel, embed, "EMOJI_CREATE", guild)
             
         if removed:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.emoji_delete)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.emoji_delete)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in removed:
-                embed = disnake.Embed(description=f"🗑️ **Emoji Deleted:** `{e.name}`{actor_str} - <t:{now}:f>", color=COLOR_DELETE)
+                embed = discord.Embed(description=f"🗑️ **Emoji Deleted:** `{e.name}`{actor_str} - <t:{now}:f>", color=COLOR_DELETE)
                 await self.send_log(channel, embed, "EMOJI_DELETE", guild)
             
         if edited:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.emoji_update)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.emoji_update)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in edited:
                 old_e = before_dict[e.id]
-                embed = disnake.Embed(description=f"✏️ **Emoji Updated:** {e}{actor_str} - <t:{now}:f>\n\n**Name:** `{old_e.name}` ➔ `{e.name}`", color=COLOR_EDIT)
+                embed = discord.Embed(description=f"✏️ **Emoji Updated:** {e}{actor_str} - <t:{now}:f>\n\n**Name:** `{old_e.name}` ➔ `{e.name}`", color=COLOR_EDIT)
                 await self.send_log(channel, embed, "EMOJI_UPDATE", guild)
 
     @commands.Cog.listener()
     async def on_guild_stickers_update(self, guild, before, after):
         channel = self.get_log_channel(guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         before_dict = {s.id: s for s in before}
         after_dict = {s.id: s for s in after}
@@ -853,29 +838,29 @@ class Log(commands.Cog, name="log"):
         edited = [s for s in after if s.id in before_dict and s.name != before_dict[s.id].name]
 
         if added:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.sticker_create)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.sticker_create)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in added:
                 desc = f"🌠 **Sticker Created:** `{s.name}`{actor_str} - <t:{now}:f>"
-                embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+                embed = discord.Embed(description=desc, color=COLOR_CREATE)
                 embed.set_image(url=s.url)
                 await self.send_log(channel, embed, "STICKER_CREATE", guild)
                 
         if removed:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.sticker_delete)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.sticker_delete)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in removed:
                 desc = f"🗑️ **Sticker Deleted:** `{s.name}`{actor_str} - <t:{now}:f>"
-                embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+                embed = discord.Embed(description=desc, color=COLOR_DELETE)
                 await self.send_log(channel, embed, "STICKER_DELETE", guild)
                 
         if edited:
-            entry = await self._get_audit_entry(guild, disnake.AuditLogAction.sticker_update)
+            entry = await self._get_audit_entry(guild, discord.AuditLogAction.sticker_update)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in edited:
                 old_s = before_dict[s.id]
                 desc = f"✏️ **Sticker Updated:** `{s.name}`{actor_str} - <t:{now}:f>\n\n**Name:** `{old_s.name}` ➔ `{s.name}`"
-                embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+                embed = discord.Embed(description=desc, color=COLOR_EDIT)
                 await self.send_log(channel, embed, "STICKER_UPDATE", guild)
 
     #############################################
@@ -886,11 +871,11 @@ class Log(commands.Cog, name="log"):
     async def on_guild_scheduled_event_create(self, event):
         channel = self.get_log_channel(event.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
         actor_str = f" by {event.creator.mention}" if event.creator else ""
         desc = f"📅 **Event Created:** `{event.name}`{actor_str} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_CREATE)
+        embed = discord.Embed(description=desc, color=COLOR_CREATE)
         
         if event.channel:
             embed.add_field(name="Location", value=event.channel.mention, inline=True)
@@ -903,13 +888,13 @@ class Log(commands.Cog, name="log"):
     async def on_guild_scheduled_event_delete(self, event):
         channel = self.get_log_channel(event.guild)
         if not channel: return
-        now = int(disnake.utils.utcnow().timestamp())
+        now = int(discord.utils.utcnow().timestamp())
         
-        entry = await self._get_audit_entry(event.guild, disnake.AuditLogAction.guild_scheduled_event_delete, event.id)
+        entry = await self._get_audit_entry(event.guild, discord.AuditLogAction.guild_scheduled_event_delete, event.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
         desc = f"🗑️ **Event Deleted / Cancelled:** `{event.name}`{actor_str} - <t:{now}:f>"
-        embed = disnake.Embed(description=desc, color=COLOR_DELETE)
+        embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "EVENT_DELETE", event.guild)
 
     @commands.Cog.listener()
@@ -926,12 +911,12 @@ class Log(commands.Cog, name="log"):
             changes.append(f"**Status:** `{before.status.name}` ➔ `{after.status.name}`")
             
         if changes:
-            entry = await self._get_audit_entry(after.guild, disnake.AuditLogAction.guild_scheduled_event_update, after.id)
+            entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.guild_scheduled_event_update, after.id)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-            now = int(disnake.utils.utcnow().timestamp())
+            now = int(discord.utils.utcnow().timestamp())
             
             desc = f"✏️ **Event Updated:** `{after.name}`{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
-            embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+            embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "EVENT_UPDATE", before.guild)
 
 
@@ -959,14 +944,14 @@ class Log(commands.Cog, name="log"):
             changes.append(f"**System Channel:** {before.system_channel.mention if before.system_channel else 'None'} ➔ {after.system_channel.mention if after.system_channel else 'None'}")
 
         if changes:
-            entry = await self._get_audit_entry(after, disnake.AuditLogAction.guild_update)
+            entry = await self._get_audit_entry(after, discord.AuditLogAction.guild_update)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
-            now = int(disnake.utils.utcnow().timestamp())
+            now = int(discord.utils.utcnow().timestamp())
             
             desc = f"⚙️ **Server Settings Updated**{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
-            embed = disnake.Embed(description=desc, color=COLOR_EDIT)
+            embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "GUILD_UPDATE", before)
 
 
-def setup(bot):
-    bot.add_cog(Log(bot))
+async def setup(bot):
+    await bot.add_cog(Log(bot))
