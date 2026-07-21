@@ -54,6 +54,43 @@ async def send_temp(channel: discord.abc.Messageable, content: str, *, delay: fl
         pass
 
 
+class _ValueSelect(discord.ui.Select):
+    """A single-choice dropdown that records the picked value and stops its view."""
+
+    def __init__(self, placeholder: str, options: list[discord.SelectOption]):
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
+        self.value: Optional[str] = None
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.value = self.values[0]
+        await interaction.response.defer()
+        self.view.stop()
+
+
+async def prompt_select(
+    destination: discord.abc.Messageable,
+    content: str,
+    options: Iterable,
+    *,
+    placeholder: str = "Select an option",
+    timeout: float = 180.0,
+) -> Optional[str]:
+    """Show a single-select dropdown and return the chosen value (or ``None`` on timeout).
+
+    ``options`` may be ``discord.SelectOption`` objects or ``(label, value)`` pairs.
+    """
+    select_options = [
+        opt if isinstance(opt, discord.SelectOption) else discord.SelectOption(label=opt[0], value=opt[1])
+        for opt in options
+    ]
+    select = _ValueSelect(placeholder, select_options)
+    view = discord.ui.View(timeout=timeout)
+    view.add_item(select)
+    await destination.send(content, view=view)
+    await view.wait()
+    return select.value
+
+
 async def wait_for_reaction(
     bot,
     message: discord.Message,

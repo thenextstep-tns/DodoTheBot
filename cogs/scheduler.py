@@ -1,332 +1,214 @@
+"""
+Scheduler cog — ``schedule_raid`` walks a raid leader through picking a trial,
+run type, time and group composition, then posts a forum thread with a live
+sign-up roster (tank/heal/dd/reserve buttons).
+
+Natural-language time and composition are parsed by the LLM.
+"""
+
 import json
-import os
-import sys
-import asyncio
+
 from datetime import datetime
-import disnake
-from disnake.ext import commands
 
-# Configuration
-if not os.path.isfile("config.json"):
-    sys.exit("'config.json' not found! Please add it and try again.")
-else:
-    with open("config.json") as file:
-        config = json.load(file)
+from openai import OpenAI
 
-if not os.path.isfile("config_py.py"):
-    sys.exit("'config_py.py' not found! Please add it and try again.")
-else:
-    import config_py
+import discord
+from discord.ext import commands
+from discord.ext.commands import Context
 
-if not os.path.isfile("lang.py"):
-    sys.exit("Language file not found! Please add it and try again.")
-else:
-    import lang
+import config_py
+from helpers import messages
+
+_PROXY_BASE_URL = "https://api.proxyapi.ru/openai/v1"
+_MODEL = "gpt-4o-mini"
+_RUN_TYPES = ["free for all", "vet training", "hm training", "farm run", "farm hm run", "achievement run"]
+
 
 class Scheduler(commands.Cog, name="scheduler"):
-    """Cog for scheduling raids and managing sign-ups."""
+    """Schedule raids and manage sign-ups."""
+
     def __init__(self, bot):
         self.bot = bot
-        # Initialize any required variables here
+        proxy_key = getattr(config_py, "PROXY_API", None)
+        self.client = OpenAI(api_key=proxy_key, base_url=_PROXY_BASE_URL) if proxy_key else None
 
-    @commands.slash_command(name="schedule_raid", description="Schedule a new raid.")
-    async def schedule_raid(self, inter):
-        """Main command to start scheduling a raid."""
-        await inter.response.defer()
+    @commands.hybrid_command(name="schedule_raid", description="Schedule a new raid.")
+    async def schedule_raid(self, context: Context) -> None:
+        """Interactive wizard: trial → run type → time → composition → forum post."""
+        await context.defer()
 
-        # Step 1: Ask for the trial
-        trial = await self.ask_trial(inter)
+        trials = list(config_py.trial_ping_roles.keys())
+        trial = await messages.prompt_select(
+            context, "Please select the trial:", [(t, t) for t in trials], placeholder="Select a trial"
+        )
         if not trial:
             return
 
-        # Step 2: Ask for the run type
-        run_type = await self.ask_run_type(inter)
+        run_type = await messages.prompt_select(
+            context, "Please select the type of run:", [(r, r) for r in _RUN_TYPES], placeholder="Select the type of run"
+        )
         if not run_type:
             return
 
-        # Step 3: Ask for the raid time
-        raid_time = await self.ask_raid_time(inter)
+        raid_time = await self._ask_raid_time(context)
         if not raid_time:
             return
 
-        # Step 4: Ask for the group composition
-        group_comp = await self.ask_group_composition(inter)
+        group_comp = await self._ask_group_composition(context)
         if not group_comp:
             return
 
-        # Step 5: Create the raid channel and post the roster
-        await self.create_raid_channel(inter, trial, run_type, raid_time, group_comp)
+        await self._create_raid_channel(context, trial, run_type, raid_time, group_comp)
 
-    async def ask_trial(self, inter):
-        """Ask the raid leader which trial they want to schedule."""
-        trials = list(config_py.trial_ping_roles.keys())
-
-        # Create select options
-        options = [
-            disnake.SelectOption(label=trial, value=trial)
-            for trial in trials
-        ]
-
-        select = disnake.ui.Select(
-            placeholder="Select a trial",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
-
-        # Define the interaction handler
-        async def select_callback(interaction):
-            await interaction.response.defer()
-            select.stop()
-
-        select.callback = select_callback
-
-        # Create and send the message with the select menu
-        view = disnake.ui.View()
-        view.add_item(select)
-        await inter.followup.send("Please select the trial:", view=view)
-        await select.wait()
-
-        selected_trial = select.values[0]
-        return selected_trial
-
-    async def ask_run_type(self, inter):
-        """Ask the raid leader what type of run it will be."""
-        run_types = [
-            "free for all",
-            "vet training",
-            "hm training",
-            "farm run",
-            "farm hm run",
-            "achievement run"
-        ]
-
-        options = [
-            disnake.SelectOption(label=run_type, value=run_type)
-            for run_type in run_types
-        ]
-
-        select = disnake.ui.Select(
-            placeholder="Select the type of run",
-            options=options,
-            min_values=1,
-            max_values=1
-        )
-
-        async def select_callback(interaction):
-            await interaction.response.defer()
-            select.stop()
-
-        select.callback = select_callback
-
-        view = disnake.ui.View()
-        view.add_item(select)
-        await inter.followup.send("Please select the type of run:", view=view)
-        await select.wait()
-
-        selected_run_type = select.values[0]
-        return selected_run_type
-
-    async def ask_raid_time(self, inter):
-        """Ask the raid leader when the raid is scheduled, using OpenAI API for parsing."""
-        await inter.followup.send(
+    async def _ask_raid_time(self, context: Context) -> dict | None:
+        """Prompt for and parse a raid date/time into a timestamp."""
+        await context.send(
             "Please enter the date and time for the raid (e.g., `2023-10-12 18:30` or `next Friday at 6pm`):"
         )
-
-        def check(message):
-            return message.author == inter.author and message.channel == inter.channel
-
-        try:
-            msg = await self.bot.wait_for('message', check=check, timeout=300)
-            user_input = msg.content.strip()
-
-            # Use OpenAI API to parse the date and time
-            response = await self.parse_raid_time(user_input)
-
-            if response:
-                timestamp = response.get('timestamp')
-                raid_datetime = datetime.fromtimestamp(timestamp)
-                discord_timestamp = f"<t:{timestamp}:R>"
-                return {'datetime': raid_datetime, 'timestamp': discord_timestamp}
-            else:
-                await inter.followup.send("Sorry, I couldn't parse the date and time. Please try again.")
-                return None
-
-        except asyncio.TimeoutError:
-            await inter.followup.send("You took too long to respond. Please try scheduling the raid again.")
+        reply = await self._await_reply(context)
+        if reply is None:
             return None
 
-    async def parse_raid_time(self, user_input):
-        """Use OpenAI API to parse the date and time from user input."""
-        # Create a concise prompt to minimize token usage
-        prompt = f"Convert the following date and time to a Unix timestamp: '{user_input}'. Return only the timestamp as an integer."
-
-        # Make the API call
-        try:
-            completion = await openai.Completion.acreate(
-                engine="text-davinci-003",  # You can choose the appropriate model
-                prompt=prompt,
-                max_tokens=10,
-                temperature=0,
-                n=1,
-                stop=None
-            )
-
-            # Extract the timestamp from the response
-            response_text = completion.choices[0].text.strip()
-            timestamp = int(response_text)
-            return {'timestamp': timestamp}
-        except Exception as e:
-            print(f"Error parsing raid time: {e}")
+        timestamp = self._parse_timestamp(reply)
+        if timestamp is None:
+            await context.send("Sorry, I couldn't parse the date and time. Please try again.")
             return None
+        return {"datetime": datetime.fromtimestamp(timestamp), "timestamp": f"<t:{timestamp}:R>"}
 
-    async def ask_group_composition(self, inter):
-        """Ask the raid leader for the group composition, using OpenAI API for parsing."""
-        await inter.followup.send(
+    async def _ask_group_composition(self, context: Context) -> dict | None:
+        """Prompt for and parse the group composition into tank/heal/dd counts."""
+        await context.send(
             "Please enter the group composition (e.g., `2 tanks, 2 heals, 8 dds` or `1 tank 3 heal 8 dd`):"
         )
+        reply = await self._await_reply(context)
+        if reply is None:
+            return None
 
+        comp = self._parse_composition(reply)
+        if comp is None:
+            await context.send("Sorry, I couldn't parse the group composition. Please try again.")
+            return None
+        return comp
+
+    async def _await_reply(self, context: Context) -> str | None:
+        """Wait (5 min) for the raid leader's next message in this channel."""
         def check(message):
-            return message.author == inter.author and message.channel == inter.channel
+            return message.author == context.author and message.channel == context.channel
 
         try:
-            msg = await self.bot.wait_for('message', check=check, timeout=300)
-            user_input = msg.content.strip()
-
-            # Use OpenAI API to parse the group composition
-            response = await self.parse_group_composition(user_input)
-
-            if response:
-                return response  # Contains 'tanks', 'heals', 'dds'
-            else:
-                await inter.followup.send("Sorry, I couldn't parse the group composition. Please try again.")
-                return None
-
-        except asyncio.TimeoutError:
-            await inter.followup.send("You took too long to respond. Please try scheduling the raid again.")
+            message = await self.bot.wait_for("message", check=check, timeout=300)
+            return message.content.strip()
+        except TimeoutError:
+            await context.send("You took too long to respond. Please try scheduling the raid again.")
             return None
 
-    async def parse_group_composition(self, user_input):
-        """Use OpenAI API to parse the group composition from user input."""
-        # Create a concise prompt to minimize token usage
-        prompt = (
-            f"Extract the number of tanks, heals, and dds from the following input: '{user_input}'. "
-            f"Return the result as JSON in the format: {{'tanks': int, 'heals': int, 'dds': int}}."
-        )
-
-        # Make the API call
+    def _complete(self, prompt: str, *, as_json: bool) -> str | None:
+        """Single LLM call returning the trimmed response text (or None on error)."""
+        if self.client is None:
+            return None
         try:
-            completion = await openai.Completion.acreate(
-                engine="text-davinci-003",
-                prompt=prompt,
-                max_tokens=20,
-                temperature=0,
-                n=1,
-                stop=None
+            kwargs = {"response_format": {"type": "json_object"}} if as_json else {}
+            completion = self.client.chat.completions.create(
+                model=_MODEL, temperature=0, messages=[{"role": "user", "content": prompt}], **kwargs
             )
-
-            # Extract the JSON from the response
-            response_text = completion.choices[0].text.strip()
-            group_comp = json.loads(response_text)
-            return group_comp
-        except Exception as e:
-            print(f"Error parsing group composition: {e}")
+            return completion.choices[0].message.content.strip()
+        except Exception as error:
+            self.bot.logger.error(f"Scheduler LLM call failed: {error}")
             return None
 
-    async def create_raid_channel(self, inter, trial, run_type, raid_time, group_comp):
-        """Create the raid channel and post the roster message."""
-        # Get the forum channel
+    def _parse_timestamp(self, user_input: str) -> int | None:
+        """Ask the LLM to convert a natural-language time to a Unix timestamp."""
+        text = self._complete(
+            f"Convert this date and time to a Unix timestamp: '{user_input}'. "
+            'Reply with JSON: {"timestamp": <integer>}.',
+            as_json=True,
+        )
+        try:
+            return int(json.loads(text)["timestamp"])
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+            return None
+
+    def _parse_composition(self, user_input: str) -> dict | None:
+        """Ask the LLM to extract tank/heal/dd counts from free text."""
+        text = self._complete(
+            f"Extract the number of tanks, heals, and dds from this input: '{user_input}'. "
+            'Reply with JSON: {"tanks": int, "heals": int, "dds": int}.',
+            as_json=True,
+        )
+        try:
+            comp = json.loads(text)
+            return {"tanks": int(comp["tanks"]), "heals": int(comp["heals"]), "dds": int(comp["dds"])}
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+            return None
+
+    async def _create_raid_channel(self, context, trial, run_type, raid_time, group_comp) -> None:
+        """Create the forum thread with the roster embed and sign-up buttons."""
         forum_channel = self.bot.get_channel(config_py.OPEN_RAID_CHANNEL)
         if not forum_channel:
-            await inter.followup.send("Could not find the raid forum channel.")
+            await context.send("Could not find the raid forum channel.")
             return
 
-        # Create the channel name
-        date_str = raid_time['datetime'].strftime('%Y-%m-%d %H:%M')
+        date_str = raid_time["datetime"].strftime("%Y-%m-%d %H:%M")
         trial_abbr = config_py.trial_abbreviations.get(trial, trial)
         channel_name = f"{date_str} {trial_abbr} {run_type}"
 
-        # Get the trial image
-        trial_image = config_py.raid_pictures.get(trial, None)
-
-        # Create the forum post
-        embed = disnake.Embed(
-            title=f"{trial} - {run_type}",
-            description=f"Raid scheduled for {raid_time['timestamp']}",
-            color=disnake.Color.blue()
+        embed = messages.embed(
+            f"Raid scheduled for {raid_time['timestamp']}", title=f"{trial} - {run_type}", color=discord.Color.blue()
         )
-        if trial_image:
+        if trial_image := config_py.raid_pictures.get(trial):
             embed.set_image(url=trial_image)
-
-        # Add the roster fields
         embed.add_field(name="Tanks", value=f"0/{group_comp['tanks']}", inline=False)
         embed.add_field(name="Healers", value=f"0/{group_comp['heals']}", inline=False)
         embed.add_field(name="DDs", value=f"0/{group_comp['dds']}", inline=False)
         embed.add_field(name="Reserves", value="0", inline=False)
 
-        # Create the view with sign-up buttons
-        view = RaidSignUpView(group_comp)
-
-        # Create the forum post
         await forum_channel.create_thread(
             name=channel_name,
             content=f"<@&{config_py.trial_ping_roles[trial]}>",
             embed=embed,
-            view=view
+            view=RaidSignUpView(group_comp),
         )
+        await context.send("Raid scheduled successfully.")
 
-        await inter.followup.send("Raid scheduled successfully.")
 
-class RaidSignUpView(disnake.ui.View):
-    """View containing the sign-up buttons."""
-    def __init__(self, group_comp):
+class RaidSignUpView(discord.ui.View):
+    """Roster with tank/heal/dd/unsign buttons that update the embed live."""
+
+    def __init__(self, group_comp: dict):
         super().__init__(timeout=None)
         self.group_comp = group_comp
-        self.signups = {
-            'tanks': [],
-            'heals': [],
-            'dds': [],
-            'reserves': []
-        }
-
-        # Create buttons for each role
+        self.signups = {"tanks": [], "heals": [], "dds": [], "reserves": []}
         self.add_item(RoleButton(label="Tank", custom_id="signup_tank"))
         self.add_item(RoleButton(label="Healer", custom_id="signup_heal"))
         self.add_item(RoleButton(label="DD", custom_id="signup_dd"))
-        self.add_item(RoleButton(label="Unsign", custom_id="unsign", style=disnake.ButtonStyle.danger))
+        self.add_item(RoleButton(label="Unsign", custom_id="unsign", style=discord.ButtonStyle.danger))
 
-    async def update_embed(self, message):
-        """Update the roster embed."""
+    async def update_embed(self, message: discord.Message) -> None:
+        """Re-render the roster embed from the current sign-ups."""
         embed = message.embeds[0]
-
-        # Prepare the lists of signed-up users
-        tanks_list = '\n'.join([user.mention for user in self.signups['tanks']]) or "None"
-        heals_list = '\n'.join([user.mention for user in self.signups['heals']]) or "None"
-        dds_list = '\n'.join([user.mention for user in self.signups['dds']]) or "None"
-        reserves_list = '\n'.join([user.mention for user in self.signups['reserves']]) or "None"
-
-        # Update the fields
-        embed.set_field_at(0, name=f"Tanks ({len(self.signups['tanks'])}/{self.group_comp['tanks']})", value=tanks_list, inline=False)
-        embed.set_field_at(1, name=f"Healers ({len(self.signups['heals'])}/{self.group_comp['heals']})", value=heals_list, inline=False)
-        embed.set_field_at(2, name=f"DDs ({len(self.signups['dds'])}/{self.group_comp['dds']})", value=dds_list, inline=False)
-        embed.set_field_at(3, name=f"Reserves ({len(self.signups['reserves'])})", value=reserves_list, inline=False)
-
-        # Update the message
+        for index, (role, label) in enumerate((("tanks", "Tanks"), ("heals", "Healers"), ("dds", "DDs"))):
+            members = "\n".join(user.mention for user in self.signups[role]) or "None"
+            embed.set_field_at(
+                index, name=f"{label} ({len(self.signups[role])}/{self.group_comp[role]})", value=members, inline=False
+            )
+        reserves = "\n".join(user.mention for user in self.signups["reserves"]) or "None"
+        embed.set_field_at(3, name=f"Reserves ({len(self.signups['reserves'])})", value=reserves, inline=False)
         await message.edit(embed=embed, view=self)
 
-class RoleButton(disnake.ui.Button):
-    """Button for signing up as a specific role."""
-    def __init__(self, label, custom_id, style=disnake.ButtonStyle.primary):
+
+class RoleButton(discord.ui.Button):
+    """A single sign-up (or unsign) button."""
+
+    def __init__(self, label: str, custom_id: str, style: discord.ButtonStyle = discord.ButtonStyle.primary):
         super().__init__(label=label, custom_id=custom_id, style=style)
 
-    async def callback(self, interaction: disnake.MessageInteraction):
+    async def callback(self, interaction: discord.Interaction) -> None:
         view: RaidSignUpView = self.view
-        user = interaction.author
+        user = interaction.user
 
-        # Handle unsign
         if self.custom_id == "unsign":
             removed = False
-            for role in ['tanks', 'heals', 'dds', 'reserves']:
+            for role in view.signups:
                 if user in view.signups[role]:
                     view.signups[role].remove(user)
                     removed = True
@@ -337,31 +219,24 @@ class RoleButton(disnake.ui.Button):
                 await interaction.response.send_message("You are not signed up.", ephemeral=True)
             return
 
-        # Determine role
-        role = self.custom_id.split('_')[-1] + 's'  # Convert to plural
-        max_slots = view.group_comp[role]
-
-        # Check if user is already signed up
+        role = self.custom_id.split("_")[-1] + "s"  # signup_tank -> tanks
         if user in view.signups[role]:
             await interaction.response.send_message("You are already signed up for this role.", ephemeral=True)
             return
 
-        # Check if slot is available
-        if len(view.signups[role]) < max_slots:
-            # Remove user from other roles
-            for other_role in ['tanks', 'heals', 'dds', 'reserves']:
+        if len(view.signups[role]) < view.group_comp[role]:
+            for other_role in view.signups:
                 if user in view.signups[other_role]:
                     view.signups[other_role].remove(user)
             view.signups[role].append(user)
             await interaction.response.send_message(f"You have signed up as a {self.label}.", ephemeral=True)
+        elif user not in view.signups["reserves"]:
+            view.signups["reserves"].append(user)
+            await interaction.response.send_message("All slots are full. You have been added to reserves.", ephemeral=True)
         else:
-            # Add to reserves
-            if user not in view.signups['reserves']:
-                view.signups['reserves'].append(user)
-                await interaction.response.send_message("All slots are full. You have been added to reserves.", ephemeral=True)
-            else:
-                await interaction.response.send_message("You are already in the reserves.", ephemeral=True)
+            await interaction.response.send_message("You are already in the reserves.", ephemeral=True)
         await view.update_embed(interaction.message)
 
-def setup(bot):
-    bot.add_cog(Scheduler(bot))
+
+async def setup(bot):
+    await bot.add_cog(Scheduler(bot))
