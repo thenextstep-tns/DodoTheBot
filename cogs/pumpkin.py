@@ -1,33 +1,25 @@
-import json
-import os
-import random
-import sys
+"""
+Pumpkin cog — the pumpkin economy plus a full team deathmatch minigame. Players
+spend pumpkins (earned from the pull minigame) on attack/block/dodge action
+points across rounds; a renown/title system tracks career stats.
+"""
+
 import asyncio
+import math
+import random
 import uuid
-import math # Added for ceil function
 from collections import defaultdict
-import disnake
-from disnake.ext import commands
-from disnake.ext.commands import Context
 from datetime import datetime, timedelta
-from helpers import checks # Assuming you have this helper file
 
-# --- Load Config Files ---
+import discord
+from discord.ext import commands
+from discord.ext.commands import Context
 
-if not os.path.isfile("config.json"):
-    sys.exit("'config.json' not found! Please add it and try again.")
-else:
-    with open("config.json") as file:
-        config = json.load(file)
+import config_py
+from helpers import checks
 
-if not os.path.isfile("config_py.py"):
-    sys.exit("'config_py.py' not found! Please add it and try again.")
-else:
-    import config_py
 
-# --- Cog Definition ---
-
-class Pumpkin(commands.Cog, name="Pumpkin"):
+class Pumpkin(commands.Cog, name="pumpkin"):
     def __init__(self, bot):
         self.bot = bot
         # --- Database Collections ---
@@ -148,7 +140,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
 
     # --- Role Removal Helper (from original bot) ---
     
-    async def remove_role_later(self, member: disnake.Member, role: disnake.Role):
+    async def remove_role_later(self, member: discord.Member, role: discord.Role):
         """
         Waits 1 hour, then removes the specified role from the member if they still have it.
         This is not persistent; if the bot restarts, the timer is lost.
@@ -157,7 +149,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         try:
             if role in member.roles:
                 await member.remove_roles(role)
-        except disnake.HTTPException:
+        except discord.HTTPException:
             pass  # Member might have left, or permissions changed
 
     # --- Internal Helper Functions ---
@@ -356,13 +348,13 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         """Rolls a 20-sided die."""
         return random.randint(1, 20)
 
-    async def _get_temporary_role(self, guild: disnake.Guild) -> disnake.Role:
+    async def _get_temporary_role(self, guild: discord.Guild) -> discord.Role:
         """Safely gets the "covered in guts" role."""
         if not guild:
             return None
         return guild.get_role(self.PUMPKIN_ROLE_ID)
 
-    async def _apply_splat_role(self, member: disnake.Member, role: disnake.Role, channel: disnake.TextChannel):
+    async def _apply_splat_role(self, member: discord.Member, role: discord.Role, channel: discord.TextChannel):
         """Applies the temporary splat role and schedules its removal."""
         if not member or not role or member.id == self.BOT_USER_ID:
             return
@@ -370,10 +362,10 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
             if role not in member.roles:
                 await member.add_roles(role)
                 self.bot.loop.create_task(self.remove_role_later(member, role))
-        except disnake.Forbidden:
-            pass # Silently fail, log will show it
-        except Exception as e:
-            print(f"Error adding temporary pumpkin role: {e}")
+        except discord.Forbidden:
+            pass  # Silently fail
+        except Exception as error:
+            self.bot.logger.error(f"Error adding temporary pumpkin role: {error}")
 
     def _calculate_ramping_attack_cost(self, attack_ap: int) -> int:
         """
@@ -498,9 +490,9 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
 
     # --- User Commands ---
 
-    @commands.command(name="pumpkinstats", description="Check your pumpkin balance.")
+    @commands.hybrid_command(name="pumpkinstats", description="Check your pumpkin balance.")
     @checks.not_blacklisted()
-    async def pumpkinstats(self, context: Context, member : disnake.Member = None):
+    async def pumpkinstats(self, context: Context, member: discord.Member = None):
         """
         Calculates and displays your total pumpkin stats.
         Shows how much you've collected vs. how much you've spent.
@@ -508,15 +500,15 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         if not member:
             member = context.author
         user_id = member.id
-        await context.trigger_typing()
+        pass  # (typing indicator omitted under discord.py)
 
         collected = await self._get_total_pumpkin_collected(user_id)
         spent = await self._get_total_pumpkin_spent(user_id) # This is a negative number
         balance = collected + spent
 
-        embed = disnake.Embed(
+        embed = discord.Embed(
             title=f"🎃 {context.author.display_name}'s Pumpkin Accounting Department 🎃",
-            color=disnake.Color.orange()
+            color=discord.Color.orange()
         )
         #embed.add_field(name="Total Pumpkin Collected", value=f"**{collected} kg**", inline=False)
         #embed.add_field(name="Total Pumpkin Thrown/Spent", value=f"**{abs(spent)} kg**", inline=False)
@@ -527,25 +519,25 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
     
     # --- NEW RENOWN COMMAND ---
     
-    @commands.command(name="reputation", aliases=["fightstats", "pumpking"], description="Check your Pumpkin Renown and stats.")
+    @commands.hybrid_command(name="reputation", aliases=["fightstats", "pumpking"], description="Check your Pumpkin Renown and stats.")
     @checks.not_blacklisted()
-    async def renown(self, context: Context, user: disnake.Member = None):
+    async def renown(self, context: Context, user: discord.Member = None):
         """
         Displays your Pumpkin Renown score, title, and career stats from pumpkin fights.
         """
         if user is None:
             user = context.author
         
-        await context.trigger_typing()
+        pass  # (typing indicator omitted under discord.py)
         
         renown_score = await self._get_renown_score(user.id)
         renown_title = self._get_renown_title(renown_score)
         stats = await self._get_renown_stats(user.id)
         
-        embed = disnake.Embed(
+        embed = discord.Embed(
             title=f"👑 {user.display_name}'s Reputation 👑",
             description=f"**Title:** *{renown_title}*\n**Reputation Score:** **{renown_score}**",
-            color=disnake.Color.gold()
+            color=discord.Color.gold()
         )
         embed.set_thumbnail(url=user.display_avatar.url)
         
@@ -582,7 +574,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
 
     def _build_tournament_embed(self, team_a, team_b, team_a_name, team_b_name, round_num, action_text: str = None, log_list: list = None):
         """Helper to build the all-in-one status/action/log embed."""
-        embed = disnake.Embed(title=f"🎃 Pumpkin Deathmatch: The {team_a_name} vs. The {team_b_name} - Round {round_num} 💀", color=disnake.Color.orange())
+        embed = discord.Embed(title=f"🎃 Pumpkin Deathmatch: The {team_a_name} vs. The {team_b_name} - Round {round_num} 💀", color=discord.Color.orange())
         
         def get_player_string(player):
             name = player['obj'].display_name
@@ -812,10 +804,10 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         )
         
         def build_lobby_embed(time_left):
-            embed = disnake.Embed(
+            embed = discord.Embed(
                 title="🎃 Pumpkin Deathmatch Lobby 💀",
                 description=base_lobby_text + f"Sign-ups are closed in **{time_left}** seconds!",
-                color=disnake.Color.orange()
+                color=discord.Color.orange()
             )
             
             # NEW: Show player lists
@@ -829,15 +821,15 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         lobby_embed = build_lobby_embed(lobby_time)
         
         # --- NEW: Use Buttons for Lobby ---
-        class LobbyView(disnake.ui.View):
+        class LobbyView(discord.ui.View):
             def __init__(self, timeout, pumpkin_cog): # Pass cog in
                 super().__init__(timeout=timeout)
                 self.pumpkin_cog = pumpkin_cog # Store cog
                 self.all_players = {} # Store user objects
                 self.view_timeout_time = datetime.now() + timedelta(seconds=timeout)
 
-            @disnake.ui.button(label="Join Fight!", style=disnake.ButtonStyle.primary, emoji="🎃", custom_id="join_fight")
-            async def join_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+            @discord.ui.button(label="Join Fight!", style=discord.ButtonStyle.primary, emoji="🎃", custom_id="join_fight")
+            async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 user = interaction.user
                 
                 if user.id in self.all_players:
@@ -877,7 +869,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                 # Update the lobby embed with new player lists
                 time_left = int((self.view_timeout_time - datetime.now()).total_seconds())
                 new_lobby_embed = build_lobby_embed(time_left)
-                await interaction.edit_original_message(embed=new_lobby_embed)
+                await interaction.edit_original_response(embed=new_lobby_embed)
 
         lobby_view = LobbyView(timeout=lobby_time, pumpkin_cog=self) # Pass self (the cog)
         lobby_msg = await context.send(embed=lobby_embed, view=lobby_view)
@@ -889,14 +881,14 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
             new_lobby_embed = build_lobby_embed(time_left)
             try:
                 await lobby_msg.edit(embed=new_lobby_embed)
-            except disnake.HTTPException:
+            except discord.HTTPException:
                 return # Message was deleted
         
         await asyncio.sleep(5) # Wait for the last 5 seconds
         
         try:
             await lobby_msg.edit(content="Lobby closed!", view=None)
-        except disnake.HTTPException:
+        except discord.HTTPException:
             pass # Message deleted, fine
 
         # 3. Check for enough players *before* ready check
@@ -923,10 +915,10 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
             "**Press ✅ when you're ready to start!**"
         )
         
-        rules_embed = disnake.Embed(
+        rules_embed = discord.Embed(
             title="🎃 How to Fight 🎃",
             description=rules_text,
-            color=disnake.Color.orange()
+            color=discord.Color.orange()
         )
         
         required_reactions = math.ceil(num_human_players * 0.55)
@@ -937,7 +929,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         
         ready_players = set()
         
-        def check_ready(reaction: disnake.Reaction, user: disnake.User):
+        def check_ready(reaction: discord.Reaction, user: discord.User):
             """Check if the reaction is valid for the ready-up."""
             return (
                 user.id in all_human_players_ids and   # Is a human player in this game
@@ -1038,7 +1030,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
         total_pumpkin_spent_this_match = 0 # NEW: Reward pot
         
         # --- NEW: Create persistent Action Button View ---
-        class ActionView(disnake.ui.View):
+        class ActionView(discord.ui.View):
             def __init__(self, timeout, pumpkin_cog): # Pass cog in
                 super().__init__(timeout=timeout)
                 self.pumpkin_cog = pumpkin_cog # Store cog
@@ -1047,7 +1039,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                 self.reapers_alive = []
                 self.end_time = datetime.now() + timedelta(seconds=timeout)
 
-            async def update_embed(self, interaction: disnake.MessageInteraction, team_a, team_b, team_a_name, team_b_name, round_num, log_list):
+            async def update_embed(self, interaction: discord.Interaction, team_a, team_b, team_a_name, team_b_name, round_num, log_list):
                 """Dynamically updates the embed with AP info."""
                 time_left = (self.end_time - datetime.now()).total_seconds()
                 if time_left < 0: time_left = 0
@@ -1076,11 +1068,11 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                 
                 try:
                     # Use the interaction to edit, not the message
-                    await interaction.edit_original_message(embed=status_embed)
-                except disnake.HTTPException:
+                    await interaction.edit_original_response(embed=status_embed)
+                except discord.HTTPException:
                     pass # Ignore edit conflicts or rate limits
 
-            async def handle_click(self, interaction: disnake.MessageInteraction, emoji: str):
+            async def handle_click(self, interaction: discord.Interaction, emoji: str):
                 user = interaction.user
                 
                 # Find the player in our game
@@ -1135,16 +1127,16 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                     # Corrected call signature:
                     await self.update_embed(interaction, self.gourds_alive, self.reapers_alive, team_a_name, team_b_name, round_num, log_list)
             
-            @disnake.ui.button(label="Attack", style=disnake.ButtonStyle.danger, emoji="💥", custom_id="atk_button")
-            async def attack_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+            @discord.ui.button(label="Attack", style=discord.ButtonStyle.danger, emoji="💥", custom_id="atk_button")
+            async def attack_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await self.handle_click(interaction, self.pumpkin_cog.ACTION_CHARGE_EMOJI)
 
-            @disnake.ui.button(label="Block", style=disnake.ButtonStyle.primary, emoji="🛡️", custom_id="blk_button")
-            async def block_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+            @discord.ui.button(label="Block", style=discord.ButtonStyle.primary, emoji="🛡️", custom_id="blk_button")
+            async def block_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await self.handle_click(interaction, self.pumpkin_cog.ACTION_BLOCK_EMOJI)
             
-            @disnake.ui.button(label="Dodge", style=disnake.ButtonStyle.success, emoji="💨", custom_id="ddg_button")
-            async def dodge_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+            @discord.ui.button(label="Dodge", style=discord.ButtonStyle.success, emoji="💨", custom_id="ddg_button")
+            async def dodge_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 await self.handle_click(interaction, self.pumpkin_cog.ACTION_DODGE_EMOJI)
 
         
@@ -1262,7 +1254,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                 status_embed = self._build_tournament_embed(gourds_alive, reapers_alive, team_a_name, team_b_name, round_num, action_text=action_text, log_list=log_list)
                 try:
                     await game_message.edit(embed=status_embed)
-                except disnake.HTTPException:
+                except discord.HTTPException:
                     pass
                 
                 await asyncio.sleep(1) # Update timer every second
@@ -1363,7 +1355,7 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
                     
                     if p_data["id"] != self.BOT_USER_ID:
                         member = p_data["obj"]
-                        if isinstance(member, disnake.Member):
+                        if isinstance(member, discord.Member):
                              await self._apply_splat_role(member, splatted_role, context.channel)
                         else:
                             try:
@@ -1534,6 +1526,5 @@ class Pumpkin(commands.Cog, name="Pumpkin"):
             await context.send("\n".join(renown_report_lines))
 
 
-# --- Setup Function ---
-def setup(bot):
-    bot.add_cog(Pumpkin(bot))
+async def setup(bot):
+    await bot.add_cog(Pumpkin(bot))
