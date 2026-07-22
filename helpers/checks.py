@@ -2,14 +2,14 @@
 Reusable command checks.
 
 These decorate commands to gate access. The predicates read ``context.author``,
-which exists on both prefix ``Context`` and slash ``ApplicationCommandInteraction``,
-so the same checks work as we migrate commands to slash.
+which exists for both prefix and slash (hybrid) invocations, so the same checks
+work everywhere.
 """
 
 import json
 from typing import Callable, TypeVar
 
-from disnake.ext import commands
+from discord.ext import commands
 
 from exceptions import UserBlacklisted, UserNotOwner
 

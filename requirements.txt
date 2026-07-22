@@ -1,2 +1,21 @@
+# Core
+discord.py>=2.4
+pymongo
+dnspython          # required for Atlas mongodb+srv:// connection strings
+
+# Integrations
+openai             # chat, scheduler, racing, dnd, imagine
+requests
+beautifulsoup4     # general guide + tarot scraping
 aiohttp
-disnake
+
+# Image / OCR (the pat, fishing, pet cogs)
+opencv-python
+numpy
+Pillow
+pytesseract        # also needs the Tesseract OCR binary installed on the host
+
+# Text generation
+markovify          # talkengine
+
+# Note: inspirobot is a small local module (inspirobot.py), not a PyPI package.
