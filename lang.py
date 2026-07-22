@@ -597,3 +597,74 @@ LOG_EVENT_CREATE = "📅 **Event Created:** `{name}`{actor} - <t:{now}:f>"
 LOG_EVENT_DELETE = "🗑️ **Event Deleted / Cancelled:** `{name}`{actor} - <t:{now}:f>"
 LOG_EVENT_EDIT = "✏️ **Event Updated:** `{name}`{actor} - <t:{now}:f>\n\n{changes}"
 LOG_GUILD_UPDATE = "⚙️ **Server Settings Updated**{actor} - <t:{now}:f>\n\n{changes}"
+
+# --------------------------------------------------------------------------- #
+#  Racing cog (user-facing copy; per-move battle-log fragments stay inline)
+# --------------------------------------------------------------------------- #
+RACING_MOUSE_EXISTS = "The mouse name '{name}' already exists in the list."
+RACING_CHOOSE_CLASS = "Choose a class for your mouse:\n{classes}"
+RACING_CLASS_TIMEOUT = "You took too long to choose a class. Please try again."
+RACING_MOUSE_ADDED = "The mouse name '{name}' with class '{mouse_class}' has been added to the list."
+RACING_START = (
+    "{mention} started the race! You have {countdown} seconds to react and add your skeevaton to the race roster.\n"
+    "React with 🐁 to join the race."
+)
+RACING_COUNTDOWN = (
+    "{mention} started the race of {track_length} laps! You have {remaining} seconds to react and add your "
+    "skeevaton to the race roster.\nReact with 🐁 to join the race."
+)
+RACING_GIGA_START = (
+    "THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have 9 hours (32400 seconds) to react and add your "
+    "skeevaton to the race roster.\nReact with 🐁 to join the race.\n"
+    " 1st place - 100 000 gold \n 2nd place - 50 000 gold \n 3rd place - 10 000 gold  "
+)
+RACING_GIGA_COUNTDOWN = (
+    "THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have {remaining} seconds to react and add "
+    "your skeevaton to the race roster.\nReact with 🐁 to join the race.\n "
+    "1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold "
+)
+RACING_NO_JOIN = "No one joined the race. Race cancelled."
+RACING_LINEUP_TITLE = "Race Line-up"
+RACING_LINEUP_DESCRIPTION = "The race is about to start!\n"
+RACING_LIGHTS_TITLE = "Race is about to start!"
+RACING_LIGHTS_DESCRIPTION = (
+    "{roster}\n\nReactions:\n"
+    "🧀 Cheese: Increases your move by 1\n"
+    "🍷 Wine: Multiplies your move by 2\n"
+    "💣 Bomb: Drops everyone else back by 5"
+)
+RACING_LIGHTS_GO = "{roster}\n\nGOOOO!!!"
+RACING_EVENT_RACING = "## We are racing :mouse2:"
+RACING_EVENT_MAP = "## A Treasure Map just appeared! Click the map emoji to pick it up!"
+RACING_EVENT_STARRY = "## Starry Eyes! Click ✨ to inspire your mouse!"
+RACING_EVENT_CHEESE = "## Cheese appeared! Click the cheese emoji to grab it!"
+RACING_EVENT_WINE = "## Wine appeared! Click the wine emoji to grab it!"
+RACING_EVENT_BOMB = "## Bomb appeared! Click the bomb emoji to grab it!"
+RACING_PROGRESS_TITLE = "THE SKEEVATON RACE IS ON!"
+RACING_SUMMARY_HEADER = "The race has ended!\nRace Results:\n"
+RACING_SUMMARY_LINE = "{mention}'s {mouse} - {points} points\n"
+RACING_RELATIONSHIP_TITLE = "Relationship Points Adjusted"
+RACING_RELATIONSHIP_LINE = "{mention} gains {points} relationship points with **{mouse}**!"
+RACING_ADOPT_PROMPT = "{mention}, do you want to {verb} {mouse}? React with 👍 for yes or 👎 for no."
+RACING_ADOPT_SUCCESS = "**{mouse}** happily chirps that it will serve you with all its smol heart!"
+RACING_READOPT_SUCCESS = "{mouse} joyfully announces its readoption and vows to serve you faithfully!"
+RACING_ADOPT_DECLINE = "{mouse} is heartbroken... :pleading_face: it slinks away and hides in shame and neglect. :broken_heart:"
+RACING_ADOPT_MOUSECHAT = (
+    "You are a little {mouse}, and your relationship with {name} just reached a new height! Look at tham with sad, "
+    "hopeful eyes and ask them in the mousy cutest way possible to adopt you. When prompted for adoption, return your "
+    "message strictly in the following format: **Name of the mouse**: Your direct speech. Don't add any additional text"
+)
+RACING_READOPT_MOUSECHAT = (
+    "{mouse} feels neglected by its current owner and turns to you with pleading eyes. It wonders if you'll adopt it instead!"
+)
+RACING_CHEESE_TITLE = "Cheese Collected!"
+RACING_CHEESE_COLLECTED = "{mention} collected a piece of magical cheese for {mouse} and gained 5 relationship points!"
+RACING_CHANNEL_ADOPT_TITLE = "Adopt {mouse}?"
+RACING_CHANNEL_ADOPT_DESCRIPTION = (
+    "{mention}, your bond with {mouse} has grown strong.\nReact with 👍 to adopt or 👎 to decline (and break its little heart)"
+)
+RACING_CHANNEL_ADOPT_SUCCESS = "{mouse} happily chirps that it will serve you with all its heart!"
+RACING_REL_NONE = "You have no relationships with any mice yet."
+RACING_REL_TITLE = "Your Mouse Relationships"
+RACING_REL_LINE = "**{name}** ({mouse_class}) - {points} points"
+RACING_REL_FOOTER = "Page {page}/{total}"

@@ -18,6 +18,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks, messages
 
 _PROXY_BASE_URL = "https://api.proxyapi.ru/openai/v1"
@@ -45,34 +46,34 @@ class Racing(commands.Cog, name="racing"):
     async def newmouse(self, context: Context, *, mouse_name: str) -> None:
         """Add a new mouse and let the caller pick its class by reaction."""
         if config_py.user_mice.find_one({"name": mouse_name}):
-            await context.send(f"The mouse name '{mouse_name}' already exists in the list.")
+            await context.send(lang.RACING_MOUSE_EXISTS.format(name=mouse_name))
             return
 
         classes = list(config_py.mouse_classes.find())
         class_emojis = {c["emoji"]: c["name"] for c in classes}
         class_message = await context.send(
-            "Choose a class for your mouse:\n"
-            + "\n".join(f"{c['emoji']} {c['name']}: {c['description']}" for c in classes)
+            lang.RACING_CHOOSE_CLASS.format(
+                classes="\n".join(f"{c['emoji']} {c['name']}: {c['description']}" for c in classes)
+            )
         )
 
         emoji, _ = await messages.wait_for_reaction(
             self.bot, class_message, class_emojis, member=context.author, timeout=60.0
         )
         if emoji is None:
-            await context.send("You took too long to choose a class. Please try again.")
+            await context.send(lang.RACING_CLASS_TIMEOUT)
             return
 
         mouse_class = class_emojis[emoji]
         config_py.user_mice.insert_one({"user_id": context.author.id, "name": mouse_name, "class": mouse_class})
-        await context.send(f"The mouse name '{mouse_name}' with class '{mouse_class}' has been added to the list.")
+        await context.send(lang.RACING_MOUSE_ADDED.format(name=mouse_name, mouse_class=mouse_class))
 
     @commands.hybrid_command(name="race", description="Challenge your guildies to a skeevaton race!")
     @checks.not_blacklisted()
     async def race(self, context: Context, countdown: int = 20) -> None:
         """Start a race in this channel with a short sign-up countdown."""
         race_message = await context.send(
-            f"{context.author.mention} started the race! You have {countdown} seconds to react and add your "
-            f"skeevaton to the race roster.\nReact with 🐁 to join the race."
+            lang.RACING_START.format(mention=context.author.mention, countdown=countdown)
         )
         track_length = random.randint(15, 45)
         await race_message.add_reaction(MOUSE)
@@ -85,11 +86,7 @@ class Racing(commands.Cog, name="racing"):
     async def gigarace(self, context: Context) -> None:
         """Start a gigarace announced in the announcement channel with a 9h countdown."""
         announcement_channel = self.bot.get_channel(config_py.ANNOUNCEMENT_CHANNEL)
-        race_message = await announcement_channel.send(
-            "THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have 9 hours (32400 seconds) to react and add your "
-            "skeevaton to the race roster.\nReact with 🐁 to join the race.\n"
-            " 1st place - 100 000 gold \n 2nd place - 50 000 gold \n 3rd place - 10 000 gold  "
-        )
+        race_message = await announcement_channel.send(lang.RACING_GIGA_START)
         await race_message.add_reaction(MOUSE)
         await self._countdown_message(race_message, context.author, 45, 32400, giga=True)
         await self._run_full_race(context, race_message, context.author, 45, f"{context.author}'s gigarace")
@@ -100,7 +97,7 @@ class Racing(commands.Cog, name="racing"):
         race_message = await race_message.channel.fetch_message(race_message.id)
         mouse_users = await self.get_reaction_users(race_message, MOUSE)
         if not mouse_users:
-            await context.send("No one joined the race. Race cancelled.")
+            await context.send(lang.RACING_NO_JOIN)
             return
 
         mice = self.assign_mice_classes(mouse_users)
@@ -128,15 +125,10 @@ class Racing(commands.Cog, name="racing"):
         while time.time() < end_time:
             remaining = int(end_time - time.time())
             if giga:
-                content = (
-                    f"THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have {remaining} seconds to react and add "
-                    "your skeevaton to the race roster.\nReact with 🐁 to join the race.\n "
-                    "1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold "
-                )
+                content = lang.RACING_GIGA_COUNTDOWN.format(remaining=remaining)
             else:
-                content = (
-                    f"{race_starter.mention} started the race of {track_length} laps! You have {remaining} seconds "
-                    "to react and add your skeevaton to the race roster.\nReact with 🐁 to join the race."
+                content = lang.RACING_COUNTDOWN.format(
+                    mention=race_starter.mention, track_length=track_length, remaining=remaining
                 )
             await race_message.edit(content=content)
             await asyncio.sleep(interval)
@@ -166,7 +158,7 @@ class Racing(commands.Cog, name="racing"):
 
     async def send_lineup_embed(self, race_message, context, mice) -> None:
         """Show the starting line-up embed."""
-        embed = discord.Embed(title="Race Line-up", description="The race is about to start!\n", color=0xFF0000)
+        embed = discord.Embed(title=lang.RACING_LINEUP_TITLE, description=lang.RACING_LINEUP_DESCRIPTION, color=0xFF0000)
         for user_id, mouse_info in mice.items():
             user = context.guild.get_member(user_id)
             embed.add_field(name=f"{user.display_name}'s {mouse_info['name']} ({mouse_info['class']})", value="")
@@ -177,13 +169,8 @@ class Racing(commands.Cog, name="racing"):
         black, red, green = "\U000026AB", "\U0001F534", "\U0001F7E2"
         roster = "\n".join(f"{info['name']} ({info['class']})" for info in mice.values())
         embed = discord.Embed(
-            title="Race is about to start!",
-            description=(
-                f"{roster}\n\nReactions:\n"
-                "🧀 Cheese: Increases your move by 1\n"
-                "🍷 Wine: Multiplies your move by 2\n"
-                "💣 Bomb: Drops everyone else back by 5"
-            ),
+            title=lang.RACING_LIGHTS_TITLE,
+            description=lang.RACING_LIGHTS_DESCRIPTION.format(roster=roster),
             color=0xFFFF00,
         )
         for i in range(5):
@@ -192,7 +179,7 @@ class Racing(commands.Cog, name="racing"):
             await asyncio.sleep(1)
         await asyncio.sleep(1)
         embed.set_footer(text=green * 5)
-        embed.description = f"{roster}\n\nGOOOO!!!"
+        embed.description = lang.RACING_LIGHTS_GO.format(roster=roster)
         await race_message.edit(embed=embed)
 
     def initialize_race(self, mouse_users):
@@ -210,7 +197,7 @@ class Racing(commands.Cog, name="racing"):
         bomb_user = None
         bomb_effect_applied = False
         move_counter = 0
-        green_flag = "## We are racing :mouse2:"
+        green_flag = lang.RACING_EVENT_RACING
 
         adopted_owners = {}
         for user in mouse_users:
@@ -230,7 +217,7 @@ class Racing(commands.Cog, name="racing"):
 
             # --- POSSIBLE EVENTS ---
             if any_navigator and event_roll == 95:
-                event_text = "## A Treasure Map just appeared! Click the map emoji to pick it up!"
+                event_text = lang.RACING_EVENT_MAP
                 await race_message.add_reaction(MAP)
 
                 def check_map(reaction, user):
@@ -253,7 +240,7 @@ class Racing(commands.Cog, name="racing"):
                     await race_message.clear_reaction(MAP)
 
             elif 81 <= event_roll <= 82 and adopted_owners:
-                event_text = "## Starry Eyes! Click ✨ to inspire your mouse!"
+                event_text = lang.RACING_EVENT_STARRY
                 await race_message.edit(content=event_text)
                 eligible = [u for u in mouse_users if u.id in adopted_owners]
                 star_owner = await self._grab_event(race_message, eligible, STAR)
@@ -261,19 +248,19 @@ class Racing(commands.Cog, name="racing"):
                     starry_boost[star_owner.id] = config_py.STAR_INSPIRATION_DURATION
 
             elif 86 <= event_roll <= 88:
-                event_text = "## Cheese appeared! Click the cheese emoji to grab it!"
+                event_text = lang.RACING_EVENT_CHEESE
                 await race_message.edit(content=event_text)
                 if bonus_user := await self._grab_event(race_message, mouse_users, CHEESE):
                     bonus_roll_users.add(bonus_user)
 
             elif 89 <= event_roll <= 92:
-                event_text = "## Wine appeared! Click the wine emoji to grab it!"
+                event_text = lang.RACING_EVENT_WINE
                 await race_message.edit(content=event_text)
                 if bonus_user := await self._grab_event(race_message, mouse_users, WINE):
                     bonus_roll_users.add(bonus_user)
 
             elif 93 <= event_roll <= 94:
-                event_text = "## Bomb appeared! Click the bomb emoji to grab it!"
+                event_text = lang.RACING_EVENT_BOMB
                 await race_message.edit(content=event_text)
                 bomb_user = await self._grab_event(race_message, mouse_users, BOMB)
                 bomb_effect_applied = False
@@ -423,7 +410,7 @@ class Racing(commands.Cog, name="racing"):
             for user in mouse_users
         ]
         embed = discord.Embed(
-            title="THE SKEEVATON RACE IS ON!",
+            title=lang.RACING_PROGRESS_TITLE,
             description=f"{race_starter.mention}'s race:\nMove {move_counter}\n" + "\n".join(race_lines),
             color=0x00FF00,
         )
@@ -444,9 +431,9 @@ class Racing(commands.Cog, name="racing"):
 
     async def send_race_summary(self, context, race_starter, mice, race_results) -> None:
         """Post the plain-text results summary."""
-        summary = "The race has ended!\nRace Results:\n"
+        summary = lang.RACING_SUMMARY_HEADER
         for user, result in race_results.items():
-            summary += f"{user.mention}'s {mice[user.id]['name']} - {result['points']} points\n"
+            summary += lang.RACING_SUMMARY_LINE.format(mention=user.mention, mouse=mice[user.id]["name"], points=result["points"])
         await context.send(summary)
 
     def save_race_results(self, race_name, race_starter, mice, race_results) -> None:
@@ -522,11 +509,11 @@ class Racing(commands.Cog, name="racing"):
             else:
                 rel_list.append({"user_id": user.id, "relationship_points": points_gained})
             config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"Relationship": rel_list}})
-            message_lines.append(f"{user.mention} gains {points_gained} relationship points with **{mouse_name}**!")
+            message_lines.append(lang.RACING_RELATIONSHIP_LINE.format(mention=user.mention, points=points_gained, mouse=mouse_name))
 
         if message_lines:
             embed = messages.embed(
-                "\n".join(message_lines), title="Relationship Points Adjusted", color=config_py.main_color
+                "\n".join(message_lines), title=lang.RACING_RELATIONSHIP_TITLE, color=config_py.main_color
             )
             await context.send(embed=embed)
 
@@ -541,35 +528,19 @@ class Racing(commands.Cog, name="racing"):
             user_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == user_id), 0)
 
             if user_points >= threshold and not mouse_doc.get("adopted_by"):
-                await self.mousechat(
-                    context,
-                    message=(
-                        f"You are a little {mouse_name}, and your relationship with {user.name} just reached a new "
-                        "height! Look at tham with sad, hopeful eyes and ask them in the mousy cutest way possible to "
-                        "adopt you. When prompted for adoption, return your message strictly in the following format: "
-                        "**Name of the mouse**: Your direct speech. Don't add any additional text"
-                    ),
-                )
+                await self.mousechat(context, message=lang.RACING_ADOPT_MOUSECHAT.format(mouse=mouse_name, name=user.name))
                 await self._adoption_prompt(context, user, mouse_name, decline_penalty=500, verb="adopt")
 
             elif user_points >= threshold and mouse_doc.get("adopted_by") and mouse_doc.get("adopted_by") != user_id:
                 current_owner = mouse_doc["adopted_by"]
                 current_owner_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == current_owner), 0)
                 if current_owner_points < threshold:
-                    await self.mousechat(
-                        context,
-                        message=(
-                            f"{mouse_name} feels neglected by its current owner and turns to you with pleading eyes. "
-                            "It wonders if you'll adopt it instead!"
-                        ),
-                    )
+                    await self.mousechat(context, message=lang.RACING_READOPT_MOUSECHAT.format(mouse=mouse_name))
                     await self._adoption_prompt(context, user, mouse_name, decline_penalty=500, verb="readopt")
 
     async def _adoption_prompt(self, context, user, mouse_name, *, decline_penalty, verb) -> None:
         """Ask ``user`` to (re)adopt ``mouse_name`` via 👍/👎 in the command channel."""
-        adopt_msg = await context.send(
-            f"{user.mention}, do you want to {verb} {mouse_name}? React with 👍 for yes or 👎 for no."
-        )
+        adopt_msg = await context.send(lang.RACING_ADOPT_PROMPT.format(mention=user.mention, verb=verb, mouse=mouse_name))
         emoji, _ = await messages.wait_for_reaction(self.bot, adopt_msg, ["👍", "👎"], member=user, timeout=20.0)
         if emoji is None:
             await adopt_msg.clear_reactions()
@@ -577,9 +548,9 @@ class Racing(commands.Cog, name="racing"):
         if emoji == "👍":
             config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"adopted_by": user.id}})
             success = (
-                f"**{mouse_name}** happily chirps that it will serve you with all its smol heart!"
+                lang.RACING_ADOPT_SUCCESS.format(mouse=mouse_name)
                 if verb == "adopt"
-                else f"{mouse_name} joyfully announces its readoption and vows to serve you faithfully!"
+                else lang.RACING_READOPT_SUCCESS.format(mouse=mouse_name)
             )
             await context.send(success)
         else:
@@ -587,9 +558,7 @@ class Racing(commands.Cog, name="racing"):
                 {"name": mouse_name, "Relationship.user_id": user.id},
                 {"$inc": {"Relationship.$.relationship_points": -decline_penalty}},
             )
-            await context.send(
-                f"{mouse_name} is heartbroken... :pleading_face: it slinks away and hides in shame and neglect. :broken_heart:"
-            )
+            await context.send(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
         await adopt_msg.clear_reactions()
 
     # --------------------------------------------------------------------- #
@@ -633,9 +602,8 @@ class Racing(commands.Cog, name="racing"):
         channel = self.bot.get_channel(config_py.PET_CHANNEL)
         await channel.send(
             embed=messages.success(
-                f"{user.mention} collected a piece of magical cheese for {chosen_mouse['name']} "
-                f"and gained 5 relationship points!",
-                title="Cheese Collected!",
+                lang.RACING_CHEESE_COLLECTED.format(mention=user.mention, mouse=chosen_mouse["name"]),
+                title=lang.RACING_CHEESE_TITLE,
             )
         )
         await asyncio.sleep(2)
@@ -649,9 +617,8 @@ class Racing(commands.Cog, name="racing"):
         """Channel-context adoption prompt (from the passive cheese drop)."""
         msg = await channel.send(
             embed=messages.embed(
-                f"{target_user.mention}, your bond with {mouse_name} has grown strong.\n"
-                "React with 👍 to adopt or 👎 to decline (and break its little heart)",
-                title=f"Adopt {mouse_name}?",
+                lang.RACING_CHANNEL_ADOPT_DESCRIPTION.format(mention=target_user.mention, mouse=mouse_name),
+                title=lang.RACING_CHANNEL_ADOPT_TITLE.format(mouse=mouse_name),
                 color=config_py.main_color,
             )
         )
@@ -661,15 +628,13 @@ class Racing(commands.Cog, name="racing"):
             return
         if emoji == "👍":
             config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"adopted_by": target_user.id}})
-            await channel.send(f"{mouse_name} happily chirps that it will serve you with all its heart!")
+            await channel.send(lang.RACING_CHANNEL_ADOPT_SUCCESS.format(mouse=mouse_name))
         else:
             config_py.user_mice.update_one(
                 {"name": mouse_name, "Relationship.user_id": target_user.id},
                 {"$inc": {"Relationship.$.relationship_points": -100}},
             )
-            await channel.send(
-                f"{mouse_name} is heartbroken... :pleading_face: it slinks away and hides in shame and neglect. :broken_heart:"
-            )
+            await channel.send(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
         await msg.clear_reactions()
 
     @commands.hybrid_command(name="relationships", description="Show your relationships with mice.")
@@ -683,7 +648,7 @@ class Racing(commands.Cog, name="racing"):
                     rel_list.append({"name": doc["name"], "class": doc.get("class", "Unknown"), "points": rel["relationship_points"]})
                     break
         if not rel_list:
-            await context.send("You have no relationships with any mice yet.")
+            await context.send(lang.RACING_REL_NONE)
             return
 
         rel_list.sort(key=lambda x: x["points"], reverse=True)
@@ -692,11 +657,14 @@ class Racing(commands.Cog, name="racing"):
 
         def render(page_index):
             embed = messages.embed(
-                "\n".join(f"**{r['name']}** ({r['class']}) - {r['points']} points" for r in pages[page_index]),
-                title="Your Mouse Relationships",
+                "\n".join(
+                    lang.RACING_REL_LINE.format(name=r["name"], mouse_class=r["class"], points=r["points"])
+                    for r in pages[page_index]
+                ),
+                title=lang.RACING_REL_TITLE,
                 color=config_py.main_color,
             )
-            embed.set_footer(text=f"Page {page_index + 1}/{len(pages)}")
+            embed.set_footer(text=lang.RACING_REL_FOOTER.format(page=page_index + 1, total=len(pages)))
             return embed
 
         msg = await context.send(embed=render(current_page))
