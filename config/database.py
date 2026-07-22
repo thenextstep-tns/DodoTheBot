@@ -1,0 +1,62 @@
+"""
+MongoDB connection and collection handles. The connection string comes from
+``config.json`` via ``config.secrets``.
+"""
+
+from pymongo import MongoClient
+
+from config.secrets import DATABASE_NAME, MONGO_URI
+
+client = MongoClient(MONGO_URI)
+db = client[DATABASE_NAME]
+
+# --- Collections ---
+collection = db["Dummies"]
+dailies = db["Dailies"]
+wallets = db["Wallets"]
+catcollection = db["Cats"]
+dogcollection = db["Dogs"]
+waifucollection = db["Waifu"]
+petownerscollection = db["Petowners"]
+dodoroll = db["Rolls"]
+parses = db["Parses"]
+duels = db["Duels"]
+commands_use = db["Commands Usage"]
+messages = db["Messages with Channels"]
+pps = db["PPs"]
+items = db["Items"]
+itemtypes = db["ItemTypes"]
+itemsources = db["ItemSourcing"]
+itemqualities = db["ItemQualities"]
+base_modifiers = db["BaseModifiers"]
+goodies_bag = db["GoodiesBag"]
+fishing_results = db["FishingResults"]
+sweetrolls = db["Sweetrolls"]
+races = db["Races"]
+mice = db["Mice"]
+votes = db["Votes"]
+gym_sessions = db["GymSessions"]
+left_roles = db["LeftRoles"]
+mouse_classes = db["MouseClasses"]
+user_mice = db["UserMice"]
+user_power = db["ThrowingPower"]
+throws = db["Throws"]
+waifus = db["Waifus"]
+memory = db["Memories"]
+cardinals_col = db["Cardinals"]
+orders_col = db["Orders"]
+rumours_col = db["Rumours"]
+votes_col = db["Votes"]
+state_col = db["Conclave_state"]
+favor_col = db["Favor_tokens"]
+pin_fails = db["Pin_fails"]
+pumpkins = db["Pumpkins"]
+pull = db["Pull"]
+pumpkinstats = db["Pumpkinstats"]
+pumpkinlog = db["Pumpkinlog"]
+renown = db["Pumpkinrep"]
+raid_templates = db["RaidTemplates"]
+active_raids = db["ActiveRaids"]
+botServerRoles = db["BotServerRoles"]
+botServerCategories = db["BotServerCategories"]
+logs = db["Logs"]
