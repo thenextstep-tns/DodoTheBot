@@ -16,6 +16,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks
 
 
@@ -507,13 +508,12 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         balance = collected + spent
 
         embed = discord.Embed(
-            title=f"🎃 {context.author.display_name}'s Pumpkin Accounting Department 🎃",
-            color=discord.Color.orange()
+            title=lang.PUMPKIN_STATS_TITLE.format(name=context.author.display_name), color=discord.Color.orange()
         )
-        #embed.add_field(name="Total Pumpkin Collected", value=f"**{collected} kg**", inline=False)
-        #embed.add_field(name="Total Pumpkin Thrown/Spent", value=f"**{abs(spent)} kg**", inline=False)
-        embed.add_field(name="Available Pumpkin Balance", value=f"**{balance} kg**", inline=False)
-        embed.set_footer(text="There's no such thing as enough pumpkin, go pull out some more!")
+        embed.add_field(
+            name=lang.PUMPKIN_STATS_BALANCE, value=lang.PUMPKIN_STATS_BALANCE_VALUE.format(balance=balance), inline=False
+        )
+        embed.set_footer(text=lang.PUMPKIN_STATS_FOOTER)
 
         await context.send(embed=embed)
     
@@ -535,8 +535,8 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         stats = await self._get_renown_stats(user.id)
         
         embed = discord.Embed(
-            title=f"👑 {user.display_name}'s Reputation 👑",
-            description=f"**Title:** *{renown_title}*\n**Reputation Score:** **{renown_score}**",
+            title=lang.PUMPKIN_REP_TITLE.format(name=user.display_name),
+            description=lang.PUMPKIN_REP_DESCRIPTION.format(title=renown_title, score=renown_score),
             color=discord.Color.gold()
         )
         embed.set_thumbnail(url=user.display_avatar.url)
@@ -551,20 +551,21 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         kd_ratio = (splats / splatted) if splatted > 0 else splats # Handle divide by zero
         
         embed.add_field(
-            name="Career Stats",
-            value=f"**Matches:** {total_matches} ({wins} W / {losses} L)\n"
-                  f"**Win Rate:** {win_rate:.1f}%\n"
-                  f"**Splat/Splat'd:** {splats} / {splatted} ({kd_ratio:.2f} K/D)",
-            inline=False
+            name=lang.PUMPKIN_REP_CAREER,
+            value=lang.PUMPKIN_REP_CAREER_VALUE.format(
+                matches=total_matches, wins=wins, losses=losses, win_rate=win_rate,
+                splats=splats, splatted=splatted, kd=kd_ratio,
+            ),
+            inline=False,
         )
-        
+
         embed.add_field(
-            name="Performance",
-            value=f"**Total Damage Dealt:** {stats.get('damage_dealt', 0)}kg\n"
-                  f"**Successful Dodges:** {stats.get('dodges', 0)}\n"
-                  f"**Last Stands:** {stats.get('last_stands', 0)}\n"
-                  f"**Attack Fizzles:** {stats.get('fizzles', 0)}",
-            inline=False
+            name=lang.PUMPKIN_REP_PERFORMANCE,
+            value=lang.PUMPKIN_REP_PERFORMANCE_VALUE.format(
+                damage=stats.get("damage_dealt", 0), dodges=stats.get("dodges", 0),
+                last_stands=stats.get("last_stands", 0), fizzles=stats.get("fizzles", 0),
+            ),
+            inline=False,
         )
         
         await context.send(embed=embed)
@@ -798,15 +799,12 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         team_b = [] # Use lists to preserve order (of user objects)
         join_log = []
 
-        base_lobby_text = (
-            f"A team pumpkin deathmatch fight is starting! React to join and be assigned a team.\n"
-            f"Cost to join: **{self.FIGHT_JOIN_COST}kg** of pumpkin.\n\n"
-        )
-        
+        base_lobby_text = lang.PUMPKIN_LOBBY_BASE.format(cost=self.FIGHT_JOIN_COST)
+
         def build_lobby_embed(time_left):
             embed = discord.Embed(
-                title="🎃 Pumpkin Deathmatch Lobby 💀",
-                description=base_lobby_text + f"Sign-ups are closed in **{time_left}** seconds!",
+                title=lang.PUMPKIN_LOBBY_TITLE,
+                description=base_lobby_text + lang.PUMPKIN_LOBBY_CLOSING.format(time=time_left),
                 color=discord.Color.orange()
             )
             
@@ -828,19 +826,20 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 self.all_players = {} # Store user objects
                 self.view_timeout_time = datetime.now() + timedelta(seconds=timeout)
 
-            @discord.ui.button(label="Join Fight!", style=discord.ButtonStyle.primary, emoji="🎃", custom_id="join_fight")
+            @discord.ui.button(label=lang.PUMPKIN_JOIN_BUTTON, style=discord.ButtonStyle.primary, emoji="🎃", custom_id="join_fight")
             async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 user = interaction.user
-                
+
                 if user.id in self.all_players:
-                    await interaction.response.send_message("You've already joined!", ephemeral=True)
+                    await interaction.response.send_message(lang.PUMPKIN_JOIN_ALREADY, ephemeral=True)
                     return
-                
+
                 # Check cost
                 if not await self.pumpkin_cog._has_enough_pumpkin(user.id, self.pumpkin_cog.FIGHT_JOIN_COST):
                     join_log.append(f"❌ {user.display_name} didn't have {self.pumpkin_cog.FIGHT_JOIN_COST}kg!")
-                    # Send ephemeral message instead of public chat
-                    await interaction.response.send_message(f"You don't have enough pumpkin to join! You need {self.pumpkin_cog.FIGHT_JOIN_COST}kg.", ephemeral=True)
+                    await interaction.response.send_message(
+                        lang.PUMPKIN_JOIN_NO_PUMPKIN.format(cost=self.pumpkin_cog.FIGHT_JOIN_COST), ephemeral=True
+                    )
                     return
 
                 # Defer to make sure the "Join" click doesn't fail
@@ -854,17 +853,17 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 if len(team_a) <= len(team_b):
                     if len(team_a) < self.pumpkin_cog.TEAM_SIZE:
                         team_a.append(user)
-                        join_log.append(f"🎃 {user.display_name} joined **Team {team_a_name}**!")
+                        join_log.append(lang.PUMPKIN_JOIN_GOURD.format(name=user.display_name, team=team_a_name))
                     else:
-                        team_b.append(user) # Overflow to other team
-                        join_log.append(f"💀 {user.display_name} joined **Team {team_b_name}**!")
+                        team_b.append(user)
+                        join_log.append(lang.PUMPKIN_JOIN_REAPER.format(name=user.display_name, team=team_b_name))
                 else:
                     if len(team_b) < self.pumpkin_cog.TEAM_SIZE:
                         team_b.append(user)
-                        join_log.append(f"💀 {user.display_name} joined **Team {team_b_name}**!")
+                        join_log.append(lang.PUMPKIN_JOIN_REAPER.format(name=user.display_name, team=team_b_name))
                     else:
-                        team_a.append(user) # Overflow to other team
-                        join_log.append(f"🎃 {user.display_name} joined **Team {team_a_name}**!")
+                        team_a.append(user)
+                        join_log.append(lang.PUMPKIN_JOIN_GOURD.format(name=user.display_name, team=team_a_name))
                 
                 # Update the lobby embed with new player lists
                 time_left = int((self.view_timeout_time - datetime.now()).total_seconds())
@@ -887,7 +886,7 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         await asyncio.sleep(5) # Wait for the last 5 seconds
         
         try:
-            await lobby_msg.edit(content="Lobby closed!", view=None)
+            await lobby_msg.edit(content=lang.PUMPKIN_LOBBY_CLOSED, view=None)
         except discord.HTTPException:
             pass # Message deleted, fine
 
@@ -897,7 +896,7 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         num_human_players = len(all_human_players_list)
         
         if num_human_players < 1: # Min 1 player
-            await context.send("Not enough players for a fight. Try again!")
+            await context.send(lang.PUMPKIN_NOT_ENOUGH)
             return
 
         if join_log:
@@ -915,14 +914,10 @@ class Pumpkin(commands.Cog, name="pumpkin"):
             "**Press ✅ when you're ready to start!**"
         )
         
-        rules_embed = discord.Embed(
-            title="🎃 How to Fight 🎃",
-            description=rules_text,
-            color=discord.Color.orange()
-        )
-        
+        rules_embed = discord.Embed(title=lang.PUMPKIN_RULES_TITLE, description=rules_text, color=discord.Color.orange())
+
         required_reactions = math.ceil(num_human_players * 0.55)
-        rules_embed.set_footer(text=f"The fight will start when {required_reactions} (55%) of players are ready. (60s timer)")
+        rules_embed.set_footer(text=lang.PUMPKIN_RULES_FOOTER.format(required=required_reactions))
         
         ready_msg = await context.send(embed=rules_embed)
         await ready_msg.add_reaction("✅")
@@ -964,10 +959,10 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         
         # --- Check results of ready-up ---
         if len(ready_players) >= required_reactions:
-            await context.send(f"**{len(ready_players)}/{num_human_players}** players are ready! The fight begins!")
+            await context.send(lang.PUMPKIN_READY.format(ready=len(ready_players), total=num_human_players))
             await ready_msg.delete()
         else:
-            await context.send(f"Not enough players were ready (**{len(ready_players)}/{required_reactions}**). The fight is cancelled.")
+            await context.send(lang.PUMPKIN_NOT_READY.format(ready=len(ready_players), required=required_reactions))
             await ready_msg.delete()
             return # Exit the command
 
@@ -1016,10 +1011,10 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         
         if len(team_a_data) > len(team_b_data):
             team_b_data.append(bot_data)
-            await context.send(f"{self.bot.user.display_name} joins **Team {team_b_name}** to balance the scales!")
+            await context.send(lang.PUMPKIN_BOT_JOINS.format(bot=self.bot.user.display_name, team=team_b_name))
         elif len(team_b_data) > len(team_a_data):
             team_a_data.append(bot_data)
-            await context.send(f"{self.bot.user.display_name} joins **Team {team_a_name}** to balance the scales!")
+            await context.send(lang.PUMPKIN_BOT_JOINS.format(bot=self.bot.user.display_name, team=team_a_name))
             
         splatted_role = await self._get_temporary_role(context.guild)
         
@@ -1154,14 +1149,14 @@ class Pumpkin(commands.Cog, name="pumpkin"):
             
             if not gourds_alive:
                 final_embed = self._build_tournament_embed(gourds_alive, reapers_alive, team_a_name, team_b_name, round_num, log_list=log_list)
-                final_embed.title = f"💀 Team {team_b_name} Wins! 💀"
-                final_embed.description = f"Team {team_a_name} has been completely splatted!"
+                final_embed.title = lang.PUMPKIN_TEAM_WINS_REAPER.format(team=team_b_name)
+                final_embed.description = lang.PUMPKIN_TEAM_SPLATTED.format(team=team_a_name)
                 await game_message.edit(embed=final_embed, content=None, view=None)
                 break # Reapers win
             if not reapers_alive:
                 final_embed = self._build_tournament_embed(gourds_alive, reapers_alive, team_a_name, team_b_name, round_num, log_list=log_list)
-                final_embed.title = f"🎃 Team {team_a_name} Wins! 🎃"
-                final_embed.description = f"Team {team_b_name} has been completely splatted!"
+                final_embed.title = lang.PUMPKIN_TEAM_WINS_GOURD.format(team=team_a_name)
+                final_embed.description = lang.PUMPKIN_TEAM_SPLATTED.format(team=team_b_name)
                 await game_message.edit(embed=final_embed, content=None, view=None)
                 break # Gourds win
             
@@ -1181,16 +1176,16 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 reaper_total_hp = sum(p["hp"] for p in reapers_alive)
 
                 win_embed = self._build_tournament_embed(gourds_alive, reapers_alive, team_a_name, team_b_name, round_num, log_list=log_list)
-                win_embed.title = "🎃 Fight Over! Everyone's Out of Ammo! 🎃"
+                win_embed.title = lang.PUMPKIN_OUT_OF_AMMO_TITLE
                 win_embed.add_field(name=f"Team {team_a_name} Total HP", value=str(gourd_total_hp))
                 win_embed.add_field(name=f"Team {team_b_name} Total HP", value=str(reaper_total_hp))
 
                 if gourd_total_hp > reaper_total_hp:
-                    win_embed.description = f"**Team {team_a_name} wins** by having more HP remaining!"
+                    win_embed.description = lang.PUMPKIN_HP_WIN.format(team=team_a_name)
                 elif reaper_total_hp > gourd_total_hp:
-                    win_embed.description = f"**Team {team_b_name} wins** by having more HP remaining!"
+                    win_embed.description = lang.PUMPKIN_HP_WIN.format(team=team_b_name)
                 else:
-                    win_embed.description = "It's a draw! Both teams have the same HP!"
+                    win_embed.description = lang.PUMPKIN_HP_DRAW
                 
                 await game_message.edit(embed=win_embed, content=None, view=None)
                 break # End game
@@ -1401,16 +1396,16 @@ class Pumpkin(commands.Cog, name="pumpkin"):
             winning_team_players = [p for p in gourds_alive if p["id"] != self.BOT_USER_ID]
             winning_team_all = all_team_a_humans
             losing_team_all = all_team_b_humans
-            await context.send(f"**Team {team_a_name} is victorious!**")
+            await context.send(lang.PUMPKIN_VICTORIOUS.format(team=team_a_name))
         elif reapers_alive and not gourds_alive: # Reapers won
             winning_team_players = [p for p in reapers_alive if p["id"] != self.BOT_USER_ID]
             winning_team_all = all_team_b_humans
             losing_team_all = all_team_a_humans
-            await context.send(f"**Team {team_b_name} is victorious!**")
+            await context.send(lang.PUMPKIN_VICTORIOUS.format(team=team_b_name))
         else:
             # This handles draws (like out of ammo)
             losing_team_all = all_human_players_in_match # Everyone is a "loser" in a draw
-            await context.send("The match is a draw!")
+            await context.send(lang.PUMPKIN_DRAW)
 
         reward_msg = ""
         
@@ -1422,11 +1417,11 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 winner_reward = round(total_pumpkin_spent_this_match / len(winning_team_players))
             
             if winner_reward > 0:
-                reward_msg += f"**Winning team survivors ({team_a_name if gourds_alive else team_b_name}) rewarded!**\n"
+                reward_msg += lang.PUMPKIN_REWARD_WINNERS.format(team=team_a_name if gourds_alive else team_b_name)
                 for player in winning_team_players:
                     user_obj = player["obj"]
                     await self._add_pumpkin(user_obj.id, winner_reward, f"tournament_win_pot_{match_id}")
-                    reward_msg += f"{user_obj.mention} gains **{winner_reward}kg** of pumpkin!\n"
+                    reward_msg += lang.PUMPKIN_REWARD_WINNER_LINE.format(mention=user_obj.mention, reward=winner_reward)
 
         if losing_team_all: # Changed from all_losers
             # Losers get 50% of the pot, divided by *all* original members
@@ -1435,17 +1430,17 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 loser_reward = round((total_pumpkin_spent_this_match / 2) / len(losing_team_all))
                 
             if loser_reward > 0:
-                reward_msg += f"\n**Losing team ({team_b_name if gourds_alive else team_a_name}) consolation prize!**\n"
+                reward_msg += lang.PUMPKIN_REWARD_LOSERS.format(team=team_b_name if gourds_alive else team_a_name)
                 for player in losing_team_all:
                     user_obj = player["obj"]
                     await self._add_pumpkin(user_obj.id, loser_reward, f"tournament_loss_pot_{match_id}")
-                    reward_msg += f"{user_obj.mention} gains **{loser_reward}kg** of pumpkin.\n"
+                    reward_msg += lang.PUMPKIN_REWARD_LOSER_LINE.format(mention=user_obj.mention, reward=loser_reward)
 
         if reward_msg:
             await context.send(reward_msg)
         
         # --- NEW: RENOWN CALCULATION ---
-        renown_report_lines = ["**--- 🎃 Ranks Update 🎃 ---**"]
+        renown_report_lines = [lang.PUMPKIN_RANKS_HEADER]
         
         for player in all_human_players_in_match:
             user_id = player["id"]
@@ -1520,7 +1515,9 @@ class Pumpkin(commands.Cog, name="pumpkin"):
             
             # Add to report
             sign = "+" if renown_change >= 0 else ""
-            renown_report_lines.append(f"{user_obj.mention}: **{sign}{renown_change} Reputation** ({', '.join(renown_reasons)})")
+            renown_report_lines.append(
+                lang.PUMPKIN_RANK_LINE.format(mention=user_obj.mention, sign=sign, change=renown_change, reasons=", ".join(renown_reasons))
+            )
 
         if len(renown_report_lines) > 1:
             await context.send("\n".join(renown_report_lines))
