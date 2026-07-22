@@ -19,6 +19,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import messages
 
 _ITEM_IMG_DIR = "item_imgs"
@@ -40,7 +41,7 @@ class Fishing(commands.Cog, name="fishing"):
         fishing_cost = config_py.fishing_cost
 
         if not self.has_enough_balance(user_id):
-            await context.send("Sorry, you don't have enough coins to go fishing. Try doing dodo dailies to earn more coins!")
+            await context.send(lang.FISHING_NO_COINS)
             return
 
         cats_list = await self.fetch_owned_cats(user_id)
@@ -66,11 +67,11 @@ class Fishing(commands.Cog, name="fishing"):
             stashed, sold, thrown_away = await self.draw_victory_embed(context, item_name, user_id)
             fishing_success = 1
             text = self.process_fishing_results(user_id, stashed, sold, thrown_away, item_info)
-            await context.send(f"{text}\nThe Fishing Bait cost you {fishing_cost} coins. We subtracted them from your wallet :3")
+            await context.send(f"{text}\n{lang.FISHING_COST_NOTE.format(cost=fishing_cost)}")
         else:
             fishing_success = 0
-            await context.send(f"Unfortunately, you couldn't fish that {item_name}. Better luck next time!")
-            await context.send(f"The Fishing Bait cost you {fishing_cost} coins. We subtracted them from your wallet :3")
+            await context.send(lang.FISHING_FAILED.format(item_name=item_name))
+            await context.send(lang.FISHING_COST_NOTE.format(cost=fishing_cost))
 
         self.subtract_fishing_cost(user_id)
         self.save_fishing_result(item_info, user_id, selected_cat_id, *ratios, fishing_success)
@@ -86,9 +87,7 @@ class Fishing(commands.Cog, name="fishing"):
     async def select_cat(self, cats_list: list, context: Context) -> str | None:
         """Prompt the user to pick a cat; return its id (or None)."""
         if not cats_list:
-            await context.send(
-                "You don't have any cats available to fish with. Summon one of your cats and toggle fishing for them! 🐱"
-            )
+            await context.send(lang.FISHING_NO_CATS)
             return None
         options = [
             discord.SelectOption(
@@ -98,14 +97,10 @@ class Fishing(commands.Cog, name="fishing"):
             for cat in cats_list[:25]
         ]
         selected = await messages.prompt_select(
-            context,
-            "Please select a cat to fish with! 🐱 Choose wisely! Different cats are good for different types of loot!",
-            options,
-            placeholder="Select a cat to fish with",
-            timeout=30.0,
+            context, lang.FISHING_SELECT_CAT, options, placeholder=lang.FISHING_SELECT_CAT_PLACEHOLDER, timeout=30.0
         )
         if selected:
-            await context.send(":thinking: Hmmm, what is this? Looks like you can reel in!")
+            await context.send(lang.FISHING_REEL_IN)
         return selected
 
     def fetch_cat_parameters(self, selected_cat_id: str):
@@ -156,7 +151,7 @@ class Fishing(commands.Cog, name="fishing"):
         intellect_needed = item_quality["intellect_modifier"] * base.find_one({"name": "base_intellect_modifier"})["modifier"]
         strength_needed = item["weight"] * base.find_one({"name": "base_strength_modifier"})["modifier"]
 
-        embed = discord.Embed(title=item["name"], description="A new item has appeared for fishing!", color=discord.Color.random())
+        embed = discord.Embed(title=item["name"], description=lang.FISHING_ITEM_APPEARED, color=discord.Color.random())
         embed.add_field(name="Quality", value=item_quality["quality"], inline=True)
         embed.add_field(name="Type", value=item_type["type"], inline=True)
         embed.add_field(name="Cost", value=f"{item['cost']} dodo coins", inline=True)
@@ -185,13 +180,8 @@ class Fishing(commands.Cog, name="fishing"):
         item_type = config_py.itemtypes.find_one({"_id": item["type_id"]})
 
         embed = discord.Embed(
-            title=f"You have successfully fished out\n**{item_name}**!",
-            description=(
-                "Now you have to decide what to do with the item!\n"
-                "Use the BACKPACK icon to stash it in your goodies bag if you have space!\n"
-                "Use the COIN PURSE icon to sell it immediately\n"
-                "Use the EXPLOSION icon to throw it away!"
-            ),
+            title=lang.FISHING_VICTORY_TITLE.format(item_name=item_name),
+            description=lang.FISHING_VICTORY_DESCRIPTION,
             color=discord.Color.random(),
         )
         embed.add_field(name="Quality", value=item_quality["quality"], inline=True)
@@ -219,19 +209,16 @@ class Fishing(commands.Cog, name="fishing"):
     def get_parameter_message(self, parameter_name: str, ratio: float) -> str:
         """Flavour text for how a cat's stat measures up."""
         if ratio > 2:
-            return f":white_check_mark: Wow! Fishing this item with so much {parameter_name} should be a piece of cake for your cat!"
+            return lang.FISHING_PARAM_EXCELLENT.format(parameter=parameter_name)
         if ratio > 1:
-            return f":ballot_box_with_check: Great! Your cat's {parameter_name} is looking good for fishing this item."
+            return lang.FISHING_PARAM_GOOD.format(parameter=parameter_name)
         if ratio > 0.5:
-            return f":warning: Not bad! Your cat's {parameter_name} is somewhat sufficient, but it might be not enough... :pleading_face:"
-        return f":no_entry: Uh-oh! Your cat's {parameter_name} is a bit low for this fishing trip."
+            return lang.FISHING_PARAM_OK.format(parameter=parameter_name)
+        return lang.FISHING_PARAM_LOW.format(parameter=parameter_name)
 
     def write_fishing_message(self, agility_message, intellect_message, strength_message) -> str:
         """Compose the pre-result status message."""
-        return (
-            f"\nLet's see how your stats are looking for this reel in!\n {agility_message}\n {intellect_message}\n "
-            f"{strength_message}\n\n YOUR CAT IS TRYING REALLY HARD TO REEL IN! WAIT JUST A BIT LONGER :fish:"
-        )
+        return lang.FISHING_STATUS.format(agility=agility_message, intellect=intellect_message, strength=strength_message)
 
     # ------------------------------------------------------------------ #
     #  Inventory / wallet
@@ -281,9 +268,9 @@ class Fishing(commands.Cog, name="fishing"):
         """Apply the chosen disposition (stash/sell/throw) and return a status line."""
         if stashed:
             if self.count_goodies_bag(user_id) >= _MAX_BAG:
-                return "Sorry, your goodies bag is full! There's no more space to store anything else."
+                return lang.FISHING_BAG_FULL
             self._store_item(user_id, item_info)
-            return "Item stashed in the goodies bag!"
+            return lang.FISHING_STASHED
 
         if sold:
             self._store_item(user_id, item_info, sold=1)
@@ -295,11 +282,11 @@ class Fishing(commands.Cog, name="fishing"):
                 )
             else:
                 config_py.wallets.insert_one({"user_id": user_id, "balance": price})
-            return f"Item sold! You earned {price} dodo coins!"
+            return lang.FISHING_SOLD.format(price=price)
 
         if thrown_away:
             self._store_item(user_id, item_info, thrown_away=1)
-            return "We threw it away! EW!"
+            return lang.FISHING_THROWN
         return ""
 
     def has_enough_balance(self, user_id: int) -> bool:

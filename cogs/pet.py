@@ -1,6 +1,7 @@
 """
 Pet cog — the cat/dog/waifu pet system: claim new pets from image APIs, list and
 summon them, toggle their fishing/gym abilities, and pit them against each other.
+User-facing text lives in ``lang``.
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
+import lang
 from helpers import checks, messages
 
 # Per-pet-kind configuration for the claim flow (cats can additionally fish).
@@ -30,8 +32,8 @@ _PET_KINDS = {
         "claim_skill": 1.2,
         "claim_multiplier": 1.2,
         "extra_fields": {"FISHING": 0},
-        "stop_msg": "Alright, let's stop LFC (looking for cats!) :hearts: ",
-        "dodge_msg": "This cat was quite nimble, they dodged the claim and ran away! Wanna look for the next one?",
+        "stop_msg": lang.PET_STOP_CATS,
+        "dodge_msg": lang.PET_DODGE_CAT,
         "noun": "cat",
     },
     "dog": {
@@ -41,8 +43,8 @@ _PET_KINDS = {
         "claim_skill": 2,
         "claim_multiplier": 1.7,
         "extra_fields": {},
-        "stop_msg": "Alright, let's stop LFD (looking for dogs!) :hearts: ",
-        "dodge_msg": "This dog didn't trust you enough and they ran away! Wanna look for the next one?",
+        "stop_msg": lang.PET_STOP_DOGS,
+        "dodge_msg": lang.PET_DODGE_DOG,
         "noun": "dog",
     },
 }
@@ -73,12 +75,10 @@ class Pet(commands.Cog, name="pet"):
         pets = list(self._collection(kind).find({"owner": member.id}))
         channel = self.bot.get_channel(config_py.PET_CHANNEL)
         if kind == "cat":
-            await context.send(f"Ok, {member.display_name}, here comes your meow army! :cat: ")
+            await context.send(lang.PET_SHOWCATS_INTRO.format(name=member.display_name))
 
         if not pets:
-            await channel.send(
-                f"Doesn't look like you have any {kind}s :pleading_face: , try dodo {kind} command to find a new one!"
-            )
+            await channel.send(lang.PET_SHOW_NONE.format(kind=kind))
             return
 
         names, buffer = [], ""
@@ -90,7 +90,7 @@ class Pet(commands.Cog, name="pet"):
                 names, buffer = [], ""
         if names:
             await channel.send(", ".join(names))
-        await channel.send(f"I found {len(pets)} {kind}s")
+        await channel.send(lang.PET_SHOW_COUNT.format(count=len(pets), kind=kind))
 
     @commands.hybrid_command(name="showcats", description="Show all your cats in a list.")
     @checks.not_blacklisted()
@@ -108,7 +108,7 @@ class Pet(commands.Cog, name="pet"):
     @checks.not_blacklisted()
     async def snake(self, context: Context) -> None:
         """:snake:"""
-        await context.send(":snake:")
+        await context.send(lang.PET_SNAKE)
 
     # ------------------------------------------------------------------ #
     #  Claiming new pets
@@ -134,7 +134,7 @@ class Pet(commands.Cog, name="pet"):
                 async with session.get(config["api"]) as request:
                     if request.status != 200:
                         await channel.send(
-                            embed=messages.error(f"{config['api_name']} is being weird at the moment, try again or later", title="Nope")
+                            embed=messages.error(lang.PET_API_ERROR.format(api_name=config["api_name"]), title="Nope")
                         )
                         return None
                     url = (await request.json())[0].get("url")
@@ -161,11 +161,13 @@ class Pet(commands.Cog, name="pet"):
             claim_chance = round(config["claim_skill"] * stats["claimres"] * 100 * config["claim_multiplier"])
 
             embed = messages.success(
-                f"Strength = {stats['strength']}, Agility = {stats['agility']}, Intellect = {stats['intellect']}, "
-                f"Charm = {stats['charm']}, your chance to claim them is {claim_chance}%"
+                lang.PET_CLAIM_OFFER.format(
+                    strength=stats["strength"], agility=stats["agility"], intellect=stats["intellect"],
+                    charm=stats["charm"], claim_chance=claim_chance,
+                )
             )
             embed.set_image(url=url)
-            embed.set_author(name=f"{member.display_name}, this {pet_class[0]} is free! Are you gonna claim them?")
+            embed.set_author(name=lang.PET_CLAIM_AUTHOR.format(name=member.display_name, pet_type=pet_class[0]))
             suggestion = await channel.send(embed=embed)
 
             choice, _ = await messages.wait_for_reaction(self.bot, suggestion, _CLAIM_REACTIONS, member=member, timeout=60)
@@ -181,7 +183,6 @@ class Pet(commands.Cog, name="pet"):
             if random.randint(0, 100) > 100 - claim_chance:
                 await self._name_and_save(context, channel, collection, member, kind, pet_class[0], url, stats, config["extra_fields"], suggestion)
                 return
-            # Dodged — offer to look for another.
             looking = await self._offer_retry(context, channel, member, config)
 
     def _roll_stats(self, pet_class) -> dict:
@@ -204,10 +205,7 @@ class Pet(commands.Cog, name="pet"):
 
     async def _name_and_save(self, context, channel, collection, member, kind, pet_type, url, stats, extra_fields, suggestion) -> None:
         """Ask for a unique name and insert the claimed pet."""
-        await channel.send(
-            "You have successfully claimed this pet! :white_check_mark: How are you going to name them? "
-            "Hurry up, the others may name it too!"
-        )
+        await channel.send(lang.PET_CLAIM_SUCCESS)
         while True:
             try:
                 name_msg = await self.bot.wait_for("message", timeout=60)
@@ -216,15 +214,13 @@ class Pet(commands.Cog, name="pet"):
                 return
             name = str(name_msg.content).replace("@", " ")
             if collection.find_one({"name": name, "owner": name_msg.author.id}):
-                await channel.send(
-                    f"I won't be able to distinguish between different {name}s. Please choose a unique name for your unique {kind}! Meow :3"
-                )
+                await channel.send(lang.PET_CLAIM_DUPLICATE.format(name=name, kind=kind))
                 continue
             collection.insert_one(
                 {"name": name, "type": pet_type, "url": url, "owner": member.id, "fightswon": 0, "fightslost": 0,
                  **stats, **extra_fields}
             )
-            await channel.send(f"{name} has been added to your collection!")
+            await channel.send(lang.PET_CLAIM_ADDED.format(name=name))
             await suggestion.clear_reactions()
             return
 
@@ -235,9 +231,9 @@ class Pet(commands.Cog, name="pet"):
         await dodge_msg.clear_reactions()
         if choice is None or _AGAIN_REACTIONS.get(choice) == 1:
             if choice is not None:
-                await channel.send(f"Alright, {member.display_name} let's stop looking for {config['noun']}s")
+                await channel.send(lang.PET_RETRY_STOP.format(name=member.display_name, noun=config["noun"]))
             return False
-        await channel.send(f"Okie dokie, find a new {config['noun']}!")
+        await channel.send(lang.PET_RETRY_YES.format(noun=config["noun"]))
         return True
 
     # ------------------------------------------------------------------ #
@@ -249,9 +245,7 @@ class Pet(commands.Cog, name="pet"):
         """Summon a pet by name, letting you interact via reactions."""
         pets = self.find_pets(context.author.id, pet_name)
         if not pets:
-            await context.send(
-                f"I couldn't find '{pet_name}' in your collections. Please check the spelling and try again."
-            )
+            await context.send(lang.PET_SUMMON_NOT_FOUND.format(pet_name=pet_name))
         elif len(pets) > 1:
             await self.ask_user_to_choose_pet(context, pets)
         else:
@@ -273,11 +267,11 @@ class Pet(commands.Cog, name="pet"):
         description = "\n".join(
             f"{emoji}: {pet['type'].title()} named {pet['name']}" for emoji, pet in zip(emoji_list, pets)
         )
-        embed = messages.embed(description, title="Looks like you have several pets with that name!", color=config_py.info)
+        embed = messages.embed(description, title=lang.PET_SUMMON_MULTIPLE_TITLE, color=config_py.info)
         choice_message = await context.send(embed=embed)
         emoji, _ = await messages.wait_for_reaction(self.bot, choice_message, emoji_list, member=context.author, timeout=10)
         if emoji is None:
-            await choice_message.edit(content="Oops, too slow! Please try the command again.", embed=None)
+            await choice_message.edit(content=lang.PET_SUMMON_TIMEOUT, embed=None)
             return
         await self.handle_pet_interaction(context, pets[emoji_list.index(emoji)])
 
@@ -293,17 +287,19 @@ class Pet(commands.Cog, name="pet"):
         elif emoji == "\U0001F4AA":  # gym
             await self.toggle_gym(pet["_id"], context.author.id, context.channel.id)
         else:
-            await context.send("This action is not recognized.")
+            await context.send(lang.PET_SUMMON_UNKNOWN_ACTION)
 
     def create_pet_embed(self, pet: dict) -> discord.Embed:
         """Build the summoned-pet embed with its stats and action prompts."""
         embed = messages.success(
-            f"Type: {pet['type'].title()}, Wins: {pet.get('fightswon', 0)}, Losses: {pet.get('fightslost', 0)}"
+            lang.PET_PET_STATUS.format(
+                type=pet["type"].title(), wins=pet.get("fightswon", 0), losses=pet.get("fightslost", 0)
+            )
         )
         embed.set_image(url=pet["url"])
-        embed.set_author(name=f"{pet['name']} at your service", icon_url=pet["url"])
+        embed.set_author(name=lang.PET_PET_AUTHOR.format(name=pet["name"]), icon_url=pet["url"])
         for emoji, action in config_py.pet_actions.items():
-            embed.add_field(name=f"React with {emoji}", value=action, inline=False)
+            embed.add_field(name=lang.PET_PET_ACTION_FIELD.format(emoji=emoji), value=action, inline=False)
         return embed
 
     # ------------------------------------------------------------------ #
@@ -314,9 +310,7 @@ class Pet(commands.Cog, name="pet"):
         cat = config_py.catcollection.find_one({"name": name, "owner": owner_id})
         dog = config_py.dogcollection.find_one({"name": name, "owner": owner_id})
         if cat and dog:
-            prompt = await context.send(
-                f"I found a cat and a dog with this name{collection_label}! Who would you want to fight? :eyes: "
-            )
+            prompt = await context.send(lang.PET_FIGHT_BOTH.format(label=collection_label))
             emoji, _ = await messages.wait_for_reaction(self.bot, prompt, config_py.pet_emoji, member=context.author, timeout=60)
             await prompt.clear_reactions()
             if emoji is None:
@@ -331,22 +325,21 @@ class Pet(commands.Cog, name="pet"):
         """Propose a duel between your pet and an opponent's pet."""
         attacker = await self._resolve_pet(context, mypet, context.author.id, collection_label="")
         if not attacker:
-            await context.send("I couldn't find any pets with that name in your collection :slight_frown: . Please check spelling and try again")
+            await context.send(lang.PET_FIGHT_NO_MY_PET)
             return
         defender = await self._resolve_pet(context, theirpet, opponent.id, collection_label=" in your opponents collection")
         if not defender:
-            await context.send("I couldn't find any pets with that name in your opponent's collection :angry: . Please check spelling and try again")
+            await context.send(lang.PET_FIGHT_NO_THEIR_PET)
             return
 
         duel_image = self._compose_duel_image(attacker["url"], defender["url"])
         embed = messages.success(
-            f"Duel has been proposed! \n {context.author.display_name}'s **{attacker['name']}** \n "
-            f"Strength: **{attacker['strength']}** \n Agility: **{attacker['agility']}** \n "
-            f"Intellect: **{attacker['intellect']}** \n Charm: **{attacker['charm']}** \n \n "
-            f"is challenging {opponent.display_name}'s **{defender['name']}** \n \n "
-            f"Strength: **{defender['strength']}** \n Agility: **{defender['agility']}** \n "
-            f"Intellect: **{defender['intellect']}** \n Charm: **{defender['charm']}** \n "
-            f"Will {opponent.display_name} accept the duel? "
+            lang.PET_FIGHT_PROPOSAL.format(
+                challenger=context.author.display_name, attacker=attacker["name"], a_str=attacker["strength"],
+                a_agi=attacker["agility"], a_int=attacker["intellect"], a_cha=attacker["charm"],
+                opponent=opponent.display_name, defender=defender["name"], d_str=defender["strength"],
+                d_agi=defender["agility"], d_int=defender["intellect"], d_cha=defender["charm"],
+            )
         )
         embed.set_image(url="attachment://duel.jpg")
         await context.send(file=duel_image, embed=embed)
@@ -379,28 +372,24 @@ class Pet(commands.Cog, name="pet"):
         object_id = bson.ObjectId(cat_id)
         if cat.get(flag, 0) == 1:
             cats.update_one({"_id": object_id}, {"$set": {flag: 0}})
-            await channel.send(disabled_msg(cat["name"]))
+            await channel.send(disabled_msg.format(name=cat["name"]))
             return
         if cats.count_documents({"owner": user_id, flag: 1}) >= 25:
-            await channel.send(full_msg(cat["name"]))
+            await channel.send(full_msg.format(name=cat["name"]))
             return
         cats.update_one({"_id": object_id}, {"$set": {flag: 1}})
-        await channel.send(enabled_msg(cat["name"]))
+        await channel.send(enabled_msg.format(name=cat["name"]))
 
     async def toggle_fishing(self, cat_id, user_id, channel_id) -> None:
         await self._toggle_flag(
             cat_id, user_id, channel_id, flag="FISHING",
-            enabled_msg=lambda n: f"{n} can now fish!",
-            disabled_msg=lambda n: f"You took away {n}'s fishing pole. They won't be able to fish anymore.",
-            full_msg=lambda n: f"You already have 25 cats that can fish. Toggle one off, and {n} will be able to join!",
+            enabled_msg=lang.PET_FISHING_ENABLED, disabled_msg=lang.PET_FISHING_DISABLED, full_msg=lang.PET_FISHING_FULL,
         )
 
     async def toggle_gym(self, cat_id, user_id, channel_id) -> None:
         await self._toggle_flag(
             cat_id, user_id, channel_id, flag="GYM",
-            enabled_msg=lambda n: f"{n} can now use the gym!",
-            disabled_msg=lambda n: f"{n} is no longer allowed to use the gym.",
-            full_msg=lambda n: f"You already have 25 cats using the gym. Toggle one off, and {n} will be able to join!",
+            enabled_msg=lang.PET_GYM_ENABLED, disabled_msg=lang.PET_GYM_DISABLED, full_msg=lang.PET_GYM_FULL,
         )
 
 
