@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 from discord.ext.commands import Context
 
 import config_py
+import lang
 
 # Colors for consistent visual logging
 COLOR_JOIN = 0x43b581     # Green
@@ -162,14 +163,14 @@ class Log(commands.Cog, name="log"):
 
                 now = int(discord.utils.utcnow().timestamp())
                 actor_str = f" by {data['actor']}" if data['actor'] != "Unknown" else ""
-                desc = f"👤 **{member.mention}** (`{member.id}`) roles updated{actor_str} - <t:{now}:f>"
-                
+                desc = lang.LOG_ROLE_UPDATE.format(mention=member.mention, id=member.id, actor=actor_str, now=now)
+
                 embed = discord.Embed(description=desc, color=COLOR_INFO)
-                
+
                 if final_added:
-                    embed.add_field(name="➕ Added", value=" ".join(final_added)[:1024], inline=False)
+                    embed.add_field(name=lang.LOG_ROLE_ADDED, value=" ".join(final_added)[:1024], inline=False)
                 if final_removed:
-                    embed.add_field(name="➖ Removed", value=" ".join(final_removed)[:1024], inline=False)
+                    embed.add_field(name=lang.LOG_ROLE_REMOVED, value=" ".join(final_removed)[:1024], inline=False)
                 
                 await self.send_log(channel, embed, "MEMBER_ROLE_UPDATE", guild)
 
@@ -215,7 +216,7 @@ class Log(commands.Cog, name="log"):
         guild_data["guild_name"] = context.guild.name
         log_channels[guild_id] = guild_data
         save_guilds(log_channels)
-        await context.send(f"✅ Standard server logs will now be sent to {channel.mention}.", ephemeral=True)
+        await context.send(lang.LOG_SET_CHANNEL.format(channel=channel.mention), ephemeral=True)
 
     @commands.hybrid_command(name="setdeletechannel", description="Set a separate channel for edit/deletion logs.")
     @commands.has_permissions(administrator=True)
@@ -230,7 +231,7 @@ class Log(commands.Cog, name="log"):
         guild_data["guild_name"] = context.guild.name
         log_channels[guild_id] = guild_data
         save_guilds(log_channels)
-        await context.send(f"✅ Message edit and deletion logs will now be sent to {channel.mention}.", ephemeral=True)
+        await context.send(lang.LOG_SET_DELETE_CHANNEL.format(channel=channel.mention), ephemeral=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -254,7 +255,7 @@ class Log(commands.Cog, name="log"):
         if not channel: return
 
         now = int(discord.utils.utcnow().timestamp())
-        desc = f"📥 **{member.mention}** (`{member.id}`) joined the server - <t:{now}:f>"
+        desc = lang.LOG_MEMBER_JOIN.format(mention=member.mention, id=member.id, now=now)
 
         # Check which invite was used
         used_invite = None
@@ -275,7 +276,7 @@ class Log(commands.Cog, name="log"):
         if used_invite:
             inviter = used_invite.inviter
             inviter_text = f"**{inviter.name}** (`{inviter.id}`)" if inviter else "Unknown"
-            embed.add_field(name="📨 Invite Used", value=f"`{used_invite.code}` by {inviter_text} (Uses: {used_invite.uses})", inline=False)
+            embed.add_field(name=lang.LOG_INVITE_USED, value=lang.LOG_INVITE_USED_VALUE.format(code=used_invite.code, inviter=inviter_text, uses=used_invite.uses), inline=False)
 
         await self.send_log(channel, embed, "MEMBER_JOIN", member.guild)
 
@@ -297,10 +298,10 @@ class Log(commands.Cog, name="log"):
         if kick_entry:
             actor = kick_entry.user.mention if kick_entry.user else "Unknown"
             reason = kick_entry.reason or "No reason provided"
-            desc = f"👢 **{member.mention}** was kicked by {actor} - <t:{now}:f>\n**Reason:** {reason}"
+            desc = lang.LOG_MEMBER_KICK.format(mention=member.mention, actor=actor, now=now, reason=reason)
             event_type = "MEMBER_KICK"
         else:
-            desc = f"📤 **{member.mention}** left the server - <t:{now}:f>"
+            desc = lang.LOG_MEMBER_LEAVE.format(mention=member.mention, now=now)
             event_type = "MEMBER_LEAVE"
 
         embed = discord.Embed(description=desc, color=COLOR_LEAVE)
@@ -308,7 +309,7 @@ class Log(commands.Cog, name="log"):
         
         roles = [role.mention for role in member.roles if role.name != "@everyone"]
         if roles:
-            embed.add_field(name="Roles Held", value=" ".join(roles)[:1024], inline=False)
+            embed.add_field(name=lang.LOG_ROLES_HELD, value=" ".join(roles)[:1024], inline=False)
 
         await self.send_log(channel, embed, event_type, member.guild)
 
@@ -324,7 +325,7 @@ class Log(commands.Cog, name="log"):
         actor = ban_entry.user.mention if ban_entry and ban_entry.user else "Unknown"
         reason = ban_entry.reason if ban_entry and ban_entry.reason else "No reason provided"
         
-        desc = f"🔨 **{user.mention}** was banned by {actor} - <t:{now}:f>\n**Reason:** {reason}"
+        desc = lang.LOG_MEMBER_BAN.format(mention=user.mention, actor=actor, now=now, reason=reason)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url if user.display_avatar else None)
         
@@ -341,7 +342,7 @@ class Log(commands.Cog, name="log"):
         
         actor = unban_entry.user.mention if unban_entry and unban_entry.user else "Unknown"
         
-        desc = f"🔓 **{user.mention}** was unbanned by {actor} - <t:{now}:f>"
+        desc = lang.LOG_MEMBER_UNBAN.format(mention=user.mention, actor=actor, now=now)
         embed = discord.Embed(description=desc, color=COLOR_JOIN)
         embed.set_author(name=f"{user.name} ({user.id})", icon_url=user.display_avatar.url if user.display_avatar else None)
         
@@ -379,7 +380,7 @@ class Log(commands.Cog, name="log"):
             old_nick = before.nick if before.nick else before.name
             new_nick = after.nick if after.nick else after.name
             
-            desc = f"✏️ **{after.mention}** (`{after.id}`) nickname changed by {actor} - <t:{now}:f>\n\n**From:** `{old_nick}`\n**To:** `{new_nick}`"
+            desc = lang.LOG_NICK_CHANGE.format(mention=after.mention, id=after.id, actor=actor, now=now, old=old_nick, new=new_nick)
             embed = discord.Embed(description=desc, color=COLOR_INFO)
             await self.send_log(channel, embed, "MEMBER_NICK_UPDATE", before.guild)
 
@@ -391,11 +392,11 @@ class Log(commands.Cog, name="log"):
 
             if after.current_timeout:
                 timeout_until = int(after.current_timeout.timestamp())
-                desc = f"⏳ **{after.mention}** (`{after.id}`) was timed out by {actor} - <t:{now}:f>\n**Until:** <t:{timeout_until}:f>\n**Reason:** {reason}"
+                desc = lang.LOG_TIMEOUT_ADD.format(mention=after.mention, id=after.id, actor=actor, now=now, until=timeout_until, reason=reason)
                 color = COLOR_DELETE
                 event_type = "MEMBER_TIMEOUT_ADD"
             else:
-                desc = f"⌛ **{after.mention}** (`{after.id}`) timeout removed by {actor} - <t:{now}:f>\n**Reason:** {reason}"
+                desc = lang.LOG_TIMEOUT_REMOVE.format(mention=after.mention, id=after.id, actor=actor, now=now, reason=reason)
                 color = COLOR_JOIN
                 event_type = "MEMBER_TIMEOUT_REMOVE"
                 
@@ -419,7 +420,7 @@ class Log(commands.Cog, name="log"):
         rule_name = execution.rule.name if getattr(execution, "rule", None) else "Unknown Rule"
         action_type = execution.action.type.name.replace("_", " ").title() if getattr(execution, "action", None) else "Unknown Action"
         
-        desc = f"🛡️ **AutoMod Executed:** {action_type} on **{user_mention}** (`{user_id}`) - <t:{now}:f>\n**Rule:** `{rule_name}`"
+        desc = lang.LOG_AUTOMOD.format(action=action_type, mention=user_mention, id=user_id, now=now, rule=rule_name)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         
         if getattr(execution, "matched_keyword", None):
@@ -469,8 +470,8 @@ class Log(commands.Cog, name="log"):
         max_age = format_age(invite.max_age)
         max_uses = "Infinite" if invite.max_uses == 0 else invite.max_uses
         
-        desc = f"✉️ **Invite Created** by {inviter} in {invite.channel.mention} - <t:{now}:f>\n**Code:** `{invite.code}` | **Age:** {max_age} | **Uses:** {max_uses}"
-        
+        desc = lang.LOG_INVITE_CREATE.format(inviter=inviter, channel=invite.channel.mention, now=now, code=invite.code, age=max_age, uses=max_uses)
+
         embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "INVITE_CREATE", invite.guild)
 
@@ -483,7 +484,7 @@ class Log(commands.Cog, name="log"):
         entry = await self._get_audit_entry(invite.guild, discord.AuditLogAction.invite_delete)
         actor_str = f" by **{entry.user.name}**" if entry and entry.user else ""
         
-        desc = f"🗑️ **Invite Deleted:** `{invite.code}`{actor_str} - <t:{now}:f>\n**Channel:** {invite.channel.mention if invite.channel else 'Unknown'}"
+        desc = lang.LOG_INVITE_DELETE.format(code=invite.code, actor=actor_str, now=now, channel=invite.channel.mention if invite.channel else "Unknown")
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "INVITE_DELETE", invite.guild)
 
@@ -500,8 +501,8 @@ class Log(commands.Cog, name="log"):
         if not channel: return
 
         now = int(discord.utils.utcnow().timestamp())
-        desc = f"✏️ **{before.author.mention}** (`{before.author.id}`) edited a message in {before.channel.mention} - <t:{now}:f> [Jump]({after.jump_url})"
-        
+        desc = lang.LOG_MESSAGE_EDIT.format(mention=before.author.mention, id=before.author.id, channel=before.channel.mention, now=now, jump=after.jump_url)
+
         embed = discord.Embed(description=desc, color=COLOR_EDIT)
         embed.add_field(name="Before", value=self.truncate(before.content) or "*[Empty]*", inline=False)
         embed.add_field(name="After", value=self.truncate(after.content) or "*[Empty]*", inline=False)
@@ -527,8 +528,8 @@ class Log(commands.Cog, name="log"):
             pass
 
         now = int(discord.utils.utcnow().timestamp())
-        deleter_text = f" (Deleted by {deleter.mention})" if deleter and deleter.id != message.author.id else ""
-        desc = f"🗑️ **{message.author.mention}** (`{message.author.id}`) message deleted in {message.channel.mention}{deleter_text} - <t:{now}:f>"
+        deleter_text = lang.LOG_DELETED_BY.format(mention=deleter.mention) if deleter and deleter.id != message.author.id else ""
+        desc = lang.LOG_MESSAGE_DELETE.format(mention=message.author.mention, id=message.author.id, channel=message.channel.mention, deleter=deleter_text, now=now)
 
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         
@@ -555,7 +556,7 @@ class Log(commands.Cog, name="log"):
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         now = int(discord.utils.utcnow().timestamp())
         
-        desc = f"🧹 **Bulk Delete:** {len(messages)} messages purged in {first_msg.channel.mention}{actor_str} - <t:{now}:f>"
+        desc = lang.LOG_BULK_DELETE.format(count=len(messages), channel=first_msg.channel.mention, actor=actor_str, now=now)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(log_channel, embed, "MESSAGE_BULK_DELETE", first_msg.guild)
 
@@ -572,8 +573,8 @@ class Log(commands.Cog, name="log"):
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
         now = int(discord.utils.utcnow().timestamp())
-        desc = f"🏷️ **Role Created:** {role.mention} (`{role.name}`){actor_str} - <t:{now}:f>"
-        
+        desc = lang.LOG_ROLE_CREATE.format(mention=role.mention, name=role.name, actor=actor_str, now=now)
+
         embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "ROLE_CREATE", role.guild)
 
@@ -586,8 +587,8 @@ class Log(commands.Cog, name="log"):
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
         now = int(discord.utils.utcnow().timestamp())
-        desc = f"🗑️ **Role Deleted:** `{role.name}`{actor_str} - <t:{now}:f>"
-        
+        desc = lang.LOG_ROLE_DELETE.format(name=role.name, actor=actor_str, now=now)
+
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "ROLE_DELETE", role.guild)
 
@@ -611,7 +612,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             now = int(discord.utils.utcnow().timestamp())
             
-            desc = f"✏️ **Role Updated:** {after.mention}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
+            desc = lang.LOG_ROLE_EDIT.format(mention=after.mention, actor=actor_str, now=now, changes="\n".join(changes))
             embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "ROLE_UPDATE", before.guild)
 
@@ -632,7 +633,7 @@ class Log(commands.Cog, name="log"):
         entity = "Category" if is_cat else "Channel"
         display = channel.name if is_cat else channel.mention
 
-        desc = f"📁 **{entity} Created:** {display}{actor_str} - <t:{now}:f>"
+        desc = lang.LOG_CHANNEL_CREATE.format(entity=entity, display=display, actor=actor_str, now=now)
         embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(log_channel, embed, "CHANNEL_CREATE", channel.guild)
 
@@ -647,7 +648,7 @@ class Log(commands.Cog, name="log"):
         now = int(discord.utils.utcnow().timestamp())
         entity = "Category" if channel.type == discord.ChannelType.category else "Channel"
 
-        desc = f"🗑️ **{entity} Deleted:** `#{channel.name}`{actor_str} - <t:{now}:f>"
+        desc = lang.LOG_CHANNEL_DELETE.format(entity=entity, name=channel.name, actor=actor_str, now=now)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(log_channel, embed, "CHANNEL_DELETE", channel.guild)
 
@@ -677,7 +678,7 @@ class Log(commands.Cog, name="log"):
             entity = "Category" if is_cat else "Channel"
             display = after.name if is_cat else after.mention
 
-            desc = f"✏️ **{entity} Updated:** {display}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
+            desc = lang.LOG_CHANNEL_EDIT.format(entity=entity, display=display, actor=actor_str, now=now, changes="\n".join(changes))
             embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(log_channel, embed, "CHANNEL_UPDATE", before.guild)
 
@@ -692,7 +693,7 @@ class Log(commands.Cog, name="log"):
         now = int(discord.utils.utcnow().timestamp())
         
         actor_str = f" by {thread.owner.mention}" if thread.owner else ""
-        desc = f"🧵 **Thread Created:** {thread.mention} (`{thread.name}`){actor_str} - <t:{now}:f>\n**Parent:** {thread.parent.mention}"
+        desc = lang.LOG_THREAD_CREATE.format(mention=thread.mention, name=thread.name, actor=actor_str, now=now, parent=thread.parent.mention)
         embed = discord.Embed(description=desc, color=COLOR_CREATE)
         await self.send_log(channel, embed, "THREAD_CREATE", thread.guild)
 
@@ -705,7 +706,7 @@ class Log(commands.Cog, name="log"):
         entry = await self._get_audit_entry(thread.guild, discord.AuditLogAction.thread_delete, thread.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        desc = f"🗑️ **Thread Deleted:** `#{thread.name}`{actor_str} - <t:{now}:f>\n**Parent:** {thread.parent.mention}"
+        desc = lang.LOG_THREAD_DELETE.format(name=thread.name, actor=actor_str, now=now, parent=thread.parent.mention)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "THREAD_DELETE", thread.guild)
 
@@ -727,7 +728,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             now = int(discord.utils.utcnow().timestamp())
             
-            desc = f"✏️ **Thread Updated:** {after.mention}{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
+            desc = lang.LOG_THREAD_EDIT.format(mention=after.mention, actor=actor_str, now=now, changes="\n".join(changes))
             embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "THREAD_UPDATE", before.guild)
 
@@ -744,15 +745,15 @@ class Log(commands.Cog, name="log"):
         # Channel Join / Leave / Move
         if before.channel != after.channel:
             if before.channel is None and after.channel is not None:
-                desc = f"🎙️ **{member.mention}** (`{member.id}`) joined {after.channel.mention} - <t:{now}:f>"
+                desc = lang.LOG_VOICE_JOIN.format(mention=member.mention, id=member.id, channel=after.channel.mention, now=now)
                 color = COLOR_JOIN
                 event_type = "VOICE_JOIN"
             elif before.channel is not None and after.channel is None:
-                desc = f"🎙️ **{member.mention}** (`{member.id}`) left {before.channel.mention} - <t:{now}:f>"
+                desc = lang.LOG_VOICE_LEAVE.format(mention=member.mention, id=member.id, channel=before.channel.mention, now=now)
                 color = COLOR_LEAVE
                 event_type = "VOICE_LEAVE"
             else:
-                desc = f"🎙️ **{member.mention}** (`{member.id}`) moved from {before.channel.mention} to {after.channel.mention} - <t:{now}:f>"
+                desc = lang.LOG_VOICE_MOVE.format(mention=member.mention, id=member.id, before=before.channel.mention, after=after.channel.mention, now=now)
                 color = COLOR_INFO
                 event_type = "VOICE_MOVE"
                 
@@ -764,25 +765,25 @@ class Log(commands.Cog, name="log"):
             entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.member_update, member.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             action = "server muted" if after.mute else "server unmuted"
-            desc = f"🔇 **{member.mention}** (`{member.id}`) was {action} by {actor} in {after.channel.mention} - <t:{now}:f>"
+            desc = lang.LOG_VOICE_MUTE.format(mention=member.mention, id=member.id, action=action, actor=actor, channel=after.channel.mention, now=now)
             await self.send_log(channel, discord.Embed(description=desc, color=COLOR_EDIT if after.mute else COLOR_INFO), "VOICE_MUTE", member.guild)
             
         if before.deaf != after.deaf:
             entry = await self._get_audit_entry(member.guild, discord.AuditLogAction.member_update, member.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             action = "server deafened" if after.deaf else "server undeafened"
-            desc = f"🎧 **{member.mention}** (`{member.id}`) was {action} by {actor} in {after.channel.mention} - <t:{now}:f>"
+            desc = lang.LOG_VOICE_DEAFEN.format(mention=member.mention, id=member.id, action=action, actor=actor, channel=after.channel.mention, now=now)
             await self.send_log(channel, discord.Embed(description=desc, color=COLOR_EDIT if after.deaf else COLOR_INFO), "VOICE_DEAFEN", member.guild)
 
         # Self Streaming / Video
         if before.self_stream != after.self_stream:
             action = "started" if after.self_stream else "stopped"
-            desc = f"📺 **{member.mention}** (`{member.id}`) {action} streaming in {after.channel.mention} - <t:{now}:f>"
+            desc = lang.LOG_VOICE_STREAM.format(mention=member.mention, id=member.id, action=action, channel=after.channel.mention, now=now)
             await self.send_log(channel, discord.Embed(description=desc, color=COLOR_INFO), "VOICE_STREAM", member.guild)
 
         if before.self_video != after.self_video:
             action = "turned on" if after.self_video else "turned off"
-            desc = f"📷 **{member.mention}** (`{member.id}`) {action} their camera in {after.channel.mention} - <t:{now}:f>"
+            desc = lang.LOG_VOICE_CAMERA.format(mention=member.mention, id=member.id, action=action, channel=after.channel.mention, now=now)
             await self.send_log(channel, discord.Embed(description=desc, color=COLOR_INFO), "VOICE_CAMERA", member.guild)
 
     #############################################
@@ -806,14 +807,14 @@ class Log(commands.Cog, name="log"):
             entry = await self._get_audit_entry(guild, discord.AuditLogAction.emoji_create)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in added:
-                embed = discord.Embed(description=f"😀 **Emoji Created:** {e} (`{e.name}`){actor_str} - <t:{now}:f>", color=COLOR_CREATE)
+                embed = discord.Embed(description=lang.LOG_EMOJI_CREATE.format(emoji=e, name=e.name, actor=actor_str, now=now), color=COLOR_CREATE)
                 await self.send_log(channel, embed, "EMOJI_CREATE", guild)
             
         if removed:
             entry = await self._get_audit_entry(guild, discord.AuditLogAction.emoji_delete)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in removed:
-                embed = discord.Embed(description=f"🗑️ **Emoji Deleted:** `{e.name}`{actor_str} - <t:{now}:f>", color=COLOR_DELETE)
+                embed = discord.Embed(description=lang.LOG_EMOJI_DELETE.format(name=e.name, actor=actor_str, now=now), color=COLOR_DELETE)
                 await self.send_log(channel, embed, "EMOJI_DELETE", guild)
             
         if edited:
@@ -821,7 +822,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for e in edited:
                 old_e = before_dict[e.id]
-                embed = discord.Embed(description=f"✏️ **Emoji Updated:** {e}{actor_str} - <t:{now}:f>\n\n**Name:** `{old_e.name}` ➔ `{e.name}`", color=COLOR_EDIT)
+                embed = discord.Embed(description=lang.LOG_EMOJI_EDIT.format(emoji=e, actor=actor_str, now=now, old=old_e.name, new=e.name), color=COLOR_EDIT)
                 await self.send_log(channel, embed, "EMOJI_UPDATE", guild)
 
     @commands.Cog.listener()
@@ -841,7 +842,7 @@ class Log(commands.Cog, name="log"):
             entry = await self._get_audit_entry(guild, discord.AuditLogAction.sticker_create)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in added:
-                desc = f"🌠 **Sticker Created:** `{s.name}`{actor_str} - <t:{now}:f>"
+                desc = lang.LOG_STICKER_CREATE.format(name=s.name, actor=actor_str, now=now)
                 embed = discord.Embed(description=desc, color=COLOR_CREATE)
                 embed.set_image(url=s.url)
                 await self.send_log(channel, embed, "STICKER_CREATE", guild)
@@ -850,7 +851,7 @@ class Log(commands.Cog, name="log"):
             entry = await self._get_audit_entry(guild, discord.AuditLogAction.sticker_delete)
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in removed:
-                desc = f"🗑️ **Sticker Deleted:** `{s.name}`{actor_str} - <t:{now}:f>"
+                desc = lang.LOG_STICKER_DELETE.format(name=s.name, actor=actor_str, now=now)
                 embed = discord.Embed(description=desc, color=COLOR_DELETE)
                 await self.send_log(channel, embed, "STICKER_DELETE", guild)
                 
@@ -859,7 +860,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             for s in edited:
                 old_s = before_dict[s.id]
-                desc = f"✏️ **Sticker Updated:** `{s.name}`{actor_str} - <t:{now}:f>\n\n**Name:** `{old_s.name}` ➔ `{s.name}`"
+                desc = lang.LOG_STICKER_EDIT.format(name=s.name, actor=actor_str, now=now, old=old_s.name, new=s.name)
                 embed = discord.Embed(description=desc, color=COLOR_EDIT)
                 await self.send_log(channel, embed, "STICKER_UPDATE", guild)
 
@@ -874,7 +875,7 @@ class Log(commands.Cog, name="log"):
         now = int(discord.utils.utcnow().timestamp())
         
         actor_str = f" by {event.creator.mention}" if event.creator else ""
-        desc = f"📅 **Event Created:** `{event.name}`{actor_str} - <t:{now}:f>"
+        desc = lang.LOG_EVENT_CREATE.format(name=event.name, actor=actor_str, now=now)
         embed = discord.Embed(description=desc, color=COLOR_CREATE)
         
         if event.channel:
@@ -893,7 +894,7 @@ class Log(commands.Cog, name="log"):
         entry = await self._get_audit_entry(event.guild, discord.AuditLogAction.guild_scheduled_event_delete, event.id)
         actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
         
-        desc = f"🗑️ **Event Deleted / Cancelled:** `{event.name}`{actor_str} - <t:{now}:f>"
+        desc = lang.LOG_EVENT_DELETE.format(name=event.name, actor=actor_str, now=now)
         embed = discord.Embed(description=desc, color=COLOR_DELETE)
         await self.send_log(channel, embed, "EVENT_DELETE", event.guild)
 
@@ -915,7 +916,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             now = int(discord.utils.utcnow().timestamp())
             
-            desc = f"✏️ **Event Updated:** `{after.name}`{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
+            desc = lang.LOG_EVENT_EDIT.format(name=after.name, actor=actor_str, now=now, changes="\n".join(changes))
             embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "EVENT_UPDATE", before.guild)
 
@@ -948,7 +949,7 @@ class Log(commands.Cog, name="log"):
             actor_str = f" by {entry.user.mention}" if entry and entry.user else ""
             now = int(discord.utils.utcnow().timestamp())
             
-            desc = f"⚙️ **Server Settings Updated**{actor_str} - <t:{now}:f>\n\n" + "\n".join(changes)
+            desc = lang.LOG_GUILD_UPDATE.format(actor=actor_str, now=now, changes="\n".join(changes))
             embed = discord.Embed(description=desc, color=COLOR_EDIT)
             await self.send_log(channel, embed, "GUILD_UPDATE", before)
 
