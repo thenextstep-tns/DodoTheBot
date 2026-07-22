@@ -242,18 +242,31 @@ class Pet(commands.Cog, name="pet"):
     @commands.hybrid_command(name="summon", description="Summon one of your pets (case-insensitive).")
     @checks.not_blacklisted()
     async def summon(self, context: Context, *, pet_name: str) -> None:
-        """Summon a pet by name, letting you interact via reactions."""
-        pets = self.find_pets(context.author.id, pet_name)
+        """Summon a pet by name.
+
+        An exact (case-insensitive) name wins outright, so ``summon Bank`` picks
+        the pet literally called "Bank" even when you also own "My bank account".
+        Only when nothing matches exactly do we fall back to partial matches, and
+        any genuine tie is resolved with a dropdown.
+        """
+        pets = self.find_pets(context.author.id, pet_name, exact=True) or self.find_pets(context.author.id, pet_name)
         if not pets:
             await context.send(lang.PET_SUMMON_NOT_FOUND.format(pet_name=pet_name))
-        elif len(pets) > 1:
-            await self.ask_user_to_choose_pet(context, pets)
-        else:
+        elif len(pets) == 1:
             await self.handle_pet_interaction(context, pets[0])
+        else:
+            await self.ask_user_to_choose_pet(context, pets, pet_name)
 
-    def find_pets(self, owner_id: int, pet_name: str) -> list:
-        """Find pets across all collections by case-insensitive partial name."""
-        regex = re.compile(pet_name, re.IGNORECASE)
+    def find_pets(self, owner_id: int, pet_name: str, *, exact: bool = False) -> list:
+        """Find an owner's pets by name across all collections (case-insensitive).
+
+        ``exact`` matches the whole name; otherwise any pet whose name contains
+        ``pet_name`` matches. The query is regex-escaped so names with special
+        characters are treated literally.
+        """
+        escaped = re.escape(pet_name)
+        pattern = f"^{escaped}$" if exact else escaped
+        regex = re.compile(pattern, re.IGNORECASE)
         found = []
         for pet_type, collection in self.pet_collections.items():
             for pet in collection.find({"owner": owner_id, "name": {"$regex": regex}}):
@@ -261,19 +274,22 @@ class Pet(commands.Cog, name="pet"):
                 found.append(pet)
         return found
 
-    async def ask_user_to_choose_pet(self, context: Context, pets: list) -> None:
-        """Disambiguate multiple name matches via reactions."""
-        emoji_list = list(config_py.pet_emoji.keys())[: len(pets)]
-        description = "\n".join(
-            f"{emoji}: {pet['type'].title()} named {pet['name']}" for emoji, pet in zip(emoji_list, pets)
+    async def ask_user_to_choose_pet(self, context: Context, pets: list, pet_name: str) -> None:
+        """Disambiguate multiple name matches with a select dropdown."""
+        options = [
+            discord.SelectOption(
+                label=pet["name"][:100], description=pet["type"].title(), value=str(index)
+            )
+            for index, pet in enumerate(pets[:25])  # Discord caps a select at 25 options.
+        ]
+        choice = await messages.prompt_select(
+            context, lang.PET_SUMMON_CHOOSE.format(pet_name=pet_name), options,
+            placeholder="Pick a pet", timeout=30,
         )
-        embed = messages.embed(description, title=lang.PET_SUMMON_MULTIPLE_TITLE, color=config_py.info)
-        choice_message = await context.send(embed=embed)
-        emoji, _ = await messages.wait_for_reaction(self.bot, choice_message, emoji_list, member=context.author, timeout=10)
-        if emoji is None:
-            await choice_message.edit(content=lang.PET_SUMMON_TIMEOUT, embed=None)
+        if choice is None:
+            await context.send(lang.PET_SUMMON_TIMEOUT)
             return
-        await self.handle_pet_interaction(context, pets[emoji_list.index(emoji)])
+        await self.handle_pet_interaction(context, pets[int(choice)])
 
     async def handle_pet_interaction(self, context: Context, pet: dict) -> None:
         """Show a summoned pet and react to fishing/gym toggle choices."""
