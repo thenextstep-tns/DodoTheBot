@@ -23,6 +23,7 @@ from discord.ext import commands, tasks
 
 import config_py
 import exceptions
+from config.guild_config import GuildConfigManager
 from helpers.logger import setup_logger
 
 # --------------------------------------------------------------------------- #
@@ -60,6 +61,15 @@ class DodoBot(commands.Bot):
         super().__init__(command_prefix=config["prefix"], intents=_build_intents(), help_command=None)
         self.logger = logger
         self.config = config
+        # Per-guild settings (channel/role IDs, …), backed by MongoDB with the
+        # config.guild constants as built-in defaults. Cogs and events read guild
+        # settings via ``self.guild_config.get(guild_id, "KEY")``.
+        self.guild_config = GuildConfigManager()
+
+    def guild_setting(self, guild: "discord.Guild | int | None", key: str):
+        """Convenience: resolve a per-guild setting from a guild object or ID."""
+        guild_id = guild.id if isinstance(guild, discord.Guild) else guild
+        return self.guild_config.get(guild_id, key)
 
     async def setup_hook(self) -> None:
         """Runs once before ``on_ready``: load cogs and sync the command tree."""
@@ -181,23 +191,25 @@ async def on_member_join(member: discord.Member) -> None:
     3. Restore saved roles from a previous membership (welcome-back) or post a
        first-time welcome.
     """
+    settings = bot.guild_config.get_all(member.guild.id)
     try:
-        trap_role_id = int(config_py.TRAP_ROLE_ID)
+        trap_role_id = int(settings["TRAP_ROLE_ID"])
         if any(role.id == trap_role_id for role in member.roles):
             await handle_trap_trigger(member)
             return
-    except (AttributeError, ValueError):
+    except (KeyError, TypeError, ValueError):
         pass
 
-    starter_roles = [member.guild.get_role(rid) for rid in config_py.starter_roles]
+    starter_roles = [member.guild.get_role(rid) for rid in settings["starter_roles"]]
     starter_roles = [role for role in starter_roles if role is not None]
     if starter_roles:
         await member.add_roles(*starter_roles, reason="Automatic starter roles on join")
 
-    channel = bot.get_channel(config_py.WAYSHRINE)
+    channel = bot.get_channel(settings["WAYSHRINE"])
     if not channel:
         return
 
+    rank_req, select_roles = settings["RANK_REQ"], settings["SELECT_ROLES"]
     saved = config_py.left_roles.find_one({"_id": member.id})
     if saved and "roles" in saved:
         restored = [member.guild.get_role(rid) for rid in saved["roles"]]
@@ -207,15 +219,15 @@ async def on_member_join(member: discord.Member) -> None:
         await channel.send(
             f"Welcome back, {member.mention}! I have saved your roles from the last visit and "
             f"reassigned them to you. If anything has changed, update your roles in "
-            f"<#{config_py.RANK_REQ}> and pick the trials you want to be notified about in "
-            f"<#{config_py.SELECT_ROLES}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
+            f"<#{rank_req}> and pick the trials you want to be notified about in "
+            f"<#{select_roles}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
         )
         config_py.left_roles.delete_one({"_id": member.id})
     else:
         await channel.send(
             f"Welcome, {member.mention}! If you want to raid with us, post your clearsies in "
-            f"<#{config_py.RANK_REQ}> and choose the trials you would like to join in "
-            f"<#{config_py.SELECT_ROLES}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
+            f"<#{rank_req}> and choose the trials you would like to join in "
+            f"<#{select_roles}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
         )
 
 
@@ -238,8 +250,8 @@ async def on_member_remove(member: discord.Member) -> None:
 async def on_member_update(before: discord.Member, after: discord.Member) -> None:
     """Catch users who gain the bot-trap role after joining (e.g. via onboarding)."""
     try:
-        trap_role_id = int(config_py.TRAP_ROLE_ID)
-    except (AttributeError, ValueError):
+        trap_role_id = int(bot.guild_config.get(after.guild.id, "TRAP_ROLE_ID"))
+    except (TypeError, ValueError):
         return
     if not any(r.id == trap_role_id for r in before.roles) and any(r.id == trap_role_id for r in after.roles):
         await handle_trap_trigger(after)
@@ -357,7 +369,10 @@ async def _invoke_command(context: commands.Context, name: str, **kwargs) -> Non
 @bot.event
 async def on_message_delete(message: discord.Message) -> None:
     """Log deleted messages to the audit channel."""
-    channel = bot.get_channel(config_py.LOG_CHANNEL)
+    guild_id = message.guild.id if message.guild else None
+    channel = bot.get_channel(bot.guild_config.get(guild_id, "LOG_CHANNEL"))
+    if not channel:
+        return
     embed = discord.Embed(
         title=f"{message.author.display_name} just deleted a message in #{message.channel}",
         description=f"**{message.content}**",
@@ -455,7 +470,7 @@ async def on_command_completion(context: commands.Context) -> None:
             "Date": date.today().isoformat(),
         }
     )
-    channel = bot.get_channel(config_py.LOG_CHANNEL)
+    channel = bot.get_channel(bot.guild_config.get(context.guild.id if context.guild else None, "LOG_CHANNEL"))
     if channel and context.guild:
         await channel.send(
             f"Executed {executed_command} command in {context.guild.name} "
@@ -548,16 +563,19 @@ async def get_tags_from_wordpress_api() -> dict:
 
 async def check_for_harmful_messages(message: discord.Message) -> None:
     """Delete (and, for invite+@everyone spam, ban) messages with restricted content."""
+    if message.guild is None:
+        return
+    settings = bot.guild_config.get_all(message.guild.id)
     if any(link in message.content for link in config_py.allowed_links):
         return
     if not any(s in message.content.lower() for s in config_py.restricted_strings):
         return
 
     member_roles = [role.id for role in message.author.roles]
-    if any(role in member_roles for role in config_py.allowed_roles):
+    if any(role in member_roles for role in settings["allowed_roles"]):
         return
 
-    log_channel = bot.get_channel(config_py.E4D_LOG)
+    log_channel = bot.get_channel(settings["E4D_LOG"])
     embed = discord.Embed(
         title="Oi!!",
         description=f"**User:** {message.author}\n**Content:** {message.content}",
@@ -624,7 +642,7 @@ async def add_role_to_user(member: discord.Member, role_id: int, message: discor
     if not role:
         return
     await member.add_roles(role)
-    log_channel = bot.get_channel(config_py.E4D_ROLE_LOG)
+    log_channel = bot.get_channel(bot.guild_config.get(message.guild.id, "E4D_ROLE_LOG"))
     await log_channel.send(f"Added {role.name} to {member.display_name} in {message.guild.name}.")
     if role_id == 807064226697969686:  # In-game guild role.
         moderators_channel = bot.get_channel(1060472908188749904)
@@ -643,7 +661,7 @@ async def remove_role_from_user(member: discord.Member, role_id: int, message: d
     if not role:
         return
     await member.remove_roles(role)
-    log_channel = bot.get_channel(config_py.E4D_ROLE_LOG)
+    log_channel = bot.get_channel(bot.guild_config.get(message.guild.id, "E4D_ROLE_LOG"))
     await log_channel.send(f"Removed {role.name} from {member.display_name} in {message.guild.name}.")
     temp_message = await message.channel.send(f"The {role.name} role has been removed from you, {member.display_name}.")
     await asyncio.sleep(5)
@@ -911,8 +929,9 @@ async def _run_sweetroll_event(message, sweetrolls, pumpkins, channel, spawn_emo
 
 async def check_sweetroll_chance(message: discord.Message) -> None:
     """Roll for a sweetroll/rhubarb/pumpkin spawn and, if it hits, launch the event."""
-    channel = bot.get_channel(config_py.PET_CHANNEL)
-    if random.randint(1, 100) <= config_py.SWEETROLL_NEEDED:
+    guild_id = message.guild.id if message.guild else None
+    channel = bot.get_channel(bot.guild_config.get(guild_id, "PET_CHANNEL"))
+    if not channel or random.randint(1, 100) <= config_py.SWEETROLL_NEEDED:
         return
 
     is_rhubarb = random.randint(1, 1000) >= 995
@@ -929,11 +948,12 @@ async def check_sweetroll_chance(message: discord.Message) -> None:
 async def handle_trap_trigger(member: discord.Member) -> None:
     """Ban a member who took the bot-trap role, alert admins, and allow a reaction-undo."""
     try:
-        alert_channel_id = int(config_py.ALERT_CHANNEL_ID)
-        ban_emoji = config_py.BAN_EMOJI
+        settings = bot.guild_config.get_all(member.guild.id)
+        alert_channel_id = int(settings["ALERT_CHANNEL_ID"])
+        ban_emoji = settings["BAN_EMOJI"]
         check_emoji = getattr(config_py, "CHECK_EMOJI", "✅")
         wait_duration = config_py.WAIT_DURATION
-    except AttributeError as error:
+    except (KeyError, TypeError, ValueError) as error:
         bot.logger.warning(f"Missing trap-listener config: {error}")
         return
 

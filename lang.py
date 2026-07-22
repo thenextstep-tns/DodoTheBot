@@ -721,3 +721,18 @@ PUMPKIN_REWARD_LOSERS = "\n**Losing team ({team}) consolation prize!**\n"
 PUMPKIN_REWARD_LOSER_LINE = "{mention} gains **{reward}kg** of pumpkin.\n"
 PUMPKIN_RANKS_HEADER = "**--- 🎃 Ranks Update 🎃 ---**"
 PUMPKIN_RANK_LINE = "{mention}: **{sign}{change} Reputation** ({reasons})"
+
+# ---------------------------------------------------------------------------
+# Server config (per-guild settings admin)
+# ---------------------------------------------------------------------------
+SERVERCONFIG_GUILD_ONLY = "This command can only be used inside a server."
+SERVERCONFIG_VIEW_TITLE = "Server settings for {guild}"
+SERVERCONFIG_VIEW_FOOTER = "● = customised for this server · ○ = using the default"
+SERVERCONFIG_UNKNOWN_KEY = "'{key}' is not a valid setting. Use `/serverconfig view` to see the available keys."
+SERVERCONFIG_BAD_VALUE = "'{value}' is not valid for **{key}** — expected {expected}."
+SERVERCONFIG_SET_OK = "**{key}** is now `{value}` for this server."
+SERVERCONFIG_RESET_OK = "**{key}** has been reset to its default (`{value}`) for this server."
+SERVERCONFIG_RESET_NOOP = "**{key}** was already using the default (`{value}`)."
+SERVERCONFIG_EXPECT_ID = "a channel/role ID (a whole number)"
+SERVERCONFIG_EXPECT_ID_LIST = "a list of IDs (numbers separated by spaces or commas)"
+SERVERCONFIG_EXPECT_EMOJI = "an emoji or short text"
