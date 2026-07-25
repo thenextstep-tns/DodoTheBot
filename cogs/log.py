@@ -385,13 +385,13 @@ class Log(commands.Cog, name="log"):
             await self.send_log(channel, embed, "MEMBER_NICK_UPDATE", before.guild)
 
         # Timeout changes
-        if before.current_timeout != after.current_timeout:
+        if before.timed_out_until != after.timed_out_until:
             entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_update, after.id)
             actor = entry.user.mention if entry and entry.user else "Unknown"
             reason = entry.reason if entry and entry.reason else "No reason provided"
 
-            if after.current_timeout:
-                timeout_until = int(after.current_timeout.timestamp())
+            if after.timed_out_until:
+                timeout_until = int(after.timed_out_until.timestamp())
                 desc = lang.LOG_TIMEOUT_ADD.format(mention=after.mention, id=after.id, actor=actor, now=now, until=timeout_until, reason=reason)
                 color = COLOR_DELETE
                 event_type = "MEMBER_TIMEOUT_ADD"
