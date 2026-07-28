@@ -13,6 +13,8 @@ players look up their per-stage setups in Discord.
 Both commands are hybrid. User-facing text lives in ``lang``.
 """
 
+import asyncio
+import time
 from datetime import datetime, timezone
 
 import discord
@@ -32,6 +34,11 @@ RAID_MANAGER_ROLES = {
 }
 
 _ACCENT = 0x9C84EF
+# /setups re-reads the sheet live so edits show up without re-importing. This
+# short cache only coalesces bursts (e.g. a whole team running it at once) so we
+# don't refetch the same sheet many times a second; edits appear within it.
+_REFRESH_TTL = 10.0
+_live_cache: dict[str, tuple[float, RaidData]] = {}
 
 
 def _can_manage(member: discord.Member) -> bool:
@@ -83,6 +90,30 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             {"guild_id": context.guild.id, "channel_id": context.channel.id, "active": True}
         )
 
+    async def _fresh_data(self, raid: dict) -> RaidData:
+        """Return the raid's current data, re-read live from the sheet.
+
+        Uses a short per-sheet cache to coalesce bursts. On a successful fetch the
+        stored snapshot is refreshed too; if the sheet is unreachable we fall back
+        to the last stored snapshot so ``/setups`` still works offline.
+        """
+        sheet_id = raid.get("sheet_id", "")
+        cached = _live_cache.get(sheet_id)
+        if cached and time.monotonic() - cached[0] < _REFRESH_TTL:
+            return cached[1]
+        try:
+            _, data = await asyncio.to_thread(load_raid, raid.get("sheet_url") or sheet_id)
+        except SheetError as error:
+            self.bot.logger.warning(f"Live setups refresh failed for raid '{raid.get('name')}': {error}")
+            return RaidData.from_mongo(raid)
+
+        _live_cache[sheet_id] = (time.monotonic(), data)
+        self.raids.update_one(
+            {"_id": raid["_id"]},
+            {"$set": {**data.to_mongo(), "updated_at": datetime.now(timezone.utc)}},
+        )
+        return data
+
     @commands.hybrid_command(name="create_raid", description="Import a raid's gear plan from a Google Sheet (managers only).")
     @commands.guild_only()
     async def create_raid(self, context: Context, name: str, *, sheet: str) -> None:
@@ -117,6 +148,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             {"$set": doc, "$setOnInsert": {"created_at": now}},
             upsert=True,
         )
+        _live_cache.pop(sheet_id, None)   # force the next /setups to refetch
 
         embed = messages.success(
             lang.RAID_CREATED_BODY.format(
@@ -139,7 +171,8 @@ class RaidSetups(commands.Cog, name="raid_setups"):
         if not raid:
             await context.send(lang.RAID_SETUPS_NONE, ephemeral=True)
             return
-        data = RaidData.from_mongo(raid)
+        await context.defer()
+        data = await self._fresh_data(raid)   # re-read the sheet live each time
 
         if player:
             if not _can_manage(context.author):
