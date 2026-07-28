@@ -736,3 +736,28 @@ SERVERCONFIG_RESET_NOOP = "**{key}** was already using the default (`{value}`)."
 SERVERCONFIG_EXPECT_ID = "a channel/role ID (a whole number)"
 SERVERCONFIG_EXPECT_ID_LIST = "a list of IDs (numbers separated by spaces or commas)"
 SERVERCONFIG_EXPECT_EMOJI = "an emoji or short text"
+
+# ---------------------------------------------------------------------------
+# Raid setups (gear lookup imported from Google Sheets)
+# ---------------------------------------------------------------------------
+RAID_NO_PERMISSION = "You need the {roles} role to manage raids."
+RAID_GUILD_ONLY = "This command can only be used inside a server."
+RAID_IMPORT_FAILED = "Import failed: {reason}"
+RAID_CREATED_TITLE = "Raid imported: {name}"
+RAID_CREATED_BODY = "Bound to {channel}.\n**{players}** players · **{stages}** stages."
+RAID_CREATED_STAGES = "Stages"
+RAID_CREATED_WARNINGS = "Heads up"
+RAID_SETUPS_NONE = "No raid is set up in this channel yet. A raid manager can import one with `/create_raid`."
+RAID_SETUPS_PICK_RAID = "Which raid?"
+RAID_SETUPS_PICK_PLAYER = "Pick a player to see their setups:"
+RAID_SETUPS_PLAYER_PLACEHOLDER = "Select a player…"
+RAID_SETUPS_RAID_PLACEHOLDER = "Select a raid…"
+RAID_SETUPS_HEADER = "{name} — {role} {cls}"
+RAID_SETUPS_SLAYER = " · Slayer: {slayer}"
+RAID_SETUPS_TITLE = "{player} · {raid}"
+RAID_SETUPS_EMPTY_STAGE = "—"
+RAID_SETUPS_NOT_FOUND = "I couldn't find '{player}' in this raid."
+RAID_SETUPS_NOT_ON_ROSTER = (
+    "Your Discord tag isn't on this raid's roster, so I can't show your setups. "
+    "Ask a raid manager to add your Discord username (**{tag}**) to the sheet's Roster."
+)
