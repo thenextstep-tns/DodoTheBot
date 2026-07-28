@@ -83,6 +83,126 @@ def _render_lookup(data: RaidData, raid_name: str, player: str) -> discord.Embed
     return embed
 
 
+# --------------------------------------------------------------------------- #
+#  Group ("fight") view
+# --------------------------------------------------------------------------- #
+_TANK_ICON, _HEAL_ICON, _DPS_ICON, _OTHER_ICON = "🛡️", "⚕️", "⚔️", "▫️"
+_FIGHTS_PER_PAGE = 8          # ALL view: fights per page
+_EMBED_CHAR_BUDGET = 5900     # hard cap under Discord's 6000-char embed limit
+_FIELD_LIMIT = 1024           # Discord's per-field value limit
+
+
+def _role_icon(role: str) -> str:
+    """Role → icon: tanks get a shield, healers a staff, DDs crossed swords."""
+    r = (role or "").strip().upper()
+    if r in ("MT", "OT") or "TANK" in r:
+        return _TANK_ICON
+    if r.startswith("H") or "HEAL" in r:
+        return _HEAL_ICON
+    if r.startswith("D") or "DPS" in r:
+        return _DPS_ICON
+    return _OTHER_ICON
+
+
+def _fmt_gear(gear: dict[str, str], columns: list[str]) -> str:
+    return " · ".join(v for v in (gear.get(c, "") for c in columns) if v) or lang.RAID_SETUPS_EMPTY_STAGE
+
+
+def _group_line(entry: dict[str, str], gear: dict[str, str], bold: bool, columns: list[str]) -> str:
+    """One player's line in a fight's group view: role icon, name, gear."""
+    icon = _role_icon(entry.get("Role", ""))
+    name = entry.get("Name", "")
+    gear_text = _fmt_gear(gear, columns)
+    if bold:
+        return f"{icon} ⭐ **{name} — {gear_text}**"
+    return f"{icon} **{name}** — {gear_text}"
+
+
+def _fight_lines(data: RaidData, stage_name: str) -> list[str]:
+    return [_group_line(entry, gear, bold, data.columns) for entry, gear, bold in data.group(stage_name)]
+
+
+def _render_fight(data: RaidData, raid_name: str, stage_name: str) -> discord.Embed:
+    """A single fight, whole group, organised in roster order (tanks → heals → DDs)."""
+    description = "\n".join(_fight_lines(data, stage_name)) or lang.RAID_SETUPS_EMPTY_FIGHT
+    if len(description) > 4096:
+        description = description[:4093] + "…"
+    embed = discord.Embed(title=stage_name, description=description, color=_ACCENT)
+    embed.set_footer(text=raid_name)
+    return embed
+
+
+def _build_all_pages(data: RaidData, raid_name: str) -> list[discord.Embed]:
+    """One field per fight, chunked into pages (≤8 fights and within the char budget)."""
+    fields = []
+    for stage_name in data.stage_names:
+        value = "\n".join(_fight_lines(data, stage_name)) or lang.RAID_SETUPS_EMPTY_FIGHT
+        if len(value) > _FIELD_LIMIT:
+            value = value[: _FIELD_LIMIT - 1] + "…"
+        fields.append((stage_name, value))
+
+    pages: list[list[tuple[str, str]]] = []
+    current: list[tuple[str, str]] = []
+    current_chars = 0
+    for name, value in fields:
+        size = len(name) + len(value)
+        if current and (len(current) >= _FIGHTS_PER_PAGE or current_chars + size > _EMBED_CHAR_BUDGET):
+            pages.append(current)
+            current, current_chars = [], 0
+        current.append((name, value))
+        current_chars += size
+    if current:
+        pages.append(current)
+
+    embeds = []
+    for index, page in enumerate(pages, start=1):
+        embed = discord.Embed(title=lang.RAID_SETUPS_ALL_TITLE.format(raid=raid_name), color=_ACCENT)
+        for name, value in page:
+            embed.add_field(name=name, value=value, inline=False)
+        embed.set_footer(text=f"{raid_name} · page {index}/{len(pages)}")
+        embeds.append(embed)
+    return embeds or [discord.Embed(title=lang.RAID_SETUPS_ALL_TITLE.format(raid=raid_name),
+                                    description=lang.RAID_SETUPS_EMPTY_FIGHT, color=_ACCENT)]
+
+
+class _FightPager(discord.ui.View):
+    """Button pager for the ALL view; only the invoker can flip pages."""
+
+    def __init__(self, embeds: list[discord.Embed], author_id: int):
+        super().__init__(timeout=300)
+        self.embeds = embeds
+        self.author_id = author_id
+        self.index = 0
+        self._sync()
+
+    def _sync(self) -> None:
+        for child in self.children:
+            if child.custom_id == "raid_prev":
+                child.disabled = self.index == 0
+            elif child.custom_id == "raid_next":
+                child.disabled = self.index >= len(self.embeds) - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("This menu isn't yours — run `/setups` yourself.", ephemeral=True)
+            return False
+        return True
+
+    async def _show(self, interaction: discord.Interaction) -> None:
+        self._sync()
+        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+
+    @discord.ui.button(emoji="◀", style=discord.ButtonStyle.secondary, custom_id="raid_prev")
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.index = max(0, self.index - 1)
+        await self._show(interaction)
+
+    @discord.ui.button(emoji="▶", style=discord.ButtonStyle.secondary, custom_id="raid_next")
+    async def nxt(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.index = min(len(self.embeds) - 1, self.index + 1)
+        await self._show(interaction)
+
+
 class RaidSetups(commands.Cog, name="raid_setups"):
     """Import raid gear plans from Google Sheets and look them up in Discord."""
 
@@ -169,9 +289,12 @@ class RaidSetups(commands.Cog, name="raid_setups"):
 
     @commands.hybrid_command(name="setups", description="See your gear setups for this channel's raid.")
     @commands.guild_only()
-    @app_commands.describe(player="Raid managers only: look up another player by name.")
-    async def setups(self, context: Context, *, player: str = None) -> None:
-        """Show your own setups (matched by Discord tag), or a named player's (managers)."""
+    @app_commands.describe(
+        fight="Show the whole group for one fight, or ALL fights.",
+        player="Raid managers only: look up another player by name.",
+    )
+    async def setups(self, context: Context, fight: str = None, *, player: str = None) -> None:
+        """Your own setups (by Discord tag), a whole fight's group, or a named player (managers)."""
         raid = self._channel_raid(context)
         if not raid:
             await context.send(lang.RAID_SETUPS_NONE, ephemeral=True)
@@ -179,6 +302,23 @@ class RaidSetups(commands.Cog, name="raid_setups"):
         await context.defer()
         data = await self._fresh_data(raid)   # re-read the sheet live each time
 
+        # Group ("fight") view — the whole team for one fight, or every fight.
+        if fight:
+            if fight.strip().lower() == "all":
+                pages = _build_all_pages(data, raid["name"])
+                view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
+                await context.send(embed=pages[0], view=view)
+            else:
+                stage = data.stage(fight)
+                if stage is None:
+                    fights = ", ".join(data.stage_names) or "—"
+                    await context.send(lang.RAID_SETUPS_UNKNOWN_FIGHT.format(fight=fight, fights=fights), ephemeral=True)
+                    return
+                await context.send(embed=_render_fight(data, raid["name"], stage.name))
+            await self._send_roster_link(context, raid)
+            return
+
+        # Per-player view.
         if player:
             if not _can_manage(context.author):
                 await context.send(lang.RAID_SETUPS_LOOKUP_DENIED, ephemeral=True)
@@ -196,6 +336,27 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             target = entry["Name"]
 
         await context.send(embed=_render_lookup(data, raid["name"], target))
+        await self._send_roster_link(context, raid)
+
+    async def _send_roster_link(self, context: Context, raid: dict) -> None:
+        """Privately (ephemerally) DM-style send raid managers the full sheet link."""
+        if context.interaction is None or not _can_manage(context.author):
+            return
+        url = raid.get("sheet_url")
+        if url:
+            await context.interaction.followup.send(lang.RAID_ROSTER_LINK.format(url=url), ephemeral=True)
+
+    @setups.autocomplete("fight")
+    async def _setups_fight_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Suggest 'ALL' plus this raid's fight names."""
+        raid = self.raids.find_one(
+            {"guild_id": interaction.guild_id, "channel_id": interaction.channel_id, "active": True}
+        )
+        if not raid:
+            return []
+        names = ["ALL"] + [s.get("name", "") for s in raid.get("stages", []) if s.get("name")]
+        current = current.lower()
+        return [app_commands.Choice(name=n, value=n) for n in names if current in n.lower()][:25]
 
     @setups.autocomplete("player")
     async def _setups_player_autocomplete(self, interaction: discord.Interaction, current: str):

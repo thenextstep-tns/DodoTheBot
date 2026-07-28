@@ -103,6 +103,35 @@ class RaidData:
                 return row
         return None
 
+    @property
+    def stage_names(self) -> list[str]:
+        """Stage/pull names in sheet order."""
+        return [s.name for s in self.stages]
+
+    def stage(self, name: str) -> "Stage | None":
+        """Case-insensitive stage lookup by name."""
+        for s in self.stages:
+            if s.name.lower() == name.lower():
+                return s
+        return None
+
+    def group(self, stage_name: str) -> list[tuple[dict[str, str], dict[str, str], bool]]:
+        """Every roster player's gear for one stage, in roster order.
+
+        Returns ``[(roster_entry, {column: value}, bold), …]``; players with no
+        row for the stage are included with empty gear.
+        """
+        st = self.stage(stage_name)
+        if st is None:
+            return []
+        result = []
+        for entry in self.roster:
+            name = entry.get("Name", "")
+            values = st.rows.get(name) or _ci_get(st.rows, name) or {}
+            gear = {col: values.get(col, "") for col in self.columns}
+            result.append((entry, gear, bool(values.get(_BOLD_KEY))))
+        return result
+
     def lookup(self, name: str) -> list[tuple[str, dict[str, str], bool]]:
         """Return ``[(stage_name, {column: value}, bold), …]`` for one player.
 
