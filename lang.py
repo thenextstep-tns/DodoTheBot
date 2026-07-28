@@ -761,3 +761,4 @@ RAID_SETUPS_NOT_ON_ROSTER = (
     "Your Discord tag isn't on this raid's roster, so I can't show your setups. "
     "Ask a raid manager to add your Discord username (**{tag}**) to the sheet's Roster."
 )
+RAID_SETUPS_LOOKUP_DENIED = "Only raid managers can look up other players. Run `/setups` to see your own."

@@ -31,6 +31,21 @@ ROSTER_TAB = "Roster"
 SETUPS_TAB = "Setups"
 # First-column header labels that mark a stage block's header row (lower-cased).
 _HEADER_LABELS = {"player", "role", "name"}
+# Header labels for the "bold this setup" checkbox column (lower-cased).
+_BOLD_LABELS = {"★", "✓", "✔", "bold", "highlight", "current", "active", "show"}
+# Reserved key used to carry a row's bold flag inside its values dict.
+_BOLD_KEY = "__bold__"
+
+
+def _truthy(value) -> bool:
+    """Interpret a checkbox cell (bool, TRUE/FALSE text, 1/0, x, ✓) as a boolean."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "1", "yes", "y", "x", "✓", "✔", "checked"}
 
 # Roster columns the bot understands (matched case-insensitively by header name).
 # "Discord" holds the player's Discord username/tag and gates the /setups command.
@@ -88,16 +103,18 @@ class RaidData:
                 return row
         return None
 
-    def lookup(self, name: str) -> list[tuple[str, dict[str, str]]]:
-        """Return ``[(stage_name, {column: value}), …]`` for one player across all stages.
+    def lookup(self, name: str) -> list[tuple[str, dict[str, str], bool]]:
+        """Return ``[(stage_name, {column: value}, bold), …]`` for one player.
 
-        Stages where the player has no row are included with empty values, so the
-        pull list stays complete.
+        ``bold`` is the stage's checkbox flag for that player. Stages where the
+        player has no row are included with empty values, so the pull list stays
+        complete.
         """
         result = []
         for stage in self.stages:
             values = stage.rows.get(name) or _ci_get(stage.rows, name) or {}
-            result.append((stage.name, {col: values.get(col, "") for col in self.columns}))
+            row = {col: values.get(col, "") for col in self.columns}
+            result.append((stage.name, row, bool(values.get(_BOLD_KEY))))
         return result
 
 
@@ -253,11 +270,13 @@ def _parse_setups(ws, roster: list[dict[str, str]]):
 
     current: Stage | None = None       # active titled block (None between blocks)
     header: list[str] | None = None    # its column header row
+    flag_cols: list[int] = []          # checkbox column indices for the current block
     skipping = False                   # inside an untitled (template placeholder) block
     row_index = 0                      # player position within the current block
 
     for raw in ws.iter_rows(values_only=True):
         cells = _cells(raw)
+        raw_values = list(raw)         # keep original types (bool for checkboxes)
 
         if not any(cells):             # blank row ends the current block
             current, header, skipping = None, None, False
@@ -268,10 +287,11 @@ def _parse_setups(ws, roster: list[dict[str, str]]):
         # Header row of a block.
         if first.lower() in _HEADER_LABELS:
             header = cells
+            flag_cols = [i for i in range(1, len(cells)) if cells[i].lower() in _BOLD_LABELS]
             if current is None:
                 skipping = True        # header with no title above -> dormant block
             else:
-                current.columns = [c for c in cells[1:] if c]
+                current.columns = [c for i, c in enumerate(cells[1:], start=1) if c and i not in flag_cols]
                 for col in current.columns:
                     if col not in union_columns:
                         union_columns.append(col)
@@ -290,8 +310,11 @@ def _parse_setups(ws, roster: list[dict[str, str]]):
             values = {}
             for col in range(1, len(header)):
                 col_name = header[col]
-                if col_name:
+                if col_name and col not in flag_cols:
                     values[col_name] = cells[col] if col < len(cells) else ""
+            values[_BOLD_KEY] = any(
+                _truthy(raw_values[i]) for i in flag_cols if i < len(raw_values)
+            )
             if player:
                 current.rows[player] = values
             row_index += 1
