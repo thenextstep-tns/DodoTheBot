@@ -109,13 +109,16 @@ def _fmt_gear(gear: dict[str, str], columns: list[str]) -> str:
 
 
 def _group_line(entry: dict[str, str], gear: dict[str, str], bold: bool, columns: list[str]) -> str:
-    """One player's line in a fight's group view: role icon, name, gear."""
+    """One player's line in a fight's group view: role icon, name, gear.
+
+    No markdown bold here — in the group view only the fight name (the embed
+    field name / title) is bold. A ★-checked row just gets a ⭐ marker.
+    """
     icon = _role_icon(entry.get("Role", ""))
     name = entry.get("Name", "")
     gear_text = _fmt_gear(gear, columns)
-    if bold:
-        return f"{icon} ⭐ **{name} — {gear_text}**"
-    return f"{icon} **{name}** — {gear_text}"
+    star = "⭐ " if bold else ""
+    return f"{icon} {star}{name} — {gear_text}"
 
 
 def _fight_lines(data: RaidData, stage_name: str) -> list[str]:
