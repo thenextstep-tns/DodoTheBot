@@ -63,13 +63,18 @@ def _render_lookup(data: RaidData, raid_name: str, player: str) -> discord.Embed
     if entry.get("Slayer"):
         identity = f"{identity} · Slayer: {entry['Slayer']}" if identity else f"Slayer: {entry['Slayer']}"
 
+    # Header: identity, then the roster's Notes for this player (shown once, on top).
+    header_lines = [identity] if identity else []
+    if entry.get("Notes"):
+        header_lines.append(f"📝 {entry['Notes']}")
+
     lines = []
     for stage, values, bold in data.lookup(player):
         gear = " · ".join(v for v in (values.get(c, "") for c in data.columns) if v) or lang.RAID_SETUPS_EMPTY_STAGE
         # Monospace "pill" for the stage; the whole gear line goes bold when ticked.
         lines.append(f"`{stage}`  ⭐ **{gear}**" if bold else f"`{stage}`  {gear}")
 
-    description = (f"{identity}\n\n" if identity else "") + "\n".join(lines)
+    description = ("\n".join(header_lines) + "\n\n" if header_lines else "") + "\n".join(lines)
     if len(description) > 4096:
         description = description[:4093] + "…"
 
