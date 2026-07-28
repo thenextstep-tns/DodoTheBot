@@ -108,21 +108,26 @@ def _fmt_gear(gear: dict[str, str], columns: list[str]) -> str:
     return " · ".join(v for v in (gear.get(c, "") for c in columns) if v) or lang.RAID_SETUPS_EMPTY_STAGE
 
 
-def _group_line(entry: dict[str, str], gear: dict[str, str], bold: bool, columns: list[str]) -> str:
-    """One player's line in a fight's group view: role icon, name, gear.
-
-    No markdown bold here — in the group view only the fight name (the embed
-    field name / title) is bold. A ★-checked row just gets a ⭐ marker.
-    """
+def _group_line(entry: dict[str, str], gear: dict[str, str], columns: list[str]) -> str:
+    """One player's line in a fight's group view: role icon, bold name, normal gear."""
     icon = _role_icon(entry.get("Role", ""))
     name = entry.get("Name", "")
     gear_text = _fmt_gear(gear, columns)
-    star = "⭐ " if bold else ""
-    return f"{icon} {star}{name} — {gear_text}"
+    return f"{icon} **{name}** — {gear_text}"
 
 
 def _fight_lines(data: RaidData, stage_name: str) -> list[str]:
-    return [_group_line(entry, gear, bold, data.columns) for entry, gear, bold in data.group(stage_name)]
+    return [_group_line(entry, gear, data.columns) for entry, gear, _bold in data.group(stage_name)]
+
+
+def _stage_starred(data: RaidData, stage_name: str) -> bool:
+    """A fight is 'starred' (a boss) when any of its rows are ★-checked."""
+    return any(bold for _entry, _gear, bold in data.group(stage_name))
+
+
+def _fight_title(data: RaidData, stage_name: str) -> str:
+    """The fight's display name, with a ⭐ next to it when it's a starred fight."""
+    return f"⭐ {stage_name}" if _stage_starred(data, stage_name) else stage_name
 
 
 def _render_fight(data: RaidData, raid_name: str, stage_name: str) -> discord.Embed:
@@ -130,7 +135,7 @@ def _render_fight(data: RaidData, raid_name: str, stage_name: str) -> discord.Em
     description = "\n".join(_fight_lines(data, stage_name)) or lang.RAID_SETUPS_EMPTY_FIGHT
     if len(description) > 4096:
         description = description[:4093] + "…"
-    embed = discord.Embed(title=stage_name, description=description, color=_ACCENT)
+    embed = discord.Embed(title=_fight_title(data, stage_name), description=description, color=_ACCENT)
     embed.set_footer(text=raid_name)
     return embed
 
@@ -142,7 +147,7 @@ def _build_all_pages(data: RaidData, raid_name: str) -> list[discord.Embed]:
         value = "\n".join(_fight_lines(data, stage_name)) or lang.RAID_SETUPS_EMPTY_FIGHT
         if len(value) > _FIELD_LIMIT:
             value = value[: _FIELD_LIMIT - 1] + "…"
-        fields.append((stage_name, value))
+        fields.append((_fight_title(data, stage_name), value))
 
     pages: list[list[tuple[str, str]]] = []
     current: list[tuple[str, str]] = []
