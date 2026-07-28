@@ -29,7 +29,8 @@ import requests
 
 ROSTER_TAB = "Roster"
 SETUPS_TAB = "Setups"
-PLAYER_HEADER = "player"  # marks the header row inside a stage block (lower-cased)
+# First-column header labels that mark a stage block's header row (lower-cased).
+_HEADER_LABELS = {"player", "role", "name"}
 
 # Roster columns the bot understands (matched case-insensitively by header name).
 # "Discord" holds the player's Discord username/tag and gates the /setups command.
@@ -176,7 +177,7 @@ def parse_workbook(workbook: openpyxl.Workbook) -> RaidData:
 
     data = RaidData()
     data.roster = _parse_roster(workbook[tabs[ROSTER_TAB.lower()]])
-    data.stages, data.columns, stage_warnings = _parse_setups(workbook[tabs[SETUPS_TAB.lower()]])
+    data.stages, data.columns, stage_warnings = _parse_setups(workbook[tabs[SETUPS_TAB.lower()]], data.roster)
     data.warnings.extend(stage_warnings)
 
     if not data.roster:
@@ -228,61 +229,83 @@ def _parse_roster(ws) -> list[dict[str, str]]:
     return roster
 
 
-def _parse_setups(ws):
+def _parse_setups(ws, roster: list[dict[str, str]]):
     """Parse the Setups tab's stacked stage blocks.
+
+    A block is: a stage-title row (a single cell with the pull's name), a header
+    row (``Player | Set 1 | …``), and one row per player, blocks separated by a
+    blank row. Only **titled** blocks are imported, so the template can ship with
+    many pre-made, untitled blocks that stay dormant until named.
+
+    Player identity is the roster **Name**: each row's first cell is matched to
+    the roster (case-insensitively) and stored under the canonical roster name.
+    If that cell is blank (e.g. a roster formula that didn't resolve), the row's
+    position within the block falls back to the roster order.
 
     Returns ``(stages, union_columns, warnings)``.
     """
+    roster_names = [r.get("Name", "") for r in roster]
+    canonical = {n.lower(): n for n in roster_names if n}
+
     stages: list[Stage] = []
     union_columns: list[str] = []
     warnings: list[str] = []
 
-    current: Stage | None = None
-    current_header: list[str] | None = None
+    current: Stage | None = None       # active titled block (None between blocks)
+    header: list[str] | None = None    # its column header row
+    skipping = False                   # inside an untitled (template placeholder) block
+    row_index = 0                      # player position within the current block
 
     for raw in ws.iter_rows(values_only=True):
         cells = _cells(raw)
-        filled = [(i, v) for i, v in enumerate(cells) if v]
 
-        if not filled:
-            continue  # blank separator
+        if not any(cells):             # blank row ends the current block
+            current, header, skipping = None, None, False
+            continue
 
         first = cells[0]
 
-        # Header row of a block: first cell is "Player".
-        if first.lower() == PLAYER_HEADER:
-            current_header = cells
-            if current is not None:
-                cols = [c for c in cells[1:] if c]
-                current.columns = cols
-                for col in cols:
+        # Header row of a block.
+        if first.lower() in _HEADER_LABELS:
+            header = cells
+            if current is None:
+                skipping = True        # header with no title above -> dormant block
+            else:
+                current.columns = [c for c in cells[1:] if c]
+                for col in current.columns:
                     if col not in union_columns:
                         union_columns.append(col)
+                row_index = 0
             continue
 
-        # Stage-title row: only the first column is filled.
-        if len(filled) == 1 and filled[0][0] == 0:
-            current = Stage(name=first, order=len(stages), columns=[], rows={})
-            stages.append(current)
-            current_header = None
+        if skipping:
             continue
 
-        # Player data row (needs an active block with a known header).
-        if current is not None and current_header is not None:
+        # Player data row (active titled block with a header).
+        if current is not None and header is not None:
             player = first
-            if not player:
-                continue
+            if not player and row_index < len(roster_names):
+                player = roster_names[row_index]      # positional fallback
+            player = canonical.get(player.lower(), player)
             values = {}
-            for col in range(1, len(current_header)):
-                col_name = current_header[col]
-                if not col_name:
-                    continue
-                values[col_name] = cells[col] if col < len(cells) else ""
-            current.rows[player] = values
-        else:
-            warnings.append(f"Ignored a row before any stage header: {first!r}")
+            for col in range(1, len(header)):
+                col_name = header[col]
+                if col_name:
+                    values[col_name] = cells[col] if col < len(cells) else ""
+            if player:
+                current.rows[player] = values
+            row_index += 1
+            continue
 
-    stages = [s for s in stages if s.rows]  # drop empty blocks
+        # Otherwise this is a stage-title row: start a new block.
+        current = Stage(name=first, order=len(stages), columns=[], rows={})
+        stages.append(current)
+        header = None
+        row_index = 0
+
+    stages = [s for s in stages if s.rows]  # drop titled-but-empty blocks
+    for i, stage in enumerate(stages):
+        stage.order = i
     return stages, union_columns, warnings
 
 
