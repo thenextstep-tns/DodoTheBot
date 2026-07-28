@@ -308,13 +308,18 @@ def _parse_setups(ws, roster: list[dict[str, str]]):
                 player = roster_names[row_index]      # positional fallback
             player = canonical.get(player.lower(), player)
             values = {}
+            bold = False
             for col in range(1, len(header)):
                 col_name = header[col]
-                if col_name and col not in flag_cols:
-                    values[col_name] = cells[col] if col < len(cells) else ""
-            values[_BOLD_KEY] = any(
-                _truthy(raw_values[i]) for i in flag_cols if i < len(raw_values)
-            )
+                raw = raw_values[col] if col < len(raw_values) else None
+                cell = cells[col] if col < len(cells) else ""
+                # Any checkbox/boolean cell is the bold signal, never shown as gear.
+                if col in flag_cols or isinstance(raw, bool) or cell.strip().lower() in ("true", "false"):
+                    bold = bold or _truthy(raw if raw is not None else cell)
+                    continue
+                if col_name:
+                    values[col_name] = cell
+            values[_BOLD_KEY] = bold
             if player:
                 current.rows[player] = values
             row_index += 1
@@ -329,6 +334,10 @@ def _parse_setups(ws, roster: list[dict[str, str]]):
     stages = [s for s in stages if s.rows]  # drop titled-but-empty blocks
     for i, stage in enumerate(stages):
         stage.order = i
+    # Keep only columns that actually carry gear somewhere (drops stray/blank ones).
+    used = {col for s in stages for vals in s.rows.values()
+            for col in vals if col != _BOLD_KEY and vals.get(col)}
+    union_columns = [c for c in union_columns if c in used]
     return stages, union_columns, warnings
 
 
