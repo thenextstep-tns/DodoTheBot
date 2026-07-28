@@ -8,6 +8,7 @@ openai             # chat, scheduler, racing, dnd, imagine
 requests
 beautifulsoup4     # general guide + tarot scraping
 aiohttp
+openpyxl           # raid_setups: parse gear plans from Google Sheets (xlsx export)
 
 # Image / OCR (the pat, fishing, pet cogs)
 opencv-python
