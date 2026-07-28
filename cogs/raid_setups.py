@@ -331,6 +331,17 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             if not _can_manage(context.author):
                 await context.send(lang.RAID_SETUPS_LOOKUP_DENIED, ephemeral=True)
                 return
+            if player.strip().lower() == "all":
+                pages = [_render_lookup(data, raid["name"], name) for name in data.player_names]
+                if not pages:
+                    await context.send(lang.RAID_SETUPS_EMPTY_FIGHT, ephemeral=True)
+                    return
+                for index, page in enumerate(pages, start=1):
+                    page.set_footer(text=f"{raid['name']} · player {index}/{len(pages)}")
+                view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
+                await context.send(embed=pages[0], view=view)
+                await self._send_roster_link(context, raid)
+                return
             entry = data.roster_entry(player)
             if not entry:
                 await context.send(lang.RAID_SETUPS_NOT_FOUND.format(player=player), ephemeral=True)
@@ -377,7 +388,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
         if not raid:
             return []
         current = current.lower()
-        names = [row.get("Name", "") for row in raid.get("roster", []) if row.get("Name")]
+        names = ["All"] + [row.get("Name", "") for row in raid.get("roster", []) if row.get("Name")]
         return [app_commands.Choice(name=n, value=n) for n in names if current in n.lower()][:25]
 
 
