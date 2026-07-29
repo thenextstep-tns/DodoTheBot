@@ -762,6 +762,8 @@ RAID_SETUPS_NOT_ON_ROSTER = (
     "Ask a raid manager to add your Discord username (**{tag}**) to the sheet's Roster."
 )
 RAID_SETUPS_LOOKUP_DENIED = "Only raid managers can look up other players. Run `/setups` to see your own."
+RAID_MARKERS_NONE = "No markers are set for this raid yet (the sheet's Instructions tab, cell A32, is empty)."
+RAID_MARKERS_HINT = "💡 Need the raid markers? Use `/markers`."
 RAID_SETUPS_UNKNOWN_FIGHT = "There's no fight called '{fight}'. Available: {fights}"
 RAID_SETUPS_ALL_TITLE = "All setups · {raid}"
 RAID_SETUPS_EMPTY_FIGHT = "No setups for this fight yet."

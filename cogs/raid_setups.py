@@ -55,6 +55,16 @@ def _discord_candidates(member: discord.Member) -> set[str]:
     return {v for v in values if v}
 
 
+def _markers_hint(data: RaidData) -> str | None:
+    """A one-line '/markers' nudge, shown with /setups only when the raid has markers."""
+    return lang.RAID_MARKERS_HINT if (data.markers or "").strip() else None
+
+
+def _chunk_code(text: str, limit: int = 1900) -> list[str]:
+    """Split ``text`` into code-block messages that fit under Discord's 2000-char cap."""
+    return [f"```\n{text[i:i + limit]}\n```" for i in range(0, len(text), limit)]
+
+
 def _render_lookup(data: RaidData, raid_name: str, player: str) -> discord.Embed:
     """Build a tidy per-stage gear embed for one player; ★-checked pulls are bold."""
     entry = data.roster_entry(player) or {"Name": player, "Role": "", "Class": "", "Slayer": ""}
@@ -309,20 +319,21 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             return
         await context.defer()
         data = await self._fresh_data(raid)   # re-read the sheet live each time
+        hint = _markers_hint(data)            # nudge toward /markers when the raid has them
 
         # Group ("fight") view — the whole team for one fight, or every fight.
         if fight:
             if fight.strip().lower() == "all":
                 pages = _build_all_pages(data, raid["name"])
                 view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
-                await context.send(embed=pages[0], view=view)
+                await context.send(content=hint, embed=pages[0], view=view)
             else:
                 stage = data.stage(fight)
                 if stage is None:
                     fights = ", ".join(data.stage_names) or "—"
                     await context.send(lang.RAID_SETUPS_UNKNOWN_FIGHT.format(fight=fight, fights=fights), ephemeral=True)
                     return
-                await context.send(embed=_render_fight(data, raid["name"], stage.name))
+                await context.send(content=hint, embed=_render_fight(data, raid["name"], stage.name))
             await self._send_roster_link(context, raid)
             return
 
@@ -339,7 +350,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
                 for index, page in enumerate(pages, start=1):
                     page.set_footer(text=f"{raid['name']} · player {index}/{len(pages)}")
                 view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
-                await context.send(embed=pages[0], view=view)
+                await context.send(content=hint, embed=pages[0], view=view)
                 await self._send_roster_link(context, raid)
                 return
             entry = data.roster_entry(player)
@@ -354,7 +365,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
                 return
             target = entry["Name"]
 
-        await context.send(embed=_render_lookup(data, raid["name"], target))
+        await context.send(content=hint, embed=_render_lookup(data, raid["name"], target))
         await self._send_roster_link(context, raid)
 
     async def _send_roster_link(self, context: Context, raid: dict) -> None:
@@ -364,6 +375,23 @@ class RaidSetups(commands.Cog, name="raid_setups"):
         url = raid.get("sheet_url")
         if url:
             await context.interaction.followup.send(lang.RAID_ROSTER_LINK.format(url=url), ephemeral=True)
+
+    @commands.hybrid_command(name="markers", description="Get this channel's raid marker string.")
+    @commands.guild_only()
+    async def markers(self, context: Context) -> None:
+        """Dump the raid's marker string (Instructions!A32) in copy-ready code blocks."""
+        raid = self._channel_raid(context)
+        if not raid:
+            await context.send(lang.RAID_SETUPS_NONE, ephemeral=True)
+            return
+        await context.defer(ephemeral=True)
+        data = await self._fresh_data(raid)
+        text = (data.markers or "").strip()
+        if not text:
+            await context.send(lang.RAID_MARKERS_NONE, ephemeral=True)
+            return
+        for chunk in _chunk_code(text):
+            await context.send(chunk, ephemeral=True)
 
     @setups.autocomplete("fight")
     async def _setups_fight_autocomplete(self, interaction: discord.Interaction, current: str):

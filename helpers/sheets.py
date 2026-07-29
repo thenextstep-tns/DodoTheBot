@@ -29,6 +29,8 @@ import requests
 
 ROSTER_TAB = "Roster"
 SETUPS_TAB = "Setups"
+INSTRUCTIONS_TAB = "Instructions"
+MARKERS_CELL = "A32"        # cell in the Instructions tab holding the raid marker string
 # First-column header labels that mark a stage block's header row (lower-cased).
 _HEADER_LABELS = {"player", "role", "name"}
 # Header labels for the "bold this setup" checkbox column (lower-cased).
@@ -77,6 +79,7 @@ class RaidData:
     stages: list[Stage] = field(default_factory=list)
     columns: list[str] = field(default_factory=list)   # union of stage columns, first-seen order
     warnings: list[str] = field(default_factory=list)
+    markers: str = ""                                  # raid marker string (Instructions!A32)
 
     @property
     def player_names(self) -> list[str]:
@@ -148,10 +151,11 @@ class RaidData:
 
 
     def to_mongo(self) -> dict:
-        """Serialise the parsed data for storage (roster + stages + columns)."""
+        """Serialise the parsed data for storage (roster + stages + columns + markers)."""
         return {
             "columns": self.columns,
             "roster": self.roster,
+            "markers": self.markers,
             "stages": [
                 {"name": s.name, "order": s.order, "columns": s.columns, "rows": s.rows}
                 for s in self.stages
@@ -164,6 +168,7 @@ class RaidData:
         data = cls()
         data.columns = doc.get("columns", [])
         data.roster = doc.get("roster", [])
+        data.markers = doc.get("markers", "")
         data.stages = [
             Stage(name=s["name"], order=s.get("order", i), columns=s.get("columns", []), rows=s.get("rows", {}))
             for i, s in enumerate(doc.get("stages", []))
@@ -225,6 +230,7 @@ def parse_workbook(workbook: openpyxl.Workbook) -> RaidData:
     data.roster = _parse_roster(workbook[tabs[ROSTER_TAB.lower()]])
     data.stages, data.columns, stage_warnings = _parse_setups(workbook[tabs[SETUPS_TAB.lower()]], data.roster)
     data.warnings.extend(stage_warnings)
+    data.markers = _read_markers(workbook, tabs)
 
     if not data.roster:
         raise SheetError(f"The **{ROSTER_TAB}** tab has no players.")
@@ -233,6 +239,15 @@ def parse_workbook(workbook: openpyxl.Workbook) -> RaidData:
 
     data.warnings.extend(_cross_check(data))
     return data
+
+
+def _read_markers(workbook, tabs: dict[str, str]) -> str:
+    """Read the raid marker string from the Instructions tab (cell A32), if present."""
+    name = tabs.get(INSTRUCTIONS_TAB.lower())
+    if not name:
+        return ""
+    value = workbook[name][MARKERS_CELL].value
+    return str(value).strip() if value is not None else ""
 
 
 def _cells(row) -> list[str]:
