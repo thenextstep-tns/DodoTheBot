@@ -55,6 +55,19 @@ def _discord_candidates(member: discord.Member) -> set[str]:
     return {v for v in values if v}
 
 
+# Columns treated as free-text "instructions" (callouts), split off from the gear
+# so they can sit apart from the setup in the per-player view.
+_INSTRUCTION_COLS = {"extra", "notes", "instructions", "instruction", "callout", "callouts"}
+_EM = " "   # em space (U+2003): a wide, non-collapsing gap for visual air
+
+
+def _split_gear(values: dict[str, str], columns: list[str]) -> tuple[str, str]:
+    """Split a stage's gear into (setup, instructions) text by column name."""
+    setup = [values.get(c, "") for c in columns if c.lower() not in _INSTRUCTION_COLS]
+    instr = [values.get(c, "") for c in columns if c.lower() in _INSTRUCTION_COLS]
+    return " · ".join(v for v in setup if v), " · ".join(v for v in instr if v)
+
+
 def _markers_hint(data: RaidData) -> str | None:
     """A one-line '/markers' nudge, shown with /setups only when the raid has markers."""
     return lang.RAID_MARKERS_HINT if (data.markers or "").strip() else None
@@ -80,9 +93,19 @@ def _render_lookup(data: RaidData, raid_name: str, player: str) -> discord.Embed
 
     lines = []
     for stage, values, bold in data.lookup(player):
-        gear = " · ".join(v for v in (values.get(c, "") for c in data.columns) if v) or lang.RAID_SETUPS_EMPTY_STAGE
-        # Monospace "pill" for the stage; the whole gear line goes bold when ticked.
-        lines.append(f"`{stage}`  ⭐ **{gear}**" if bold else f"`{stage}`  {gear}")
+        setup, instr = _split_gear(values, data.columns)
+        if not setup and not instr:
+            setup = lang.RAID_SETUPS_EMPTY_STAGE
+
+        def emph(text):
+            return f"**{text}**" if bold and text else text
+
+        # Stage "pill" + air + setup, then a wider gap before the instructions.
+        star = "⭐ " if bold else ""
+        line = f"`{stage}`{_EM}{star}{emph(setup)}"
+        if instr:
+            line += f"{_EM}{_EM}{emph(instr)}"
+        lines.append(line)
 
     description = ("\n".join(header_lines) + "\n\n" if header_lines else "") + "\n".join(lines)
     if len(description) > 4096:
