@@ -120,9 +120,6 @@ def _render_lookup(data: RaidData, raid_name: str, player: str) -> discord.Embed
 #  Group ("fight") view
 # --------------------------------------------------------------------------- #
 _TANK_ICON, _HEAL_ICON, _DPS_ICON, _OTHER_ICON = "🛡️", "⚕️", "⚔️", "▫️"
-_FIGHTS_PER_PAGE = 8          # ALL view: fights per page
-_EMBED_CHAR_BUDGET = 5900     # hard cap under Discord's 6000-char embed limit
-_FIELD_LIMIT = 1024           # Discord's per-field value limit
 
 
 def _role_icon(role: str) -> str:
@@ -174,74 +171,111 @@ def _render_fight(data: RaidData, raid_name: str, stage_name: str) -> discord.Em
 
 
 def _build_all_pages(data: RaidData, raid_name: str) -> list[discord.Embed]:
-    """One field per fight, chunked into pages (≤8 fights and within the char budget)."""
-    fields = []
-    for stage_name in data.stage_names:
-        value = "\n".join(_fight_lines(data, stage_name)) or lang.RAID_SETUPS_EMPTY_FIGHT
-        if len(value) > _FIELD_LIMIT:
-            value = value[: _FIELD_LIMIT - 1] + "…"
-        fields.append((_fight_title(data, stage_name), value))
-
-    pages: list[list[tuple[str, str]]] = []
-    current: list[tuple[str, str]] = []
-    current_chars = 0
-    for name, value in fields:
-        size = len(name) + len(value)
-        if current and (len(current) >= _FIGHTS_PER_PAGE or current_chars + size > _EMBED_CHAR_BUDGET):
-            pages.append(current)
-            current, current_chars = [], 0
-        current.append((name, value))
-        current_chars += size
-    if current:
-        pages.append(current)
-
-    embeds = []
-    for index, page in enumerate(pages, start=1):
-        embed = discord.Embed(title=lang.RAID_SETUPS_ALL_TITLE.format(raid=raid_name), color=_ACCENT)
-        for name, value in page:
-            embed.add_field(name=name, value=value, inline=False)
-        embed.set_footer(text=f"{raid_name} · page {index}/{len(pages)}")
-        embeds.append(embed)
-    return embeds or [discord.Embed(title=lang.RAID_SETUPS_ALL_TITLE.format(raid=raid_name),
-                                    description=lang.RAID_SETUPS_EMPTY_FIGHT, color=_ACCENT)]
+    """One embed per fight (one fight per page), for the reaction-scrolled pager."""
+    names = data.stage_names
+    if not names:
+        return [discord.Embed(title=lang.RAID_SETUPS_ALL_TITLE.format(raid=raid_name),
+                              description=lang.RAID_SETUPS_EMPTY_FIGHT, color=_ACCENT)]
+    pages = []
+    for index, stage_name in enumerate(names, start=1):
+        embed = _render_fight(data, raid_name, stage_name)
+        embed.set_footer(text=f"{raid_name} · fight {index}/{len(names)}")
+        pages.append(embed)
+    return pages
 
 
-class _FightPager(discord.ui.View):
-    """Button pager for the ALL view; only the invoker can flip pages."""
+async def _reaction_pager(bot, message: discord.Message, embeds: list[discord.Embed],
+                          author_id: int, *, timeout: float = 180.0) -> None:
+    """Let the invoker scroll through ``embeds`` with ◀ / ▶ reactions on ``message``."""
+    if len(embeds) <= 1:
+        return
+    left, right = "◀", "▶"
+    try:
+        await message.add_reaction(left)
+        await message.add_reaction(right)
+    except discord.HTTPException:
+        return
 
-    def __init__(self, embeds: list[discord.Embed], author_id: int):
-        super().__init__(timeout=300)
-        self.embeds = embeds
+    index = 0
+
+    def check(reaction, user):
+        return (
+            user.id == author_id
+            and reaction.message.id == message.id
+            and str(reaction.emoji) in (left, right)
+        )
+
+    while True:
+        try:
+            reaction, user = await bot.wait_for("reaction_add", timeout=timeout, check=check)
+        except asyncio.TimeoutError:
+            try:
+                await message.clear_reactions()
+            except discord.HTTPException:
+                pass
+            return
+        index = min(len(embeds) - 1, index + 1) if str(reaction.emoji) == right else max(0, index - 1)
+        try:
+            await message.edit(embed=embeds[index])
+            await message.remove_reaction(reaction.emoji, user)
+        except discord.HTTPException:
+            pass
+
+
+class _DeleteRaidView(discord.ui.View):
+    """Manager tool: pick which attached raids to disconnect, then confirm."""
+
+    def __init__(self, raids: list[dict], author_id: int, cog: "RaidSetups", guild: discord.Guild):
+        super().__init__(timeout=120)
         self.author_id = author_id
-        self.index = 0
-        self._sync()
+        self.cog = cog
+        self.by_id = {str(r["_id"]): r for r in raids}
 
-    def _sync(self) -> None:
-        for child in self.children:
-            if child.custom_id == "raid_prev":
-                child.disabled = self.index == 0
-            elif child.custom_id == "raid_next":
-                child.disabled = self.index >= len(self.embeds) - 1
+        options = [discord.SelectOption(
+            label=lang.RAID_DELETE_ALL_OPTION, value="__all__", description="Disconnect every attached raid"
+        )]
+        for raid in raids[:24]:  # 24 + the "All" option = 25, Discord's cap
+            channel = guild.get_channel(raid.get("channel_id"))
+            where = f"#{channel.name}" if channel else "unknown channel"
+            options.append(discord.SelectOption(label=raid.get("name", "?")[:100], value=str(raid["_id"]), description=where[:100]))
+
+        self.select = discord.ui.Select(
+            placeholder=lang.RAID_DELETE_PLACEHOLDER, min_values=1, max_values=len(options), options=options
+        )
+        self.select.callback = self._on_select
+        self.add_item(self.select)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("This menu isn't yours — run `/setups` yourself.", ephemeral=True)
+            await interaction.response.send_message("This menu isn't yours.", ephemeral=True)
             return False
         return True
 
-    async def _show(self, interaction: discord.Interaction) -> None:
-        self._sync()
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+    async def _on_select(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()   # remember the choice; act on Disconnect
 
-    @discord.ui.button(emoji="◀", style=discord.ButtonStyle.secondary, custom_id="raid_prev")
-    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.index = max(0, self.index - 1)
-        await self._show(interaction)
+    @discord.ui.button(label="Disconnect", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        values = self.select.values
+        if not values:
+            await interaction.response.send_message(lang.RAID_DELETE_NOTHING, ephemeral=True)
+            return
+        if "__all__" in values:
+            targets = list(self.by_id.values())
+        else:
+            targets = [self.by_id[v] for v in values if v in self.by_id]
 
-    @discord.ui.button(emoji="▶", style=discord.ButtonStyle.secondary, custom_id="raid_next")
-    async def nxt(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.index = min(len(self.embeds) - 1, self.index + 1)
-        await self._show(interaction)
+        self.cog.raids.delete_many({"_id": {"$in": [t["_id"] for t in targets]}})
+        for target in targets:
+            _live_cache.pop(target.get("sheet_id", ""), None)
+
+        for child in self.children:
+            child.disabled = True
+        names = ", ".join(t.get("name", "?") for t in targets)
+        await interaction.response.edit_message(
+            content=lang.RAID_DELETE_DONE.format(count=len(targets), names=names), view=self
+        )
+        self.stop()
 
 
 class RaidSetups(commands.Cog, name="raid_setups"):
@@ -279,6 +313,18 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             {"$set": {**data.to_mongo(), "updated_at": datetime.now(timezone.utc)}},
         )
         return data
+
+    async def _send_paged(self, context: Context, embeds: list[discord.Embed], *, content: str = None) -> None:
+        """Send the first embed and, if there's more than one, add ◀/▶ reaction scrolling."""
+        sent = await context.send(content=content, embed=embeds[0])
+        if len(embeds) <= 1:
+            return
+        # Fetch a full Message so reactions work even for interaction followups.
+        try:
+            message = await context.channel.fetch_message(sent.id)
+        except (discord.HTTPException, AttributeError):
+            message = sent
+        self.bot.loop.create_task(_reaction_pager(self.bot, message, embeds, context.author.id))
 
     @commands.hybrid_command(name="create_raid", description="Import a raid's gear plan from a Google Sheet (managers only).")
     @commands.guild_only()
@@ -348,8 +394,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
         if fight:
             if fight.strip().lower() == "all":
                 pages = _build_all_pages(data, raid["name"])
-                view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
-                await context.send(content=hint, embed=pages[0], view=view)
+                await self._send_paged(context, pages, content=hint)
             else:
                 stage = data.stage(fight)
                 if stage is None:
@@ -372,8 +417,7 @@ class RaidSetups(commands.Cog, name="raid_setups"):
                     return
                 for index, page in enumerate(pages, start=1):
                     page.set_footer(text=f"{raid['name']} · player {index}/{len(pages)}")
-                view = _FightPager(pages, context.author.id) if len(pages) > 1 else None
-                await context.send(content=hint, embed=pages[0], view=view)
+                await self._send_paged(context, pages, content=hint)
                 await self._send_roster_link(context, raid)
                 return
             entry = data.roster_entry(player)
@@ -415,6 +459,21 @@ class RaidSetups(commands.Cog, name="raid_setups"):
             return
         for chunk in _chunk_code(text):
             await context.send(chunk, ephemeral=True)
+
+    @commands.hybrid_command(name="delete_raid", description="Disconnect raid(s) attached in this server (managers only).")
+    @commands.guild_only()
+    async def delete_raid(self, context: Context) -> None:
+        """Show a dropdown of this server's attached raids to disconnect (all or some)."""
+        if not _can_manage(context.author):
+            roles = " or ".join(RAID_MANAGER_ROLES)
+            await context.send(lang.RAID_NO_PERMISSION.format(roles=roles), ephemeral=True)
+            return
+        raids = list(self.raids.find({"guild_id": context.guild.id, "active": True}))
+        if not raids:
+            await context.send(lang.RAID_DELETE_NONE, ephemeral=True)
+            return
+        view = _DeleteRaidView(raids, context.author.id, self, context.guild)
+        await context.send(content=lang.RAID_DELETE_PROMPT, view=view, ephemeral=True)
 
     @setups.autocomplete("fight")
     async def _setups_fight_autocomplete(self, interaction: discord.Interaction, current: str):
