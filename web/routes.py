@@ -133,19 +133,31 @@ def _page(title: str, body: str) -> web.Response:
     return web.Response(text=doc, content_type="text/html")
 
 
+def _guild_avatar(guild, *, size: int = 64) -> str:
+    """A guild's icon <img>, or a lettered placeholder tile. ``size`` is only the
+    display size (any int); the source asset uses its default size to avoid
+    Discord's power-of-two constraint on Asset.replace()."""
+    if guild.icon:
+        return f'<img class="glogo" src="{guild.icon.url}" alt="" width="{size}" height="{size}">'
+    initial = html.escape((guild.name or "?")[:1].upper())
+    return f'<div class="glogo placeholder" style="width:{size}px;height:{size}px">{initial}</div>'
+
+
 def _dashboard_html(bot) -> str:
-    guilds = "".join(
-        f'<li><a href="/guild/{g.id}">{html.escape(g.name)}</a>'
-        f'<span class="muted">{g.member_count or "?"} members · {g.id}</span></li>'
+    cards = "".join(
+        f'<a class="guildcard" href="/guild/{g.id}">'
+        f'{_guild_avatar(g)}'
+        f'<div class="ginfo"><b>{html.escape(g.name)}</b>'
+        f'<span class="muted small">{g.member_count or "?"} members · {g.id}</span></div></a>'
         for g in sorted(bot.guilds, key=lambda g: g.name.lower())
-    ) or '<li class="muted">The bot is not in any guilds yet.</li>'
+    ) or '<p class="muted">The bot is not in any guilds yet.</p>'
 
     cog_rows = ""
     for cog in _cog_inventory(bot):
         badge = '<span class="on">loaded</span>' if cog["loaded"] else '<span class="off">unloaded</span>'
         buttons = (
             f'<button data-action="reload" data-cog="{cog["name"]}">Reload</button>'
-            f'<button data-action="unload" data-cog="{cog["name"]}">Unload</button>'
+            f'<button data-action="unload" data-cog="{cog["name"]}" class="ghost">Unload</button>'
             if cog["loaded"]
             else f'<button data-action="load" data-cog="{cog["name"]}">Load</button>'
         )
@@ -153,7 +165,7 @@ def _dashboard_html(bot) -> str:
 
     return f"""
 <h1>Guilds</h1>
-<ul class="guilds">{guilds}</ul>
+<div class="guildgrid">{cards}</div>
 <h1>Cogs <span class="muted">(process-wide — affects every guild)</span></h1>
 <table class="cogs"><thead><tr><th>Cog</th><th>State</th><th>Actions</th></tr></thead>
 <tbody>{cog_rows}</tbody></table>
@@ -161,19 +173,27 @@ def _dashboard_html(bot) -> str:
 """
 
 
-def _command_rows(commands: list[dict]) -> str:
-    rows = ""
+_LEVEL_ICON = {LEVEL_VISIBLE: "🌐", LEVEL_ADMIN: "🛡️", LEVEL_OWNER: "🔒"}
+
+
+def _command_cards(commands: list[dict]) -> str:
+    """Each command as a small card with a name, description and level selector."""
+    if not commands:
+        return ""
+    cards = ""
     for cmd in commands:
         options = "".join(
-            f'<option value="{lvl}"{" selected" if lvl == cmd["level"] else ""}>{lvl}</option>'
+            f'<option value="{lvl}"{" selected" if lvl == cmd["level"] else ""}>{_LEVEL_ICON[lvl]} {lvl}</option>'
             for lvl in VALID_LEVELS
         )
-        rows += (
-            f'<tr><td><code>{html.escape(cmd["name"])}</code>'
-            f'<div class="muted">{html.escape(cmd["description"])}</div></td>'
-            f'<td><select class="level" data-command="{html.escape(cmd["name"])}">{options}</select></td></tr>'
+        cards += (
+            f'<div class="cmdcard lvl-{cmd["level"]}">'
+            f'<code class="cmdname">/{html.escape(cmd["name"])}</code>'
+            f'<div class="muted small cmddesc">{html.escape(cmd["description"] or "—")}</div>'
+            f'<select class="level" data-command="{html.escape(cmd["name"])}">{options}</select>'
+            f'</div>'
         )
-    return rows
+    return f'<div class="cmdgrid">{cards}</div>'
 
 
 def _feature_rows(features: list[dict]) -> str:
@@ -238,33 +258,35 @@ def _param_rows(params: list[dict], guild) -> str:
 
 def _cog_block(detail: dict, guild, *, toggleable: bool) -> str:
     """One cog inside a category: optional per-cog toggle, passive-feature toggles,
-    per-server parameters, and its per-command visibility levels."""
-    table = f'<table class="cmds"><tbody>{_command_rows(detail["commands"])}</tbody></table>' if detail["commands"] else ""
+    per-server parameters, and its per-command visibility cards."""
+    body = _command_cards(detail["commands"])
     if not detail["commands"] and not detail["features"] and not detail["params"]:
-        table = '<p class="muted small">No slash commands — passive/listener cog.</p>'
+        body = '<p class="muted small">No slash commands — passive/listener cog.</p>'
     toggle = (
         f'<label class="switch"><input type="checkbox" class="cogtoggle" {"checked" if detail["enabled"] else ""}> enabled</label>'
         if toggleable else '<span class="muted small">always on</span>'
     )
     return f"""
-<div class="cogcard" data-cog="{html.escape(detail["cog"])}">
+<div class="cogcard" id="cog-{html.escape(detail["cog"])}" data-cog="{html.escape(detail["cog"])}">
   <div class="coghead"><h3>{html.escape(detail["cog"])}</h3>{toggle}</div>
   {_feature_rows(detail["features"])}
   {_param_rows(detail["params"], guild)}
-  {table}
+  {body}
 </div>"""
 
 
 def _guild_html(bot, guild) -> str:
     sections = ""
+    nav = ""
     for category in cog_categories.group_loaded_cogs(bot.cogs.keys()):
         toggleable = category["toggleable"]
         members = [_cog_detail(bot, guild.id, name) for name in category["present"]]
         if not toggleable:
             # Core: no enable/disable, only per-command visibility for cogs that have commands.
-            blocks = "".join(_cog_block(m, guild, toggleable=False) for m in members if m["commands"])
-            if not blocks:
+            members = [m for m in members if m["commands"]]
+            if not members:
                 continue
+            blocks = "".join(_cog_block(m, guild, toggleable=False) for m in members)
             master = '<span class="muted small">always on</span>'
         else:
             states = [m["enabled"] for m in members]
@@ -272,12 +294,12 @@ def _guild_html(bot, guild) -> str:
             checked = "checked" if state == "on" else ""
             master = (
                 f'<label class="switch master"><input type="checkbox" class="cattoggle" '
-                f'data-category="{category["key"]}" data-state="{state}" {checked}> enabled here</label>'
+                f'data-category="{category["key"]}" data-state="{state}" {checked}> on</label>'
             )
             blocks = "".join(_cog_block(m, guild, toggleable=True) for m in members)
 
         sections += f"""
-<section class="catcard" data-category="{category["key"]}">
+<section class="catcard" id="cat-{category["key"]}" data-category="{category["key"]}">
   <div class="cathead">
     <div class="cattitle"><span class="catemoji">{category["emoji"]}</span>
       <h2>{html.escape(category["label"])}</h2>
@@ -285,16 +307,43 @@ def _guild_html(bot, guild) -> str:
     </div>
     {master}
   </div>
-  <details class="catbody"><summary>per-cog & per-command controls</summary>{blocks}</details>
+  <details class="catbody" open><summary>per-cog & per-command controls</summary>{blocks}</details>
 </section>"""
 
+        nav_cogs = "".join(
+            f'<div class="navcog" data-cog="{html.escape(m["cog"])}">'
+            f'<a href="#cog-{html.escape(m["cog"])}">{html.escape(m["cog"])}</a>'
+            f'<span class="navbtns">'
+            f'<button data-action="reload" data-cog="{html.escape(m["cog"])}" title="Reload">Reload</button>'
+            f'<button data-action="unload" data-cog="{html.escape(m["cog"])}" title="Unload">Unload</button>'
+            f'</span></div>'
+            for m in members
+        )
+        nav += (
+            f'<details class="navcat" open><summary>{category["emoji"]} {html.escape(category["label"])}</summary>'
+            f'{nav_cogs}</details>'
+        )
+
     return f"""
-<p><a href="/" class="back">← all guilds</a></p>
-<h1>{html.escape(guild.name)} <span class="muted">{guild.id}</span></h1>
-<p class="muted">Toggle a whole category on/off for this server, or expand it for per-cog and
-per-command control. Setting a command to <b>admin</b> (Manage&nbsp;Server) or <b>owner</b>
-(hidden) and category/cog changes all apply to this guild's slash picker within a few seconds.</p>
-<div data-guild="{guild.id}">{sections}</div>
+<div class="guildpage" data-guild="{guild.id}">
+  <aside class="sidebar">
+    <a href="/" class="back">← all guilds</a>
+    <div class="ghead">{_guild_avatar(guild, size=48)}
+      <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
+    <div class="toolbar">
+      <input id="cogfilter" type="search" placeholder="Filter cogs…" autocomplete="off">
+      <button id="expandall" class="ghost">Expand all</button>
+      <button id="collapseall" class="ghost">Collapse all</button>
+    </div>
+    <nav class="cognav"><div class="navroot">All categories</div>{nav}</nav>
+  </aside>
+  <main class="content">
+    <p class="muted">Toggle a whole category on/off for this server, or expand a cog for its
+    features, parameters and per-command visibility (<b>🌐 visible</b> / <b>🛡️ admin</b> /
+    <b>🔒 owner</b>). Changes apply to this guild within a few seconds.</p>
+    {sections}
+  </main>
+</div>
 <p id="status" class="status"></p>
 """
 

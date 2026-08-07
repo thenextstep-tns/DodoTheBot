@@ -125,6 +125,67 @@ document.querySelectorAll(".cattoggle").forEach((toggle) => {
   });
 });
 
+// --- Guild page: sidebar convenience (expand/collapse all + cog filter) ---
+const _expandAll = document.getElementById("expandall");
+const _collapseAll = document.getElementById("collapseall");
+if (_expandAll) _expandAll.addEventListener("click", () =>
+  document.querySelectorAll(".content .catbody").forEach((d) => (d.open = true)));
+if (_collapseAll) _collapseAll.addEventListener("click", () =>
+  document.querySelectorAll(".content .catbody").forEach((d) => (d.open = false)));
+
+const _cogFilter = document.getElementById("cogfilter");
+if (_cogFilter) {
+  _cogFilter.addEventListener("input", () => {
+    const q = _cogFilter.value.trim().toLowerCase();
+    document.querySelectorAll(".content .cogcard").forEach((card) => {
+      card.style.display = !q || card.dataset.cog.toLowerCase().includes(q) ? "" : "none";
+    });
+    document.querySelectorAll(".cognav .navcat").forEach((navcat) => {
+      let any = false;
+      navcat.querySelectorAll(".navcog").forEach((row) => {
+        const m = !q || row.dataset.cog.toLowerCase().includes(q);
+        row.style.display = m ? "" : "none";
+        if (m) any = true;
+      });
+      navcat.style.display = any ? "" : "none";
+    });
+    document.querySelectorAll(".content .catcard").forEach((cat) => {
+      const visible = [...cat.querySelectorAll(".cogcard")].some((c) => c.style.display !== "none");
+      cat.style.display = visible ? "" : "none";
+      if (q && visible) { const b = cat.querySelector(".catbody"); if (b) b.open = true; }
+    });
+  });
+}
+
+// --- Guild sidebar: per-cog Reload / Unload↔Load (process-wide cog lifecycle) ---
+document.querySelectorAll(".navbtns button").forEach((btn) => {
+  btn.addEventListener("click", async (event) => {
+    event.preventDefault();
+    const action = btn.dataset.action;
+    const cog = btn.dataset.cog;
+    btn.disabled = true;
+    const res = await post("/api/cog", { action, cog });
+    btn.disabled = false;
+    if (!res.ok) {
+      flash(res.error || `Failed to ${action} ${cog}`, false);
+      return;
+    }
+    flash(`${action} ${cog} ✓`, true);
+    // Unload↔Load toggles; Reload stays Reload.
+    if (action === "unload") { btn.dataset.action = "load"; btn.textContent = "Load"; btn.title = "Load"; }
+    else if (action === "load") { btn.dataset.action = "unload"; btn.textContent = "Unload"; btn.title = "Unload"; }
+  });
+});
+
+// A command's card border reflects its level live when the selector changes.
+document.querySelectorAll(".cmdcard select.level").forEach((sel) => {
+  sel.addEventListener("change", () => {
+    const card = sel.closest(".cmdcard");
+    card.classList.remove("lvl-visible", "lvl-admin", "lvl-owner");
+    card.classList.add("lvl-" + sel.value);
+  });
+});
+
 // --- Strings page: edit / reset user-facing strings ---
 document.querySelectorAll("#langlist .langrow").forEach((row) => {
   const key = row.dataset.key;
