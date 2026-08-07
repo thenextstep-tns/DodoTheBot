@@ -149,6 +149,23 @@ button:disabled { opacity: .5; cursor: default; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
   line-height: 1.5; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; }
 .paramrow.wide textarea:focus { outline: none; border-color: var(--accent); }
+
+/* Searchable chip multi-select (list_role / list_channel) */
+.multiselect { width: 100%; }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ms-chips:empty { display: none; }
+.ms-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(156,132,239,.18);
+  color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px 3px 9px; font-size: 13px; }
+.ms-chip b { cursor: pointer; color: var(--muted); font-weight: 700; padding: 0 4px; border-radius: 4px; }
+.ms-chip b:hover { color: var(--off); background: var(--bg); }
+.ms-search { width: 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font-size: 13px; margin-bottom: 6px; }
+.ms-search:focus { outline: none; border-color: var(--accent); }
+.ms-options { max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg); }
+.ms-opt { padding: 7px 10px; cursor: pointer; font-size: 13px; border-top: 1px solid var(--line); }
+.ms-opt:first-child { border-top: none; }
+.ms-opt:hover { background: var(--panel); color: var(--text); }
 table.cmds { border: 0; border-radius: 0; background: transparent; }
 table.cmds code { color: var(--text); }
 table.cmds td { border-bottom: 1px solid var(--line); }

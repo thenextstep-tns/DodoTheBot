@@ -356,6 +356,7 @@ GYM_MUSCLE_GROUPS = [
 #  Chat cog (user-facing replies; the LLM system prompt stays in the cog)
 # --------------------------------------------------------------------------- #
 CHAT_API_ERROR = "Oh dear, my brain feels a bit fuzzy... I couldn't connect to my thoughts. (Error: {error})"
+CHAT_NO_KEY = "This server hasn't set up a chat API key yet — an admin can add one in the control panel to enable me here. :hearts:"
 CHAT_REPLY_FALLBACK = "I... I think I forgot what I was saying. My apologies!"
 CHAT_PARSE_ERROR = "My thoughts got all tangled up! Could you say that again?"
 

@@ -57,11 +57,22 @@ class Chat(commands.Cog, name="chat"):
         self._default_key = getattr(config_py, "PROXY_API", None)
         self._clients: dict[str, OpenAI] = {}
 
-    def _client_for(self, guild_id) -> "OpenAI | None":
-        """The OpenAI client for a guild: its own per-server API key if set,
-        otherwise the bot's default key. Clients are cached by key. Returns None
-        when no key is available anywhere."""
-        key = self.bot.params.get(guild_id, "chat_api_key") or self._default_key
+    def _owner_scope(self, guild, author) -> bool:
+        """Whether the bot's default (shared) key may be used here: only the bot
+        owner's own server (or the owner in DMs). Everyone else must bring a key."""
+        owners = self.bot.config.get("owners", [])
+        if guild is not None:
+            return guild.owner_id in owners
+        return author.id in owners
+
+    def _client_for(self, guild, author) -> "OpenAI | None":
+        """The OpenAI client for this context: the server's own per-server API key
+        if set; otherwise the bot's default key **only** for the owner's server.
+        Clients are cached by key. Returns None when no usable key applies."""
+        guild_id = guild.id if guild else None
+        key = self.bot.params.get(guild_id, "chat_api_key")
+        if not key and self._owner_scope(guild, author):
+            key = self._default_key
         if not key:
             return None
         if key not in self._clients:
@@ -138,9 +149,9 @@ The "new_rumour" key should be `null` or an object like `{{"target_index": 0, "r
     )
     async def chat(self, context: Context, *, message: str) -> None:
         """Chat with Dodo — single LLM call handles reply, memory, mood and rumours."""
-        client = self._client_for(context.guild.id if context.guild else None)
+        client = self._client_for(context.guild, context.author)
         if client is None:
-            await context.send(lang.CHAT_API_ERROR.format(error="no API key configured for this server"))
+            await context.send(lang.CHAT_NO_KEY)
             return
         async with context.typing():
             author_id = str(context.author.id)

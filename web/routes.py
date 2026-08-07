@@ -239,17 +239,31 @@ def _param_input(param: dict, guild) -> str:
             for c in param.get("choices", [])
         )
         return f'<select {common}>{opts}</select>'
-    if ptype in ("role", "channel", "list_role", "list_channel"):
-        multi = ptype.startswith("list_")
-        selected = set(value) if multi else {value}
-        source = (guild.roles if "role" in ptype else guild.text_channels) if guild else []
-        rows = "" if multi else '<option value="0">— none —</option>'
+    if ptype in ("role", "channel"):
+        source = (guild.roles if ptype == "role" else guild.text_channels) if guild else []
+        rows = '<option value="0">— none —</option>'
         for obj in source:
             if getattr(obj, "is_default", lambda: False)():  # skip @everyone
                 continue
-            rows += f'<option value="{obj.id}"{" selected" if obj.id in selected else ""}>{html.escape(obj.name)}</option>'
-        attr = "multiple" if multi else ""
-        return f'<select {common} {attr}>{rows}</select>'
+            rows += f'<option value="{obj.id}"{" selected" if obj.id == value else ""}>{html.escape(obj.name)}</option>'
+        return f'<select {common}>{rows}</select>'
+    if ptype in ("list_role", "list_channel"):
+        source = (guild.roles if ptype == "list_role" else guild.text_channels) if guild else []
+        selected = set(value)
+        opts = ""
+        for obj in source:
+            if getattr(obj, "is_default", lambda: False)():  # skip @everyone
+                continue
+            opts += (
+                f'<div class="ms-opt" data-id="{obj.id}" data-name="{html.escape(obj.name)}" '
+                f'data-selected="{1 if obj.id in selected else 0}">{html.escape(obj.name)}</div>'
+            )
+        return (
+            f'<div class="multiselect" data-key="{html.escape(param["key"])}" data-type="{ptype}">'
+            f'<div class="ms-chips"></div>'
+            f'<input class="ms-search" placeholder="Search…" autocomplete="off">'
+            f'<div class="ms-options">{opts}</div></div>'
+        )
     return f'<input type="text" {common} value="{html.escape(str(value))}">'
 
 
@@ -259,7 +273,7 @@ def _param_rows(params: list[dict], guild) -> str:
     rows = ""
     for param in params:
         # Multiline inputs get a stacked, full-width row.
-        wide = " wide" if param["type"] in ("text", "list_str") else ""
+        wide = " wide" if param["type"] in ("text", "list_str", "list_role", "list_channel") else ""
         rows += f"""
     <div class="paramrow{wide}">
       <div><b>{html.escape(param["label"])}</b><div class="muted small">{html.escape(param["description"])}</div></div>

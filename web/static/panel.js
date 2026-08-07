@@ -85,6 +85,50 @@ document.querySelectorAll(".cogcard").forEach((card) => {
     });
   });
 
+    // --- Guild page: searchable chip multi-selects (list_role / list_channel) ---
+  card.querySelectorAll(".multiselect").forEach((ms) => {
+    const key = ms.dataset.key;
+    const chips = ms.querySelector(".ms-chips");
+    const search = ms.querySelector(".ms-search");
+    const opts = Array.from(ms.querySelectorAll(".ms-opt"));
+    const selected = new Set(opts.filter((o) => o.dataset.selected === "1").map((o) => Number(o.dataset.id)));
+
+    const save = async () => {
+      const res = await post(`/api/guild/${guildId}/param`, { key, value: [...selected] });
+      flash(res.ok ? `${key} saved ✓` : (res.error || "Failed"), res.ok);
+    };
+    const applyFilter = () => {
+      const q = search.value.trim().toLowerCase();
+      opts.forEach((o) => {
+        const hidden = selected.has(Number(o.dataset.id)) || (q && !o.dataset.name.toLowerCase().includes(q));
+        o.style.display = hidden ? "none" : "";
+      });
+    };
+    const render = () => {
+      chips.innerHTML = "";
+      opts.forEach((o) => {
+        if (!selected.has(Number(o.dataset.id))) return;
+        const chip = document.createElement("span");
+        chip.className = "ms-chip";
+        chip.textContent = o.dataset.name + " ";
+        const x = document.createElement("b");
+        x.textContent = "×";
+        x.addEventListener("click", () => { selected.delete(Number(o.dataset.id)); render(); save(); });
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+      applyFilter();
+    };
+    opts.forEach((o) => o.addEventListener("click", () => {
+      selected.add(Number(o.dataset.id));
+      search.value = "";
+      render();
+      save();
+    }));
+    search.addEventListener("input", applyFilter);
+    render();
+  });
+
   // --- Guild page: per-command visibility level ---
   card.querySelectorAll("select.level").forEach((sel) => {
     let previous = sel.value;

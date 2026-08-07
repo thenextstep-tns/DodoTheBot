@@ -111,7 +111,7 @@ PARAMETERS: list[dict] = [
      "label": "Fight join cost", "description": "Pumpkins to join a deathmatch."},
     # --- chat (LLM) ---
     {"key": "chat_api_key", "cog": "chat", "type": "secret", "default": "",
-     "label": "Chat API key", "description": "This server's own LLM API key (proxyapi.ru). Blank = use the bot's default key."},
+     "label": "Chat API key", "description": "This server's own LLM API key (proxyapi.ru). Required — only the owner's own server falls back to the bot's default key."},
     {"key": "chat_personality", "cog": "chat", "type": "text",
      "default": ('You are Dodo, a bird from "ESO for Dodos". You give out concise wise and profound '
                  "things, but also sometimes randomly unhinged and stupid."),
