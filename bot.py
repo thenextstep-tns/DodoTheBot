@@ -30,6 +30,7 @@ from helpers.state_machine import StateStore
 from helpers.visibility import VisibilityManager
 from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
+from helpers.parameters import ParamManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -96,6 +97,9 @@ class DodoBot(commands.Bot):
         # edits made from the control panel. Done here (before cogs load) so the
         # first use of any string already sees its override.
         self.lang = LangManager(lang, config_py.lang_overrides)
+        # Per-server command parameters (thresholds, limits, role lists, …).
+        # Cogs read via self.params.get(guild_id, "key"); edited from the panel.
+        self.params = ParamManager(config_py.command_params)
 
     # ------------------------------------------------------------------ #
     #  Visibility enforcement (prefix/hybrid + slash)

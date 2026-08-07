@@ -18,8 +18,6 @@ import lang
 from helpers import checks, messages
 
 FOX_ID = 309719542115074049
-_PIN_ALLOWED_ROLES = [852793776064692264, 1055862512689623181]
-_UNPIN_ROLE = 852793776064692264
 
 
 class Moderation(commands.Cog, name="moderation"):
@@ -30,13 +28,18 @@ class Moderation(commands.Cog, name="moderation"):
         self.pin_fails = config_py.pin_fails
         self.pin_fails.create_index([("created_at", ASCENDING)], expireAfterSeconds=3600)
 
+    def _log_channel(self, context: Context):
+        """This guild's moderation log channel (per-guild, falls back to default)."""
+        guild_id = context.guild.id if context.guild else None
+        return self.bot.get_channel(self.bot.guild_config.get(guild_id, "LOG_CHANNEL"))
+
     # ----------------------------- kick / ban / nick ----------------------------- #
     @commands.hybrid_command(name="kick", description="Kick a member from the server.")
     @commands.has_permissions(kick_members=True)
     @checks.not_blacklisted()
     async def kick(self, context: Context, member: discord.Member, *, reason: str = "Not specified") -> None:
         """Kick ``member``, logging it and DMing them the reason."""
-        channel = self.bot.get_channel(config_py.LOG_CHANNEL)
+        channel = self._log_channel(context)
         if member.guild_permissions.administrator:
             await context.send(embed=messages.error(lang.MOD_KICK_ADMIN, title="Oi!"))
             return
@@ -61,7 +64,7 @@ class Moderation(commands.Cog, name="moderation"):
     @checks.not_blacklisted()
     async def ban(self, context: Context, member: discord.Member, *, reason: str = "Not specified") -> None:
         """Ban ``member``, logging it and DMing them the reason."""
-        channel = self.bot.get_channel(config_py.LOG_CHANNEL)
+        channel = self._log_channel(context)
         try:
             if member.guild_permissions.administrator:
                 await context.send(embed=messages.error(lang.MOD_BAN_ADMIN, title="Oi!"))
@@ -98,7 +101,7 @@ class Moderation(commands.Cog, name="moderation"):
     @checks.not_blacklisted()
     async def nick(self, context: Context, member: discord.Member, *, nickname: str = None) -> None:
         """Change ``member``'s nickname (omit to reset)."""
-        channel = self.bot.get_channel(config_py.LOG_CHANNEL)
+        channel = self._log_channel(context)
         try:
             await member.edit(nick=nickname)
             embed = messages.embed(
@@ -117,11 +120,13 @@ class Moderation(commands.Cog, name="moderation"):
     @checks.not_blacklisted()
     async def purge(self, context: Context, amount: int) -> None:
         """Delete ``amount`` recent unpinned messages (max 50)."""
-        channel = self.bot.get_channel(config_py.LOG_CHANNEL)
+        channel = self._log_channel(context)
+        guild_id = context.guild.id if context.guild else None
+        purge_max = self.bot.params.get(guild_id, "purge_max")
         if amount < 1:
             await context.send(embed=messages.error(lang.MOD_PURGE_INVALID.format(amount=amount)))
             return
-        if amount > 50:
+        if amount > purge_max:
             await context.send(lang.MOD_PURGE_TOO_MANY)
             fox = await self.bot.fetch_user(FOX_ID)
             await fox.send(lang.MOD_PURGE_ALERT_FOX)
@@ -158,7 +163,9 @@ class Moderation(commands.Cog, name="moderation"):
     @commands.command(name="pin", description="Pin the message you replied to.")
     async def pin(self, context: Context) -> None:
         """Pin the replied-to message, with escalating refusals on repeated failures."""
-        if not any(role.id in _PIN_ALLOWED_ROLES for role in context.author.roles):
+        guild_id = context.guild.id if context.guild else None
+        pin_roles = self.bot.params.get(guild_id, "pin_allowed_roles")
+        if not any(role.id in pin_roles for role in context.author.roles):
             await self._pin_fail_response(context, "no_permission", lang.MOD_PIN_NO_PERMISSION)
             return
         if context.message is None or context.message.reference is None:
@@ -173,7 +180,9 @@ class Moderation(commands.Cog, name="moderation"):
     @commands.command(name="unpin", description="Unpin the message you replied to.")
     async def unpin(self, context: Context) -> None:
         """Unpin the replied-to message (requires the pin role)."""
-        if discord.utils.get(context.author.roles, id=_UNPIN_ROLE) is None:
+        guild_id = context.guild.id if context.guild else None
+        unpin_role = self.bot.params.get(guild_id, "unpin_role")
+        if unpin_role and discord.utils.get(context.author.roles, id=unpin_role) is None:
             await context.send(lang.MOD_UNPIN_NO_PERMISSION)
             return
         if context.message is None or context.message.reference is None:

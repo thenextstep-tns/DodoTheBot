@@ -11,7 +11,6 @@ from collections import defaultdict
 import discord
 from discord.ext import commands, tasks
 
-import config_py
 import lang
 
 _DAY_IN_SECONDS = 86400
@@ -33,9 +32,10 @@ class SpamProtector(commands.Cog, name="spam"):
     async def background_ram_cleanup(self) -> None:
         """Drop message records that are older than the longest detection window."""
         try:
+            # Use the widest window across guilds so no guild's records are pruned early.
             max_window = max(
-                getattr(config_py, "SPAM_TIME_WINDOW", 2.0),
-                getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0),
+                self.bot.params.get(None, "spam_time_window"),
+                self.bot.params.get(None, "multi_channel_window"),
             )
             now = time.time()
             for index, user_id in enumerate(list(self._user_msg_data.keys())):
@@ -60,7 +60,7 @@ class SpamProtector(commands.Cog, name="spam"):
             await guild.ban(member, delete_message_seconds=_DAY_IN_SECONDS, reason=reason_log)
             self.bot.logger.info(f"Banned spammer {member} — {reason_log}")
 
-            alert_channel_id = getattr(config_py, "ALERT_CHANNEL_ID", None)
+            alert_channel_id = self.bot.guild_config.get(guild.id, "ALERT_CHANNEL_ID")
             if alert_channel_id and (alert_channel := guild.get_channel(int(alert_channel_id))):
                 await alert_channel.send(
                     lang.SPAM_ALERT.format(mention=member.mention, user_id=member.id, reason=reason_public)
@@ -84,10 +84,11 @@ class SpamProtector(commands.Cog, name="spam"):
         if getattr(message.author.guild_permissions, "administrator", False):
             return
 
-        spam_threshold = getattr(config_py, "SPAM_THRESHOLD", 3)
-        spam_window = getattr(config_py, "SPAM_TIME_WINDOW", 2.0)
-        multi_threshold = getattr(config_py, "MULTI_CHANNEL_THRESHOLD", 3)
-        multi_window = getattr(config_py, "MULTI_CHANNEL_WINDOW", 1.0)
+        guild_id = message.guild.id
+        spam_threshold = self.bot.params.get(guild_id, "spam_threshold")
+        spam_window = self.bot.params.get(guild_id, "spam_time_window")
+        multi_threshold = self.bot.params.get(guild_id, "multi_channel_threshold")
+        multi_window = self.bot.params.get(guild_id, "multi_channel_window")
         max_window = max(spam_window, multi_window)
 
         user_id = message.author.id

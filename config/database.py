@@ -72,3 +72,4 @@ feature_state = db["FeatureState"]            # {guild_id, feature, enabled} —
 guild_admins = db["GuildAdmins"]              # {guild_id, user_ids: [...]}
 command_sync_hashes = db["CommandSyncHashes"] # {guild_id, hash} — startup resync guard
 lang_overrides = db["LangOverrides"]          # {key, value} — editable user-facing strings
+command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

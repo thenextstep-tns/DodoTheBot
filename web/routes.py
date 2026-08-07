@@ -109,6 +109,7 @@ def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
         "enabled": bot.visibility.cog_enabled(guild_id, cog_name),
         "commands": commands,
         "features": features,
+        "params": bot.params.entries_for_cog(guild_id, cog_name),
     }
 
 
@@ -190,11 +191,53 @@ def _feature_rows(features: list[dict]) -> str:
     return f'<div class="features"><div class="muted small feathead">Passive features (listeners)</div>{rows}</div>'
 
 
-def _cog_block(detail: dict, *, toggleable: bool) -> str:
+def _param_input(param: dict, guild) -> str:
+    """The typed control for one parameter (role/channel dropdowns come from the guild)."""
+    ptype, value = param["type"], param["value"]
+    common = f'class="param" data-key="{html.escape(param["key"])}" data-type="{ptype}"'
+    if ptype == "bool":
+        return f'<input type="checkbox" {common} {"checked" if value else ""}>'
+    if ptype in ("int", "float"):
+        step = "1" if ptype == "int" else "any"
+        return f'<input type="number" step="{step}" {common} value="{html.escape(str(value))}">'
+    if ptype == "choice":
+        opts = "".join(
+            f'<option value="{html.escape(c)}"{" selected" if c == value else ""}>{html.escape(c)}</option>'
+            for c in param.get("choices", [])
+        )
+        return f'<select {common}>{opts}</select>'
+    if ptype in ("role", "channel", "list_role", "list_channel"):
+        multi = ptype.startswith("list_")
+        selected = set(value) if multi else {value}
+        source = (guild.roles if "role" in ptype else guild.text_channels) if guild else []
+        rows = "" if multi else '<option value="0">— none —</option>'
+        for obj in source:
+            if getattr(obj, "is_default", lambda: False)():  # skip @everyone
+                continue
+            rows += f'<option value="{obj.id}"{" selected" if obj.id in selected else ""}>{html.escape(obj.name)}</option>'
+        attr = "multiple" if multi else ""
+        return f'<select {common} {attr}>{rows}</select>'
+    return f'<input type="text" {common} value="{html.escape(str(value))}">'
+
+
+def _param_rows(params: list[dict], guild) -> str:
+    if not params:
+        return ""
+    rows = ""
+    for param in params:
+        rows += f"""
+    <div class="paramrow">
+      <div><b>{html.escape(param["label"])}</b><div class="muted small">{html.escape(param["description"])}</div></div>
+      {_param_input(param, guild)}
+    </div>"""
+    return f'<div class="params"><div class="muted small feathead">Parameters</div>{rows}</div>'
+
+
+def _cog_block(detail: dict, guild, *, toggleable: bool) -> str:
     """One cog inside a category: optional per-cog toggle, passive-feature toggles,
-    and its per-command visibility levels."""
+    per-server parameters, and its per-command visibility levels."""
     table = f'<table class="cmds"><tbody>{_command_rows(detail["commands"])}</tbody></table>' if detail["commands"] else ""
-    if not detail["commands"] and not detail["features"]:
+    if not detail["commands"] and not detail["features"] and not detail["params"]:
         table = '<p class="muted small">No slash commands — passive/listener cog.</p>'
     toggle = (
         f'<label class="switch"><input type="checkbox" class="cogtoggle" {"checked" if detail["enabled"] else ""}> enabled</label>'
@@ -204,6 +247,7 @@ def _cog_block(detail: dict, *, toggleable: bool) -> str:
 <div class="cogcard" data-cog="{html.escape(detail["cog"])}">
   <div class="coghead"><h3>{html.escape(detail["cog"])}</h3>{toggle}</div>
   {_feature_rows(detail["features"])}
+  {_param_rows(detail["params"], guild)}
   {table}
 </div>"""
 
@@ -215,7 +259,7 @@ def _guild_html(bot, guild) -> str:
         members = [_cog_detail(bot, guild.id, name) for name in category["present"]]
         if not toggleable:
             # Core: no enable/disable, only per-command visibility for cogs that have commands.
-            blocks = "".join(_cog_block(m, toggleable=False) for m in members if m["commands"])
+            blocks = "".join(_cog_block(m, guild, toggleable=False) for m in members if m["commands"])
             if not blocks:
                 continue
             master = '<span class="muted small">always on</span>'
@@ -227,7 +271,7 @@ def _guild_html(bot, guild) -> str:
                 f'<label class="switch master"><input type="checkbox" class="cattoggle" '
                 f'data-category="{category["key"]}" data-state="{state}" {checked}> enabled here</label>'
             )
-            blocks = "".join(_cog_block(m, toggleable=True) for m in members)
+            blocks = "".join(_cog_block(m, guild, toggleable=True) for m in members)
 
         sections += f"""
 <section class="catcard" data-category="{category["key"]}">
@@ -441,6 +485,25 @@ async def api_guild_feature(request: web.Request):
 
 
 @require_owner
+async def api_guild_param(request: web.Request):
+    """Set a per-server command parameter: body {key, value}. Coerced/validated by
+    the ParamManager; no command resync needed."""
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    data = await request.json()
+    key = data.get("key")
+    if not key:
+        return web.json_response({"ok": False, "error": "bad request"}, status=400)
+    try:
+        bot.params.set(gid, key, data.get("value"))
+    except KeyError:
+        return web.json_response({"ok": False, "error": "unknown parameter"}, status=400)
+    except (ValueError, TypeError) as error:
+        return web.json_response({"ok": False, "error": f"invalid value: {error}"}, status=200)
+    return web.json_response({"ok": True})
+
+
+@require_owner
 async def api_lang(request: web.Request):
     """Body: {key, action:"reset"} OR {key, value:<text>, is_list:bool}."""
     bot = request.app["bot"]
@@ -484,6 +547,7 @@ def create_app(bot) -> web.Application:
             web.post("/api/guild/{gid}/command", api_guild_command),
             web.post("/api/guild/{gid}/category", api_guild_category),
             web.post("/api/guild/{gid}/feature", api_guild_feature),
+            web.post("/api/guild/{gid}/param", api_guild_param),
             web.post("/api/lang", api_lang),
             web.static("/static", os.path.join(os.path.dirname(__file__), "static")),
         ]

@@ -66,6 +66,22 @@ document.querySelectorAll(".cogcard").forEach((card) => {
     });
   });
 
+  // --- Guild page: per-server parameters ---
+  card.querySelectorAll(".param").forEach((el) => {
+    const key = el.dataset.key;
+    const type = el.dataset.type;
+    const readValue = () => {
+      if (type === "bool") return el.checked;
+      if (type.startsWith("list_")) return Array.from(el.selectedOptions).map((o) => Number(o.value));
+      if (type === "int" || type === "float" || type === "role" || type === "channel") return Number(el.value);
+      return el.value;
+    };
+    el.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/param`, { key, value: readValue() });
+      flash(res.ok ? `${key} saved ✓` : (res.error || "Failed"), res.ok);
+    });
+  });
+
   // --- Guild page: per-command visibility level ---
   card.querySelectorAll("select.level").forEach((sel) => {
     let previous = sel.value;

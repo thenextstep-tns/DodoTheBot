@@ -71,6 +71,16 @@ button:disabled { opacity: .5; cursor: default; }
   padding: 8px 14px; }
 .featrow + .featrow { border-top: 1px solid var(--line); }
 .featrow b { font-size: 13px; }
+.params { border-bottom: 1px solid var(--line); }
+.paramrow { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 8px 14px; }
+.paramrow + .paramrow { border-top: 1px solid var(--line); }
+.paramrow b { font-size: 13px; }
+.paramrow input[type="number"], .paramrow input[type="text"] { width: 120px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.paramrow select { max-width: 220px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.paramrow select[multiple] { min-height: 66px; }
 table.cmds { border: 0; border-radius: 0; background: transparent; }
 table.cmds code { color: var(--text); }
 table.cmds td { border-bottom: 1px solid var(--line); }
