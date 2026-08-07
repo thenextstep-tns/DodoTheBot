@@ -62,7 +62,8 @@ class Cheese(commands.Cog, name="cheese"):
             message.author.id in self.owner_ids
             and config_py.CHEESE_SECRET_TRIGGER in message.content.lower()
         )
-        if forced or random.randint(0, 1000) > config_py.CHEESE_DROP_THRESHOLD:
+        drop_threshold = self.bot.params.get(message.guild.id if message.guild else None, "cheese_drop_threshold")
+        if forced or random.randint(0, 1000) > drop_threshold:
             try:
                 await message.add_reaction(CHEESE)
                 self.bot.loop.create_task(self.handle_cheese_drop(message))
@@ -139,9 +140,9 @@ class Cheese(commands.Cog, name="cheese"):
         config_py.user_mice.update_one({"_id": chosen["_id"]}, {"$set": {"Relationship": rel_list}})
         return {"name": chosen["name"], "points": new_points, "adopted_by": chosen.get("adopted_by")}
 
-    def _maybe_spawn_mouse(self, participant_ids) -> dict | None:
+    def _maybe_spawn_mouse(self, participant_ids, guild_id) -> dict | None:
         """Roll for an adopted mouse (owned by a participant) to peek out for the cheese."""
-        if random.random() >= config_py.CHEESE_MOUSE_CHANCE:
+        if random.random() >= self.bot.params.get(guild_id, "cheese_mouse_chance"):
             return None
         # Only mice that a participant has actually adopted (adopted_by set to their id).
         owner_ids = [uid for uid in participant_ids if uid]
@@ -161,6 +162,8 @@ class Cheese(commands.Cog, name="cheese"):
     # --------------------------------------------------------------------- #
     async def run_cheese_game(self, channel: discord.TextChannel, initiator: discord.abc.User) -> None:
         """Run the whole co-op stretch: pull / cut / steal / snap / mouse, all in one embed."""
+        guild_id = channel.guild.id if channel.guild else None
+        event_timeout = self.bot.params.get(guild_id, "cheese_event_timeout")
         cheese = self._roll_cheese_type()
         snap_limit = random.randint(cheese["snap_min"], cheese["snap_max"])  # hidden, never shown
         stretch_by_user: dict[int, int] = defaultdict(int)
@@ -186,7 +189,7 @@ class Cheese(commands.Cog, name="cheese"):
         while True:
             try:
                 reaction, user = await self.bot.wait_for(
-                    "reaction_add", timeout=config_py.CHEESE_EVENT_TIMEOUT, check=check
+                    "reaction_add", timeout=event_timeout, check=check
                 )
             except asyncio.TimeoutError:
                 await self._end_cheese_fizzle(game_msg, cheese)
@@ -201,15 +204,15 @@ class Cheese(commands.Cog, name="cheese"):
             if emoji == CHEESE_MOUSE:
                 # Only the peeking mouse's owner can let it pounce.
                 if mouse is not None and user.id == mouse["owner_id"]:
-                    await self._end_cheese_mouse(game_msg, cheese, mouse, stretch_by_user, users_by_id)
+                    await self._end_cheese_mouse(game_msg, cheese, mouse, stretch_by_user, users_by_id, guild_id)
                     return
                 continue
 
             if emoji == CHEESE_CUT:
-                await self._end_cheese_cut(game_msg, channel, cheese, stretch_by_user, users_by_id)
+                await self._end_cheese_cut(game_msg, channel, cheese, stretch_by_user, users_by_id, guild_id)
                 return
             if emoji == CHEESE_STEAL:
-                await self._end_cheese_steal(game_msg, channel, cheese, user, total_stretch)
+                await self._end_cheese_steal(game_msg, channel, cheese, user, total_stretch, guild_id)
                 return
 
             # --- A 👌 pull: add a random amount of stretch ---
@@ -223,7 +226,7 @@ class Cheese(commands.Cog, name="cheese"):
 
             # Every pull is a chance for an adopted mouse to peek out for the cheese.
             if mouse is None:
-                mouse = self._maybe_spawn_mouse(stretch_by_user.keys())
+                mouse = self._maybe_spawn_mouse(stretch_by_user.keys(), guild_id)
                 if mouse is not None:
                     try:
                         await game_msg.add_reaction(CHEESE_MOUSE)
@@ -238,8 +241,9 @@ class Cheese(commands.Cog, name="cheese"):
     # --------------------------------------------------------------------- #
     #  Endings
     # --------------------------------------------------------------------- #
-    async def _end_cheese_cut(self, game_msg, channel, cheese, stretch_by_user, users_by_id) -> None:
+    async def _end_cheese_cut(self, game_msg, channel, cheese, stretch_by_user, users_by_id, guild_id=None) -> None:
         """Split the stretch evenly among everyone who pulled; each bonds with a random mouse."""
+        adoption_rank = self.bot.params.get(guild_id, "mouse_adoption_rank")
         total = sum(stretch_by_user.values())
         num_participants = len(stretch_by_user)
         reward_each = math.ceil((total / num_participants) * cheese["like_mult"]) if num_participants else 0
@@ -253,7 +257,7 @@ class Cheese(commands.Cog, name="cheese"):
                 mention=messages.mention(users_by_id.get(user_id, user_id)),
                 mouse=bond["name"], points=reward_each,
             ))
-            if bond["points"] >= config_py.MOUSE_ADOPTION_RANK and not bond["adopted_by"]:
+            if bond["points"] >= adoption_rank and not bond["adopted_by"]:
                 adoption_targets.append((users_by_id.get(user_id), bond["name"]))
 
         await self._finish_cheese(game_msg, "\n".join(lines) or lang.CHEESE_FIZZLE.format(cheese=cheese["name"]),
@@ -262,9 +266,10 @@ class Cheese(commands.Cog, name="cheese"):
             if user is not None:
                 await self._adoption_prompt_channel(channel, user, mouse_name)
 
-    async def _end_cheese_steal(self, game_msg, channel, cheese, thief, total_stretch) -> None:
+    async def _end_cheese_steal(self, game_msg, channel, cheese, thief, total_stretch, guild_id=None) -> None:
         """The thief grabs a fraction of the whole pot; everyone else gets nothing."""
-        stolen = math.ceil((total_stretch / config_py.CHEESE_STEAL_DIVISOR) * cheese["like_mult"])
+        divisor = self.bot.params.get(guild_id, "cheese_steal_divisor")
+        stolen = math.ceil((total_stretch / divisor) * cheese["like_mult"])
         bond = self._award_to_random_mouse(thief.id, stolen)
         if bond is None:
             await self._end_cheese_fizzle(game_msg, cheese)
@@ -274,12 +279,12 @@ class Cheese(commands.Cog, name="cheese"):
             lang.CHEESE_STEAL.format(mention=thief.mention, points=stolen, cheese=cheese["name"], mouse=bond["name"]),
             lang.CHEESE_STEAL_TITLE, messages.WARNING,
         )
-        if bond["points"] >= config_py.MOUSE_ADOPTION_RANK and not bond["adopted_by"]:
+        if bond["points"] >= self.bot.params.get(guild_id, "mouse_adoption_rank") and not bond["adopted_by"]:
             await self._adoption_prompt_channel(channel, thief, bond["name"])
 
-    async def _end_cheese_mouse(self, game_msg, cheese, mouse, stretch_by_user, users_by_id) -> None:
+    async def _end_cheese_mouse(self, game_msg, cheese, mouse, stretch_by_user, users_by_id, guild_id=None) -> None:
         """An adopted mouse gobbles the cheese: no stretch reward, but sweetrolls for every puller."""
-        each = config_py.CHEESE_MOUSE_SWEETROLLS
+        each = self.bot.params.get(guild_id, "cheese_mouse_sweetrolls")
         now = datetime.now()
         recipient_lines = []
         for user_id in stretch_by_user:

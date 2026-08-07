@@ -350,10 +350,11 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         return random.randint(1, 20)
 
     async def _get_temporary_role(self, guild: discord.Guild) -> discord.Role:
-        """Safely gets the "covered in guts" role."""
+        """Safely gets this guild's "covered in guts" role (per-server parameter)."""
         if not guild:
             return None
-        return guild.get_role(self.PUMPKIN_ROLE_ID)
+        role_id = self.bot.params.get(guild.id, "pumpkin_role_id")
+        return guild.get_role(role_id)
 
     async def _apply_splat_role(self, member: discord.Member, role: discord.Role, channel: discord.TextChannel):
         """Applies the temporary splat role and schedules its removal."""
@@ -792,14 +793,15 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         """
         match_id = str(uuid.uuid4())
         lobby_time = 30 # 30 seconds to join
-        
+        join_cost = self.bot.params.get(context.guild.id if context.guild else None, "fight_join_cost")
+
         # 1. Lobby Phase
         team_a_name, team_b_name = random.sample(self.TEAM_NAMES, 2)
         team_a = [] # Use lists to preserve order (of user objects)
         team_b = [] # Use lists to preserve order (of user objects)
         join_log = []
 
-        base_lobby_text = lang.PUMPKIN_LOBBY_BASE.format(cost=self.FIGHT_JOIN_COST)
+        base_lobby_text = lang.PUMPKIN_LOBBY_BASE.format(cost=join_cost)
 
         def build_lobby_embed(time_left):
             embed = discord.Embed(
@@ -820,9 +822,10 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         
         # --- NEW: Use Buttons for Lobby ---
         class LobbyView(discord.ui.View):
-            def __init__(self, timeout, pumpkin_cog): # Pass cog in
+            def __init__(self, timeout, pumpkin_cog, join_cost): # Pass cog + per-guild cost in
                 super().__init__(timeout=timeout)
                 self.pumpkin_cog = pumpkin_cog # Store cog
+                self.join_cost = join_cost     # per-guild fight join cost
                 self.all_players = {} # Store user objects
                 self.view_timeout_time = datetime.now() + timedelta(seconds=timeout)
 
@@ -835,17 +838,17 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                     return
 
                 # Check cost
-                if not await self.pumpkin_cog._has_enough_pumpkin(user.id, self.pumpkin_cog.FIGHT_JOIN_COST):
-                    join_log.append(f"❌ {user.display_name} didn't have {self.pumpkin_cog.FIGHT_JOIN_COST}kg!")
+                if not await self.pumpkin_cog._has_enough_pumpkin(user.id, self.join_cost):
+                    join_log.append(f"❌ {user.display_name} didn't have {self.join_cost}kg!")
                     await interaction.response.send_message(
-                        lang.PUMPKIN_JOIN_NO_PUMPKIN.format(cost=self.pumpkin_cog.FIGHT_JOIN_COST), ephemeral=True
+                        lang.PUMPKIN_JOIN_NO_PUMPKIN.format(cost=self.join_cost), ephemeral=True
                     )
                     return
 
                 # Defer to make sure the "Join" click doesn't fail
                 await interaction.response.defer()
 
-                await self.pumpkin_cog._spend_pumpkin(user.id, self.pumpkin_cog.FIGHT_JOIN_COST, f"join_tournament_{match_id}")
+                await self.pumpkin_cog._spend_pumpkin(user.id, self.join_cost, f"join_tournament_{match_id}")
                 
                 self.all_players[user.id] = user
                 
@@ -870,7 +873,7 @@ class Pumpkin(commands.Cog, name="pumpkin"):
                 new_lobby_embed = build_lobby_embed(time_left)
                 await interaction.edit_original_response(embed=new_lobby_embed)
 
-        lobby_view = LobbyView(timeout=lobby_time, pumpkin_cog=self) # Pass self (the cog)
+        lobby_view = LobbyView(timeout=lobby_time, pumpkin_cog=self, join_cost=join_cost) # Pass self (the cog)
         lobby_msg = await context.send(embed=lobby_embed, view=lobby_view)
 
         # Timer loop to update countdown

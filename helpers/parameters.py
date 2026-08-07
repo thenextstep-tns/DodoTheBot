@@ -58,6 +58,37 @@ PARAMETERS: list[dict] = [
      "label": "Fishing cost", "description": "Coins deducted per fishing attempt."},
     {"key": "fishing_bag_max", "cog": "fishing", "type": "int", "default": 24,
      "label": "Goodies bag size", "description": "Max items a user can keep stashed."},
+    # --- cheese (co-op cheese-stretch minigame; listener feature) ---
+    {"key": "cheese_drop_threshold", "cog": "cheese", "type": "int", "default": 985,
+     "label": "Drop threshold", "description": "0–1000 roll; a 🧀 drops when the roll is above this (higher = rarer)."},
+    {"key": "cheese_event_timeout", "cog": "cheese", "type": "int", "default": 25,
+     "label": "Stretch timeout (s)", "description": "Seconds of inactivity before the cheese fizzles."},
+    {"key": "cheese_steal_divisor", "cog": "cheese", "type": "int", "default": 5,
+     "label": "Steal divisor", "description": "A thief grabs ceil(total stretch / this) for themselves."},
+    {"key": "cheese_mouse_chance", "cog": "cheese", "type": "float", "default": 0.02,
+     "label": "Mouse peek chance", "description": "Per-pull chance an adopted mouse peeks out (0–1)."},
+    {"key": "cheese_mouse_sweetrolls", "cog": "cheese", "type": "int", "default": 5,
+     "label": "Mouse sweetrolls", "description": "Sweetrolls each puller gets if the mouse eats the cheese."},
+    {"key": "mouse_adoption_rank", "cog": "cheese", "type": "int", "default": 250,
+     "label": "Adoption rank", "description": "Relationship points with a mouse before adoption is offered (shared with racing)."},
+    # --- pumpkin (pull minigame in bot.py + team deathmatch) ---
+    {"key": "pumpkin_role_id", "cog": "pumpkin", "type": "role", "default": 1430471888412475413,
+     "label": "Pumpkin role", "description": "The 'covered in guts' / collector role."},
+    {"key": "pumpkin_role_threshold", "cog": "pumpkin", "type": "int", "default": 50,
+     "label": "Role threshold", "description": "Pumpkins collected before the pumpkin role is granted."},
+    {"key": "pumpkin_weight_min", "cog": "pumpkin", "type": "int", "default": 5,
+     "label": "Giant pumpkin min kg", "description": "Lightest a spawned giant pumpkin can be."},
+    {"key": "pumpkin_weight_max", "cog": "pumpkin", "type": "int", "default": 800,
+     "label": "Giant pumpkin max kg", "description": "Heaviest a spawned giant pumpkin can be."},
+    {"key": "pumpkin_strength_start", "cog": "pumpkin", "type": "int", "default": 50,
+     "label": "Base pull strength", "description": "Starting pull strength for a new puller."},
+    {"key": "pumpkin_strength_gain", "cog": "pumpkin", "type": "int", "default": 5,
+     "label": "Pull strength gain", "description": "Strength gained each time you join a pull."},
+    {"key": "fight_join_cost", "cog": "pumpkin", "type": "int", "default": 5,
+     "label": "Fight join cost", "description": "Pumpkins to join a deathmatch."},
+    # --- chat (LLM) ---
+    {"key": "chat_api_key", "cog": "chat", "type": "secret", "default": "",
+     "label": "Chat API key", "description": "This server's own LLM API key (proxyapi.ru). Blank = use the bot's default key."},
 ]
 
 
@@ -95,7 +126,7 @@ def coerce(param_type: str, raw: Any, *, choices: Optional[list] = None) -> Any:
         return float(raw)
     if param_type == "bool":
         return _to_bool(raw)
-    if param_type == "str":
+    if param_type in ("str", "secret"):
         return str(raw)
     if param_type in ("role", "channel"):
         return int(raw or 0)
@@ -144,11 +175,16 @@ class ParamManager:
         return list(self._by_cog.get(cog, []))
 
     def entries_for_cog(self, guild_id: Optional[int], cog: str) -> list[dict]:
-        """Specs + current values, for the panel."""
-        return [
-            {**spec, "value": self.get(guild_id, spec["key"])}
-            for spec in self._by_cog.get(cog, [])
-        ]
+        """Specs + current values, for the panel. ``secret`` values are never sent
+        to the client — only whether one is set."""
+        entries = []
+        for spec in self._by_cog.get(cog, []):
+            value = self.get(guild_id, spec["key"])
+            if spec["type"] == "secret":
+                entries.append({**spec, "value": "", "is_set": bool(value)})
+            else:
+                entries.append({**spec, "value": value})
+        return entries
 
     # ------------------------------------------------------------------ #
     #  Writes

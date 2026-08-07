@@ -77,8 +77,11 @@ document.querySelectorAll(".cogcard").forEach((card) => {
       return el.value;
     };
     el.addEventListener("change", async () => {
+      // Never overwrite a stored secret with an empty field.
+      if (type === "secret" && !el.value) return;
       const res = await post(`/api/guild/${guildId}/param`, { key, value: readValue() });
       flash(res.ok ? `${key} saved ✓` : (res.error || "Failed"), res.ok);
+      if (type === "secret" && res.ok) { el.value = ""; el.placeholder = "•••••• set (blank keeps it)"; }
     });
   });
 

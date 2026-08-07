@@ -195,6 +195,9 @@ def _param_input(param: dict, guild) -> str:
     """The typed control for one parameter (role/channel dropdowns come from the guild)."""
     ptype, value = param["type"], param["value"]
     common = f'class="param" data-key="{html.escape(param["key"])}" data-type="{ptype}"'
+    if ptype == "secret":
+        placeholder = "•••••• set (blank keeps it)" if param.get("is_set") else "not set"
+        return f'<input type="password" {common} placeholder="{html.escape(placeholder)}" autocomplete="new-password">'
     if ptype == "bool":
         return f'<input type="checkbox" {common} {"checked" if value else ""}>'
     if ptype in ("int", "float"):

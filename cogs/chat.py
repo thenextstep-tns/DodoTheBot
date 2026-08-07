@@ -53,10 +53,20 @@ class Chat(commands.Cog, name="chat"):
 
     def __init__(self, bot):
         self.bot = bot
-        proxy_key = getattr(config_py, "PROXY_API", None)
-        if not proxy_key:
-            raise ValueError("PROXY_API key not found in config_py.py.")
-        self.client = OpenAI(api_key=proxy_key, base_url=_PROXY_BASE_URL)
+        # The bot-wide default key (used when a guild hasn't set its own).
+        self._default_key = getattr(config_py, "PROXY_API", None)
+        self._clients: dict[str, OpenAI] = {}
+
+    def _client_for(self, guild_id) -> "OpenAI | None":
+        """The OpenAI client for a guild: its own per-server API key if set,
+        otherwise the bot's default key. Clients are cached by key. Returns None
+        when no key is available anywhere."""
+        key = self.bot.params.get(guild_id, "chat_api_key") or self._default_key
+        if not key:
+            return None
+        if key not in self._clients:
+            self._clients[key] = OpenAI(api_key=key, base_url=_PROXY_BASE_URL)
+        return self._clients[key]
 
     def _build_system_prompt(self, context, current_memory, current_relationship, current_rumours) -> str:
         """Assemble the LLM system prompt from the user's memory, mood and rumours."""
@@ -126,6 +136,10 @@ The "new_rumour" key should be `null` or an object like `{{"target_index": 0, "r
     )
     async def chat(self, context: Context, *, message: str) -> None:
         """Chat with Dodo — single LLM call handles reply, memory, mood and rumours."""
+        client = self._client_for(context.guild.id if context.guild else None)
+        if client is None:
+            await context.send(lang.CHAT_API_ERROR.format(error="no API key configured for this server"))
+            return
         async with context.typing():
             author_id = str(context.author.id)
             memory_doc = config_py.memory.find_one({"user_id": author_id}) or {}
@@ -138,7 +152,7 @@ The "new_rumour" key should be `null` or an object like `{{"target_index": 0, "r
             )
 
             try:
-                completion = self.client.chat.completions.create(
+                completion = client.chat.completions.create(
                     model=_MODEL,
                     temperature=1.3,
                     response_format={"type": "json_object"},

@@ -765,19 +765,28 @@ async def run_pumpkin_game(
     """Run the cooperative 'pull the giant pumpkin' minigame."""
     pumpkins = config_py.pumpkins
     pull_collection = config_py.pull
-    weight = random.randint(5, 800)
-    explosion_time = datetime.now() + timedelta(minutes=weight / 8)
-
-    discoverer_data = pull_collection.find_one({"_id": discoverer.id})
-    base_strength = discoverer_data.get("strength", 50) if discoverer_data else 50
-    pullers = {discoverer.id: base_strength}
-    total_strength = base_strength
-
-    PUMPKIN_ROLE_ID = 1430471888412475413
-    GAME_EMOJI = "\U0001F383"
     guild = original_message.guild
     if not guild:
         return
+    guild_id = guild.id
+
+    # Per-server tunables.
+    strength_start = bot.params.get(guild_id, "pumpkin_strength_start")
+    strength_gain = bot.params.get(guild_id, "pumpkin_strength_gain")
+    role_threshold = bot.params.get(guild_id, "pumpkin_role_threshold")
+    PUMPKIN_ROLE_ID = bot.params.get(guild_id, "pumpkin_role_id")
+
+    weight = random.randint(
+        bot.params.get(guild_id, "pumpkin_weight_min"), bot.params.get(guild_id, "pumpkin_weight_max")
+    )
+    explosion_time = datetime.now() + timedelta(minutes=weight / 8)
+
+    discoverer_data = pull_collection.find_one({"_id": discoverer.id})
+    base_strength = discoverer_data.get("strength", strength_start) if discoverer_data else strength_start
+    pullers = {discoverer.id: base_strength}
+    total_strength = base_strength
+
+    GAME_EMOJI = "\U0001F383"
 
     embed = discord.Embed(
         title="🎃 A GIANT PUMPKIN APPEARS! 🎃",
@@ -814,7 +823,7 @@ async def run_pumpkin_game(
             )
             if user.id not in pullers:
                 user_data = pull_collection.find_one({"_id": user.id})
-                pullers[user.id] = user_data.get("strength", 50) if user_data else 50
+                pullers[user.id] = user_data.get("strength", strength_start) if user_data else strength_start
                 total_strength = sum(pullers.values())
                 puller_list = "\n".join(f"<@{uid}>: {strength}kg" for uid, strength in pullers.items())
                 embed.set_field_at(2, name="Total Strength", value=f"**{total_strength} kg**", inline=True)
@@ -837,13 +846,13 @@ async def run_pumpkin_game(
                 for user_id, current_strength in pullers.items():
                     pull_collection.update_one(
                         {"_id": user_id},
-                        {"$set": {"strength": current_strength + 5, "last_pull": datetime.now()}},
+                        {"$set": {"strength": current_strength + strength_gain, "last_pull": datetime.now()}},
                         upsert=True,
                     )
                     pumpkins.insert_one(
                         {"collector": user_id, "date": datetime.now(), "weight_collected": reward_per_person}
                     )
-                    if pumpkins.count_documents({"collector": user_id}) >= 50:
+                    if pumpkins.count_documents({"collector": user_id}) >= role_threshold:
                         try:
                             role = guild.get_role(PUMPKIN_ROLE_ID)
                             member = await guild.fetch_member(user_id)
@@ -879,7 +888,7 @@ async def run_pumpkin_game(
         for user_id, current_strength in pullers.items():
             pull_collection.update_one(
                 {"_id": user_id},
-                {"$set": {"strength": current_strength + 5, "last_pull": datetime.now()}},
+                {"$set": {"strength": current_strength + strength_gain, "last_pull": datetime.now()}},
                 upsert=True,
             )
 
