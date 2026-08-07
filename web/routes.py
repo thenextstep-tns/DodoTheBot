@@ -258,8 +258,10 @@ def _param_rows(params: list[dict], guild) -> str:
         return ""
     rows = ""
     for param in params:
+        # Multiline inputs get a stacked, full-width row.
+        wide = " wide" if param["type"] in ("text", "list_str") else ""
         rows += f"""
-    <div class="paramrow">
+    <div class="paramrow{wide}">
       <div><b>{html.escape(param["label"])}</b><div class="muted small">{html.escape(param["description"])}</div></div>
       {_param_input(param, guild)}
     </div>"""

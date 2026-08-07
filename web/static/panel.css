@@ -143,6 +143,12 @@ button:disabled { opacity: .5; cursor: default; }
 .paramrow select { max-width: 220px; background: var(--panel); color: var(--text);
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .paramrow select[multiple] { min-height: 66px; }
+.paramrow.wide { flex-direction: column; align-items: stretch; gap: 8px; }
+.paramrow.wide textarea { width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  line-height: 1.5; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; }
+.paramrow.wide textarea:focus { outline: none; border-color: var(--accent); }
 table.cmds { border: 0; border-radius: 0; background: transparent; }
 table.cmds code { color: var(--text); }
 table.cmds td { border-bottom: 1px solid var(--line); }
