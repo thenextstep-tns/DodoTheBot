@@ -1,8 +1,7 @@
 """
 Racing cog — the skeevaton (mouse) racing game: register mice with classes,
 run races with reaction-driven cheese/wine/bomb/treasure events, track
-relationships, and handle mouse adoption. Includes a passive cheese-drop
-listener and a relationships browser.
+relationships, handle mouse adoption, and browse relationships.
 """
 
 import asyncio
@@ -560,82 +559,6 @@ class Racing(commands.Cog, name="racing"):
             )
             await context.send(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
         await adopt_msg.clear_reactions()
-
-    # --------------------------------------------------------------------- #
-    #  Passive cheese drop
-    # --------------------------------------------------------------------- #
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message) -> None:
-        """Rarely drop a 🧀 on a message; the first clicker bonds with a random mouse."""
-        if message.author.bot:
-            return
-        if random.randint(0, 1000) > config_py.CHEESE_DROP_THRESHOLD:
-            try:
-                await message.add_reaction("🧀")
-                self.bot.loop.create_task(self.handle_cheese_drop(message))
-            except discord.HTTPException:
-                pass
-
-    async def handle_cheese_drop(self, message: discord.Message) -> None:
-        """Award +5 relationship points to the first person to grab a dropped cheese."""
-        emoji, user = await messages.wait_for_reaction(self.bot, message, ["🧀"], timeout=3.0, add=False)
-        if emoji is None:
-            try:
-                await message.clear_reaction("🧀")
-            except discord.HTTPException:
-                pass
-            return
-
-        mice = list(config_py.user_mice.find())
-        if not mice:
-            return
-        chosen_mouse = random.choice(mice)
-        rel_list = chosen_mouse.get("Relationship", [])
-        for entry in rel_list:
-            if entry["user_id"] == user.id:
-                entry["relationship_points"] += 5
-                break
-        else:
-            rel_list.append({"user_id": user.id, "relationship_points": 5})
-        config_py.user_mice.update_one({"_id": chosen_mouse["_id"]}, {"$set": {"Relationship": rel_list}})
-
-        channel = self.bot.get_channel(config_py.PET_CHANNEL)
-        await channel.send(
-            embed=messages.success(
-                lang.RACING_CHEESE_COLLECTED.format(mention=user.mention, mouse=chosen_mouse["name"]),
-                title=lang.RACING_CHEESE_TITLE,
-            )
-        )
-        await asyncio.sleep(2)
-        await message.remove_reaction("🧀", user)
-
-        user_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == user.id), 0)
-        if user_points >= config_py.MOUSE_ADOPTION_RANK and not chosen_mouse.get("adopted_by"):
-            await self._adoption_prompt_channel(message.channel, user, chosen_mouse["name"])
-
-    async def _adoption_prompt_channel(self, channel, target_user, mouse_name) -> None:
-        """Channel-context adoption prompt (from the passive cheese drop)."""
-        msg = await channel.send(
-            embed=messages.embed(
-                lang.RACING_CHANNEL_ADOPT_DESCRIPTION.format(mention=target_user.mention, mouse=mouse_name),
-                title=lang.RACING_CHANNEL_ADOPT_TITLE.format(mouse=mouse_name),
-                color=config_py.main_color,
-            )
-        )
-        emoji, _ = await messages.wait_for_reaction(self.bot, msg, ["👍", "👎"], member=target_user, timeout=60.0)
-        if emoji is None:
-            await msg.clear_reactions()
-            return
-        if emoji == "👍":
-            config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"adopted_by": target_user.id}})
-            await channel.send(lang.RACING_CHANNEL_ADOPT_SUCCESS.format(mouse=mouse_name))
-        else:
-            config_py.user_mice.update_one(
-                {"name": mouse_name, "Relationship.user_id": target_user.id},
-                {"$inc": {"Relationship.$.relationship_points": -100}},
-            )
-            await channel.send(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
-        await msg.clear_reactions()
 
     @commands.hybrid_command(name="relationships", description="Show your relationships with mice.")
     async def relationships(self, context: Context) -> None:

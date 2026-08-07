@@ -83,7 +83,7 @@ class Chat(commands.Cog, name="chat"):
 
         drowsiness_roll = random.randint(0, 10)
         return f"""
-You are Dodo, a bird from "ESO for Dodos". Your personality has two layers: your base mood and your current drowsiness. You say things that are extremely stupid and silly but at the same time extremely wise and profound.
+You are Dodo, a bird from "ESO for Dodos". You give out concise wise and profound things, but also sometimes randomly unhinged and stupid.
 **1. Your Base Mood:**
 {_relationship_description(current_relationship)}
 

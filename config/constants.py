@@ -36,9 +36,39 @@ statuses = [
 # --- Relationship / pet system tuning ---
 MOUSE_ADOPTION_RANK = 250        # Relationship points needed for adoption
 RELATIONSHIP_BASE_POINTS = 20    # Base points in the relationship calculation formula
-CHEESE_DROP_THRESHOLD = 990      # In a 0-1000 roll, drop cheese if roll > this (~10%)
-STAR_INSPIRATION_BOOST = 5       # Extra steps when the starry-eyes event triggers
+CHEESE_DROP_THRESHOLD = 950      # In a 0-1000 roll, drop cheese if roll > this (~1%)
+STAR_INSPIRATION_BOOST = 5       # Extra steps when the starry-eyes (race) event triggers
 STAR_INSPIRATION_DURATION = 5    # Number of moves the starry boost lasts
+
+# --- Cheese co-op stretch minigame ---
+# When a dropped 🧀 is grabbed, we roll which cheese it is (weighted by ``weight``).
+# Players 👌-pull to stretch it: every pull adds a random amount of stretch and
+# grows the pot, but risks crossing a HIDDEN snap limit rolled between ``snap_min``
+# and ``snap_max`` for that drop. Relationship reward = the stretch shared out,
+# then multiplied by the cheese's ``like_mult`` and rounded up (rarer cheese is
+# adored by the mice, so it pays much more). ``image`` is a small thumbnail shown
+# in the embed so players can recognise each cheese.
+# name, emoji, weight, snap_min, snap_max, like_mult, image.
+CHEESE_TYPES = [
+    {"name": "Mozzarella", "emoji": "🧀", "weight": 50, "snap_min": 12, "snap_max": 25, "like_mult": 1,
+     "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/57/Mozzarella_di_bufala3.jpg/250px-Mozzarella_di_bufala3.jpg"},
+    {"name": "Cheddar", "emoji": "🧀", "weight": 25, "snap_min": 6, "snap_max": 15, "like_mult": 2,
+     "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Somerset-Cheddar.jpg/250px-Somerset-Cheddar.jpg"},
+    {"name": "Gouda", "emoji": "🧀", "weight": 14, "snap_min": 5, "snap_max": 12, "like_mult": 1.5,
+     "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fb/Chesses_gouda_affinage.JPG/250px-Chesses_gouda_affinage.JPG"},
+    {"name": "Aged Gruyere", "emoji": "🧀", "weight": 8, "snap_min": 4, "snap_max": 10, "like_mult": 5,
+     "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Gruyere_alpage_th_wa.jpg/250px-Gruyere_alpage_th_wa.jpg"},
+    {"name": "Aged Parmigiano Reggiano", "emoji": "🧀", "weight": 3, "snap_min": 3, "snap_max": 6, "like_mult": 10,
+     "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/Parmigiano_Reggiano%2C_Italien%2C_Europ%C3%A4ische_Union.jpg/250px-Parmigiano_Reggiano%2C_Italien%2C_Europ%C3%A4ische_Union.jpg"},
+]
+CHEESE_PULL_STRENGTHS = [2, 3, 5, 6, 8]  # A single 👌-pull adds a random amount from this pool
+CHEESE_STEAL_DIVISOR = 5         # A thief grabs ceil(stretch / this) for themselves
+CHEESE_EVENT_TIMEOUT = 25        # Seconds of inactivity before the cheese hardens (fizzle)
+CHEESE_MOUSE_CHANCE = 0.02       # Per-pull chance an adopted mouse peeks out to snatch the cheese (~1 in 50)
+CHEESE_MOUSE_SWEETROLLS = 5      # Sweetrolls the mouse brings each participant if it eats the cheese
+# Hidden owner-only trigger: if a bot owner types this phrase anywhere in a
+# message, a cheese is force-dropped on it (bypassing the random roll).
+CHEESE_SECRET_TRIGGER = "abracadabrie"
 
 # --- Sweetrolls ---
 SWEETROLL_NEEDED = 98
@@ -46,8 +76,8 @@ SWEETROLL_COOLDOWN = 3
 SWEETROLL_GIFTING = 80
 
 # --- Parses ---
-max_parse = 150000
-max_parse_championship = 200000
+max_parse = 210000
+max_parse_championship = 210000
 dummy_health = 21000000
 
 # --- Dodo Roll ---

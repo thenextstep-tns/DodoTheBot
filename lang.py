@@ -658,13 +658,43 @@ RACING_ADOPT_MOUSECHAT = (
 RACING_READOPT_MOUSECHAT = (
     "{mouse} feels neglected by its current owner and turns to you with pleading eyes. It wonders if you'll adopt it instead!"
 )
-RACING_CHEESE_TITLE = "Cheese Collected!"
-RACING_CHEESE_COLLECTED = "{mention} collected a piece of magical cheese for {mouse} and gained 5 relationship points!"
-RACING_CHANNEL_ADOPT_TITLE = "Adopt {mouse}?"
-RACING_CHANNEL_ADOPT_DESCRIPTION = (
-    "{mention}, your bond with {mouse} has grown strong.\nReact with 👍 to adopt or 👎 to decline (and break its little heart)"
+# --- Cheese co-op stretch minigame ---
+CHEESE_GAME_TITLE = "🧀 You found {cheese}! **EVERYONE** quickly pull if you want some too!"
+CHEESE_GAME_DESC = (
+    "{bar}\n\n"
+    "The **{cheese}** is stretching! "
+    "Be careful not to pull too hard or it's gonna snap!\n\n"
+    "👌 **Pull** — stretch: grows the pot, but pull too far and it **snaps**!\n"
+    "✂️ **Cut** — split the pot *now*. Don't cut too early, maybe you still have some to pull!\n"
+    "💰 **Steal** — grab a fifth of the whole stretch just for yourself; everyone else gets nothing!\n"
+    "Pulls so far: **{pulls}**"
 )
-RACING_CHANNEL_ADOPT_SUCCESS = "{mouse} happily chirps that it will serve you with all its heart!"
+CHEESE_CUT_TITLE = "✂️ You just carefully cut off the {cheese}!"
+CHEESE_CUT_LINE = "{mention} gained **+{points}** points with **{mouse}**!"
+CHEESE_SNAP_TITLE = "💥 BOOM!"
+CHEESE_SNAP = (
+    "{bar}\n\nOH NO! Someone pulled too hard! The **{cheese}** was stretched too far and exploded! Nobody gets anything!"
+)
+CHEESE_STEAL_TITLE = "💰 Cheese STOLEN!"
+CHEESE_STEAL = (
+    "{mention} STOLE **{points}** meters of **{cheese}** and bonded with **{mouse}**!\n"
+    "Everyone else who pulled got **nothing**. Betrayal fills the room."
+)
+CHEESE_FIZZLE_TITLE = "🧀 The cheese expired..."
+CHEESE_FIZZLE = "Nobody made a move in time. The **{cheese}** went stale and crumbled away. Nobody got anything."
+CHEESE_MOUSE_NOTE = "\n\n🐭 **{mouse}** ({owner}'s mouse) is eyeing the cheese — only {owner} can let it pounce!"
+CHEESE_MOUSE_EATEN_TITLE = "🐭 {mouse} gobbled the cheese!"
+CHEESE_MOUSE_EATEN = (
+    "**{mouse}** pounced on the **{cheese}** and scoffed the whole thing, overjoyed! 🧀✨\n"
+    "The happy mouse scurried off and brought **everyone who pulled** "
+    "**{sweetrolls}** sweetrolls each!\n\n{recipients}"
+)
+CHEESE_MOUSE_RECIPIENT = "{mention} +{sweetrolls} 🧁"
+CHEESE_ADOPT_TITLE = "{mouse} wants to be adopted. Do you want to be their mouse parent?"
+CHEESE_ADOPT_DESCRIPTION = (
+    "{mention}, your bond with {mouse} has grown strong.\nReact with 👍 to ADOPT them or 👎 to REJECT them(and break its little heart)"
+)
+CHEESE_ADOPT_SUCCESS = "{mouse} happily chirps that it will serve you with all its heart!"
 RACING_REL_NONE = "You have no relationships with any mice yet."
 RACING_REL_TITLE = "Your Mouse Relationships"
 RACING_REL_LINE = "**{name}** ({mouse_class}) - {points} points"
@@ -774,3 +804,75 @@ RAID_SETUPS_UNKNOWN_FIGHT = "There's no fight called '{fight}'. Available: {figh
 RAID_SETUPS_ALL_TITLE = "All setups · {raid}"
 RAID_SETUPS_EMPTY_FIGHT = "No setups for this fight yet."
 RAID_ROSTER_LINK = "🔗 Full roster / sheet: {url}"
+
+# --------------------------------------------------------------------------- #
+#  Quote cog — Guess the Quote
+# --------------------------------------------------------------------------- #
+QUOTE_TITLE = "🗣️ Guess the Quote"
+QUOTE_INTRO = "Starting **Guess the Quote**! Reading the archives… get ready. 📜"
+QUOTE_NOT_ENOUGH = "I don't have enough quotable messages logged yet to play. Go chat more first!"
+QUOTE_SELF_DUEL = "You can't duel yourself — mention someone else to challenge!"
+QUOTE_BOT_DUEL = "You can't duel a bot. We'd win, obviously."
+QUOTE_NOT_PLAYING = "You're not in this game! Start your own with the quote command."
+QUOTE_PROMPT = "**Who said this?**\n\n> {quote}"
+QUOTE_REVEAL = "✅ It was **{name}**!"
+QUOTE_SCORE_SOLO = "**Total:** {total}\n**Streak:** {streak} 🔥\n**This one's worth:** {worth}"
+QUOTE_SCORE_LINE = "**{name}** — {total} pts · streak {streak}🔥 · worth {worth}"
+QUOTE_LOG_HEADER = "Last answers"
+QUOTE_LOG_CORRECT = "✅ {who} nailed it (+{pts}) — {answer}"
+QUOTE_LOG_WRONG = "❌ {who} missed — it was {answer}"
+QUOTE_LOG_IDLE = "😴 nobody answered — it was {answer}"
+QUOTE_FOOTER = "Round {round} · {seconds}s to answer · ends after {idle} idle rounds"
+QUOTE_FINAL_TITLE = "🏁 Game over!"
+QUOTE_FINAL_SOLO = "You scored **{total}** points across {rounds} rounds!"
+QUOTE_FINAL_WINNER = "🏆 **{name}** wins the duel with **{total}** points!"
+QUOTE_FINAL_TIE = "🤝 It's a tie at **{total}** points!"
+QUOTE_FINAL_LINE = "{name}: **{total}**"
+QUOTE_LEADERBOARD_TITLE = "🏆 Guess the Quote — Top 10"
+QUOTE_LEADERBOARD_LINE = "{medal} {mention} — **{best}**"
+QUOTE_LEADERBOARD_EMPTY = "No scores yet — be the first to play!"
+
+# --------------------------------------------------------------------------- #
+#  Gilane cog
+# --------------------------------------------------------------------------- #
+GILANE_EVENT_TITLE = "🇧🇷 THE GILANE EVENT HAS STARTED"
+GILANE_EVENT_DESC = "React with ✋ in the next **{seconds} seconds** to take part!"
+GILANE_EVENT_CONCLUDED_TITLE = "🇧🇷 THE GILANE EVENT HAS CONCLUDED"
+GILANE_EVENT_CONCLUDED_DESC = "Thank you for participating!"
+GILANE_LEADERBOARD_TITLE = "🏆 Most Gilane events attended"
+GILANE_LEADERBOARD_LINE = "{medal} {mention} — **{count}**"
+GILANE_LEADERBOARD_EMPTY = "Nobody has attended a Gilane event yet. *Hä?*"
+GILANE_CONFUSED_REDIRECT = "I am confused *und verwirrt*"
+GILANE_COOLDOWN = "We haven't unconfused yet, try again next week"
+GILANE_HAE = "Hä?"
+
+# Reaction event
+GILANE_REACTION_TITLE = "🖐️ THE GILANE REACTION EVENT"
+GILANE_REACTION_DESC = "Everyone gets their Gilane! Spam {emoji} as fast as you can — you have **10 seconds**!"
+GILANE_REACTION_HEADER = "Hä meters"
+GILANE_REACTION_LINE = "{medal} {mention} — **{count}**"
+GILANE_REACTION_RESULT_TITLE = "🎲 THE GILANE REACTION EVENT — RESULTS"
+GILANE_REACTION_WINNER = "And the winner is… {winner}, {emoji}*"
+
+# Spreadsheet event
+GILANE_SPREADSHEET = "📊 A spreadsheet has been created: [{filename}](<{url}>)"
+
+# Rename event
+GILANE_RENAME_NICK = "Gilane"
+GILANE_RENAME = "🇧🇷 Everyone who joined is now **Gilane**. *Wir sind alle Gilane.*"
+GILANE_RENAME_NONE = "Gilane tried to rename everyone but couldn't manage it (missing permissions?). *Hä?*"
+GILANE_SPREADSHEET_FILES = [
+    "Gilane_Raid_Roster.xlsx",
+    "Gilane_Attendance_2026.xlsx",
+    "Gilane_Setups_FINAL_final_v3.xlsx",
+    "Loot_Council_Notes.xlsx",
+]
+GILANE_SPREADSHEET_LINKS = [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://docs.google.com/spreadsheets/d/1JeC_2d7c758AAiSUgx_VgPbY19q5aTr6f8D3sl7pRDI/edit?pli=1&gid=823983221#gid=823983221",
+    "https://elderscrolls.fandom.com/wiki/Gilane",
+    "https://www.distillerie-mean.fr/wp-content/uploads/2023/10/produit-gilane-distillerie-mean.jpg",
+    "https://www.houseofnames.com/dpreview/GILLAN/IR/Gilane/family-crest-coat-of-arms.png",
+    "https://www.imdb.com/title/tt0450428/"
+
+]

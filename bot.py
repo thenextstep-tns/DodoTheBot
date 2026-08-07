@@ -935,7 +935,8 @@ async def check_sweetroll_chance(message: discord.Message) -> None:
         return
 
     is_rhubarb = random.randint(1, 1000) >= 995
-    is_pumpkin = not is_rhubarb and random.randint(1, 100) > 60
+    # Pumpkins are now extremely rare: only a roll of 99 or 100 spawns one.
+    is_pumpkin = not is_rhubarb and random.randint(1, 100) >= 99
     spawn_emoji = "\U0001F383" if is_pumpkin else "\U0001F9C1"
 
     asyncio.create_task(
