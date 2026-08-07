@@ -92,8 +92,10 @@ class Chat(commands.Cog, name="chat"):
             rumours_context = f"**Rumours you've heard about {context.author.display_name}:**\n{rumour_list}"
 
         drowsiness_roll = random.randint(0, 10)
+        guild_id = context.guild.id if context.guild else None
+        personality = self.bot.params.get(guild_id, "chat_personality")
         return f"""
-You are Dodo, a bird from "ESO for Dodos". You give out concise wise and profound things, but also sometimes randomly unhinged and stupid.
+{personality}
 **1. Your Base Mood:**
 {_relationship_description(current_relationship)}
 

@@ -112,6 +112,13 @@ PARAMETERS: list[dict] = [
     # --- chat (LLM) ---
     {"key": "chat_api_key", "cog": "chat", "type": "secret", "default": "",
      "label": "Chat API key", "description": "This server's own LLM API key (proxyapi.ru). Blank = use the bot's default key."},
+    {"key": "chat_personality", "cog": "chat", "type": "text",
+     "default": ('You are Dodo, a bird from "ESO for Dodos". You give out concise wise and profound '
+                 "things, but also sometimes randomly unhinged and stupid."),
+     "label": "Bot personality", "description": "The base persona injected into the chat system prompt for this server."},
+    # --- general (server-wide) ---
+    {"key": "command_prefix", "cog": "general", "type": "str", "default": "",
+     "label": "Command prefix", "description": "Text prefix for commands on this server. Blank = the bot default."},
 ]
 
 

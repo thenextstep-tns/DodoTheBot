@@ -147,6 +147,13 @@ class DodoBot(commands.Bot):
         guild_id = guild.id if isinstance(guild, discord.Guild) else guild
         return self.guild_config.get(guild_id, key)
 
+    async def get_prefix(self, message: "discord.Message"):
+        """Per-server command prefix: a guild's ``command_prefix`` param if set,
+        otherwise the default from config.json."""
+        guild_id = message.guild.id if message.guild else None
+        override = self.params.get(guild_id, "command_prefix")
+        return override or self.config["prefix"]
+
     async def setup_hook(self) -> None:
         """Runs once before ``on_ready``: load cogs. Application commands are synced
         per-guild from ``on_ready`` (via ``command_syncer``), where ``self.guilds``
