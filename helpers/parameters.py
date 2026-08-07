@@ -45,6 +45,12 @@ PARAMETERS: list[dict] = [
      "label": "Multi-channel threshold", "description": "Distinct channels posted in before a ban triggers."},
     {"key": "multi_channel_window", "cog": "spam", "type": "float", "default": 1.0,
      "label": "Multi-channel window (s)", "description": "Seconds the multi-channel spread is measured over."},
+    {"key": "duplicate_channel_threshold", "cog": "spam", "type": "int", "default": 3,
+     "label": "Cross-post threshold", "description": "Distinct channels the same message may appear in before a ban."},
+    {"key": "duplicate_window", "cog": "spam", "type": "int", "default": 30,
+     "label": "Cross-post window (s)", "description": "Seconds over which identical messages across channels are tracked."},
+    {"key": "duplicate_min_len", "cog": "spam", "type": "int", "default": 8,
+     "label": "Cross-post min text", "description": "Minimum text length for a text-only message to count (attachments always count)."},
     # --- economy ---
     {"key": "starting_balance", "cog": "economy", "type": "int", "default": 0,
      "label": "Starting balance", "description": "Coins a brand-new wallet is created with."},

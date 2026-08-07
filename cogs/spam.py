@@ -23,7 +23,23 @@ class SpamProtector(commands.Cog, name="spam"):
         self.bot = bot
         # {user_id: [(timestamp, channel_id), ...]}
         self._user_msg_data: dict[int, list[tuple[float, int]]] = defaultdict(list)
+        # Cross-post detection: {user_id: [(timestamp, channel_id, signature), ...]}
+        self._dup_data: dict[int, list[tuple[float, int, tuple]]] = defaultdict(list)
         self.background_ram_cleanup.start()
+
+    @staticmethod
+    def _signature(message: discord.Message) -> tuple:
+        """A content fingerprint: normalised text + each attachment's name & size.
+        Reposting the same image/text across channels yields the same signature."""
+        attachments = tuple(sorted((a.filename, a.size) for a in message.attachments))
+        return (message.content.strip().lower(), attachments)
+
+    @staticmethod
+    def _is_substantial(signature: tuple, min_len: int) -> bool:
+        """Only treat a message as cross-post-worthy if it has attachments or enough
+        text — avoids flagging a user saying 'gg' in a few channels."""
+        content, attachments = signature
+        return bool(attachments) or len(content) >= min_len
 
     def cog_unload(self) -> None:
         self.background_ram_cleanup.cancel()
@@ -46,6 +62,14 @@ class SpamProtector(commands.Cog, name="spam"):
                     self._user_msg_data[user_id] = recent
                 else:
                     del self._user_msg_data[user_id]
+            # Cross-post records use their own (longer) window.
+            dup_window = self.bot.params.get(None, "duplicate_window")
+            for user_id in list(self._dup_data.keys()):
+                recent = [r for r in self._dup_data[user_id] if now - r[0] <= dup_window]
+                if recent:
+                    self._dup_data[user_id] = recent
+                else:
+                    del self._dup_data[user_id]
         except Exception as error:
             self.bot.logger.error(f"Error in spam RAM cleanup task: {error}")
 
@@ -108,6 +132,25 @@ class SpamProtector(commands.Cog, name="spam"):
                 reason_public=f"Spamming across {unique_channels} channels in {multi_window}s.",
             )
             return
+
+        # Cross-post spam: the *same* message (text + attachments) posted across
+        # several channels over a longer window — the classic image cross-poster.
+        dup_window = self.bot.params.get(guild_id, "duplicate_window")
+        dup_threshold = self.bot.params.get(guild_id, "duplicate_channel_threshold")
+        dup_min_len = self.bot.params.get(guild_id, "duplicate_min_len")
+        signature = self._signature(message)
+        if self._is_substantial(signature, dup_min_len):
+            self._dup_data[user_id].append((now, message.channel.id, signature))
+            self._dup_data[user_id] = [r for r in self._dup_data[user_id] if now - r[0] <= dup_window]
+            dup_channels = {c for (t, c, sig) in self._dup_data[user_id] if sig == signature}
+            if len(dup_channels) >= dup_threshold:
+                await self._ban_and_alert(
+                    message,
+                    reason_log="Anti-Spam: Cross-post (duplicate content) detected",
+                    reason_public=f"Posted the same message across {len(dup_channels)} channels in {dup_window}s.",
+                )
+                self._dup_data.pop(user_id, None)
+                return
 
         # Volume spam: too many messages within the rate window.
         recent_count = sum(1 for (t, c) in user_data if now - t <= spam_window)
