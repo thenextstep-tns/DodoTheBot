@@ -51,7 +51,8 @@ class _MuscleGroupSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         muscle_group = self.values[0]
-        await self.cog.register_gym_session(self.user_id, self.pet_id, muscle_group)
+        guild_id = self.member.guild.id if self.member.guild else None
+        await self.cog.register_gym_session(self.user_id, self.pet_id, muscle_group, guild_id)
         await interaction.response.send_message(
             lang.GYM_TRAINING_STARTED.format(name=self.member.display_name, muscle_group=muscle_group), ephemeral=True
         )
@@ -101,32 +102,35 @@ class Gym(commands.Cog, name="gym"):
         training = {session["cat_id"] for session in config_py.gym_sessions.find()}
         return [pet for pet in all_pets if pet["name"] not in training]
 
-    async def register_gym_session(self, user_id: int, cat_id: str, muscle_group: str) -> None:
-        """Record a 24h training session and schedule the attribute increase."""
+    async def register_gym_session(self, user_id: int, cat_id: str, muscle_group: str, guild_id: int | None = None) -> None:
+        """Record a training session and schedule the attribute increase. Session
+        length and stat gain are per-guild parameters, captured now at start."""
+        hours = self.bot.params.get(guild_id, "gym_session_hours")
+        gain = self.bot.params.get(guild_id, "gym_stat_gain")
         start_time = datetime.datetime.now()
-        end_time = start_time + datetime.timedelta(hours=24)
+        end_time = start_time + datetime.timedelta(hours=hours)
         config_py.gym_sessions.insert_one(
             {"cat_id": cat_id, "start_time": start_time, "end_time": end_time, "muscle_group": muscle_group}
         )
-        self._schedule_attribute_increase(cat_id, muscle_group, end_time)
+        self._schedule_attribute_increase(cat_id, muscle_group, end_time, gain)
 
-    def _schedule_attribute_increase(self, cat_id: str, muscle_group: str, end_time: datetime.datetime) -> None:
+    def _schedule_attribute_increase(self, cat_id: str, muscle_group: str, end_time: datetime.datetime, gain: int) -> None:
         """Increase the trained attribute once the session's end time is reached."""
 
         @tasks.loop(count=1)
         async def increase_attribute():
             await asyncio.sleep((end_time - datetime.datetime.now()).total_seconds())
-            await self._increase_cat_attribute(cat_id, muscle_group)
+            await self._increase_cat_attribute(cat_id, muscle_group, gain)
 
         increase_attribute.start()
 
-    async def _increase_cat_attribute(self, cat_id: str, muscle_group: str) -> None:
-        """Apply +1 to the cat's trained attribute."""
+    async def _increase_cat_attribute(self, cat_id: str, muscle_group: str, gain: int = 1) -> None:
+        """Apply the per-session gain to the cat's trained attribute."""
         attribute = _ATTRIBUTE_MAPPING[muscle_group]
         # NOTE (pre-existing): writes to db["catcollection"] rather than the real
         # Cats collection (config_py.catcollection). Preserved as-is.
-        config_py.db["catcollection"].update_one({"_id": cat_id}, {"$inc": {attribute: 1}})
-        self.bot.logger.debug(f"Updated {attribute} for cat {cat_id}")
+        config_py.db["catcollection"].update_one({"_id": cat_id}, {"$inc": {attribute: gain}})
+        self.bot.logger.debug(f"Updated {attribute} (+{gain}) for cat {cat_id}")
 
 
 async def setup(bot):

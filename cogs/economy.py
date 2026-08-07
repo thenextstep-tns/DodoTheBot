@@ -27,7 +27,9 @@ class Economy(commands.Cog, name="economy"):
             await context.send(lang.ECONOMY_WALLET_BALANCE.format(balance=wallet["balance"]))
         else:
             await context.send(lang.ECONOMY_WALLET_CREATED)
-            config_py.wallets.insert_one({"user_id": member.id, "balance": 0})
+            guild_id = context.guild.id if context.guild else None
+            starting = self.bot.params.get(guild_id, "starting_balance")
+            config_py.wallets.insert_one({"user_id": member.id, "balance": starting})
 
     async def _top_counterpart(self, match_field: str, group_field: str, user_id: int):
         """Return (user, count) for the person topping an aggregated sweetroll relation."""

@@ -38,9 +38,11 @@ class Fishing(commands.Cog, name="fishing"):
         """Run a full fishing attempt for the caller."""
         member = context.author
         user_id = member.id
-        fishing_cost = config_py.fishing_cost
+        guild_id = context.guild.id if context.guild else None
+        fishing_cost = self.bot.params.get(guild_id, "fishing_cost")
+        bag_max = self.bot.params.get(guild_id, "fishing_bag_max")
 
-        if not self.has_enough_balance(user_id):
+        if not self.has_enough_balance(user_id, fishing_cost):
             await context.send(lang.FISHING_NO_COINS)
             return
 
@@ -66,14 +68,14 @@ class Fishing(commands.Cog, name="fishing"):
         if self.define_fishing_outcome(*ratios):
             stashed, sold, thrown_away = await self.draw_victory_embed(context, item_name, user_id)
             fishing_success = 1
-            text = self.process_fishing_results(user_id, stashed, sold, thrown_away, item_info)
+            text = self.process_fishing_results(user_id, stashed, sold, thrown_away, item_info, bag_max)
             await context.send(f"{text}\n{lang.FISHING_COST_NOTE.format(cost=fishing_cost)}")
         else:
             fishing_success = 0
             await context.send(lang.FISHING_FAILED.format(item_name=item_name))
             await context.send(lang.FISHING_COST_NOTE.format(cost=fishing_cost))
 
-        self.subtract_fishing_cost(user_id)
+        self.subtract_fishing_cost(user_id, fishing_cost)
         self.save_fishing_result(item_info, user_id, selected_cat_id, *ratios, fishing_success)
 
     # ------------------------------------------------------------------ #
@@ -264,10 +266,10 @@ class Fishing(commands.Cog, name="fishing"):
             }
         )
 
-    def process_fishing_results(self, user_id, stashed, sold, thrown_away, item_info) -> str:
+    def process_fishing_results(self, user_id, stashed, sold, thrown_away, item_info, bag_max=_MAX_BAG) -> str:
         """Apply the chosen disposition (stash/sell/throw) and return a status line."""
         if stashed:
-            if self.count_goodies_bag(user_id) >= _MAX_BAG:
+            if self.count_goodies_bag(user_id) >= bag_max:
                 return lang.FISHING_BAG_FULL
             self._store_item(user_id, item_info)
             return lang.FISHING_STASHED
@@ -289,20 +291,20 @@ class Fishing(commands.Cog, name="fishing"):
             return lang.FISHING_THROWN
         return ""
 
-    def has_enough_balance(self, user_id: int) -> bool:
+    def has_enough_balance(self, user_id: int, cost: int) -> bool:
         """Whether the user can afford a fishing attempt."""
         wallet = config_py.wallets.find_one({"user_id": user_id})
-        return bool(wallet) and wallet.get("balance", 0) >= config_py.fishing_cost
+        return bool(wallet) and wallet.get("balance", 0) >= cost
 
-    def subtract_fishing_cost(self, user_id: int) -> None:
+    def subtract_fishing_cost(self, user_id: int, cost: int) -> None:
         """Deduct the fishing cost from the user's wallet."""
         wallet = config_py.wallets.find_one({"user_id": user_id})
         if not wallet:
             raise ValueError("User does not have a wallet.")
-        if wallet.get("balance", 0) < config_py.fishing_cost:
+        if wallet.get("balance", 0) < cost:
             raise ValueError("User does not have enough coins.")
         config_py.wallets.update_one(
-            {"user_id": user_id}, {"$set": {"balance": wallet["balance"] - config_py.fishing_cost}}
+            {"user_id": user_id}, {"$set": {"balance": wallet["balance"] - cost}}
         )
 
     def save_fishing_result(self, item_info, user_id, selected_cat_id, agility_ratio, intellect_ratio, strength_ratio, fishing_success) -> None:

@@ -45,6 +45,19 @@ PARAMETERS: list[dict] = [
      "label": "Multi-channel threshold", "description": "Distinct channels posted in before a ban triggers."},
     {"key": "multi_channel_window", "cog": "spam", "type": "float", "default": 1.0,
      "label": "Multi-channel window (s)", "description": "Seconds the multi-channel spread is measured over."},
+    # --- economy ---
+    {"key": "starting_balance", "cog": "economy", "type": "int", "default": 0,
+     "label": "Starting balance", "description": "Coins a brand-new wallet is created with."},
+    # --- gym ---
+    {"key": "gym_session_hours", "cog": "gym", "type": "int", "default": 24,
+     "label": "Gym session (hours)", "description": "How long a cat trains before its attribute goes up."},
+    {"key": "gym_stat_gain", "cog": "gym", "type": "int", "default": 1,
+     "label": "Gym stat gain", "description": "How many points the trained attribute gains per session."},
+    # --- fishing ---
+    {"key": "fishing_cost", "cog": "fishing", "type": "int", "default": 10,
+     "label": "Fishing cost", "description": "Coins deducted per fishing attempt."},
+    {"key": "fishing_bag_max", "cog": "fishing", "type": "int", "default": 24,
+     "label": "Goodies bag size", "description": "Max items a user can keep stashed."},
 ]
 
 
