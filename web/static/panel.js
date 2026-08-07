@@ -1,0 +1,152 @@
+"use strict";
+
+const statusEl = () => document.getElementById("status");
+
+function flash(message, ok) {
+  const el = statusEl();
+  if (!el) return;
+  el.textContent = message;
+  el.className = "status show " + (ok ? "ok" : "err");
+  setTimeout(() => { el.className = "status"; }, 2500);
+}
+
+async function post(url, body) {
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await resp.json(); } catch (_) { /* ignore */ }
+  return { ok: resp.ok && data.ok, error: data.error };
+}
+
+// --- Dashboard: process-wide cog load/reload/unload ---
+document.querySelectorAll(".cogbtns button").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const action = btn.dataset.action;
+    const cog = btn.dataset.cog;
+    btn.disabled = true;
+    const res = await post("/api/cog", { action, cog });
+    btn.disabled = false;
+    if (res.ok) {
+      flash(`${action} ${cog} ✓`, true);
+      setTimeout(() => location.reload(), 600);
+    } else {
+      flash(res.error || `Failed to ${action} ${cog}`, false);
+    }
+  });
+});
+
+// --- Guild page: per-cog enable toggle ---
+document.querySelectorAll(".cogcard").forEach((card) => {
+  const guildId = card.closest("[data-guild]").dataset.guild;
+  const cog = card.dataset.cog;
+
+  const toggle = card.querySelector(".cogtoggle");
+  if (toggle) {
+    toggle.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/cog`, { cog, enabled: toggle.checked });
+      flash(res.ok ? `${cog} ${toggle.checked ? "enabled" : "disabled"} ✓` : (res.error || "Failed"), res.ok);
+      if (!res.ok) toggle.checked = !toggle.checked;
+    });
+  }
+
+  // --- Guild page: per-listener feature toggles ---
+  card.querySelectorAll(".featrow .feattoggle").forEach((toggle) => {
+    const feature = toggle.closest(".featrow").dataset.feature;
+    toggle.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/feature`, { feature, enabled: toggle.checked });
+      if (res.ok) {
+        flash(`${feature} ${toggle.checked ? "on" : "off"} ✓`, true);
+      } else {
+        flash(res.error || "Failed", false);
+        toggle.checked = !toggle.checked;
+      }
+    });
+  });
+
+  // --- Guild page: per-command visibility level ---
+  card.querySelectorAll("select.level").forEach((sel) => {
+    let previous = sel.value;
+    sel.addEventListener("change", async () => {
+      const command = sel.dataset.command;
+      const res = await post(`/api/guild/${guildId}/command`, { command, level: sel.value });
+      if (res.ok) {
+        flash(`${command} → ${sel.value} ✓`, true);
+        previous = sel.value;
+      } else {
+        flash(res.error || "Failed", false);
+        sel.value = previous;
+      }
+    });
+  });
+});
+
+// --- Guild page: category master toggle (turns all member cogs on/off) ---
+document.querySelectorAll(".cattoggle").forEach((toggle) => {
+  const guildEl = toggle.closest("[data-guild]");
+  if (!guildEl) return;
+  const guildId = guildEl.dataset.guild;
+  const category = toggle.dataset.category;
+  if (toggle.dataset.state === "mixed") toggle.indeterminate = true;
+
+  toggle.addEventListener("change", async () => {
+    const enabled = toggle.checked;
+    const res = await post(`/api/guild/${guildId}/category`, { category, enabled });
+    if (res.ok) {
+      flash(`${category} ${enabled ? "enabled" : "disabled"} ✓`, true);
+      toggle.indeterminate = false;
+      // Reflect on the member cog toggles inside this category.
+      toggle.closest(".catcard").querySelectorAll(".cogtoggle").forEach((c) => { c.checked = enabled; });
+    } else {
+      flash(res.error || "Failed", false);
+      toggle.checked = !toggle.checked;
+    }
+  });
+});
+
+// --- Strings page: edit / reset user-facing strings ---
+document.querySelectorAll("#langlist .langrow").forEach((row) => {
+  const key = row.dataset.key;
+  const isList = row.dataset.list === "1";
+  const ta = row.querySelector("textarea");
+
+  row.querySelector('button[data-do="save"]').addEventListener("click", async () => {
+    const res = await post("/api/lang", { key, value: ta.value, is_list: isList });
+    if (res.ok) {
+      flash(`${key} saved ✓`, true);
+      row.classList.add("saved");
+    } else {
+      flash(res.error || "Failed", false);
+    }
+  });
+
+  row.querySelector('button[data-do="reset"]').addEventListener("click", async () => {
+    const res = await post("/api/lang", { key, action: "reset" });
+    if (res.ok) {
+      flash(`${key} reset ✓`, true);
+      setTimeout(() => location.reload(), 500);
+    } else {
+      flash(res.error || "Failed", false);
+    }
+  });
+});
+
+// --- Strings page: live filter ---
+const langSearch = document.getElementById("langsearch");
+if (langSearch) {
+  langSearch.addEventListener("input", () => {
+    const q = langSearch.value.trim().toLowerCase();
+    document.querySelectorAll("#langlist .group").forEach((group) => {
+      let anyVisible = false;
+      group.querySelectorAll(".langrow").forEach((row) => {
+        const match = !q || row.dataset.search.includes(q);
+        row.style.display = match ? "" : "none";
+        if (match) anyVisible = true;
+      });
+      group.style.display = anyVisible ? "" : "none";
+      if (q && anyVisible) group.open = true;
+    });
+  });
+}

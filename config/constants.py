@@ -36,7 +36,7 @@ statuses = [
 # --- Relationship / pet system tuning ---
 MOUSE_ADOPTION_RANK = 250        # Relationship points needed for adoption
 RELATIONSHIP_BASE_POINTS = 20    # Base points in the relationship calculation formula
-CHEESE_DROP_THRESHOLD = 950      # In a 0-1000 roll, drop cheese if roll > this (~1%)
+CHEESE_DROP_THRESHOLD = 985      # In a 0-1000 roll, drop cheese if roll > this (~1%)
 STAR_INSPIRATION_BOOST = 5       # Extra steps when the starry-eyes (race) event triggers
 STAR_INSPIRATION_DURATION = 5    # Number of moves the starry boost lasts
 

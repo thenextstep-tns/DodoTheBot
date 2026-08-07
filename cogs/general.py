@@ -76,9 +76,28 @@ class General(commands.Cog, name="general"):
         current_parts: list[str] = []
         current_length = 0
 
+        # Only list commands the caller may actually run in this guild, per the
+        # per-guild visibility settings (owner-only tooling drops out for non-owners,
+        # admin-only for non-admins, and anything in a cog disabled here).
+        guild_id = context.guild.id if context.guild else None
+        perms = getattr(context.author, "guild_permissions", None)
+        has_manage = bool(context.guild and perms and perms.manage_guild)
+
+        def _can_see(command) -> bool:
+            top = command.root_parent or command
+            cog = getattr(command, "cog", None)
+            return self.bot.visibility.can_run(
+                guild_id, context.author.id, top.name,
+                cog.qualified_name if cog else None, has_manage_guild=has_manage,
+            )
+
         for cog_name, cog in self.bot.cogs.items():
             command_list = sorted(
-                (f"- **{command.name}** - {command.description}" for command in cog.get_commands()),
+                (
+                    f"- **{command.name}** - {command.description}"
+                    for command in cog.get_commands()
+                    if _can_see(command)
+                ),
                 key=str.lower,
             )
             if not command_list:

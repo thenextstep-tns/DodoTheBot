@@ -2,6 +2,7 @@
 discord.py>=2.4
 pymongo
 dnspython          # required for Atlas mongodb+srv:// connection strings
+psutil             # single-instance guard: kill duplicate bot processes / port holders on startup
 
 # Integrations
 openai             # chat, scheduler, racing, dnd, imagine

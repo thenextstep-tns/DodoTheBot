@@ -33,3 +33,11 @@ class GuildNotConfigured(DodoError):
 
     def __init__(self, message: str = "This server has not been configured yet."):
         super().__init__(message)
+
+
+class CommandHidden(DodoError):
+    """Raised when a command is hidden/disabled for the caller in this guild
+    (per the per-guild visibility settings managed from the control panel)."""
+
+    def __init__(self, message: str = "That command isn't available here."):
+        super().__init__(message)

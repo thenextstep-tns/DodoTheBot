@@ -285,7 +285,16 @@ THROW_FUNNY_PART4 = [
 #  Owner cog
 # --------------------------------------------------------------------------- #
 OWNER_SHUTDOWN = "Ah shit, not again! Family, here I come :wave:"
-OWNER_SYNCED = "Synced {count} command(s)."
+OWNER_SYNCED = "Re-synced command visibility across {count} guild(s)."
+OWNER_RELOAD_DONE = "🔄 Reloaded cog `{cog}`. Run `/sync` if its commands changed."
+OWNER_LOAD_DONE = "✅ Loaded cog `{cog}`. Run `/sync` if it added commands."
+OWNER_UNLOAD_DONE = "🛑 Unloaded cog `{cog}`. Run `/sync` if it removed commands."
+OWNER_UNLOAD_SELF = "I won't unload the owner cog — I'd lose these controls. Use `/reload owner` instead."
+OWNER_COG_NOT_LOADED = "Cog `{cog}` isn't loaded."
+OWNER_COG_NOT_FOUND = "No cog named `{cog}` was found under cogs/."
+OWNER_COG_NO_ENTRY = "`{cog}` is a helper module, not a cog (no setup function)."
+OWNER_COG_ERROR = "Failed on cog `{cog}`: {error}"
+OWNER_RELOADALL_TITLE = "Reloaded {ok}/{total} cog(s)"
 OWNER_CLEANROLE_NOT_FOUND = "Role '{role}' not found."
 OWNER_CLEANROLE_DONE = "Role '{role}' removed from all members who had it."
 OWNER_ADDONS_TITLE = "Hey! Here's the list of add-ons that we would recommend!"

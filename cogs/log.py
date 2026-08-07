@@ -57,7 +57,11 @@ class Log(commands.Cog, name="log"):
         """Helper to fetch the log channel using the dictionary from guilds.json."""
         if not guild:
             return None
-            
+        # Audit logging is a per-guild toggleable feature; when off, resolve no
+        # channel so every listener no-ops (and nothing is archived).
+        if not self.bot.visibility.feature_active(guild.id, "audit_log", "log"):
+            return None
+
         log_channels = load_guilds()
         guild_data = log_channels.get(str(guild.id))
         
@@ -78,7 +82,9 @@ class Log(commands.Cog, name="log"):
         """Helper to fetch the delete/edit log channel, falling back to standard log channel."""
         if not guild:
             return None
-            
+        if not self.bot.visibility.feature_active(guild.id, "audit_log", "log"):
+            return None
+
         log_channels = load_guilds()
         guild_data = log_channels.get(str(guild.id))
         

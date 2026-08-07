@@ -107,6 +107,9 @@ class ParseTournament(commands.Cog, name="parse_tournament"):
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User) -> None:
         if user.bot or not self.main_message:
             return
+        guild = getattr(reaction.message, "guild", None)
+        if guild and not self.bot.visibility.cog_enabled(guild.id, "parse_tournament"):
+            return
         if self.signups_open and str(reaction.emoji) == "✅":
             if user.id not in self.participants:
                 self.participants[user.id] = user

@@ -63,3 +63,12 @@ logs = db["Logs"]
 raid_setups = db["RaidSetups"]
 gilane_scores = db["GilaneScores"]
 quote_scores = db["QuoteScores"]
+# Persistent state for in-progress interactive flows (see helpers/state_machine.py).
+active_states = db["ActiveStates"]
+# Multiserver command/cog visibility (see helpers/visibility.py & the control panel).
+command_visibility = db["CommandVisibility"]  # {guild_id, command, level}
+cog_guild_state = db["CogGuildState"]         # {guild_id, cog, enabled}
+feature_state = db["FeatureState"]            # {guild_id, feature, enabled} — passive listeners
+guild_admins = db["GuildAdmins"]              # {guild_id, user_ids: [...]}
+command_sync_hashes = db["CommandSyncHashes"] # {guild_id, hash} — startup resync guard
+lang_overrides = db["LangOverrides"]          # {key, value} — editable user-facing strings

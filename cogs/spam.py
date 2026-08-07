@@ -79,6 +79,8 @@ class SpamProtector(commands.Cog, name="spam"):
         """Record each message and ban on volume or multi-channel spam."""
         if message.author.bot or not message.guild:
             return
+        if not self.bot.visibility.feature_active(message.guild.id, "spam_autoban", "spam"):
+            return
         if getattr(message.author.guild_permissions, "administrator", False):
             return
 

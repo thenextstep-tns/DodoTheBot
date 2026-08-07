@@ -23,8 +23,13 @@ from discord.ext import commands, tasks
 
 import config_py
 import exceptions
+import lang
 from config.guild_config import GuildConfigManager
 from helpers.logger import setup_logger
+from helpers.state_machine import StateStore
+from helpers.visibility import VisibilityManager
+from helpers.command_sync import CommandSyncer
+from helpers.lang_manager import LangManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -65,6 +70,73 @@ class DodoBot(commands.Bot):
         # config.guild constants as built-in defaults. Cogs and events read guild
         # settings via ``self.guild_config.get(guild_id, "KEY")``.
         self.guild_config = GuildConfigManager()
+        # Mongo-backed persistence for in-progress interactive flows. Flows opt in
+        # by registering a resume handler (see helpers/state_machine.py); every
+        # still-active flow is auto-resumed once, from on_ready.
+        self.state = StateStore(config_py.active_states, logger=logger)
+        self._resumed = False
+        # Per-guild, role-based command/cog visibility (managed from the control
+        # panel). Enforced at runtime for every invocation path via the checks
+        # registered below, and mirrored to Discord by helpers/command_sync.py.
+        self.visibility = VisibilityManager(
+            visibility_col=config_py.command_visibility,
+            cog_state_col=config_py.cog_guild_state,
+            guild_admins_col=config_py.guild_admins,
+            feature_col=config_py.feature_state,
+            owners=config.get("owners", []),
+        )
+        self.add_check(self._global_visibility_check)
+        self.tree.interaction_check = self._app_visibility_check
+        # Applies the visibility settings to each guild's slash picker (per-guild
+        # command trees), on startup and live on config changes from the panel.
+        self.command_syncer = CommandSyncer(self, hash_col=config_py.command_sync_hashes)
+        self._synced = False
+        # Editable user-facing strings: snapshots lang.py defaults and applies any
+        # stored overrides onto the live module, so cogs' ``lang.KEY`` reads reflect
+        # edits made from the control panel. Done here (before cogs load) so the
+        # first use of any string already sees its override.
+        self.lang = LangManager(lang, config_py.lang_overrides)
+
+    # ------------------------------------------------------------------ #
+    #  Visibility enforcement (prefix/hybrid + slash)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _command_meta(command) -> "tuple[str, str | None]":
+        """Top-level command name + owning cog name, keyed the way the panel stores them."""
+        top = command.root_parent or command
+        cog = getattr(command, "cog", None)
+        return top.name, (cog.qualified_name if cog else None)
+
+    async def _global_visibility_check(self, context: "commands.Context") -> bool:
+        """Global check for prefix + hybrid-text invocations."""
+        if context.command is None:
+            return True
+        name, cog = self._command_meta(context.command)
+        has_manage = bool(
+            context.guild and getattr(context.author, "guild_permissions", None)
+            and context.author.guild_permissions.manage_guild
+        )
+        guild_id = context.guild.id if context.guild else None
+        if not self.visibility.can_run(guild_id, context.author.id, name, cog, has_manage_guild=has_manage):
+            raise exceptions.CommandHidden()
+        return True
+
+    async def _app_visibility_check(self, interaction: "discord.Interaction") -> bool:
+        """``tree.interaction_check`` for slash/app-command invocations."""
+        command = interaction.command
+        # Only gate real application-command invocations (not autocomplete/components).
+        if not isinstance(command, app_commands.Command):
+            return True
+        name = (command.root_parent or command).name
+        cog = getattr(command, "binding", None)
+        cog_name = cog.qualified_name if cog else None
+        perms = getattr(interaction.user, "guild_permissions", None)
+        has_manage = bool(interaction.guild_id and perms and perms.manage_guild)
+        if not self.visibility.can_run(
+            interaction.guild_id, interaction.user.id, name, cog_name, has_manage_guild=has_manage
+        ):
+            raise exceptions.CommandHidden()
+        return True
 
     def guild_setting(self, guild: "discord.Guild | int | None", key: str):
         """Convenience: resolve a per-guild setting from a guild object or ID."""
@@ -72,19 +144,11 @@ class DodoBot(commands.Bot):
         return self.guild_config.get(guild_id, key)
 
     async def setup_hook(self) -> None:
-        """Runs once before ``on_ready``: load cogs and sync the command tree."""
+        """Runs once before ``on_ready``: load cogs. Application commands are synced
+        per-guild from ``on_ready`` (via ``command_syncer``), where ``self.guilds``
+        is populated and each guild's tree can be computed from its visibility
+        settings."""
         await self.load_all_cogs()
-        # Sync hybrid/app commands. If a dev guild is configured, sync there for
-        # instant availability; otherwise sync globally (can take up to an hour).
-        dev_guild_id = self.config.get("test_guild_id")
-        if dev_guild_id:
-            guild = discord.Object(id=int(dev_guild_id))
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            self.logger.info(f"Synced {len(synced)} app command(s) to dev guild {dev_guild_id}.")
-        else:
-            synced = await self.tree.sync()
-            self.logger.info(f"Synced {len(synced)} global app command(s).")
 
     async def load_all_cogs(self) -> None:
         """Recursively load every cog under ``cogs/``.
@@ -177,6 +241,16 @@ async def on_ready() -> None:
         api_import.start()
     if not check_reactions.is_running():
         check_reactions.start()
+    # Apply per-guild command visibility to Discord's pickers. Guarded + hash-gated
+    # so gateway reconnects and unchanged guilds don't trigger needless re-syncs.
+    if not bot._synced:
+        bot._synced = True
+        await bot.command_syncer.sync_all()
+    # Resume any interactive flows that were mid-play when the bot last stopped.
+    # Guarded so gateway reconnects (which re-fire on_ready) don't re-resume.
+    if not bot._resumed:
+        bot._resumed = True
+        await bot.state.resume_all(bot)
 
 
 # --------------------------------------------------------------------------- #
@@ -484,6 +558,9 @@ async def on_command_error(context: commands.Context, error: commands.CommandErr
     """Friendly responses for common prefix / hybrid-text command errors."""
     if isinstance(error, commands.CommandNotFound):
         return
+    if isinstance(error, exceptions.CommandHidden):
+        # Silently ignore hidden/disabled commands for prefix users — no error spam.
+        return
     if isinstance(error, (exceptions.UserBlacklisted, exceptions.UserNotOwner)):
         await context.send(embed=discord.Embed(title="Error!", description=error.message, color=0xE02B2B))
     elif isinstance(error, commands.CommandOnCooldown):
@@ -521,7 +598,7 @@ async def on_command_error(context: commands.Context, error: commands.CommandErr
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     """Friendly ephemeral responses for slash-command errors."""
     original = getattr(error, "original", error)
-    if isinstance(original, (exceptions.UserBlacklisted, exceptions.UserNotOwner)):
+    if isinstance(original, (exceptions.UserBlacklisted, exceptions.UserNotOwner, exceptions.CommandHidden)):
         message = original.message
     elif isinstance(error, app_commands.MissingPermissions):
         message = "You are missing the permission(s) `" + ", ".join(error.missing_permissions) + "` to run this command!"
@@ -1022,4 +1099,10 @@ async def handle_trap_trigger(member: discord.Member) -> None:
 #  Entry point
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
+    # Enforce a single instance: kill any other process running this script or
+    # holding the control-panel port before we connect (avoids a duplicate gateway
+    # login and "address already in use" on the in-process web panel).
+    from helpers.singleton import terminate_duplicates
+
+    terminate_duplicates(script_marker="bot.py", port=config_py.WEB_PORT, logger=logger)
     bot.run(config["token"])

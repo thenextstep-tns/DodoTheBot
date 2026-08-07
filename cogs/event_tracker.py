@@ -32,6 +32,8 @@ class EventTracker(commands.Cog, name="event_tracker"):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
+        if message.guild and not self.bot.visibility.feature_active(message.guild.id, "event_tracking", "event_tracker"):
+            return
         config = self._get_channel_config(message.channel.id)
         if not config or not config.get("category"):
             return
@@ -52,6 +54,8 @@ class EventTracker(commands.Cog, name="event_tracker"):
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         if payload.user_id == self.bot.user.id:
+            return
+        if payload.guild_id and not self.bot.visibility.feature_active(payload.guild_id, "event_tracking", "event_tracker"):
             return
         config = self._get_channel_config(payload.channel_id)
         if not config or not config.get("category"):

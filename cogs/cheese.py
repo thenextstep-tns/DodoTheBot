@@ -55,6 +55,8 @@ class Cheese(commands.Cog, name="cheese"):
         """Rarely drop a 🧀 on a message; the first grab starts the stretch game."""
         if message.author.bot:
             return
+        if message.guild and not self.bot.visibility.feature_active(message.guild.id, "cheese_drop", "cheese"):
+            return
         # Hidden owner-only trigger guarantees a drop; otherwise roll the odds.
         forced = (
             message.author.id in self.owner_ids
