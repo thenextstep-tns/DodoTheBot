@@ -53,9 +53,9 @@ class Seasonal(commands.Cog, name="seasonal"):
     async def love(self, context: Context, member: discord.Member = None) -> None:
         """Collect a valentine in a private thread and post it to the Valentine channel."""
         await context.defer(ephemeral=True)
-        valentine_channel = self.bot.get_channel(config_py.VALENTINE_CHANNEL)
+        valentine_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "VALENTINE_CHANNEL"))
         thread = await self._open_thread(context, f"Sending a love letter to a very special someone at {time.time()}")
-        await thread.send(lang.LOVE_INTRO.format(mention=context.author.mention, channel=config_py.VALENTINE_CHANNEL))
+        await thread.send(lang.LOVE_INTRO.format(mention=context.author.mention, channel=self.bot.guild_setting(context.guild, "VALENTINE_CHANNEL")))
 
         if member:
             who = member.name
@@ -83,7 +83,7 @@ class Seasonal(commands.Cog, name="seasonal"):
         await valentine_channel.send(embed=embed)
         await valentine_channel.send(lang.LOVE_HEARTS)
 
-        await self.bot.get_channel(config_py.LOG_CHANNEL).send(
+        await self.bot.get_channel(self.bot.guild_setting(context.guild, "LOG_CHANNEL")).send(
             lang.LOVE_LOG.format(author=context.author, sender=sender, who=who, message=message)
         )
         await self._close_thread(thread)
@@ -96,9 +96,9 @@ class Seasonal(commands.Cog, name="seasonal"):
             return
 
         await context.defer(ephemeral=True)
-        doty_channel = self.bot.get_channel(config_py.DOTY_CHANNEL)
+        doty_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "DOTY_CHANNEL"))
         thread = await self._open_thread(context, f"Vote at {time.time()}")
-        await thread.send(lang.VOTE_INTRO.format(mention=context.author.mention, channel=config_py.DOTY_CHANNEL))
+        await thread.send(lang.VOTE_INTRO.format(mention=context.author.mention, channel=self.bot.guild_setting(context.guild, "DOTY_CHANNEL")))
 
         role_model = await self._ask(thread, context.author, lang.VOTE_Q1, 180)
         progress = role_model and await self._ask(thread, context.author, lang.VOTE_Q2, 180)

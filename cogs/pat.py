@@ -108,7 +108,7 @@ class PATRoleAssigner(commands.Cog, name="pat"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        if message.channel.id != config_py.PAT_DECODE_CHANNEL or message.author.bot:
+        if message.channel.id != self.bot.guild_setting(message.guild, "PAT_DECODE_CHANNEL") or message.author.bot:
             return
         if message.guild and not self.bot.visibility.feature_active(message.guild.id, "pat_decode", "pat"):
             return

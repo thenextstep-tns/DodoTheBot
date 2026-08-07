@@ -84,7 +84,7 @@ class Racing(commands.Cog, name="racing"):
     @checks.is_owner()
     async def gigarace(self, context: Context) -> None:
         """Start a gigarace announced in the announcement channel with a 9h countdown."""
-        announcement_channel = self.bot.get_channel(config_py.ANNOUNCEMENT_CHANNEL)
+        announcement_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "ANNOUNCEMENT_CHANNEL"))
         race_message = await announcement_channel.send(lang.RACING_GIGA_START)
         await race_message.add_reaction(MOUSE)
         await self._countdown_message(race_message, context.author, 45, 32400, giga=True)

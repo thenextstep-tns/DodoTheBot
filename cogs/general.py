@@ -234,8 +234,8 @@ class General(commands.Cog, name="general"):
     @checks.not_blacklisted()
     async def schedule_dm(self, context: Context) -> None:
         """DM the caller the current weekly schedule (falls back to the channel)."""
-        weekly_channel = self.bot.get_channel(config_py.WEEKLY_CHANNEL)
-        schedule = await weekly_channel.fetch_message(config_py.WEEKLY_MESSAGE)
+        weekly_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "WEEKLY_CHANNEL"))
+        schedule = await weekly_channel.fetch_message(self.bot.guild_setting(context.guild, "WEEKLY_MESSAGE"))
         try:
             await context.author.send(schedule.content)
             await context.send(lang.GENERAL_SCHEDULE_SENT_DM)

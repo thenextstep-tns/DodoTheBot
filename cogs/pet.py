@@ -73,7 +73,7 @@ class Pet(commands.Cog, name="pet"):
         """List a member's pets of a given kind, chunked under the embed limit."""
         member = member or context.author
         pets = list(self._collection(kind).find({"owner": member.id}))
-        channel = self.bot.get_channel(config_py.PET_CHANNEL)
+        channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "PET_CHANNEL"))
         if kind == "cat":
             await context.send(lang.PET_SHOWCATS_INTRO.format(name=member.display_name))
 
@@ -148,7 +148,7 @@ class Pet(commands.Cog, name="pet"):
         config = _PET_KINDS[kind]
         member = member or context.author
         collection = self._collection(kind)
-        channel = self.bot.get_channel(config_py.PET_CHANNEL)
+        channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "PET_CHANNEL"))
 
         looking = True
         while looking:

@@ -140,7 +140,7 @@ class Scheduler(commands.Cog, name="scheduler"):
 
     async def _create_raid_channel(self, context, trial, run_type, raid_time, group_comp) -> None:
         """Create the forum thread with the roster embed and sign-up buttons."""
-        forum_channel = self.bot.get_channel(config_py.OPEN_RAID_CHANNEL)
+        forum_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "OPEN_RAID_CHANNEL"))
         if not forum_channel:
             await context.send(lang.SCHED_NO_FORUM)
             return
