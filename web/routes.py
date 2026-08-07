@@ -220,6 +220,16 @@ def _param_input(param: dict, guild) -> str:
         return f'<input type="password" {common} placeholder="{html.escape(placeholder)}" autocomplete="new-password">'
     if ptype == "bool":
         return f'<input type="checkbox" {common} {"checked" if value else ""}>'
+    if ptype == "text":
+        rows = min(8, max(2, (str(value).count(chr(10)) + 1)))
+        return f'<textarea {common} rows="{rows}" spellcheck="false">{html.escape(str(value))}</textarea>'
+    if ptype == "list_str":
+        text = "\n".join(value) if isinstance(value, list) else str(value)
+        rows = min(10, max(2, len(value) + 1)) if isinstance(value, list) else 3
+        return f'<textarea {common} rows="{rows}" spellcheck="false" placeholder="one per line">{html.escape(text)}</textarea>'
+    if ptype == "list_int":
+        text = ", ".join(str(v) for v in value) if isinstance(value, list) else str(value)
+        return f'<input type="text" {common} value="{html.escape(text)}" placeholder="comma-separated ids">'
     if ptype in ("int", "float"):
         step = "1" if ptype == "int" else "any"
         return f'<input type="number" step="{step}" {common} value="{html.escape(str(value))}">'

@@ -72,9 +72,9 @@ document.querySelectorAll(".cogcard").forEach((card) => {
     const type = el.dataset.type;
     const readValue = () => {
       if (type === "bool") return el.checked;
-      if (type.startsWith("list_")) return Array.from(el.selectedOptions).map((o) => Number(o.value));
+      if (type === "list_role" || type === "list_channel") return Array.from(el.selectedOptions).map((o) => Number(o.value));
       if (type === "int" || type === "float" || type === "role" || type === "channel") return Number(el.value);
-      return el.value;
+      return el.value; // str, secret, text, list_str, list_int — server coerces
     };
     el.addEventListener("change", async () => {
       // Never overwrite a stored secret with an empty field.

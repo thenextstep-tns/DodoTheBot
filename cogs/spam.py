@@ -5,6 +5,7 @@ memory (periodically pruned).
 """
 
 import asyncio
+import re
 import time
 from collections import defaultdict
 
@@ -14,6 +15,7 @@ from discord.ext import commands, tasks
 import lang
 
 _DAY_IN_SECONDS = 86400
+_INVITE_RE = re.compile(r"discord\.gg/([A-Za-z0-9-]+)", re.IGNORECASE)
 
 
 class SpamProtector(commands.Cog, name="spam"):
@@ -98,11 +100,105 @@ class SpamProtector(commands.Cog, name="spam"):
             self.bot.logger.error(f"HTTP error banning spammer: {error}")
             return False
 
+    # ------------------------------------------------------------------ #
+    #  Mention & link filter (@everyone/@here + unauthorized invites)
+    # ------------------------------------------------------------------ #
+    async def _invites_all_allowed(self, content: str, allowed_guilds: set[int]) -> bool:
+        """True only if every discord.gg invite in ``content`` resolves to a guild
+        in the allowlist (used to permit invites to specific servers)."""
+        codes = _INVITE_RE.findall(content)
+        if not codes:
+            return False
+        for code in codes:
+            try:
+                invite = await self.bot.fetch_invite(code)
+            except discord.HTTPException:
+                return False
+            guild_id = invite.guild.id if invite.guild else None
+            if guild_id not in allowed_guilds:
+                return False
+        return True
+
+    async def _check_harmful(self, message: discord.Message) -> bool:
+        """Delete (or, for a mass-mention + invite, ban) a message with restricted
+        content, per this guild's settings. Returns True if it acted."""
+        guild = message.guild
+        content = message.content
+        lower = content.lower()
+
+        restricted = self.bot.params.get(guild.id, "restricted_strings")
+        if not any(str(s).lower() in lower for s in restricted):
+            return False
+        allowed_links = self.bot.params.get(guild.id, "allowed_links")
+        if any(str(link).lower() in lower for link in allowed_links):
+            return False
+
+        settings = self.bot.guild_config.get_all(guild.id)
+        member_roles = {r.id for r in getattr(message.author, "roles", [])}
+        if any(r in member_roles for r in settings.get("allowed_roles", [])):
+            return False
+
+        allowed_guilds = set(self.bot.params.get(guild.id, "allowed_guild_ids"))
+        if allowed_guilds and "discord.gg" in lower and await self._invites_all_allowed(content, allowed_guilds):
+            return False
+
+        log_channel = self.bot.get_channel(settings.get("E4D_LOG"))
+        ping = "@everyone" in content or "@here" in content
+        invite = "discord.gg" in lower
+
+        if ping and invite:
+            user_embed = discord.Embed(
+                title="You have been banned!",
+                description=f"You have been banned from {guild.name} for unauthorized activities.",
+                color=discord.Color.dark_red(),
+            )
+            user_embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+            user_embed.add_field(name="Reason", value="Unauthorized invite link with a mass mention", inline=False)
+            user_embed.set_footer(text="Contact the server admin for more information.")
+            try:
+                await message.author.send(embed=user_embed)
+            except discord.HTTPException:
+                self.bot.logger.warning("Failed to DM the banned user.")
+            if log_channel:
+                await log_channel.send(embed=discord.Embed(
+                    title="Immediate Ban for Unauthorized Mention and Link",
+                    description=f"**User:** {message.author}\n**Content:** {content}\n"
+                                f"**Action:** Banned for an unauthorized invite link together with a mass mention.",
+                    color=discord.Color.dark_red(),
+                ))
+            await guild.ban(message.author, reason="Unauthorized invite link with mass mention")
+            await message.delete()
+            return True
+
+        if log_channel:
+            await log_channel.send(embed=discord.Embed(
+                title="Deleted Message with Restricted Content",
+                description=f"**User:** {message.author}\n**Content:** {content}\n"
+                            f"**Action:** Message deleted due to restricted content.",
+                color=discord.Color.orange(),
+            ))
+        await message.delete()
+        await message.channel.send(
+            "Oi! Something doesn't look right in this chat! I will delete the message. :hearts: "
+            "Please poke any of the admins if you think I'm being crazy."
+        )
+        return True
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        """Record each message and ban on volume or multi-channel spam."""
+        """Filter restricted content, then ban on volume / multi-channel / cross-post spam."""
         if message.author.bot or not message.guild:
             return
+
+        # Mention & link filter (independent feature).
+        if self.bot.visibility.feature_active(message.guild.id, "mention_link_filter", "spam"):
+            try:
+                if await self._check_harmful(message):
+                    return
+            except discord.HTTPException as error:
+                self.bot.logger.error(f"Mention/link filter error: {error}")
+
+        # Rate / multi-channel / cross-post spam (independent feature).
         if not self.bot.visibility.feature_active(message.guild.id, "spam_autoban", "spam"):
             return
         if getattr(message.author.guild_permissions, "administrator", False):

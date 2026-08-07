@@ -355,7 +355,8 @@ async def on_message(message: discord.Message) -> None:
             await bot.process_commands(message)
         return
 
-    await check_for_harmful_messages(message)
+    # Restricted-content filtering now lives in the spam cog (mention_link_filter
+    # feature) so it's per-server configurable and unified with the anti-spam.
 
     try:
         config_py.messages.insert_one(
@@ -640,65 +641,6 @@ async def get_tags_from_wordpress_api() -> dict:
             bot.logger.warning(f"Could not fetch guide tags (page {page}): {error}")
             break
     return tags
-
-
-async def check_for_harmful_messages(message: discord.Message) -> None:
-    """Delete (and, for invite+@everyone spam, ban) messages with restricted content."""
-    if message.guild is None:
-        return
-    settings = bot.guild_config.get_all(message.guild.id)
-    if any(link in message.content for link in config_py.allowed_links):
-        return
-    if not any(s in message.content.lower() for s in config_py.restricted_strings):
-        return
-
-    member_roles = [role.id for role in message.author.roles]
-    if any(role in member_roles for role in settings["allowed_roles"]):
-        return
-
-    log_channel = bot.get_channel(settings["E4D_LOG"])
-    embed = discord.Embed(
-        title="Oi!!",
-        description=f"**User:** {message.author}\n**Content:** {message.content}",
-        color=discord.Color.red(),
-    )
-
-    if "@everyone" in message.content and "discord.gg" in message.content.lower():
-        user_embed = discord.Embed(
-            title="You have been banned!",
-            description=f"You have been banned from {message.guild.name} for unauthorized activities.",
-            color=discord.Color.dark_red(),
-        )
-        user_embed.set_thumbnail(url=message.guild.icon.url if message.guild.icon else None)
-        user_embed.add_field(name="Reason", value="Unauthorized invite link with @everyone mention", inline=False)
-        user_embed.set_footer(text="Contact the server admin for more information.")
-        try:
-            await message.author.send(embed=user_embed)
-        except discord.HTTPException:
-            bot.logger.warning("Failed to DM the banned user.")
-        embed.title = "Immediate Ban for Unauthorized Mention and Link"
-        embed.description = (
-            f"**User:** {message.author}\n**Content:** {message.content}\n"
-            f"**Action:** Banned for an unauthorized invite link together with '@everyone'."
-        )
-        embed.color = discord.Color.dark_red()
-        await log_channel.send(embed=embed)
-        await message.guild.ban(message.author, reason="Unauthorized invite link with @everyone mention")
-        await message.delete()
-        return
-
-    embed.title = "Deleted Message with Restricted Content"
-    embed.description = (
-        f"**User:** {message.author}\n**Content:** {message.content}\n"
-        f"**Action:** Message deleted due to restricted content."
-    )
-    embed.color = discord.Color.orange()
-    await log_channel.send(embed=embed)
-    await message.delete()
-    await message.channel.send(
-        "Oi! Something doesn't look right in this chat! I will delete the message. :hearts: "
-        "Please poke any of the admins if you think I'm being crazy."
-    )
 
 
 async def check_tags(message: discord.Message) -> None:

@@ -51,6 +51,23 @@ PARAMETERS: list[dict] = [
      "label": "Cross-post window (s)", "description": "Seconds over which identical messages across channels are tracked."},
     {"key": "duplicate_min_len", "cog": "spam", "type": "int", "default": 8,
      "label": "Cross-post min text", "description": "Minimum text length for a text-only message to count (attachments always count)."},
+    # --- spam: @everyone/@here + unauthorized-link filter (mention_link_filter feature) ---
+    {"key": "restricted_strings", "cog": "spam", "type": "list_str",
+     "default": ["discord.gg", "@everyone", "@here"],
+     "label": "Restricted strings", "description": "A message containing any of these (and no allowed link/role) is removed."},
+    {"key": "allowed_links", "cog": "spam", "type": "list_str",
+     "default": [
+         "discord.gg/8ewt2Fe", "discord.gg/esou", "discord.gg/uesp", "discord.gg/ZaPwNHKQBg",
+         "discord.gg/35FMqVQJgY", "discord.gg/enterthedominion", "discord.gg/FAU9A2pBY7",
+         "discord.gg/5NaETqTjDD", "discord.gg/fmrgcr4Dc5", "dodos.fun", "discord.gg/e4d",
+         "discord.gg/tBdB6KZzmf", "discord.gg/jEXVVgBTUP", "discord.gg/7xjfDDx6cX",
+         "discord.gg/78xRCj4QVa", "discord.gg/fQXqfWDmWa", "discord.gg/pXV23eZZ86",
+         "discord.gg/MuwsNJcqEw", "discord.gg/healershaven", "discord.gg/mindcleaver",
+         "discord.gg/dpsnerds", "discord.gg/B6cyn3uMr", "discord.gg/68PsPTmk3P",
+     ],
+     "label": "Allowed links", "description": "Links/invites that are never removed (substring match)."},
+    {"key": "allowed_guild_ids", "cog": "spam", "type": "list_int", "default": [],
+     "label": "Allowed invite guilds", "description": "Guild IDs whose invites are allowed (invites are resolved and checked)."},
     # --- economy ---
     {"key": "starting_balance", "cog": "economy", "type": "int", "default": 0,
      "label": "Starting balance", "description": "Coins a brand-new wallet is created with."},
@@ -107,6 +124,17 @@ def _to_bool(raw: Any) -> bool:
     return str(raw).strip().lower() in ("1", "true", "on", "yes")
 
 
+def _to_str_list(raw: Any) -> list[str]:
+    """One string per line (or a list); blanks dropped."""
+    if isinstance(raw, list):
+        items = [str(x) for x in raw]
+    elif raw in (None, ""):
+        items = []
+    else:
+        items = str(raw).replace("\r\n", "\n").split("\n")
+    return [s.strip() for s in items if s.strip()]
+
+
 def _to_id_list(raw: Any) -> list[int]:
     if isinstance(raw, list):
         items = raw
@@ -132,12 +160,14 @@ def coerce(param_type: str, raw: Any, *, choices: Optional[list] = None) -> Any:
         return float(raw)
     if param_type == "bool":
         return _to_bool(raw)
-    if param_type in ("str", "secret"):
+    if param_type in ("str", "secret", "text"):
         return str(raw)
     if param_type in ("role", "channel"):
         return int(raw or 0)
-    if param_type in ("list_role", "list_channel"):
+    if param_type in ("list_role", "list_channel", "list_int"):
         return _to_id_list(raw)
+    if param_type == "list_str":
+        return _to_str_list(raw)
     if param_type == "choice":
         value = str(raw)
         if choices and value not in choices:
