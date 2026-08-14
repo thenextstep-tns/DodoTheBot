@@ -152,16 +152,21 @@ class VisibilityManager:
     ) -> bool:
         """The single allow/deny decision for a command invocation.
 
-        Owners bypass everything. Otherwise a disabled cog blocks its commands,
-        then the command's level gates who may run it.
+        A disabled cog is off **for the whole server, owners included** — if an
+        admin switches something off it has to actually be off, or the setting
+        is a lie. Owners keep the control panel as the way back: it is a web
+        session, not a Discord command, so nothing here can lock them out of
+        re-enabling it (and they are told when an admin changes something —
+        see helpers/audit_notify.py).
+
+        Levels still key off who you are: ``owner`` is owners-only, ``admin``
+        is guild admins (owners included), ``visible`` is everyone.
         """
-        if self.is_owner(user_id):
-            return True
         if cog is not None and not self.cog_enabled(guild_id, cog):
             return False
         lvl = self.level(guild_id, command)
         if lvl == LEVEL_OWNER:
-            return False  # owners already returned True above
+            return self.is_owner(user_id)
         if lvl == LEVEL_ADMIN:
             return self.is_guild_admin(guild_id, user_id, has_manage_guild=has_manage_guild)
         return True

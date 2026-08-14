@@ -1147,6 +1147,25 @@ async def lang_page(request: web.Request):
     return _page("Strings", _lang_html(request.app["bot"]))
 
 
+async def _notify_change(request: web.Request, line: str) -> None:
+    """Tell the owner that a non-owner changed this guild's configuration.
+
+    A no-op when the actor is an owner. Never raises: a failed notification
+    must not fail the save that already happened.
+    """
+    try:
+        if request.get("scope") == panel_access.SCOPE_OWNER:
+            return
+        bot = request.app["bot"]
+        guild = request.get("guild") or bot.get_guild(int(request.match_info["gid"]))
+        if guild is None:
+            return
+        actor = guild.get_member(request["uid"])
+        bot.audit_notify.record(guild, actor, line)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # --------------------------------------------------------------------------- #
 #  JSON API handlers
 # --------------------------------------------------------------------------- #
@@ -1185,6 +1204,7 @@ async def api_guild_cog(request: web.Request):
     if not cog:
         return web.json_response({"ok": False, "error": "bad request"}, status=400)
     bot.visibility.set_cog_enabled(gid, cog, enabled)
+    await _notify_change(request, f"Cog **{cog}** {'enabled' if enabled else 'disabled'}")
     bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True})
 
@@ -1204,6 +1224,7 @@ async def api_guild_command(request: web.Request):
         if level == LEVEL_OWNER or bot.visibility.stored_level(gid, command) == LEVEL_OWNER:
             return web.json_response({"ok": False, "error": "owner-only setting"}, status=200)
     bot.visibility.set_level(gid, command, level)
+    await _notify_change(request, f"Command `/{command}` set to **{level}**")
     bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True})
 
@@ -1224,6 +1245,10 @@ async def api_guild_category(request: web.Request):
             continue
         bot.visibility.set_cog_enabled(gid, cog, enabled)
     bot.command_syncer.request_sync(gid)
+    # One line for the whole category rather than one per member cog.
+    await _notify_change(
+        request, f"Category **{category}** {'enabled' if enabled else 'disabled'} (all its cogs)"
+    )
     return web.json_response({"ok": True})
 
 
@@ -1238,6 +1263,7 @@ async def api_guild_feature(request: web.Request):
     if not feature or not any(f["key"] == feature for f in cog_categories.FEATURES):
         return web.json_response({"ok": False, "error": "unknown feature"}, status=400)
     bot.visibility.set_feature_enabled(gid, feature, enabled)
+    await _notify_change(request, f"Feature **{feature}** turned {'on' if enabled else 'off'}")
     return web.json_response({"ok": True})
 
 
@@ -1257,6 +1283,7 @@ async def api_guild_param(request: web.Request):
         return web.json_response({"ok": False, "error": "unknown parameter"}, status=400)
     except (ValueError, TypeError) as error:
         return web.json_response({"ok": False, "error": f"invalid value: {error}"}, status=200)
+    await _notify_change(request, f"Parameter `{key}` changed")
     return web.json_response({"ok": True})
 
 
@@ -1285,6 +1312,7 @@ async def api_guild_setting(request: web.Request):
             log_cog.set_guild_log_channel(guild, key, int(data.get("value") or 0))
         except (TypeError, ValueError):
             return web.json_response({"ok": False, "error": "invalid channel"}, status=200)
+        await _notify_change(request, f"Setting `{key}` changed")
         return web.json_response({"ok": True})
 
     try:

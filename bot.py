@@ -34,6 +34,7 @@ from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.events import EventRuleManager
 from helpers.panel_access import PanelAccessManager
+from helpers.audit_notify import OwnerNotifier
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -109,6 +110,11 @@ class DodoBot(commands.Bot):
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)
+        # DMs the owner when a guild admin changes their server's config — those
+        # changes now bind everyone, owners included (see helpers/visibility.py).
+        self.audit_notify = OwnerNotifier(
+            self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
+        )
 
     # ------------------------------------------------------------------ #
     #  Visibility enforcement (prefix/hybrid + slash)
