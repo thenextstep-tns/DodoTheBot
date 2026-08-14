@@ -39,8 +39,11 @@ def _asset_version() -> str:
     """Newest static-asset mtime, appended to CSS/JS URLs to bust stale caches.
     Recomputed each process start (we restart to deploy), so edits always show."""
     try:
-        return str(int(max(os.path.getmtime(os.path.join(_STATIC_DIR, f)) for f in ("panel.css", "panel.js"))))
-    except OSError:
+        # Every static file, so a swapped icon busts the cache too — not just CSS/JS.
+        return str(int(max(
+            os.path.getmtime(os.path.join(_STATIC_DIR, name)) for name in os.listdir(_STATIC_DIR)
+        )))
+    except (OSError, ValueError):
         return "1"
 
 
@@ -206,6 +209,9 @@ def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER) -> we
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)} · Dodo Control Panel</title>
+<link rel="icon" href="/static/favicon-32.png?v={_ASSET_VER}" sizes="32x32">
+<link rel="icon" href="/static/favicon-192.png?v={_ASSET_VER}" sizes="192x192">
+<link rel="apple-touch-icon" href="/static/favicon-192.png?v={_ASSET_VER}">
 <link rel="stylesheet" href="/static/panel.css?v={_ASSET_VER}">
 </head><body>
 <header>
