@@ -1,10 +1,16 @@
 """
-aiohttp routes for the control panel (owner phase).
+aiohttp routes for the control panel.
 
 Pages are server-rendered HTML; mutations go through small JSON endpoints called
-by ``static/panel.js``. Every route is gated on a signed session whose user id is
-in the bot owners list (see ``web/auth.py``). Because the app runs in the bot
-process, handlers act on the live bot directly (``request.app["bot"]``).
+by ``static/panel.js``. Because the app runs in the bot process, handlers act on
+the live bot directly (``request.app["bot"]``).
+
+Access has two tiers. ``require_owner`` guards the bot-wide tooling (loading cogs
+into the process, the shared strings editor). Everything under ``/guild/{gid}``
+goes through ``require_scope``, which resolves the caller's per-guild scope from
+``helpers/panel_access.py`` — so a guild admin only ever reaches servers they are
+a member of, and only the parts their scope allows. The HTML hides what a scope
+can't use, but the decorators are what actually enforce it.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import cog_categories, events, names, stats
+from helpers import cog_categories, events, names, panel_access, stats
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -56,7 +62,11 @@ def _set_cookie(response: web.Response, name: str, value: str, *, max_age: int) 
 
 
 def require_owner(handler):
-    """Wrap a handler so only a logged-in bot owner reaches it."""
+    """Wrap a handler so only a logged-in bot owner reaches it.
+
+    Used for the bot-wide tooling (loading cogs into the process, the shared
+    strings editor) that no guild admin should reach.
+    """
 
     @wraps(handler)
     async def wrapper(request: web.Request):
@@ -67,9 +77,80 @@ def require_owner(handler):
         if not bot.visibility.is_owner(uid):
             return web.Response(status=403, text="Not authorised (bot owners only).", content_type="text/plain")
         request["uid"] = uid
+        request["scope"] = panel_access.SCOPE_OWNER
         return await handler(request)
 
     return wrapper
+
+
+async def _member_of(bot, guild, user_id):
+    """The user's member object in a guild, fetching if the cache misses.
+
+    Membership is the hard gate: someone who isn't in the server gets nothing
+    there, no matter what grants exist.
+    """
+    member = guild.get_member(user_id)
+    if member is not None:
+        return member
+    try:
+        return await guild.fetch_member(user_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+
+
+async def resolve_scope(bot, guild, user_id) -> str:
+    """This user's panel scope in this guild (``owner`` short-circuits)."""
+    if bot.visibility.is_owner(user_id):
+        return panel_access.SCOPE_OWNER
+    member = await _member_of(bot, guild, user_id)
+    return bot.panel_access.scope_for_member(guild.id, member)
+
+
+def require_scope(minimum: str):
+    """Gate a ``/guild/{gid}`` route on the caller's scope in *that* guild.
+
+    Every guild route and every guild API endpoint goes through this, so hiding
+    a control in the HTML is never the only thing standing in the way of it.
+    A user without access gets 404, not 403 — the panel doesn't confirm the
+    existence of servers they have nothing to do with.
+    """
+
+    def decorator(handler):
+        @wraps(handler)
+        async def wrapper(request: web.Request):
+            uid = _session_user(request)
+            if uid is None:
+                raise web.HTTPFound("/login")
+            bot = request.app["bot"]
+            try:
+                guild = bot.get_guild(int(request.match_info["gid"]))
+            except (TypeError, ValueError):
+                guild = None
+            if guild is None:
+                return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+            scope = await resolve_scope(bot, guild, uid)
+            if not panel_access.at_least(scope, minimum):
+                return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+            request["uid"] = uid
+            request["scope"] = scope
+            request["guild"] = guild
+            return await handler(request)
+
+        return wrapper
+
+    return decorator
+
+
+async def accessible_guilds(bot, user_id) -> list[tuple]:
+    """``(guild, scope)`` for every guild this user may see, best scope first."""
+    if bot.visibility.is_owner(user_id):
+        return [(guild, panel_access.SCOPE_OWNER) for guild in bot.guilds]
+    out = []
+    for guild in bot.guilds:
+        scope = await resolve_scope(bot, guild, user_id)
+        if panel_access.at_least(scope, panel_access.SCOPE_STATS):
+            out.append((guild, scope))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -120,7 +201,7 @@ def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
 # --------------------------------------------------------------------------- #
 #  HTML rendering
 # --------------------------------------------------------------------------- #
-def _page(title: str, body: str) -> web.Response:
+def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER) -> web.Response:
     doc = f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -129,12 +210,26 @@ def _page(title: str, body: str) -> web.Response:
 </head><body>
 <header>
 <a href="/" class="brand">🦤 Dodo Control Panel</a>
-<nav><a href="/">Dashboard</a><a href="/lang">Strings</a><a href="/logout" class="logout">Log out</a></nav>
+<nav><a href="/">Dashboard</a>{'<a href="/lang">Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
 </header>
 <main>{body}</main>
 <script src="/static/panel.js?v={_ASSET_VER}"></script>
 </body></html>"""
     return web.Response(text=doc, content_type="text/html")
+
+
+def _nav_chips(guild_id: int, scope: str, current: str) -> str:
+    """Cross-links between a guild's pages, limited to what the scope allows."""
+    links = []
+    if panel_access.at_least(scope, panel_access.SCOPE_FULL) and current != "cogs":
+        links.append((f"/guild/{guild_id}", "🧩 Cogs & commands"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "settings":
+        links.append((f"/guild/{guild_id}/settings", "⚙️ Settings"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "events":
+        links.append((f"/guild/{guild_id}/events", "⚡ Events"))
+    if panel_access.at_least(scope, panel_access.SCOPE_STATS) and current != "stats":
+        links.append((f"/guild/{guild_id}/stats", "📊 Stats"))
+    return "".join(f'<a class="chip" href="{href}">{label}</a>' for href, label in links)
 
 
 def _guild_avatar(guild, *, size: int = 64) -> str:
@@ -147,14 +242,29 @@ def _guild_avatar(guild, *, size: int = 64) -> str:
     return f'<div class="glogo placeholder" style="width:{size}px;height:{size}px">{initial}</div>'
 
 
-def _dashboard_html(bot) -> str:
+def _landing_for(guild_id: int, scope: str) -> str:
+    """Where a card should take someone — the first page their scope allows."""
+    if panel_access.at_least(scope, panel_access.SCOPE_FULL):
+        return f"/guild/{guild_id}"
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG):
+        return f"/guild/{guild_id}/settings"
+    return f"/guild/{guild_id}/stats"
+
+
+def _dashboard_html(bot, entries: list, scope: str) -> str:
+    """``entries`` is the ``(guild, scope)`` list the caller is allowed to see."""
     cards = "".join(
-        f'<a class="guildcard" href="/guild/{g.id}">'
+        f'<a class="guildcard" href="{_landing_for(g.id, s)}">'
         f'{_guild_avatar(g)}'
         f'<div class="ginfo"><b>{html.escape(g.name)}</b>'
-        f'<span class="muted small">{g.member_count or "?"} members · {g.id}</span></div></a>'
-        for g in sorted(bot.guilds, key=lambda g: g.name.lower())
-    ) or '<p class="muted">The bot is not in any guilds yet.</p>'
+        f'<span class="muted small">{g.member_count or "?"} members · '
+        f'{html.escape(panel_access.SCOPE_LABELS.get(s, "Full access"))}</span></div></a>'
+        for g, s in sorted(entries, key=lambda e: e[0].name.lower())
+    ) or '<p class="muted">No servers you can manage.</p>'
+
+    if scope != panel_access.SCOPE_OWNER:
+        # Guild admins get their servers and nothing bot-wide.
+        return f'<h1>Your servers</h1><div class="guildgrid">{cards}</div><p id="status" class="status"></p>'
 
     cog_rows = ""
     for cog in _cog_inventory(bot):
@@ -180,16 +290,22 @@ def _dashboard_html(bot) -> str:
 _LEVEL_ICON = {LEVEL_VISIBLE: "🌐", LEVEL_ADMIN: "🛡️", LEVEL_OWNER: "🔒"}
 
 
-def _command_cards(commands: list[dict]) -> str:
+def _command_cards(commands: list[dict], scope: str = panel_access.SCOPE_OWNER) -> str:
     """Each command as a small card with a name, description and level selector."""
     if not commands:
         return ""
+    # Only the bot owner may mark a command owner-only; a guild admin who could
+    # set that level could hide commands from the owner.
+    levels = VALID_LEVELS if scope == panel_access.SCOPE_OWNER else (LEVEL_VISIBLE, LEVEL_ADMIN)
     cards = ""
     for cmd in commands:
         options = "".join(
             f'<option value="{lvl}"{" selected" if lvl == cmd["level"] else ""}>{_LEVEL_ICON[lvl]} {lvl}</option>'
-            for lvl in VALID_LEVELS
+            for lvl in levels
         )
+        if cmd["level"] == LEVEL_OWNER and scope != panel_access.SCOPE_OWNER:
+            # Owner-locked here: show it, but don't let them change it.
+            options = f'<option value="{LEVEL_OWNER}" selected>{_LEVEL_ICON[LEVEL_OWNER]} owner</option>'
         cards += (
             f'<div class="cmdcard lvl-{cmd["level"]}">'
             f'<code class="cmdname">/{html.escape(cmd["name"])}</code>'
@@ -286,10 +402,10 @@ def _param_rows(params: list[dict], guild) -> str:
     return f'<div class="params"><div class="muted small feathead">Parameters</div>{rows}</div>'
 
 
-def _cog_block(detail: dict, guild, *, toggleable: bool) -> str:
+def _cog_block(detail: dict, guild, *, toggleable: bool, scope: str = panel_access.SCOPE_OWNER) -> str:
     """One cog inside a category: optional per-cog toggle, passive-feature toggles,
     per-server parameters, and its per-command visibility cards."""
-    body = _command_cards(detail["commands"])
+    body = _command_cards(detail["commands"], scope)
     if not detail["commands"] and not detail["features"] and not detail["params"]:
         body = '<p class="muted small">No slash commands — passive/listener cog.</p>'
     toggle = (
@@ -305,7 +421,60 @@ def _cog_block(detail: dict, guild, *, toggleable: bool) -> str:
 </div>"""
 
 
-def _guild_html(bot, guild) -> str:
+def _access_html(bot, guild) -> str:
+    """Owner-only card: hand roles (or single users) a panel scope for this guild."""
+    grants = bot.panel_access.grants(guild.id)
+    scope_options = "".join(
+        f'<option value="{key}">{html.escape(panel_access.SCOPE_LABELS[key])}</option>'
+        for key in panel_access.GRANTABLE_SCOPES
+    )
+    role_options = "".join(
+        f'<option value="{role.id}">@{html.escape(role.name)}</option>'
+        for role in sorted(guild.roles, key=lambda r: -r.position)
+        if not role.is_default()
+    )
+
+    rows = ""
+    for grant in grants:
+        if grant["kind"] == "role":
+            role = guild.get_role(grant["target_id"])
+            label = f"@{role.name}" if role else f"Deleted role ({grant['target_id']})"
+        else:
+            member = guild.get_member(grant["target_id"])
+            label = member.display_name if member else f"User {grant['target_id']}"
+        rows += (
+            f'<tr><td>{html.escape(label)}</td>'
+            f'<td class="muted small">{grant["kind"]}</td>'
+            f'<td>{html.escape(panel_access.SCOPE_LABELS.get(grant["scope"], grant["scope"]))}</td>'
+            f'<td><button class="ghost grantdel" data-kind="{grant["kind"]}" '
+            f'data-target="{grant["target_id"]}">Remove</button></td></tr>'
+        )
+    rows = rows or '<tr><td colspan="4" class="muted">No grants yet.</td></tr>'
+
+    return f"""
+<section class="catcard" id="cat-access">
+  <div class="cathead"><div class="cattitle"><span class="catemoji">🔑</span>
+    <h2>Panel access</h2>
+    <span class="muted small">who may open this server's panel, and how much of it</span></div></div>
+  <div class="accessbody">
+    <p class="muted small">Anyone with Discord's <b>Manage Server</b> permission already has full access.
+    Grants below add access for a role (or one person) on top of that. Members who aren't in this
+    server can never reach it, whatever is listed here. Only you (bot owner) can edit this card, and
+    only you see the bot-wide tooling.</p>
+    <table class="stats"><thead><tr><th>Who</th><th>Type</th><th>Access</th><th></th></tr></thead>
+      <tbody id="grantrows">{rows}</tbody></table>
+    <div class="grantadd">
+      <select id="grantkind"><option value="role">Role</option><option value="user">User id</option></select>
+      <select id="grantrole">{role_options}</select>
+      <input id="grantuser" placeholder="user id" style="display:none">
+      <select id="grantscope">{scope_options}</select>
+      <button id="grantadd">Grant access</button>
+    </div>
+  </div>
+</section>"""
+
+
+def _guild_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     sections = ""
     nav = ""
     for category in cog_categories.group_loaded_cogs(bot.cogs.keys()):
@@ -316,7 +485,7 @@ def _guild_html(bot, guild) -> str:
             members = [m for m in members if m["commands"]]
             if not members:
                 continue
-            blocks = "".join(_cog_block(m, guild, toggleable=False) for m in members)
+            blocks = "".join(_cog_block(m, guild, toggleable=False, scope=scope) for m in members)
             master = '<span class="muted small">always on</span>'
         else:
             states = [m["enabled"] for m in members]
@@ -326,7 +495,7 @@ def _guild_html(bot, guild) -> str:
                 f'<label class="switch master"><input type="checkbox" class="cattoggle" '
                 f'data-category="{category["key"]}" data-state="{state}" {checked}> on</label>'
             )
-            blocks = "".join(_cog_block(m, guild, toggleable=True) for m in members)
+            blocks = "".join(_cog_block(m, guild, toggleable=True, scope=scope) for m in members)
 
         sections += f"""
 <section class="catcard" id="cat-{category["key"]}" data-category="{category["key"]}">
@@ -340,13 +509,19 @@ def _guild_html(bot, guild) -> str:
   <details class="catbody" open><summary>per-cog & per-command controls</summary>{blocks}</details>
 </section>"""
 
+        # Reload/Unload load code into the running process (every guild), so they
+        # are owner-only; admins get the navigation link alone.
+        show_cog_buttons = scope == panel_access.SCOPE_OWNER
         nav_cogs = "".join(
             f'<div class="navcog" data-cog="{html.escape(m["cog"])}">'
             f'<a href="#cog-{html.escape(m["cog"])}">{html.escape(m["cog"])}</a>'
-            f'<span class="navbtns">'
-            f'<button data-action="reload" data-cog="{html.escape(m["cog"])}" title="Reload">Reload</button>'
-            f'<button data-action="unload" data-cog="{html.escape(m["cog"])}" title="Unload">Unload</button>'
-            f'</span></div>'
+            + (
+                f'<span class="navbtns">'
+                f'<button data-action="reload" data-cog="{html.escape(m["cog"])}" title="Reload">Reload</button>'
+                f'<button data-action="unload" data-cog="{html.escape(m["cog"])}" title="Unload">Unload</button>'
+                f'</span>' if show_cog_buttons else ""
+            )
+            + '</div>'
             for m in members
         )
         nav += (
@@ -360,11 +535,7 @@ def _guild_html(bot, guild) -> str:
     <a href="/" class="back">← all guilds</a>
     <div class="ghead">{_guild_avatar(guild, size=48)}
       <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
-    <div class="sidelinks">
-      <a class="statslink" href="/guild/{guild.id}/settings">⚙️ Settings</a>
-      <a class="statslink" href="/guild/{guild.id}/events">⚡ Events</a>
-      <a class="statslink" href="/guild/{guild.id}/stats">📊 Stats</a>
-    </div>
+    <div class="chips sidechips">{_nav_chips(guild.id, scope, "cogs")}</div>
     <div class="toolbar">
       <input id="cogfilter" type="search" placeholder="Filter cogs…" autocomplete="off">
       <button id="expandall" class="ghost">Expand all</button>
@@ -373,6 +544,7 @@ def _guild_html(bot, guild) -> str:
     <nav class="cognav"><div class="navroot">All categories</div>{nav}</nav>
   </aside>
   <main class="content">
+    {_access_html(bot, guild) if scope == panel_access.SCOPE_OWNER else ""}
     <p class="muted">Toggle a whole category on/off for this server, or expand a cog for its
     features, parameters and per-command visibility (<b>🌐 visible</b> / <b>🛡️ admin</b> /
     <b>🔒 owner</b>). Changes apply to this guild within a few seconds.</p>
@@ -457,7 +629,7 @@ def _setting_input(spec: dict, value, guild) -> str:
     return f'<input type="text" {common} value="{html.escape(str(value or ""))}">'
 
 
-def _settings_html(bot, guild) -> str:
+def _settings_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     values = bot.guild_config.get_all(guild.id)
     overridden_keys = bot.guild_config.overridden_keys(guild.id)
     log_cog = bot.get_cog("log")
@@ -504,9 +676,9 @@ def _settings_html(bot, guild) -> str:
     return f"""
 <div class="settingspage" data-guild="{guild.id}">
   <div class="statshead">
-    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+    <div><span class="muted">{html.escape(guild.name)}</span>
       <h1>Server settings</h1></div>
-    <div class="chips"><a class="chip" href="/guild/{guild.id}/stats">📊 Stats</a></div>
+    <div class="chips">{_nav_chips(guild.id, scope, "settings")}</div>
   </div>
   <p class="muted">Channels, roles and messages this server's commands read. Anything left at its
   default is inherited from the bot's built-in configuration; <b>Reset</b> puts a setting back.
@@ -614,7 +786,7 @@ def _rule_card(rule: dict, guild) -> str:
 </div>"""
 
 
-def _events_html(bot, guild) -> str:
+def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     rules = bot.event_rules.for_guild(guild.id)
     cards = "".join(_rule_card(rule, guild) for rule in rules) or (
         '<p class="muted">No rules yet. Add one to get started.</p>'
@@ -625,15 +797,14 @@ def _events_html(bot, guild) -> str:
     return f"""
 <div class="eventspage" data-guild="{guild.id}">
   <div class="statshead">
-    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+    <div><span class="muted">{html.escape(guild.name)}</span>
       <h1>Event rules <span class="muted">· {len(rules)} rule(s)</span></h1></div>
-    <div class="chips"><a class="chip" href="/guild/{guild.id}/settings">⚙️ Settings</a>
-      <a class="chip" href="/guild/{guild.id}/stats">📊 Stats</a></div>
+    <div class="chips">{_nav_chips(guild.id, scope, "events")}</div>
   </div>
   <p class="muted">When something happens on this server, post a message — optionally pinging
   people. All {len(catalog)} events this discord.py build dispatches are available.
   {"" if active else "<b>The event rules feature is currently off for this server</b> — turn it on under the event_actions cog on the "}
-  {"" if active else f'<a href="/guild/{guild.id}">main page</a>.'}</p>
+  {"" if active or not panel_access.at_least(scope, panel_access.SCOPE_FULL) else f'<a href="/guild/{guild.id}">main page</a>.'}</p>
   <p class="muted small">Rules ignore anything the bot itself caused, and each rule is capped at
   {event_actions_limit()} messages per minute so a busy event can't flood a channel.
   {len(skipped)} events aren't listed because they carry no server
@@ -728,7 +899,7 @@ def _tiles(summary: dict, guild) -> str:
     return f'<div class="tiles">{cards}</div>'
 
 
-def _stats_html(guild, data: dict, users: dict, channels: dict) -> str:
+def _stats_html(guild, data: dict, users: dict, channels: dict, scope: str = panel_access.SCOPE_OWNER) -> str:
     """``users`` / ``channels`` map the ids on this page to display names."""
     period = data["period"]
     base = f"/guild/{guild.id}/stats?period={period}"
@@ -756,7 +927,7 @@ def _stats_html(guild, data: dict, users: dict, channels: dict) -> str:
     return f"""
 <div class="statspage">
   <div class="statshead">
-    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+    <div><div class="chips">{_nav_chips(guild.id, scope, "stats")}</div>
       <h1>Server stats <span class="muted">· {html.escape(data["period_label"])}</span></h1></div>
     <div class="chips">{selector}</div>
   </div>
@@ -878,46 +1049,49 @@ async def logout(request: web.Request):
     raise response
 
 
-@require_owner
 async def dashboard(request: web.Request):
-    return _page("Dashboard", _dashboard_html(request.app["bot"]))
+    """Everyone with any access lands here; the list is filtered to their servers."""
+    uid = _session_user(request)
+    if uid is None:
+        raise web.HTTPFound("/login")
+    bot = request.app["bot"]
+    entries = await accessible_guilds(bot, uid)
+    scope = panel_access.SCOPE_OWNER if bot.visibility.is_owner(uid) else panel_access.highest(
+        *[s for _g, s in entries], panel_access.SCOPE_NONE
+    )
+    if not entries and scope != panel_access.SCOPE_OWNER:
+        return _page(
+            "No access",
+            '<h1>No servers</h1><p class="muted">Your Discord account has no panel access to any '
+            "server this bot is in. Ask the bot owner to grant your role access.</p>",
+            scope=scope,
+        )
+    return _page("Dashboard", _dashboard_html(bot, entries, scope), scope=scope)
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def guild_page(request: web.Request):
-    bot = request.app["bot"]
-    guild = bot.get_guild(int(request.match_info["gid"]))
-    if guild is None:
-        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
-    return _page(guild.name, _guild_html(bot, guild))
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    return _page(guild.name, _guild_html(bot, guild, scope), scope=scope)
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_CONFIG)
 async def guild_settings_page(request: web.Request):
-    bot = request.app["bot"]
-    guild = bot.get_guild(int(request.match_info["gid"]))
-    if guild is None:
-        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
-    return _page(f"{guild.name} · settings", _settings_html(bot, guild))
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    return _page(f"{guild.name} · settings", _settings_html(bot, guild, scope), scope=scope)
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_CONFIG)
 async def guild_events_page(request: web.Request):
-    bot = request.app["bot"]
-    guild = bot.get_guild(int(request.match_info["gid"]))
-    if guild is None:
-        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
-    return _page(f"{guild.name} · events", _events_html(bot, guild))
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    return _page(f"{guild.name} · events", _events_html(bot, guild, scope), scope=scope)
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_STATS)
 async def guild_stats_page(request: web.Request):
     """Activity stats for one guild. The aggregations are blocking pymongo calls,
     so they run in a worker thread — the bot shares this event loop."""
-    bot = request.app["bot"]
-    guild = bot.get_guild(int(request.match_info["gid"]))
-    if guild is None:
-        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
 
     def _page_number(name: str) -> int:
         try:
@@ -941,7 +1115,7 @@ async def guild_stats_page(request: web.Request):
     user_ids = [row["id"] for row in data["users"]["rows"]] + [row["user_id"] for row in data["commands"]["rows"]]
     users = await names.resolve_users(bot, guild, user_ids)
     channels = await names.resolve_channels(bot, guild, [row["id"] for row in data["channels"]["rows"]])
-    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels))
+    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels, scope), scope=scope)
 
 
 @require_owner
@@ -977,7 +1151,7 @@ async def api_cog(request: web.Request):
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def api_guild_cog(request: web.Request):
     """Body: {cog: <name>, enabled: bool}."""
     bot = request.app["bot"]
@@ -991,7 +1165,7 @@ async def api_guild_cog(request: web.Request):
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def api_guild_command(request: web.Request):
     """Body: {command: <name>, level: visible|admin|owner}."""
     bot = request.app["bot"]
@@ -1000,12 +1174,17 @@ async def api_guild_command(request: web.Request):
     command, level = data.get("command"), data.get("level")
     if not command or level not in VALID_LEVELS:
         return web.json_response({"ok": False, "error": "bad request"}, status=400)
+    # Only the bot owner may set or clear the owner level — otherwise a guild
+    # admin could lock the owner out of a command, or unlock one for themselves.
+    if request["scope"] != panel_access.SCOPE_OWNER:
+        if level == LEVEL_OWNER or bot.visibility.stored_level(gid, command) == LEVEL_OWNER:
+            return web.json_response({"ok": False, "error": "owner-only setting"}, status=200)
     bot.visibility.set_level(gid, command, level)
     bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def api_guild_category(request: web.Request):
     """Toggle a whole meta-cog category: body {category, enabled}. Sets every
     (non-core) member cog and resyncs the guild once."""
@@ -1024,7 +1203,7 @@ async def api_guild_category(request: web.Request):
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def api_guild_feature(request: web.Request):
     """Toggle a passive-listener feature: body {feature, enabled}. No command
     resync needed — features gate listeners, not slash commands."""
@@ -1038,7 +1217,7 @@ async def api_guild_feature(request: web.Request):
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_FULL)
 async def api_guild_param(request: web.Request):
     """Set a per-server command parameter: body {key, value}. Coerced/validated by
     the ParamManager; no command resync needed."""
@@ -1057,7 +1236,7 @@ async def api_guild_param(request: web.Request):
     return web.json_response({"ok": True})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_CONFIG)
 async def api_guild_setting(request: web.Request):
     """Set or reset one guild setting: body {key, value} or {key, action:"reset"}.
 
@@ -1098,7 +1277,7 @@ async def api_guild_setting(request: web.Request):
     return web.json_response({"ok": True, "value": value})
 
 
-@require_owner
+@require_scope(panel_access.SCOPE_CONFIG)
 async def api_guild_event_rule(request: web.Request):
     """Create / update / delete one event rule.
 
@@ -1130,6 +1309,35 @@ async def api_guild_event_rule(request: web.Request):
     except (KeyError, TypeError, ValueError) as error:
         return web.json_response({"ok": False, "error": f"invalid rule: {error}"}, status=200)
     return web.json_response({"ok": False, "error": "bad request"}, status=400)
+
+
+@require_owner
+async def api_guild_access(request: web.Request):
+    """Grant/revoke panel access for a role or user in one guild (owner only).
+
+    Deliberately not delegated to guild admins: whoever can edit this can hand
+    out access, so it stays with the bot owner.
+    """
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    if bot.get_guild(gid) is None:
+        return web.json_response({"ok": False, "error": "guild not found"}, status=404)
+    data = await request.json()
+    kind = data.get("kind")
+    try:
+        target_id = int(data.get("target_id") or 0)
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "invalid id"}, status=200)
+    if not target_id:
+        return web.json_response({"ok": False, "error": "pick a role or user"}, status=200)
+    try:
+        if data.get("action") == "remove":
+            bot.panel_access.remove_grant(gid, kind, target_id)
+        else:
+            bot.panel_access.set_grant(gid, kind, target_id, data.get("scope"))
+    except ValueError as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=200)
+    return web.json_response({"ok": True})
 
 
 @require_owner
@@ -1175,6 +1383,7 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/events", guild_events_page),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
+            web.post("/api/guild/{gid}/access", api_guild_access),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),

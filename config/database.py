@@ -77,4 +77,6 @@ lang_overrides = db["LangOverrides"]          # {key, value} — editable user-f
 entity_names = db["EntityNames"]              # {_id: "user:123", name, updated_at}
 # "When X happens, post this there" rules built on the panel (see helpers/events.py).
 event_rules = db["EventRules"]                # {guild_id, event, channel_id, message, ...}
+# Who may open the control panel for a guild, and how much of it they see.
+panel_access = db["PanelAccess"]              # {guild_id, kind: role|user, target_id, scope}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

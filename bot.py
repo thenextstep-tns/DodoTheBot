@@ -33,6 +33,7 @@ from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.events import EventRuleManager
+from helpers.panel_access import PanelAccessManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -88,6 +89,9 @@ class DodoBot(commands.Bot):
             feature_col=config_py.feature_state,
             owners=config.get("owners", []),
         )
+        # Who may open the control panel for a guild, and how much of it (roles
+        # and users can be granted a scope by the owner; see helpers/panel_access.py).
+        self.panel_access = PanelAccessManager(config_py.panel_access, visibility=self.visibility)
         self.add_check(self._global_visibility_check)
         self.tree.interaction_check = self._app_visibility_check
         # Applies the visibility settings to each guild's slash picker (per-guild

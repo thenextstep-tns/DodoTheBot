@@ -411,3 +411,41 @@ if (_eventsPage) {
     location.reload(); // simplest way to render a fresh card with the full pickers
   });
 }
+
+// --- Guild page: panel access grants (owner-only card) ---
+const _accessCard = document.getElementById("cat-access");
+if (_accessCard) {
+  const guildId = _accessCard.closest("[data-guild]").dataset.guild;
+  const kind = document.getElementById("grantkind");
+  const roleSel = document.getElementById("grantrole");
+  const userInput = document.getElementById("grantuser");
+
+  const syncKind = () => {
+    const isRole = kind.value === "role";
+    roleSel.style.display = isRole ? "" : "none";
+    userInput.style.display = isRole ? "none" : "";
+  };
+  kind.addEventListener("change", syncKind);
+  syncKind();
+
+  document.getElementById("grantadd").addEventListener("click", async () => {
+    const isRole = kind.value === "role";
+    const target = isRole ? roleSel.value : (userInput.value.match(/\d{5,}/) || [""])[0];
+    if (!target) { flash("Enter a user id", false); return; }
+    const res = await post(`/api/guild/${guildId}/access`, {
+      kind: kind.value, target_id: target, scope: document.getElementById("grantscope").value,
+    });
+    if (res.ok) { flash("access granted ✓", true); setTimeout(() => location.reload(), 500); }
+    else flash(res.error || "Failed", false);
+  });
+
+  _accessCard.querySelectorAll(".grantdel").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const res = await post(`/api/guild/${guildId}/access`, {
+        action: "remove", kind: btn.dataset.kind, target_id: btn.dataset.target,
+      });
+      if (res.ok) { flash("access removed ✓", true); btn.closest("tr").remove(); }
+      else flash(res.error || "Failed", false);
+    });
+  });
+}
