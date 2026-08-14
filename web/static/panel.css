@@ -1,39 +1,100 @@
+/* ==========================================================================
+   Dodo Control Panel — styled on the Airbnb design system.
+   Tokens (colour, type, space, radii, elevation) come from that system; the
+   legacy --bg/--panel/--line/... names below are kept as aliases so every rule
+   in this file keeps working. Deviations, both for density (this is a dense
+   admin tool, not an editorial site): control padding is scaled down from the
+   48px-tall website controls, and --on/--warning are status colours the source
+   system doesn't define (it specifies only an error red).
+   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-  --bg: #1b1d24; --panel: #23262f; --line: #333743; --text: #e6e8ee;
-  --muted: #9aa0ad; --accent: #9c84ef; --on: #2ecc71; --off: #e74c3c; --warning: #f1c40f;
+  /* Brand & accent */
+  --color-primary:          #ff385c;
+  --color-primary-active:   #e00b41;
+  --color-primary-disabled: #ffd1da;
+  /* Surface */
+  --color-canvas:           #ffffff;
+  --color-surface-soft:     #f7f7f7;
+  --color-surface-strong:   #f2f2f2;
+  /* Hairlines */
+  --color-hairline:         #dddddd;
+  --color-hairline-soft:    #ebebeb;
+  --color-border-strong:    #c1c1c1;
+  /* Text */
+  --color-ink:              #222222;
+  --color-body:             #3f3f3f;
+  --color-muted:            #6a6a6a;
+  --color-muted-soft:       #929292;
+  --color-on-primary:       #ffffff;
+  /* Semantic */
+  --color-error:            #c13515;
+  --color-success:          #008a05;  /* not in the source system — status only */
+  --color-warning:          #b35309;  /* not in the source system — status only */
+
+  --font-sans: 'Inter', Circular, -apple-system, system-ui, Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600; --weight-bold: 700;
+
+  --space-xs: 4px; --space-sm: 8px; --space-md: 12px; --space-base: 16px;
+  --space-lg: 24px; --space-xl: 32px;
+
+  --radius-sm: 8px;      /* buttons, inputs        */
+  --radius-md: 14px;     /* cards                  */
+  --radius-full: 9999px; /* pills, chips, avatars  */
+
+  /* The only shadow tier in the system; everything else stays flat. */
+  --shadow-float: rgba(0, 0, 0, 0.02) 0 0 0 1px,
+                  rgba(0, 0, 0, 0.04) 0 2px 6px 0,
+                  rgba(0, 0, 0, 0.1)  0 4px 8px 0;
+
+  /* Legacy aliases — what the rest of this file already references. */
+  --bg: var(--color-surface-soft);
+  --panel: var(--color-canvas);
+  --line: var(--color-hairline);
+  --text: var(--color-ink);
+  --muted: var(--color-muted);
+  --accent: var(--color-primary);
+  --on: var(--color-success);
+  --off: var(--color-error);
+  --warning: var(--color-warning);
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
-  font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  font: var(--weight-regular) 16px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
 header { display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 22px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  padding: 14px 22px; background: var(--color-canvas); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20; }
 .brand { font-weight: 700; color: var(--text); text-decoration: none; }
 .logout, .back { color: var(--muted); text-decoration: none; }
 .logout:hover, .back:hover { color: var(--text); }
 main { max-width: 1080px; margin: 0 auto; padding: 24px 22px 60px; }
-h1 { font-size: 20px; margin: 28px 0 12px; }
-h2 { font-size: 16px; margin: 0; }
+h1 { font-size: 22px; line-height: 1.18; letter-spacing: -0.44px;
+  font-weight: var(--weight-bold); margin: 28px 0 12px; }
+h2 { font-size: 16px; line-height: 1.25; font-weight: var(--weight-semibold); margin: 0; }
 .muted { color: var(--muted); font-weight: 400; font-size: 13px; }
 a { color: var(--accent); }
 
 /* Dashboard: guild cards with logos */
 .guildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.guildcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 12px; text-decoration: none; color: var(--text);
+.guildcard { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--radius-md); text-decoration: none; color: var(--text);
   transition: border-color .15s, transform .05s; }
-.guildcard:hover { border-color: var(--accent); }
+.guildcard:hover { border-color: transparent; box-shadow: var(--shadow-float); }
 .guildcard:active { transform: translateY(1px); }
 .ginfo { display: flex; flex-direction: column; min-width: 0; }
 .ginfo b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .glogo { border-radius: 50%; flex: none; object-fit: cover; }
-.glogo.placeholder { display: grid; place-items: center; background: var(--accent); color: #1b1d24;
+.glogo.placeholder { display: grid; place-items: center; background: var(--color-primary);
+  color: var(--color-on-primary);
   font-weight: 700; font-size: 20px; }
 
 /* Guild page: fixed left sidebar + fluid content. Full-width on this page only. */
 main:has(.guildpage) { max-width: none; }
 .guildpage { display: flex; align-items: flex-start; gap: 20px; }
-.sidebar { width: 280px; flex: none; position: sticky; top: 16px; align-self: flex-start;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+.sidebar { width: 280px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 14px;
   max-height: calc(100vh - 80px); overflow-y: auto; }
 .content { flex: 1 1 auto; min-width: 0; }
 .sidebar .back { display: inline-block; margin-bottom: 10px; font-size: 13px; }
@@ -55,7 +116,7 @@ main:has(.guildpage) { max-width: none; }
 .navcog { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 16px; }
 .navcog a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); text-decoration: none; font-size: 13px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font-family: var(--font-mono); }
 .navcog a:hover { color: var(--text); }
 .navbtns { display: flex; gap: 4px; flex: none; }
 .navbtns button { margin: 0; padding: 2px 7px; font-size: 11px; }
@@ -72,7 +133,7 @@ main:has(.guildpage) { max-width: none; }
 .cmdgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;
   padding: 12px 14px; }
 .cmdcard { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line);
-  border-radius: 9px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .cmdcard.lvl-admin { border-left-color: var(--warning); }
 .cmdcard.lvl-owner { border-left-color: var(--off); }
 .cmdcard .cmdname { color: var(--text); font-weight: 700; font-size: 13px; }
@@ -91,10 +152,13 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 tr:last-child td { border-bottom: none; }
 .cogbtns { text-align: right; white-space: nowrap; }
 
-button { background: var(--accent); color: #1b1d24; border: 0; border-radius: 7px;
-  padding: 6px 12px; font-weight: 600; cursor: pointer; margin-left: 6px; }
-button:hover { filter: brightness(1.08); }
-button:disabled { opacity: .5; cursor: default; }
+button { background: var(--color-primary); color: var(--color-on-primary); border: 0;
+  border-radius: var(--radius-sm); padding: 9px 16px;
+  font: var(--weight-medium) 14px/1.2 var(--font-sans);
+  cursor: pointer; margin-left: 6px; transition: background-color .15s; }
+button:hover { background: var(--color-primary-active); }
+button:active { transform: translateY(1px); }
+button:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
 
 .on { color: var(--on); font-weight: 600; }
 .off { color: var(--off); font-weight: 600; }
@@ -102,7 +166,7 @@ button:disabled { opacity: .5; cursor: default; }
 .small { font-size: 12px; }
 
 /* Category ("meta-cog") cards */
-.catcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+.catcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
   margin-bottom: 14px; overflow: hidden; }
 .cathead { display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 14px 18px; }
@@ -118,12 +182,12 @@ button:disabled { opacity: .5; cursor: default; }
 .catbody[open] > summary::before { content: "▾ "; }
 .catbody[open] > summary { color: var(--text); }
 
-.cogcard { background: var(--bg); border: 1px solid var(--line);
-  border-radius: 10px; margin: 0 14px 12px; }
+.cogcard { background: var(--color-surface-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); margin: 0 14px 12px; }
 .catbody > .cogcard:first-of-type { margin-top: 12px; }
 .coghead { display: flex; justify-content: space-between; align-items: center;
   padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.coghead h3 { font-size: 14px; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.coghead h3 { font-size: 14px; margin: 0; font-family: var(--font-mono); }
 .coghead:last-child { border-bottom: none; }
 .cogcard > p.muted { padding: 10px 14px; margin: 0; }
 .switch { font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
@@ -146,7 +210,7 @@ button:disabled { opacity: .5; cursor: default; }
 .paramrow.wide { flex-direction: column; align-items: stretch; gap: 8px; }
 .paramrow.wide textarea { width: 100%; background: var(--bg); color: var(--text);
   border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  font-family: var(--font-mono); font-size: 13px;
   line-height: 1.5; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; }
 .paramrow.wide textarea:focus { outline: none; border-color: var(--accent); }
 
@@ -154,7 +218,7 @@ button:disabled { opacity: .5; cursor: default; }
 .multiselect { width: 100%; }
 .ms-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .ms-chips:empty { display: none; }
-.ms-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(156,132,239,.18);
+.ms-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 56, 92, .10);
   color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px 3px 9px; font-size: 13px; }
 .ms-chip b { cursor: pointer; color: var(--muted); font-weight: 700; padding: 0 4px; border-radius: 4px; }
 .ms-chip b:hover { color: var(--off); background: var(--bg); }
@@ -181,7 +245,7 @@ nav a:hover { color: var(--text); }
   color: var(--text); border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
 #langsearch:focus { outline: none; border-color: var(--accent); }
 
-details.group { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+details.group { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
   margin-bottom: 12px; overflow: hidden; }
 details.group > summary { cursor: pointer; padding: 14px 18px; font-weight: 700; font-size: 15px;
   letter-spacing: .3px; list-style: none; }
@@ -194,15 +258,15 @@ details.group[open] > summary { border-bottom: 1px solid var(--line); }
 .langrow { padding: 16px 18px; border-top: 1px solid var(--line); }
 .langrow:first-of-type { border-top: none; }
 .langhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.langhead .k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+.langhead .k { font-family: var(--font-mono);
   font-weight: 700; font-size: 13px; color: var(--text); }
 .fields { display: inline-flex; gap: 6px; flex-wrap: wrap; }
-.fields code { background: rgba(156,132,239,.14); border: 1px solid transparent;
+.fields code { background: rgba(255, 56, 92, .08); border: 1px solid transparent;
   border-radius: 5px; padding: 2px 6px; font-size: 12px; color: var(--accent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  font-family: var(--font-mono); }
 .langrow textarea { display: block; width: 100%; min-height: 42px; background: var(--bg);
   color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  font-family: var(--font-mono); font-size: 13px;
   line-height: 1.55; resize: vertical; }
 .langrow textarea:focus { outline: none; border-color: var(--accent); }
 .langrow.saved textarea { border-color: var(--on); }
@@ -219,8 +283,10 @@ details.def pre { white-space: pre-wrap; word-break: break-word; background: var
   color: var(--muted); font-size: 12px; line-height: 1.5; }
 .langbtns { margin-top: 10px; display: flex; gap: 8px; }
 .langbtns button { margin: 0; }
-button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
-button.ghost:hover { color: var(--text); border-color: var(--muted); }
+/* Secondary: white with a 1px edge (the system's outlined button). */
+button.ghost { background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-border-strong); }
+button.ghost:hover { background: var(--color-surface-soft); border-color: var(--color-ink); }
 
 .status { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
@@ -246,13 +312,14 @@ main:has(.statspage) { max-width: 1180px; }
 .chip { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--panel); color: var(--muted); text-decoration: none; font-size: 13px; }
 .chip:hover { color: var(--text); border-color: var(--muted); }
-.chip.on { background: var(--accent); border-color: var(--accent); color: #1b1d24; font-weight: 600; }
+.chip.on { background: var(--color-primary); border-color: var(--color-primary);
+  color: var(--color-on-primary); font-weight: var(--weight-medium); }
 .chip.static { color: var(--text); }
 .chip code { color: var(--accent); }
 .chip.static code { font-size: 12px; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
   padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .tlabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
 .tvalue { font-size: 22px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -275,7 +342,7 @@ table.stats code { color: var(--accent); font-size: 12px; }
 svg.chart { width: 100%; height: auto; background: var(--panel);
   border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
 svg.chart .bar { fill: var(--accent); }
-svg.chart .bar:hover { fill: var(--text); }
+svg.chart .bar:hover { fill: var(--color-primary-active); }
 svg.chart .guide { stroke: var(--line); stroke-width: 1; }
 svg.chart .axis { fill: var(--muted); font-size: 11px; }
 
@@ -292,7 +359,7 @@ main:has(.settingspage) { max-width: 1180px; }
 .setrow.wide { grid-template-columns: 1fr; }
 .setrow code { color: var(--muted); font-size: 11px; }
 .setrow .on { font-size: 11px; padding: 1px 7px; border-radius: 999px;
-  background: rgba(46, 204, 113, .15); color: var(--on); }
+  background: rgba(0, 138, 5, .10); color: var(--on); }
 .setctl { display: flex; gap: 8px; align-items: flex-start; }
 .setctl > select, .setctl > input, .setctl > textarea, .setctl > .multiselect { flex: 1 1 auto; min-width: 0; }
 .setctl .setreset { flex: none; padding: 5px 10px; font-size: 12px; margin: 0; }
@@ -304,7 +371,7 @@ main:has(.settingspage) { max-width: 1180px; }
 /* --------------------------------------------------------------- Events page */
 main:has(.eventspage) { max-width: 1000px; }
 #addrule { margin: 4px 0 14px; }
-.rulecard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+.rulecard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
   padding: 14px 16px; margin-bottom: 12px; }
 .rulecard.off { opacity: .55; }
 .rulehead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -331,3 +398,54 @@ main:has(.eventspage) { max-width: 1000px; }
 .grantadd button { margin: 0; }
 .sidechips { flex-direction: column; margin-bottom: 12px; }
 .sidechips .chip { text-align: center; }
+
+
+/* ------------------------------------------------- Form controls (system spec) */
+input, select, textarea {
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+}
+input::placeholder, textarea::placeholder { color: var(--color-muted); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--color-ink); /* reads as the spec's 2px edge, no layout shift */
+}
+input:disabled, select:disabled, textarea:disabled {
+  background: var(--color-surface-soft); color: var(--color-muted-soft);
+  border-color: var(--color-hairline-soft);
+}
+/* The old dark-theme fills would now be light-on-light. */
+.toolbar #cogfilter, .ms-search, .ms-options, .paramrow input[type="number"],
+.paramrow input[type="text"], .paramrow.wide textarea, .langrow textarea,
+.setrow select, .setrow input, .setrow textarea, .rulecard select, .rulecard input,
+.rulecard textarea, .grantadd select, .grantadd input, #setsearch, #langsearch,
+.rulename, details.def pre { background: var(--color-canvas); color: var(--color-ink); }
+.ms-opt:hover { background: var(--color-surface-soft); }
+.langrow textarea:focus, .paramrow.wide textarea:focus, .ms-search:focus,
+#langsearch:focus, .setrow input:focus, .setrow textarea:focus {
+  border-color: var(--color-ink);
+}
+/* Level accents on command cards, in the system's palette. */
+.cmdcard.lvl-admin { border-left-color: var(--color-warning); }
+.cmdcard.lvl-owner { border-left-color: var(--color-primary); }
+.ms-chip { color: var(--color-ink); border-color: transparent; }
+.status { box-shadow: var(--shadow-float); }
+
+/* --------------------------------------------------- Legibility corrections
+   Rausch is a CTA/brand colour, not a small-text colour: at 12-13px it lands
+   around 3.3:1 on white, under the 4.5:1 needed. The source system agrees —
+   its links are ink (only legal copy uses a blue). So small text and links go
+   ink, and Rausch stays for buttons, bars, badges and other brand moments. */
+a { color: var(--color-ink); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--color-primary-active); }
+nav a, .chip, .navcog a, .statslink, .guildcard, .logout, .back { text-decoration: none; }
+table.stats code, .chip code, .setrow code { color: var(--color-ink); }
+.fields code { color: var(--color-primary-active); }
+/* Selected pill: ink fill, as in the system's selected filter chips (white on
+   Rausch at 13px would be 3.5:1). */
+.chip.on { background: var(--color-ink); border-color: var(--color-ink); }
+.chip.on:hover { color: var(--color-on-primary); }
