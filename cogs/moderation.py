@@ -42,6 +42,27 @@ class Moderation(commands.Cog, name="moderation"):
         guild_id = context.guild.id if context.guild else None
         return self.bot.get_channel(self.bot.guild_config.get(guild_id, "LOG_CHANNEL"))
 
+    def _report_destinations(self, context: Context) -> list:
+        """Where a mass-role report goes: the invoking channel, the moderation log,
+        and the audit log.
+
+        The audit channel matters because the sweep suppresses its per-member role
+        entries — without the summary landing there too, that channel would show
+        nothing at all for the operation. Duplicates are collapsed when a guild
+        points several of these at the same channel.
+        """
+        destinations = [context]
+        seen = {context.channel.id}
+        log_cog = self.bot.get_cog("log")
+        candidates = [self._log_channel(context)]
+        if log_cog:
+            candidates.append(log_cog.get_log_channel(context.guild))
+        for channel in candidates:
+            if channel and channel.id not in seen:
+                seen.add(channel.id)
+                destinations.append(channel)
+        return destinations
+
     # ----------------------------- kick / ban / nick ----------------------------- #
     @commands.hybrid_command(name="kick", description="Kick a member from the server.")
     @commands.has_permissions(kick_members=True)
@@ -221,11 +242,7 @@ class Moderation(commands.Cog, name="moderation"):
             footer=lang.MOD_ROLE_FAILURES_FOOTER,
         )
 
-        destinations = [context]
-        channel = self._log_channel(context)
-        if channel and channel.id != context.channel.id:
-            destinations.append(channel)
-        for destination in destinations:
+        for destination in self._report_destinations(context):
             await destination.send(embed=summary)
             await messages.send_paged(destination, failure_embeds)
 
