@@ -25,6 +25,7 @@ import config_py
 import exceptions
 import lang
 from config.guild_config import GuildConfigManager
+from helpers import messages
 from helpers.logger import setup_logger
 from helpers.state_machine import StateStore
 from helpers.visibility import VisibilityManager
@@ -290,29 +291,32 @@ async def on_member_join(member: discord.Member) -> None:
     if starter_roles:
         await member.add_roles(*starter_roles, reason="Automatic starter roles on join")
 
-    channel = bot.get_channel(settings["WAYSHRINE"])
+    # The welcome channel/text are editable per server from the control panel;
+    # WAYSHRINE stays the fallback so servers that never set one keep working.
+    channel = bot.get_channel(settings.get("WELCOME_CHANNEL") or settings["WAYSHRINE"])
     if not channel:
         return
 
-    rank_req, select_roles = settings["RANK_REQ"], settings["SELECT_ROLES"]
     saved = config_py.left_roles.find_one({"_id": member.id})
-    if saved and "roles" in saved:
+    returning = bool(saved and "roles" in saved)
+    if returning:
         restored = [member.guild.get_role(rid) for rid in saved["roles"]]
         restored = [role for role in restored if role is not None]
         if restored:
             await member.add_roles(*restored, reason="Restoring roles from previous membership")
-        await channel.send(
-            f"Welcome back, {member.mention}! I have saved your roles from the last visit and "
-            f"reassigned them to you. If anything has changed, update your roles in "
-            f"<#{rank_req}> and pick the trials you want to be notified about in "
-            f"<#{select_roles}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
-        )
         config_py.left_roles.delete_one({"_id": member.id})
-    else:
+
+    template = settings.get("WELCOME_BACK_MESSAGE" if returning else "WELCOME_MESSAGE")
+    if template:
         await channel.send(
-            f"Welcome, {member.mention}! If you want to raid with us, post your clearsies in "
-            f"<#{rank_req}> and choose the trials you would like to join in "
-            f"<#{select_roles}>. Ping any of the admins if you have questions, and happy raiding! :hearts:"
+            messages.render_template(
+                template,
+                mention=member.mention,
+                name=member.display_name,
+                guild=member.guild.name,
+                rank_req=f"<#{settings['RANK_REQ']}>",
+                select_roles=f"<#{settings['SELECT_ROLES']}>",
+            )
         )
 
 

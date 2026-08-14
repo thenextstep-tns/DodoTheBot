@@ -83,6 +83,38 @@ class Log(commands.Cog, name="log"):
             return guild.get_channel(int(channel_id))
         return None
 
+    def guild_log_channels(self, guild) -> dict:
+        """This guild's stored destinations as ``{channel_id, delete_channel_id}``.
+
+        Read straight from ``guilds.json`` (not resolved to channels) so the
+        control panel can show what is configured even if a channel is gone.
+        """
+        data = load_guilds().get(str(guild.id)) if guild else None
+        if isinstance(data, dict):
+            return {
+                "channel_id": int(data["channel_id"]) if data.get("channel_id") else 0,
+                "delete_channel_id": int(data["delete_channel_id"]) if data.get("delete_channel_id") else 0,
+            }
+        # Legacy integer format: a bare audit channel id.
+        return {"channel_id": int(data), "delete_channel_id": 0} if data else {}
+
+    def set_guild_log_channel(self, guild, key: str, channel_id: int) -> None:
+        """Point one of this guild's log destinations at a channel (0 clears it)."""
+        if key not in ("channel_id", "delete_channel_id"):
+            raise KeyError(key)
+        store = load_guilds()
+        entry = store.get(str(guild.id))
+        if not isinstance(entry, dict):
+            # Upgrade the legacy integer format on first write.
+            entry = {"channel_id": int(entry)} if entry else {}
+        entry["guild_name"] = guild.name
+        if channel_id:
+            entry[key] = int(channel_id)
+        else:
+            entry.pop(key, None)
+        store[str(guild.id)] = entry
+        save_guilds(store)
+
     def get_delete_log_channel(self, guild):
         """Helper to fetch the delete/edit log channel, falling back to standard log channel."""
         if not guild:

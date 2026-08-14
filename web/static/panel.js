@@ -18,7 +18,49 @@ async function post(url, body) {
   });
   let data = {};
   try { data = await resp.json(); } catch (_) { /* ignore */ }
-  return { ok: resp.ok && data.ok, error: data.error };
+  // `value` comes back from endpoints that resolve one (e.g. a reset to default).
+  return { ok: resp.ok && data.ok, error: data.error, value: data.value };
+}
+
+// Searchable chip multi-select (list_role / list_channel). `save` receives the
+// selected ids; used by both the cog parameters and the server settings page.
+function bindMultiSelect(ms, save) {
+  const chips = ms.querySelector(".ms-chips");
+  const search = ms.querySelector(".ms-search");
+  const opts = Array.from(ms.querySelectorAll(".ms-opt"));
+  const selected = new Set(opts.filter((o) => o.dataset.selected === "1").map((o) => Number(o.dataset.id)));
+
+  const applyFilter = () => {
+    const q = search.value.trim().toLowerCase();
+    opts.forEach((o) => {
+      const hidden = selected.has(Number(o.dataset.id)) || (q && !o.dataset.name.toLowerCase().includes(q));
+      o.style.display = hidden ? "none" : "";
+    });
+  };
+  const render = () => {
+    chips.innerHTML = "";
+    opts.forEach((o) => {
+      if (!selected.has(Number(o.dataset.id))) return;
+      const chip = document.createElement("span");
+      chip.className = "ms-chip";
+      chip.textContent = o.dataset.name + " ";
+      const x = document.createElement("b");
+      x.textContent = "×";
+      x.addEventListener("click", () => { selected.delete(Number(o.dataset.id)); render(); save([...selected]); });
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    });
+    applyFilter();
+  };
+  opts.forEach((o) => o.addEventListener("click", () => {
+    selected.add(Number(o.dataset.id));
+    search.value = "";
+    render();
+    save([...selected]);
+  }));
+  search.addEventListener("input", applyFilter);
+  render();
+  return { set: (ids) => { selected.clear(); ids.forEach((id) => selected.add(Number(id))); render(); } };
 }
 
 // --- Dashboard: process-wide cog load/reload/unload ---
@@ -85,48 +127,13 @@ document.querySelectorAll(".cogcard").forEach((card) => {
     });
   });
 
-    // --- Guild page: searchable chip multi-selects (list_role / list_channel) ---
+  // --- Guild page: searchable chip multi-selects (list_role / list_channel) ---
   card.querySelectorAll(".multiselect").forEach((ms) => {
     const key = ms.dataset.key;
-    const chips = ms.querySelector(".ms-chips");
-    const search = ms.querySelector(".ms-search");
-    const opts = Array.from(ms.querySelectorAll(".ms-opt"));
-    const selected = new Set(opts.filter((o) => o.dataset.selected === "1").map((o) => Number(o.dataset.id)));
-
-    const save = async () => {
-      const res = await post(`/api/guild/${guildId}/param`, { key, value: [...selected] });
+    bindMultiSelect(ms, async (ids) => {
+      const res = await post(`/api/guild/${guildId}/param`, { key, value: ids });
       flash(res.ok ? `${key} saved ✓` : (res.error || "Failed"), res.ok);
-    };
-    const applyFilter = () => {
-      const q = search.value.trim().toLowerCase();
-      opts.forEach((o) => {
-        const hidden = selected.has(Number(o.dataset.id)) || (q && !o.dataset.name.toLowerCase().includes(q));
-        o.style.display = hidden ? "none" : "";
-      });
-    };
-    const render = () => {
-      chips.innerHTML = "";
-      opts.forEach((o) => {
-        if (!selected.has(Number(o.dataset.id))) return;
-        const chip = document.createElement("span");
-        chip.className = "ms-chip";
-        chip.textContent = o.dataset.name + " ";
-        const x = document.createElement("b");
-        x.textContent = "×";
-        x.addEventListener("click", () => { selected.delete(Number(o.dataset.id)); render(); save(); });
-        chip.appendChild(x);
-        chips.appendChild(chip);
-      });
-      applyFilter();
-    };
-    opts.forEach((o) => o.addEventListener("click", () => {
-      selected.add(Number(o.dataset.id));
-      search.value = "";
-      render();
-      save();
-    }));
-    search.addEventListener("input", applyFilter);
-    render();
+    });
   });
 
   // --- Guild page: per-command visibility level ---
@@ -273,4 +280,75 @@ if (langSearch) {
       if (q && anyVisible) group.open = true;
     });
   });
+}
+
+// --- Settings page: guild settings + the log cog's own destinations ---
+const _settingsPage = document.querySelector(".settingspage");
+if (_settingsPage) {
+  const guildId = _settingsPage.dataset.guild;
+  const saveSetting = async (key, value) => {
+    const res = await post(`/api/guild/${guildId}/setting`, { key, value });
+    flash(res.ok ? `${key} saved ✓` : (res.error || "Failed"), res.ok);
+    return res;
+  };
+  const markSet = (key, isSet) => {
+    const row = _settingsPage.querySelector(`.setrow[data-key="${CSS.escape(key)}"]`);
+    if (!row) return;
+    const head = row.querySelector("b");
+    const existing = row.querySelector("span.on");
+    if (isSet && !existing) head.insertAdjacentHTML("afterend", ' <span class="on">set</span>');
+    if (!isSet && existing) existing.remove();
+  };
+
+  _settingsPage.querySelectorAll(".setting").forEach((el) => {
+    if (el.classList.contains("multiselect")) {
+      const key = el.dataset.key;
+      el._widget = bindMultiSelect(el, async (ids) => {
+        const res = await saveSetting(key, ids);
+        if (res.ok) markSet(key, true);
+      });
+      return;
+    }
+    el.addEventListener("change", async () => {
+      const res = await saveSetting(el.dataset.key, el.value);
+      if (res.ok) markSet(el.dataset.key, true);
+    });
+  });
+
+  // Reset restores the built-in default and re-renders the control with it.
+  _settingsPage.querySelectorAll(".setreset").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const key = btn.dataset.key;
+      const res = await post(`/api/guild/${guildId}/setting`, { key, action: "reset" });
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      flash(`${key} reset to default ✓`, true);
+      markSet(key, false);
+      const control = _settingsPage.querySelector(`.setrow[data-key="${CSS.escape(key)}"] .setting`);
+      if (!control) return;
+      if (control._widget) control._widget.set(res.value || []);
+      else control.value = res.value === null || res.value === undefined ? "" : res.value;
+    });
+  });
+
+  _settingsPage.querySelectorAll(".auditchannel").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/setting`, { key: sel.dataset.key, value: sel.value });
+      flash(res.ok ? "log channel saved ✓" : (res.error || "Failed"), res.ok);
+    });
+  });
+
+  const setSearch = document.getElementById("setsearch");
+  if (setSearch) {
+    setSearch.addEventListener("input", () => {
+      const q = setSearch.value.trim().toLowerCase();
+      _settingsPage.querySelectorAll(".setrow").forEach((row) => {
+        row.style.display = !q || row.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+      _settingsPage.querySelectorAll("details.group").forEach((group) => {
+        const anyVisible = Array.from(group.querySelectorAll(".setrow")).some((r) => r.style.display !== "none");
+        group.style.display = anyVisible ? "" : "none";
+        if (q) group.open = true;
+      });
+    });
+  }
 }

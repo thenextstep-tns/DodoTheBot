@@ -278,3 +278,25 @@ svg.chart .bar { fill: var(--accent); }
 svg.chart .bar:hover { fill: var(--text); }
 svg.chart .guide { stroke: var(--line); stroke-width: 1; }
 svg.chart .axis { fill: var(--muted); font-size: 11px; }
+
+/* ------------------------------------------------------------- Settings page */
+.sidelinks { display: flex; gap: 8px; margin-bottom: 12px; }
+.sidelinks .statslink { flex: 1 1 0; margin-bottom: 0; }
+main:has(.settingspage) { max-width: 1180px; }
+#setsearch { width: 100%; padding: 9px 11px; margin: 4px 0 16px; background: var(--panel);
+  color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.settings { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 10px; }
+.setrow { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: center;
+  padding: 11px 12px; border-bottom: 1px solid var(--line); }
+.setrow:last-child { border-bottom: none; }
+.setrow.wide { grid-template-columns: 1fr; }
+.setrow code { color: var(--muted); font-size: 11px; }
+.setrow .on { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(46, 204, 113, .15); color: var(--on); }
+.setctl { display: flex; gap: 8px; align-items: flex-start; }
+.setctl > select, .setctl > input, .setctl > textarea, .setctl > .multiselect { flex: 1 1 auto; min-width: 0; }
+.setctl .setreset { flex: none; padding: 5px 10px; font-size: 12px; margin: 0; }
+.setctl input.emoji { flex: 0 0 64px; text-align: center; font-size: 16px; }
+.setrow select, .setrow input, .setrow textarea { padding: 7px 9px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
+.setrow textarea { width: 100%; resize: vertical; line-height: 1.5; }

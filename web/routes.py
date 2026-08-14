@@ -17,6 +17,9 @@ from functools import wraps
 
 from aiohttp import web
 
+import discord
+
+from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import cog_categories, names, stats
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
@@ -357,7 +360,10 @@ def _guild_html(bot, guild) -> str:
     <a href="/" class="back">← all guilds</a>
     <div class="ghead">{_guild_avatar(guild, size=48)}
       <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
-    <a class="statslink" href="/guild/{guild.id}/stats">📊 Server stats</a>
+    <div class="sidelinks">
+      <a class="statslink" href="/guild/{guild.id}/settings">⚙️ Settings</a>
+      <a class="statslink" href="/guild/{guild.id}/stats">📊 Stats</a>
+    </div>
     <div class="toolbar">
       <input id="cogfilter" type="search" placeholder="Filter cogs…" autocomplete="off">
       <button id="expandall" class="ghost">Expand all</button>
@@ -371,6 +377,144 @@ def _guild_html(bot, guild) -> str:
     <b>🔒 owner</b>). Changes apply to this guild within a few seconds.</p>
     {sections}
   </main>
+</div>
+<p id="status" class="status"></p>
+"""
+
+
+# --------------------------------------------------------------------------- #
+#  Settings page
+# --------------------------------------------------------------------------- #
+def _channel_options(guild, selected, *, blank: str = "— none —") -> str:
+    """Channel dropdown covering everything a setting might point at (text, news,
+    forum, voice), not just text channels."""
+    options = f'<option value="0">{blank}</option>'
+    usable = [
+        channel for channel in guild.channels
+        if isinstance(channel, (discord.TextChannel, discord.ForumChannel, discord.VoiceChannel))
+    ]
+    for channel in sorted(usable, key=lambda c: (c.category.name if c.category else "", c.position)):
+        if isinstance(channel, discord.ForumChannel):
+            prefix = "🗂"
+        elif isinstance(channel, discord.VoiceChannel):
+            prefix = "🔊"
+        else:
+            prefix = "#"
+        category = f" · {channel.category.name}" if channel.category else ""
+        options += (
+            f'<option value="{channel.id}"{" selected" if channel.id == selected else ""}>'
+            f"{html.escape(prefix + channel.name + category)}</option>"
+        )
+    return options
+
+
+def _role_options(guild, selected) -> str:
+    options = '<option value="0">— none —</option>'
+    for role in sorted(guild.roles, key=lambda r: -r.position):
+        if role.is_default():
+            continue
+        options += (
+            f'<option value="{role.id}"{" selected" if role.id == selected else ""}>'
+            f"@{html.escape(role.name)}</option>"
+        )
+    return options
+
+
+def _setting_input(spec: dict, value, guild) -> str:
+    kind = spec["type"]
+    common = f'class="setting" data-key="{html.escape(spec["key"])}" data-type="{kind}"'
+    if kind == "channel":
+        return f'<select {common}>{_channel_options(guild, value)}</select>'
+    if kind == "role":
+        return f'<select {common}>{_role_options(guild, value)}</select>'
+    if kind == "message":
+        return f'<input type="text" {common} value="{html.escape(str(value or ""))}" placeholder="message id" inputmode="numeric">'
+    if kind == "text":
+        text = str(value or "")
+        return f'<textarea {common} rows="{min(8, max(3, text.count(chr(10)) + 2))}" spellcheck="false">{html.escape(text)}</textarea>'
+    if kind == "emoji":
+        return f'<input type="text" {common} value="{html.escape(str(value or ""))}" class="setting emoji" size="4">'
+    if kind in ("list_role", "list_channel"):
+        source = guild.roles if kind == "list_role" else guild.channels
+        selected = set(value or [])
+        options = ""
+        for obj in source:
+            if getattr(obj, "is_default", lambda: False)():
+                continue
+            if kind == "list_channel" and not isinstance(obj, (discord.TextChannel, discord.ForumChannel, discord.VoiceChannel)):
+                continue
+            label = ("@" if kind == "list_role" else "#") + obj.name
+            options += (
+                f'<div class="ms-opt" data-id="{obj.id}" data-name="{html.escape(label)}" '
+                f'data-selected="{1 if obj.id in selected else 0}">{html.escape(label)}</div>'
+            )
+        return (
+            f'<div class="multiselect setting" data-key="{html.escape(spec["key"])}" data-type="{kind}">'
+            f'<div class="ms-chips"></div><input class="ms-search" placeholder="Search…" autocomplete="off">'
+            f'<div class="ms-options">{options}</div></div>'
+        )
+    return f'<input type="text" {common} value="{html.escape(str(value or ""))}">'
+
+
+def _settings_html(bot, guild) -> str:
+    values = bot.guild_config.get_all(guild.id)
+    overridden_keys = bot.guild_config.overridden_keys(guild.id)
+    log_cog = bot.get_cog("log")
+    audit = log_cog.guild_log_channels(guild) if log_cog else {}
+
+    sections = ""
+    for group in guild_config.GROUPS:
+        rows = ""
+        for spec in guild_config.SETTING_SPECS:
+            if spec["group"] != group:
+                continue
+            overridden = spec["key"] in overridden_keys
+            unused = "" if spec["used_by"] else '<span class="muted small"> · not read by any command yet</span>'
+            badge = '<span class="on">set</span>' if overridden else ""
+            wide = " wide" if spec["type"] in ("text", "list_role", "list_channel") else ""
+            rows += f"""
+    <div class="setrow{wide}" data-key="{html.escape(spec["key"])}">
+      <div><b>{html.escape(spec["label"])}</b> {badge}
+        <div class="muted small">{html.escape(spec["description"])}</div>
+        <div class="muted small"><code>{html.escape(spec["key"])}</code>{unused}</div></div>
+      <div class="setctl">{_setting_input(spec, values.get(spec["key"]), guild)}
+        <button class="ghost setreset" data-key="{html.escape(spec["key"])}" title="Restore the default">Reset</button>
+      </div>
+    </div>"""
+        sections += (
+            f'<details class="group" open><summary>{html.escape(group)}</summary>'
+            f'<div class="settings">{rows}</div></details>'
+        )
+
+    # The audit logger keeps its own store (guilds.json), so it gets its own block.
+    audit_rows = ""
+    for key, label, description in (
+        ("channel_id", "Audit log channel", "Joins, leaves, role changes, edits — the full audit feed."),
+        ("delete_channel_id", "Deleted/edited messages", "Separate destination for deletions and edits. "
+                                                        "Falls back to the audit channel when unset."),
+    ):
+        audit_rows += f"""
+    <div class="setrow" data-key="{key}">
+      <div><b>{html.escape(label)}</b><div class="muted small">{html.escape(description)}</div></div>
+      <div class="setctl"><select class="auditchannel" data-key="{key}">
+        {_channel_options(guild, audit.get(key) or 0)}</select></div>
+    </div>"""
+
+    return f"""
+<div class="settingspage" data-guild="{guild.id}">
+  <div class="statshead">
+    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+      <h1>Server settings</h1></div>
+    <div class="chips"><a class="chip" href="/guild/{guild.id}/stats">📊 Stats</a></div>
+  </div>
+  <p class="muted">Channels, roles and messages this server's commands read. Anything left at its
+  default is inherited from the bot's built-in configuration; <b>Reset</b> puts a setting back.
+  Gameplay tunables (thresholds, costs, prefixes) live under each cog on the
+  <a href="/guild/{guild.id}">main page</a>.</p>
+  <input id="setsearch" type="search" placeholder="Filter settings…" autocomplete="off">
+  <details class="group" open><summary>Audit log <span class="muted">(log cog)</span></summary>
+    <div class="settings">{audit_rows}</div></details>
+  {sections}
 </div>
 <p id="status" class="status"></p>
 """
@@ -617,6 +761,15 @@ async def guild_page(request: web.Request):
 
 
 @require_owner
+async def guild_settings_page(request: web.Request):
+    bot = request.app["bot"]
+    guild = bot.get_guild(int(request.match_info["gid"]))
+    if guild is None:
+        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+    return _page(f"{guild.name} · settings", _settings_html(bot, guild))
+
+
+@require_owner
 async def guild_stats_page(request: web.Request):
     """Activity stats for one guild. The aggregations are blocking pymongo calls,
     so they run in a worker thread — the bot shares this event loop."""
@@ -764,6 +917,47 @@ async def api_guild_param(request: web.Request):
 
 
 @require_owner
+async def api_guild_setting(request: web.Request):
+    """Set or reset one guild setting: body {key, value} or {key, action:"reset"}.
+
+    Also handles the audit logger's own two destinations, which live in
+    guilds.json rather than the guild-config collection.
+    """
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    guild = bot.get_guild(gid)
+    if guild is None:
+        return web.json_response({"ok": False, "error": "guild not found"}, status=404)
+    data = await request.json()
+    key = data.get("key")
+    if not key:
+        return web.json_response({"ok": False, "error": "bad request"}, status=400)
+
+    if key in ("channel_id", "delete_channel_id"):
+        log_cog = bot.get_cog("log")
+        if log_cog is None:
+            return web.json_response({"ok": False, "error": "log cog not loaded"}, status=200)
+        try:
+            log_cog.set_guild_log_channel(guild, key, int(data.get("value") or 0))
+        except (TypeError, ValueError):
+            return web.json_response({"ok": False, "error": "invalid channel"}, status=200)
+        return web.json_response({"ok": True})
+
+    try:
+        if data.get("action") == "reset":
+            bot.guild_config.reset(gid, key)
+            value = guild_config.DEFAULTS.get(key)
+        else:
+            value = guild_config.coerce(key, data.get("value"))
+            bot.guild_config.set(gid, key, value)
+    except KeyError:
+        return web.json_response({"ok": False, "error": "unknown setting"}, status=400)
+    except (TypeError, ValueError) as error:
+        return web.json_response({"ok": False, "error": f"invalid value: {error}"}, status=200)
+    return web.json_response({"ok": True, "value": value})
+
+
+@require_owner
 async def api_lang(request: web.Request):
     """Body: {key, action:"reset"} OR {key, value:<text>, is_list:bool}."""
     bot = request.app["bot"]
@@ -802,6 +996,8 @@ def create_app(bot) -> web.Application:
             web.get("/", dashboard),
             web.get("/guild/{gid}", guild_page),
             web.get("/guild/{gid}/stats", guild_stats_page),
+            web.get("/guild/{gid}/settings", guild_settings_page),
+            web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),

@@ -43,6 +43,26 @@ def warning(description: str = None, *, title: str = None) -> discord.Embed:
     return embed(description, title=title, color=WARNING)
 
 
+class _SafeValues(dict):
+    """Formatting map that leaves unknown placeholders untouched."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def render_template(template: str, **values) -> str:
+    """Fill ``{placeholders}`` in admin-authored text.
+
+    Anything the caller doesn't supply is left visible rather than raising, so a
+    typo in a server's welcome message can't break joining.
+    """
+    try:
+        return template.format_map(_SafeValues(values))
+    except (ValueError, IndexError):
+        # Unbalanced or positional braces — show the text as written.
+        return template
+
+
 def mention(user: Union[discord.abc.User, int]) -> str:
     """Return a mention string for a user object or a raw user ID."""
     return user.mention if isinstance(user, discord.abc.User) else f"<@{user}>"

@@ -49,6 +49,22 @@ public_channels = [
     783631231392415774, 1081450115052605461,
 ]
 
+# --- Welcome ---
+# Posted by on_member_join. Placeholders: {mention} {name} {guild} {rank_req}
+# {select_roles} — the two channel ones render as clickable channel mentions.
+WELCOME_CHANNEL = WAYSHRINE
+WELCOME_MESSAGE = (
+    "Welcome, {mention}! If you want to raid with us, post your clearsies in {rank_req} "
+    "and choose the trials you would like to join in {select_roles}. Ping any of the admins "
+    "if you have questions, and happy raiding! :hearts:"
+)
+WELCOME_BACK_MESSAGE = (
+    "Welcome back, {mention}! I have saved your roles from the last visit and reassigned them "
+    "to you. If anything has changed, update your roles in {rank_req} and pick the trials you "
+    "want to be notified about in {select_roles}. Ping any of the admins if you have questions, "
+    "and happy raiding! :hearts:"
+)
+
 # --- Users / special IDs ---
 BLACKLIST = []
 CRINGE = [645590542125629470, 416986446612660235]
