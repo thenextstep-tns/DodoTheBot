@@ -18,6 +18,11 @@ import lang
 from helpers import checks, messages
 
 FOX_ID = 309719542115074049
+# How often the "working through N members" status message is refreshed.
+PROGRESS_EVERY = 25
+# How long a finished mass-role sweep stays registered, so member updates that
+# arrive over the gateway just after the last call are still recognised as ours.
+BULK_ROLE_GRACE = 10.0
 
 
 class Moderation(commands.Cog, name="moderation"):
@@ -27,6 +32,10 @@ class Moderation(commands.Cog, name="moderation"):
         self.bot = bot
         self.pin_fails = config_py.pin_fails
         self.pin_fails.create_index([("created_at", ASCENDING)], expireAfterSeconds=3600)
+        # (guild_id, role_id) pairs currently being swept by addrole/removerole. The
+        # log cog watches this so a sweep doesn't post one audit entry per member.
+        if not hasattr(bot, "bulk_role_ops"):
+            bot.bulk_role_ops = set()
 
     def _log_channel(self, context: Context):
         """This guild's moderation log channel (per-guild, falls back to default)."""
@@ -113,6 +122,128 @@ class Moderation(commands.Cog, name="moderation"):
             await channel.send(embed=embed)
         except discord.HTTPException:
             await context.send(embed=messages.error(lang.MOD_NICK_ERROR, title="Oi!"))
+
+    # ------------------------- mass role add / remove ---------------------------- #
+    def _role_blocker(self, context: Context, role: discord.Role) -> str:
+        """Return why ``role`` can't be mass-managed here, or ``None`` if it can."""
+        me = context.guild.me
+        if not me.guild_permissions.manage_roles:
+            return lang.MOD_ROLE_BOT_NO_PERMISSION
+        if role.is_default() or role.managed:
+            return lang.MOD_ROLE_UNMANAGEABLE.format(role=role.name)
+        if role >= me.top_role:
+            return lang.MOD_ROLE_ABOVE_ME.format(role=role.name)
+        if context.author != context.guild.owner and role >= context.author.top_role:
+            return lang.MOD_ROLE_ABOVE_YOU.format(role=role.name)
+        return None
+
+    async def _mass_role(self, context: Context, role: discord.Role, *, add: bool) -> None:
+        """Add or remove ``role`` for every member, after confirming the head count.
+
+        Reports a summary plus a paginated list of the members that failed, both in
+        the invoking channel and in the guild's log channel.
+        """
+        blocker = self._role_blocker(context, role)
+        if blocker:
+            await context.send(embed=messages.error(blocker, title="Oi!"))
+            return
+
+        if not context.guild.chunked:
+            await context.guild.chunk()
+        members = context.guild.members
+        # For "add" we want the members missing the role; for "remove", the ones that have it.
+        targets = [member for member in members if (role not in member.roles) == add]
+        skipped = len(members) - len(targets)
+
+        if not targets:
+            nobody = lang.MOD_ROLE_NOBODY_ADD if add else lang.MOD_ROLE_NOBODY_REMOVE
+            await context.send(embed=messages.warning(nobody.format(role=role.name)))
+            return
+
+        confirm_text = (lang.MOD_ROLE_CONFIRM_ADD if add else lang.MOD_ROLE_CONFIRM_REMOVE).format(
+            role=role.name, targets=len(targets), total=len(members), skipped=skipped
+        )
+        confirmed = await messages.prompt_confirm(
+            context,
+            context.author,
+            embed=messages.warning(confirm_text, title=lang.MOD_ROLE_CONFIRM_TITLE),
+        )
+        if not confirmed:
+            await context.send(lang.MOD_ROLE_CANCELLED)
+            return
+
+        reason = lang.MOD_ROLE_REASON.format(
+            action="add" if add else "remove", role=role.name, author=context.author
+        )
+        status = await context.send(lang.MOD_ROLE_WORKING.format(targets=len(targets), done=0))
+        failures: list[str] = []
+        changed = 0
+        sweep = (context.guild.id, role.id)
+        self.bot.bulk_role_ops.add(sweep)
+        try:
+            for index, member in enumerate(targets, start=1):
+                try:
+                    if add:
+                        await member.add_roles(role, reason=reason)
+                    else:
+                        await member.remove_roles(role, reason=reason)
+                    changed += 1
+                except discord.HTTPException as exception:
+                    failures.append(
+                        lang.MOD_ROLE_FAILURE_LINE.format(member=member.display_name, error=str(exception)[:200])
+                    )
+                if index % PROGRESS_EVERY == 0:
+                    await status.edit(content=lang.MOD_ROLE_WORKING.format(targets=len(targets), done=index))
+        finally:
+            self.bot.loop.call_later(BULK_ROLE_GRACE, self.bot.bulk_role_ops.discard, sweep)
+        try:
+            await status.delete()
+        except discord.HTTPException:
+            pass
+
+        summary = messages.success(
+            (lang.MOD_ROLE_RESULT_ADD if add else lang.MOD_ROLE_RESULT_REMOVE).format(
+                count=changed, role=role.name, author=context.author.display_name
+            ),
+            title=lang.MOD_ROLE_ADD_TITLE if add else lang.MOD_ROLE_REMOVE_TITLE,
+        )
+        summary.add_field(
+            name=lang.MOD_ROLE_FIELD_SKIPPED_ADD if add else lang.MOD_ROLE_FIELD_SKIPPED_REMOVE,
+            value=str(skipped),
+        )
+        summary.add_field(name=lang.MOD_ROLE_FIELD_FAILED, value=str(len(failures)))
+
+        failure_embeds = messages.paged_embeds(
+            failures,
+            title=lang.MOD_ROLE_FAILURES_TITLE,
+            color=messages.ERROR,
+            separator="\n",
+            footer=lang.MOD_ROLE_FAILURES_FOOTER,
+        )
+
+        destinations = [context]
+        channel = self._log_channel(context)
+        if channel and channel.id != context.channel.id:
+            destinations.append(channel)
+        for destination in destinations:
+            await destination.send(embed=summary)
+            await messages.send_paged(destination, failure_embeds)
+
+    @commands.hybrid_command(name="addrole", description="Give a role to every member of the server.")
+    @commands.guild_only()
+    @commands.has_permissions(manage_roles=True)
+    @checks.not_blacklisted()
+    async def addrole(self, context: Context, *, role: discord.Role) -> None:
+        """Give ``role`` to everyone on the server."""
+        await self._mass_role(context, role, add=True)
+
+    @commands.hybrid_command(name="removerole", description="Take a role away from every member of the server.")
+    @commands.guild_only()
+    @commands.has_permissions(manage_roles=True)
+    @checks.not_blacklisted()
+    async def removerole(self, context: Context, *, role: discord.Role) -> None:
+        """Take ``role`` away from everyone on the server."""
+        await self._mass_role(context, role, add=False)
 
     # ----------------------------------- purge ----------------------------------- #
     @commands.hybrid_command(name="purge", description="Delete a number of recent (unpinned) messages.")

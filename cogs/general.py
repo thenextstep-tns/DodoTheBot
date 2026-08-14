@@ -16,35 +16,7 @@ from discord.ext.commands import Context
 
 import config_py
 import lang
-from helpers import checks
-
-_VIEW_TIMEOUT = 180.0
-_EMBED_CHAR_LIMIT = 4096
-
-
-class _Paginator(discord.ui.View):
-    """A minimal Previous/Next button view for paging through a list of embeds."""
-
-    def __init__(self, embeds: list[discord.Embed]):
-        super().__init__(timeout=_VIEW_TIMEOUT)
-        self.embeds = embeds
-        self.index = 0
-        self.prev_button.disabled = True
-        self.next_button.disabled = len(embeds) <= 1
-
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.blurple, emoji="◀️")
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.index -= 1
-        self.next_button.disabled = False
-        self.prev_button.disabled = self.index == 0
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.blurple, emoji="▶️")
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.index += 1
-        self.prev_button.disabled = False
-        self.next_button.disabled = self.index == len(self.embeds) - 1
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+from helpers import checks, messages
 
 
 class General(commands.Cog, name="general"):
@@ -72,9 +44,7 @@ class General(commands.Cog, name="general"):
     @commands.hybrid_command(name="commands", description="Lists all loaded commands.")
     async def list_commands(self, context: Context) -> None:
         """List every loaded command, grouped by cog across paginated embeds."""
-        pages: list[str] = []
-        current_parts: list[str] = []
-        current_length = 0
+        cog_blocks: list[str] = []
 
         # Only list commands the caller may actually run in this guild, per the
         # per-guild visibility settings (owner-only tooling drops out for non-owners,
@@ -103,31 +73,18 @@ class General(commands.Cog, name="general"):
             if not command_list:
                 continue
 
-            cog_block = lang.GENERAL_COMMANDS_CATEGORY.format(cog_name=cog_name) + "\n" + "\n".join(command_list)
-            separator = 2 if current_parts else 0
-            if current_length + separator + len(cog_block) > _EMBED_CHAR_LIMIT:
-                pages.append("\n\n".join(current_parts))
-                current_parts = [cog_block]
-                current_length = len(cog_block)
-            else:
-                current_parts.append(cog_block)
-                current_length += separator + len(cog_block)
+            cog_blocks.append(
+                lang.GENERAL_COMMANDS_CATEGORY.format(cog_name=cog_name) + "\n" + "\n".join(command_list)
+            )
 
-        if current_parts:
-            pages.append("\n\n".join(current_parts))
-
-        if not pages:
+        if not cog_blocks:
             await context.send(lang.GENERAL_COMMANDS_NONE)
             return
 
-        embeds = []
-        for page in pages:
-            embed = discord.Embed(title=lang.GENERAL_COMMANDS_TITLE, description=page, color=0x3498DB)
-            embed.set_footer(text=lang.GENERAL_COMMANDS_FOOTER)
-            embeds.append(embed)
-
-        view = _Paginator(embeds) if len(embeds) > 1 else None
-        await context.send(embed=embeds[0], view=view)
+        embeds = messages.paged_embeds(
+            cog_blocks, title=lang.GENERAL_COMMANDS_TITLE, footer=lang.GENERAL_COMMANDS_FOOTER
+        )
+        await messages.send_paged(context, embeds)
 
     @commands.command(name="guide")
     @checks.not_blacklisted()
@@ -188,33 +145,17 @@ class General(commands.Cog, name="general"):
         command_stats = sorted((c for c in command_stats if c[1] > 0), key=lambda item: item[1], reverse=True)
 
         header = lang.GENERAL_STATS_HEADER.format(name=member.display_name, total=total_used)
-        char_limit = 1999
-        pages: list[str] = []
-        current_parts: list[str] = []
-        current_length = 0
-
-        for command, count in command_stats:
-            line = lang.GENERAL_STATS_LINE.format(command=command, count=count)
-            separator = 1 if current_parts else 0
-            if current_length + separator + len(line) + len(header) > char_limit:
-                pages.append("\n".join(current_parts))
-                current_parts = [line]
-                current_length = len(line)
-            else:
-                current_parts.append(line)
-                current_length += separator + len(line)
-
-        if current_parts:
-            pages.append("\n".join(current_parts))
+        pages = messages.chunk_blocks(
+            (lang.GENERAL_STATS_LINE.format(command=command, count=count) for command, count in command_stats),
+            separator="\n",
+            limit=1999 - len(header),
+        )
 
         embeds = [
-            discord.Embed(
-                title=lang.GENERAL_STATS_TITLE.format(name=member.display_name), description=header + page, color=0x3498DB
-            )
+            messages.embed(header + page, title=lang.GENERAL_STATS_TITLE.format(name=member.display_name))
             for page in pages
         ]
-        view = _Paginator(embeds) if len(embeds) > 1 else None
-        await context.send(embed=embeds[0], view=view)
+        await messages.send_paged(context, embeds)
 
     @commands.hybrid_command(
         name="remind",

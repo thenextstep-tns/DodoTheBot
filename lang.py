@@ -176,6 +176,34 @@ MOD_PIN_FAILED = "Something went wrong, I couldn't pin that."
 MOD_UNPIN_NO_PERMISSION = "You do not have permission to unpin messages."
 MOD_UNPIN_NO_REFERENCE = ":shrug: I have no idea which message to unpin, please reply to a message."
 MOD_UNPIN_DONE = "Message unpinned by {mention}."
+MOD_ROLE_BOT_NO_PERMISSION = "I don't have the **Manage Roles** permission here, so I can't touch anybody's roles."
+MOD_ROLE_ABOVE_ME = "**{role}** sits above my highest role, so I can't hand it out or take it away."
+MOD_ROLE_ABOVE_YOU = "**{role}** is not below your highest role, so you can't mass-assign it."
+MOD_ROLE_UNMANAGEABLE = "**{role}** is managed by an integration (or is @everyone) — nobody can add or remove it manually."
+MOD_ROLE_NOBODY_ADD = "Everyone on the server already has **{role}**. Nothing to do."
+MOD_ROLE_NOBODY_REMOVE = "Nobody on the server has **{role}**. Nothing to do."
+MOD_ROLE_CONFIRM_TITLE = "Hold on, let me count..."
+MOD_ROLE_CONFIRM_ADD = (
+    "I'm about to give **{role}** to **{targets}** member(s).\n"
+    "**{skipped}** already have it and will be skipped.\n\nShould we go on?"
+)
+MOD_ROLE_CONFIRM_REMOVE = (
+    "I'm about to strip the **{role}** from **{targets}** member(s).\n"
+    "**{skipped}** don't have it and will be skipped.\n\nShould we go on?"
+)
+MOD_ROLE_CANCELLED = "The interaction was cancelled, I didn't touch anyone. Pinky promise"
+MOD_ROLE_WORKING = "Working through **{targets}** users... {done} done."
+MOD_ROLE_REASON = "Mass {action} of {role} by {author}"
+MOD_ROLE_ADD_TITLE = "Role Assigned!"
+MOD_ROLE_REMOVE_TITLE = "Role Removed!"
+MOD_ROLE_RESULT_ADD = "**{count}** members have been assigned the **{role}** by **{author}**."
+MOD_ROLE_RESULT_REMOVE = "**{count}** members have been stripped of the **{role}** by **{author}**."
+MOD_ROLE_FIELD_SKIPPED_ADD = "Already had it"
+MOD_ROLE_FIELD_SKIPPED_REMOVE = "Didn't have it"
+MOD_ROLE_FIELD_FAILED = "Caused issues"
+MOD_ROLE_FAILURES_TITLE = "Members I couldn't handle"
+MOD_ROLE_FAILURE_LINE = "**{member}** — {error}"
+MOD_ROLE_FAILURES_FOOTER = "Page {page}/{pages}"
 
 # --------------------------------------------------------------------------- #
 #  PP cog

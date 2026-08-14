@@ -7,7 +7,7 @@ and prompting for a reaction choice.
 """
 
 import asyncio
-from typing import Iterable, Optional, Union
+from typing import Iterable, Optional, Sequence, Union
 
 import discord
 
@@ -17,6 +17,10 @@ ERROR = 0xE74C3C
 WARNING = 0xF1C40F
 INFO = 0x3498DB
 ACCENT = 0x9C84EF
+
+# Discord's hard limit on an embed description.
+EMBED_DESCRIPTION_LIMIT = 4096
+VIEW_TIMEOUT = 180.0
 
 
 def embed(description: str = None, *, title: str = None, color: int = INFO, **kwargs) -> discord.Embed:
@@ -52,6 +56,135 @@ async def send_temp(channel: discord.abc.Messageable, content: str, *, delay: fl
         await message.delete()
     except discord.HTTPException:
         pass
+
+
+# ------------------------------- pagination ---------------------------------- #
+class Paginator(discord.ui.View):
+    """A minimal Previous/Next button view for paging through a list of embeds."""
+
+    def __init__(self, embeds: list[discord.Embed], *, timeout: float = VIEW_TIMEOUT):
+        super().__init__(timeout=timeout)
+        self.embeds = embeds
+        self.index = 0
+        self.prev_button.disabled = True
+        self.next_button.disabled = len(embeds) <= 1
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.blurple, emoji="◀️")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index -= 1
+        self.next_button.disabled = False
+        self.prev_button.disabled = self.index == 0
+        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.blurple, emoji="▶️")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.index += 1
+        self.prev_button.disabled = False
+        self.next_button.disabled = self.index == len(self.embeds) - 1
+        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+
+
+def chunk_blocks(
+    blocks: Iterable[str], *, separator: str = "\n\n", limit: int = EMBED_DESCRIPTION_LIMIT
+) -> list[str]:
+    """Join ``blocks`` into as few strings as possible, none longer than ``limit``.
+
+    A block is never split, so a single oversized block still gets its own page.
+    """
+    pages: list[str] = []
+    current: list[str] = []
+    length = 0
+    for block in blocks:
+        extra = len(separator) if current else 0
+        if current and length + extra + len(block) > limit:
+            pages.append(separator.join(current))
+            current, length = [block], len(block)
+        else:
+            current.append(block)
+            length += extra + len(block)
+    if current:
+        pages.append(separator.join(current))
+    return pages
+
+
+def paged_embeds(
+    blocks: Iterable[str],
+    *,
+    title: str = None,
+    color: int = INFO,
+    separator: str = "\n\n",
+    footer: str = None,
+) -> list[discord.Embed]:
+    """Build one embed per page of ``blocks``.
+
+    ``footer`` may contain ``{page}`` / ``{pages}`` placeholders.
+    """
+    pages = chunk_blocks(blocks, separator=separator)
+    embeds = []
+    for index, page in enumerate(pages, start=1):
+        page_embed = embed(page, title=title, color=color)
+        if footer:
+            page_embed.set_footer(
+                text=footer.format(page=index, pages=len(pages)) if "{page" in footer else footer
+            )
+        embeds.append(page_embed)
+    return embeds
+
+
+async def send_paged(
+    destination: discord.abc.Messageable, embeds: Sequence[discord.Embed]
+) -> Optional[discord.Message]:
+    """Send the first embed, attaching Previous/Next buttons when there is more than one."""
+    if not embeds:
+        return None
+    view = Paginator(list(embeds)) if len(embeds) > 1 else None
+    return await destination.send(embed=embeds[0], view=view)
+
+
+# ------------------------------- prompting ----------------------------------- #
+class _ConfirmView(discord.ui.View):
+    """Confirm/Cancel buttons that only the requesting member may press."""
+
+    def __init__(self, member: discord.abc.User, timeout: float):
+        super().__init__(timeout=timeout)
+        self.member = member
+        self.value: Optional[bool] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.member.id:
+            return True
+        await interaction.response.send_message("This one isn't yours to answer.", ephemeral=True)
+        return False
+
+    async def _resolve(self, interaction: discord.Interaction, value: bool) -> None:
+        self.value = value
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green, emoji="✅")
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, emoji="✖️")
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._resolve(interaction, False)
+
+
+async def prompt_confirm(
+    destination: discord.abc.Messageable,
+    member: discord.abc.User,
+    *,
+    content: str = None,
+    embed: discord.Embed = None,
+    timeout: float = 60.0,
+) -> bool:
+    """Ask ``member`` to confirm; return ``True`` only if they press Confirm in time."""
+    view = _ConfirmView(member, timeout)
+    await destination.send(content=content, embed=embed, view=view)
+    await view.wait()
+    return view.value is True
 
 
 class _ValueSelect(discord.ui.Select):

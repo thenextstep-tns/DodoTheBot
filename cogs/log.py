@@ -26,6 +26,11 @@ COLOR_INFO = 0x7289da     # Blue
 
 GUILDS_FILE = "guilds.json"
 
+# Discord caps a message at 10 embeds *and* 6000 characters summed across all of
+# them; a batch that breaks either limit is rejected wholesale, so we stay under.
+MAX_EMBEDS_PER_MESSAGE = 10
+MAX_CHARS_PER_MESSAGE = 5900
+
 def load_guilds():
     """Load the guild log channel configurations."""
     if not os.path.isfile(GUILDS_FILE) or os.path.getsize(GUILDS_FILE) == 0:
@@ -147,6 +152,24 @@ class Log(commands.Cog, name="log"):
         }
         self.bot.loop.run_in_executor(None, self._insert_db, db_data)
 
+    @staticmethod
+    def _batch_embeds(embeds):
+        """Split ``embeds`` into groups that fit in one message.
+
+        ``len(embed)`` is Discord's own accounting (title + description + field
+        names/values + footer + author), which is what the 6000 limit counts.
+        """
+        chunk, chunk_chars = [], 0
+        for embed in embeds:
+            size = len(embed)
+            if chunk and (len(chunk) >= MAX_EMBEDS_PER_MESSAGE or chunk_chars + size > MAX_CHARS_PER_MESSAGE):
+                yield chunk
+                chunk, chunk_chars = [], 0
+            chunk.append(embed)
+            chunk_chars += size
+        if chunk:
+            yield chunk
+
     @tasks.loop(seconds=2.0)
     async def batch_logger(self):
         """Background task that groups pending embeds by channel to avoid rate limits."""
@@ -192,10 +215,9 @@ class Log(commands.Cog, name="log"):
         for item in pending:
             grouped[item["channel"]].append(item["embed"])
 
-        # Send in batches of 10 (Discord's max embeds per message limit)
+        # Send in batches that respect both the embed-count and character limits
         for channel, embeds in grouped.items():
-            for i in range(0, len(embeds), 10):
-                chunk = embeds[i:i+10]
+            for chunk in self._batch_embeds(embeds):
                 try:
                     await channel.send(embeds=chunk)
                 except Exception as error:
@@ -362,8 +384,18 @@ class Log(commands.Cog, name="log"):
 
         # Role updates (debounced)
         if before.roles != after.roles:
-            added = [role.mention for role in after.roles if role not in before.roles]
-            removed = [role.mention for role in before.roles if role not in after.roles]
+            # A running addrole/removerole sweep touches every member at once. Logging
+            # each one would flood the channel and burn an audit-log request per member,
+            # so those roles are skipped here — the moderation cog posts one summary.
+            sweeping = getattr(self.bot, "bulk_role_ops", ())
+            added = [
+                role.mention for role in after.roles
+                if role not in before.roles and (after.guild.id, role.id) not in sweeping
+            ]
+            removed = [
+                role.mention for role in before.roles
+                if role not in after.roles and (after.guild.id, role.id) not in sweeping
+            ]
 
             if added or removed:
                 entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_role_update, after.id)
