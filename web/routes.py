@@ -86,14 +86,16 @@ def require_owner(handler):
     return wrapper
 
 
-async def _member_of(bot, guild, user_id):
-    """The user's member object in a guild, fetching if the cache misses.
+async def _member_of(bot, guild, user_id, *, fetch: bool = True):
+    """The user's member object in a guild, optionally fetching on a cache miss.
 
     Membership is the hard gate: someone who isn't in the server gets nothing
-    there, no matter what grants exist.
+    there, no matter what grants exist. ``fetch=False`` keeps it to the local
+    member cache — used when sweeping every guild at once, where a miss per
+    guild would otherwise be an API call each.
     """
     member = guild.get_member(user_id)
-    if member is not None:
+    if member is not None or not fetch:
         return member
     try:
         return await guild.fetch_member(user_id)
@@ -101,11 +103,11 @@ async def _member_of(bot, guild, user_id):
         return None
 
 
-async def resolve_scope(bot, guild, user_id) -> str:
+async def resolve_scope(bot, guild, user_id, *, fetch: bool = True) -> str:
     """This user's panel scope in this guild (``owner`` short-circuits)."""
     if bot.visibility.is_owner(user_id):
         return panel_access.SCOPE_OWNER
-    member = await _member_of(bot, guild, user_id)
+    member = await _member_of(bot, guild, user_id, fetch=fetch)
     return bot.panel_access.scope_for_member(guild.id, member)
 
 
@@ -150,7 +152,9 @@ async def accessible_guilds(bot, user_id) -> list[tuple]:
         return [(guild, panel_access.SCOPE_OWNER) for guild in bot.guilds]
     out = []
     for guild in bot.guilds:
-        scope = await resolve_scope(bot, guild, user_id)
+        # Cache-only: the members intent keeps this authoritative, and a fetch
+        # per guild would turn one login into one API call per server.
+        scope = await resolve_scope(bot, guild, user_id, fetch=False)
         if panel_access.at_least(scope, panel_access.SCOPE_STATS):
             out.append((guild, scope))
     return out
@@ -1036,8 +1040,22 @@ async def oauth_callback(request: web.Request):
     if not user:
         return web.Response(status=400, text="OAuth exchange failed.", content_type="text/plain")
     uid = int(user["id"])
-    if not request.app["bot"].visibility.is_owner(uid):
-        return web.Response(status=403, text="This panel is for bot owners only.", content_type="text/plain")
+    bot = request.app["bot"]
+    # Anyone with access to at least one guild may hold a session; what they can
+    # then reach is decided per request by require_scope. Owners short-circuit.
+    if not bot.visibility.is_owner(uid) and not await accessible_guilds(bot, uid):
+        return web.Response(
+            status=403,
+            text=(
+                "No panel access.\n\n"
+                "This account isn't an admin of any server this bot is in. Access needs either "
+                "the Manage Server permission in that server, or a role the bot owner has granted "
+                "panel access to.\n\n"
+                "If you were just given a role or permission, log in again — access is read fresh "
+                "at each login."
+            ),
+            content_type="text/plain",
+        )
     response = web.HTTPFound("/")
     _set_cookie(
         response,
