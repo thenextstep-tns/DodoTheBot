@@ -9,6 +9,7 @@ process, handlers act on the live bot directly (``request.app["bot"]``).
 
 from __future__ import annotations
 
+import functools
 import html
 import os
 import secrets
@@ -17,9 +18,9 @@ from functools import wraps
 from aiohttp import web
 
 from config.secrets import WEB_PUBLIC_URL
-from helpers import cog_categories
+from helpers import cog_categories, names, stats
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
-from web import auth
+from web import auth, charts
 
 _SECURE = WEB_PUBLIC_URL.startswith("https")
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -356,6 +357,7 @@ def _guild_html(bot, guild) -> str:
     <a href="/" class="back">← all guilds</a>
     <div class="ghead">{_guild_avatar(guild, size=48)}
       <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
+    <a class="statslink" href="/guild/{guild.id}/stats">📊 Server stats</a>
     <div class="toolbar">
       <input id="cogfilter" type="search" placeholder="Filter cogs…" autocomplete="off">
       <button id="expandall" class="ghost">Expand all</button>
@@ -371,6 +373,152 @@ def _guild_html(bot, guild) -> str:
   </main>
 </div>
 <p id="status" class="status"></p>
+"""
+
+
+# --------------------------------------------------------------------------- #
+#  Stats page
+# --------------------------------------------------------------------------- #
+def _pager(base: str, param: str, page: int, pages: int) -> str:
+    """Prev/Next links that keep every other query parameter intact."""
+    if pages <= 1:
+        return ""
+    prev_link = (
+        f'<a href="{base}&amp;{param}={page - 1}">← prev</a>' if page > 1 else '<span class="muted">← prev</span>'
+    )
+    next_link = (
+        f'<a href="{base}&amp;{param}={page + 1}">next →</a>' if page < pages else '<span class="muted">next →</span>'
+    )
+    return f'<div class="pager">{prev_link}<span class="muted small">page {page} / {pages}</span>{next_link}</div>'
+
+
+def _rank_table(rows: list[dict], labels: dict, *, start: int, head: str) -> str:
+    """A ranked count table (top users / top channels), numbered across pages."""
+    if not rows:
+        return '<p class="muted">Nothing recorded for this period.</p>'
+    body = ""
+    for offset, row in enumerate(rows):
+        share = f'<div class="rankbar" style="width:{row["share"]:.1f}%"></div>' if row.get("share") else ""
+        label = labels.get(row["id"], str(row["id"]))
+        body += (
+            f'<tr><td class="rank">{start + offset}</td>'
+            f"<td>{html.escape(label)}{share}</td>"
+            f'<td class="num">{row["count"]:,}</td></tr>'
+        )
+    return (
+        f'<table class="stats"><thead><tr><th class="rank">#</th><th>{head}</th>'
+        f'<th class="num">Messages</th></tr></thead><tbody>{body}</tbody></table>'
+    )
+
+
+def _with_share(rows: list[dict]) -> list[dict]:
+    """Annotate rows with a percentage of the page's top count, for the inline bar."""
+    top = max((row["count"] for row in rows), default=0)
+    for row in rows:
+        row["share"] = (row["count"] / top * 100) if top else 0
+    return rows
+
+
+def _tiles(summary: dict, guild) -> str:
+    busiest_day = summary["busiest_day"]
+    busiest_hour = summary["busiest_hour"]
+    tiles = [
+        ("Messages", f"{summary['messages']:,}", "humans only, this period"),
+        ("Active people", f"{summary['active_users']:,}", f"of {guild.member_count or '?'} members"),
+        ("Messages / day", f"{summary['per_day_avg']:,}", "average over the period"),
+        ("Active channels", f"{summary['active_channels']:,}", "with at least one message"),
+        (
+            "Busiest day",
+            html.escape(busiest_day["day"]) if busiest_day else "—",
+            f"{busiest_day['count']:,} messages" if busiest_day else "no data",
+        ),
+        (
+            "Busiest hour",
+            f"{busiest_hour:02d}:00 UTC" if busiest_hour is not None else "—",
+            "across the period",
+        ),
+        ("Commands run", f"{summary['commands']:,}", "successful invocations"),
+        (
+            "Joins / leaves",
+            f"{summary['joins']:,} / {summary['leaves']:,}",
+            f"{summary['kicks']:,} kicked" if summary["kicks"] else "from the audit log",
+        ),
+    ]
+    cards = "".join(
+        f'<div class="tile"><span class="tlabel">{html.escape(label)}</span>'
+        f'<b class="tvalue">{value}</b><span class="muted small">{html.escape(note)}</span></div>'
+        for label, value, note in tiles
+    )
+    return f'<div class="tiles">{cards}</div>'
+
+
+def _stats_html(guild, data: dict, users: dict, channels: dict) -> str:
+    """``users`` / ``channels`` map the ids on this page to display names."""
+    period = data["period"]
+    base = f"/guild/{guild.id}/stats?period={period}"
+    user_stats, channel_stats, commands = data["users"], data["channels"], data["commands"]
+
+    selector = "".join(
+        f'<a class="chip{" on" if key == period else ""}" href="/guild/{guild.id}/stats?period={key}">'
+        f"{html.escape(label)}</a>"
+        for key, label, _days in stats.PERIODS
+    )
+
+    command_rows = "".join(
+        f'<tr><td><code>{html.escape(row["command"])}</code></td>'
+        f'<td>{html.escape(users.get(row["user_id"]) or row["name"] or str(row["user_id"]))}</td>'
+        f'<td class="muted small">{row["when"].strftime("%Y-%m-%d %H:%M") if row["when"] else "—"}</td></tr>'
+        for row in commands["rows"]
+    ) or '<tr><td colspan="3" class="muted">No commands recorded for this period.</td></tr>'
+
+    top_commands = "".join(
+        f'<span class="chip static"><code>{html.escape(str(row["id"]))}</code> {row["count"]:,}</span>'
+        for row in data["top_commands"][:10]
+    ) or '<span class="muted">Nothing yet.</span>'
+
+    plotted = len(data["per_day"])
+    return f"""
+<div class="statspage">
+  <div class="statshead">
+    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+      <h1>Server stats <span class="muted">· {html.escape(data["period_label"])}</span></h1></div>
+    <div class="chips">{selector}</div>
+  </div>
+
+  {_tiles(data["summary"], guild)}
+
+  <h2 class="sh">Messages per day <span class="muted">· humans only · last {plotted} day(s) with data</span></h2>
+  {charts.bar_chart(data["per_day"], key="day", tick=lambda d: d[5:])}
+
+  <div class="statsgrid">
+    <section>
+      <h2 class="sh">Most active people</h2>
+      {_rank_table(_with_share(user_stats["rows"]), users,
+                   start=(user_stats["page"] - 1) * stats.PAGE_SIZE + 1, head="Member")}
+      {_pager(base, "up", user_stats["page"], user_stats["pages"])}
+    </section>
+    <section>
+      <h2 class="sh">Most active channels</h2>
+      {_rank_table(_with_share(channel_stats["rows"]), channels,
+                   start=(channel_stats["page"] - 1) * stats.PAGE_SIZE + 1, head="Channel")}
+      {_pager(base, "cp", channel_stats["page"], channel_stats["pages"])}
+    </section>
+  </div>
+
+  <h2 class="sh">Activity by hour <span class="muted">· UTC</span></h2>
+  {charts.hour_chart(data["per_hour"])}
+
+  <h2 class="sh">Most used commands</h2>
+  <div class="chips wrap">{top_commands}</div>
+
+  <h2 class="sh">Command usage log <span class="muted">· {commands["total"]:,} in this period</span></h2>
+  <table class="stats"><thead><tr><th>Command</th><th>Who</th><th>When (UTC)</th></tr></thead>
+  <tbody>{command_rows}</tbody></table>
+  {_pager(base, "mp", commands["page"], commands["pages"])}
+
+  <p class="muted small">Message stats come from the archive of this server's channels; times are
+  derived from each record's id. Bots are excluded from message counts.</p>
+</div>
 """
 
 
@@ -466,6 +614,40 @@ async def guild_page(request: web.Request):
     if guild is None:
         return web.Response(status=404, text="Guild not found.", content_type="text/plain")
     return _page(guild.name, _guild_html(bot, guild))
+
+
+@require_owner
+async def guild_stats_page(request: web.Request):
+    """Activity stats for one guild. The aggregations are blocking pymongo calls,
+    so they run in a worker thread — the bot shares this event loop."""
+    bot = request.app["bot"]
+    guild = bot.get_guild(int(request.match_info["gid"]))
+    if guild is None:
+        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+
+    def _page_number(name: str) -> int:
+        try:
+            return max(1, int(request.query.get(name, 1)))
+        except ValueError:
+            return 1
+
+    scope = stats.Scope(guild)
+    data = await bot.loop.run_in_executor(
+        None,
+        functools.partial(
+            stats.collect,
+            scope,
+            stats.normalise_period(request.query.get("period")),
+            user_page=_page_number("up"),
+            channel_page=_page_number("cp"),
+            command_page=_page_number("mp"),
+        ),
+    )
+    # Only the ids actually on screen get resolved (a miss can cost an API call).
+    user_ids = [row["id"] for row in data["users"]["rows"]] + [row["user_id"] for row in data["commands"]["rows"]]
+    users = await names.resolve_users(bot, guild, user_ids)
+    channels = await names.resolve_channels(bot, guild, [row["id"] for row in data["channels"]["rows"]])
+    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels))
 
 
 @require_owner
@@ -619,6 +801,7 @@ def create_app(bot) -> web.Application:
             web.get("/logout", logout),
             web.get("/", dashboard),
             web.get("/guild/{gid}", guild_page),
+            web.get("/guild/{gid}/stats", guild_stats_page),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),

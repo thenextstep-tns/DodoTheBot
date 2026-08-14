@@ -72,4 +72,7 @@ feature_state = db["FeatureState"]            # {guild_id, feature, enabled} —
 guild_admins = db["GuildAdmins"]              # {guild_id, user_ids: [...]}
 command_sync_hashes = db["CommandSyncHashes"] # {guild_id, hash} — startup resync guard
 lang_overrides = db["LangOverrides"]          # {key, value} — editable user-facing strings
+# Display names for ids the gateway cache can't answer for (members who left,
+# deleted channels). Filled in as the panel resolves them — see helpers/names.py.
+entity_names = db["EntityNames"]              # {_id: "user:123", name, updated_at}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

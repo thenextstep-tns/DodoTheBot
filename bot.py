@@ -373,6 +373,10 @@ async def on_message(message: discord.Message) -> None:
                 "intent": "",
                 "author": message.author.id,
                 "channel": message.channel.id,
+                # Recorded for the panel's stats; older docs are scoped by channel
+                # and dated from their ObjectId (see helpers/stats.py).
+                "guild": message.guild.id if message.guild else None,
+                "bot": message.author.bot,
             }
         )
     except Exception as error:
@@ -551,6 +555,8 @@ async def on_command_completion(context: commands.Context) -> None:
         {
             "Command": executed_command,
             "Guild": context.guild.name if context.guild else "DM",
+            # Names change and repeat across servers; the id is what the panel filters on.
+            "Guild ID": context.guild.id if context.guild else None,
             "Name": context.author.display_name,
             "User ID": context.author.id,
             "Date": date.today().isoformat(),
