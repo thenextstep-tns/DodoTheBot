@@ -300,3 +300,23 @@ main:has(.settingspage) { max-width: 1180px; }
 .setrow select, .setrow input, .setrow textarea { padding: 7px 9px; background: var(--bg); color: var(--text);
   border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
 .setrow textarea { width: 100%; resize: vertical; line-height: 1.5; }
+
+/* --------------------------------------------------------------- Events page */
+main:has(.eventspage) { max-width: 1000px; }
+#addrule { margin: 4px 0 14px; }
+.rulecard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 12px; }
+.rulecard.off { opacity: .55; }
+.rulehead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rulename { flex: 1 1 auto; padding: 7px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font-weight: 600; }
+.rulehead .ruledelete { margin: 0; padding: 5px 10px; font-size: 12px; }
+.rulegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
+.rulegrid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+.rulecard select, .rulecard input, .rulecard textarea { padding: 7px 9px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
+.rulecard textarea { width: 100%; resize: vertical; line-height: 1.5; }
+.rulecard code { color: var(--accent); font-size: 12px; }
+.rulebtns { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.rulebtns button { margin: 0; }
+@media (max-width: 720px) { .rulegrid { grid-template-columns: 1fr; } }

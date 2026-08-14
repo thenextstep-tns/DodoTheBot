@@ -75,4 +75,6 @@ lang_overrides = db["LangOverrides"]          # {key, value} — editable user-f
 # Display names for ids the gateway cache can't answer for (members who left,
 # deleted channels). Filled in as the panel resolves them — see helpers/names.py.
 entity_names = db["EntityNames"]              # {_id: "user:123", name, updated_at}
+# "When X happens, post this there" rules built on the panel (see helpers/events.py).
+event_rules = db["EventRules"]                # {guild_id, event, channel_id, message, ...}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

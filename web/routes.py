@@ -21,7 +21,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import cog_categories, names, stats
+from helpers import cog_categories, events, names, stats
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -362,6 +362,7 @@ def _guild_html(bot, guild) -> str:
       <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
     <div class="sidelinks">
       <a class="statslink" href="/guild/{guild.id}/settings">⚙️ Settings</a>
+      <a class="statslink" href="/guild/{guild.id}/events">⚡ Events</a>
       <a class="statslink" href="/guild/{guild.id}/stats">📊 Stats</a>
     </div>
     <div class="toolbar">
@@ -518,6 +519,137 @@ def _settings_html(bot, guild) -> str:
 </div>
 <p id="status" class="status"></p>
 """
+
+
+# --------------------------------------------------------------------------- #
+#  Event rules page
+# --------------------------------------------------------------------------- #
+# Placeholder hints for the events people actually build rules on. Anything not
+# listed still works — the runtime derives names from the argument types — so
+# the page says so rather than pretending the list is exhaustive.
+_EVENT_HINTS = {
+    "member_join": "{member} {member_name} {member_mention} {guild_name}",
+    "member_remove": "{member} {member_name} {member_mention} {guild_name}",
+    "member_ban": "{guild_name} {user_name} {user_mention}",
+    "member_unban": "{guild_name} {user_name} {user_mention}",
+    "member_update": "{before} {after} {after_name} {after_mention}",
+    "message": "{message} {content} {jump_url} {member_name} {channel_name}",
+    "message_delete": "{message} {content} {channel_name} {member_name}",
+    "message_edit": "{before} {after} {jump_url}",
+    "reaction_add": "{reaction} {user_name} {user_mention}",
+    "guild_channel_create": "{channel} {channel_name}",
+    "guild_channel_delete": "{channel} {channel_name}",
+    "guild_role_create": "{role} {role_name}",
+    "guild_role_delete": "{role} {role_name}",
+    "voice_state_update": "{member_name} {member_mention} {before} {after}",
+    "thread_create": "{thread} {thread_name}",
+    "invite_create": "{invite}",
+    "audit_log_entry_create": "{entry} {guild_name}",
+}
+
+
+def _event_options(selected: str) -> str:
+    """The event picker: every catalog entry, grouped, with the current one chosen."""
+    options = ""
+    for group, event_names in events.grouped_events().items():
+        options += f'<optgroup label="{html.escape(group)}">'
+        for event in event_names:
+            options += (
+                f'<option value="{event}"{" selected" if event == selected else ""}>'
+                f"on_{html.escape(event)}</option>"
+            )
+        options += "</optgroup>"
+    return options
+
+
+def _rule_card(rule: dict, guild) -> str:
+    """One rule: event, destination, message, pings — editable in place."""
+    rule_id = str(rule["_id"])
+    event = rule.get("event", "")
+    hint = _EVENT_HINTS.get(event)
+    hint_html = (
+        f'<div class="muted small">Placeholders: <code>{html.escape(hint)}</code></div>'
+        if hint else
+        '<div class="muted small">Placeholders come from the event\'s arguments '
+        '(<code>{guild_name}</code> is always available). Fire it once and check the result.</div>'
+    )
+    pinged_users = " ".join(str(uid) for uid in rule.get("ping_user_ids") or [])
+    role_options = ""
+    for role in guild.roles:
+        if role.is_default():
+            continue
+        chosen = 1 if role.id in (rule.get("ping_role_ids") or []) else 0
+        role_options += (
+            f'<div class="ms-opt" data-id="{role.id}" data-name="@{html.escape(role.name)}" '
+            f'data-selected="{chosen}">@{html.escape(role.name)}</div>'
+        )
+
+    return f"""
+<div class="rulecard{"" if rule.get("enabled", True) else " off"}" data-rule="{rule_id}">
+  <div class="rulehead">
+    <input class="rulename" value="{html.escape(rule.get("name") or event)}" placeholder="Rule name">
+    <label class="switch"><input type="checkbox" class="ruletoggle"
+      {"checked" if rule.get("enabled", True) else ""}> on</label>
+    <button class="ghost ruledelete" title="Delete this rule">Delete</button>
+  </div>
+  <div class="rulegrid">
+    <label>When <select class="ruleevent">{_event_options(event)}</select></label>
+    <label>post in <select class="rulechannel">{_channel_options(guild, rule.get("channel_id") or 0,
+                                                                 blank="— pick a channel —")}</select></label>
+  </div>
+  <textarea class="rulemessage" rows="3" spellcheck="false"
+    placeholder="Message to post…">{html.escape(rule.get("message") or "")}</textarea>
+  {hint_html}
+  <div class="rulegrid">
+    <label>Ping roles
+      <div class="multiselect ruleroles"><div class="ms-chips"></div>
+        <input class="ms-search" placeholder="Search roles…" autocomplete="off">
+        <div class="ms-options">{role_options}</div></div>
+    </label>
+    <label>Ping user ids
+      <input class="ruleusers" value="{html.escape(pinged_users)}" placeholder="123456789 987654321"></label>
+  </div>
+  <div class="rulebtns"><button class="rulesave">Save</button>
+    <span class="muted small">{html.escape(event)}</span></div>
+</div>"""
+
+
+def _events_html(bot, guild) -> str:
+    rules = bot.event_rules.for_guild(guild.id)
+    cards = "".join(_rule_card(rule, guild) for rule in rules) or (
+        '<p class="muted">No rules yet. Add one to get started.</p>'
+    )
+    catalog = events.selectable_events()
+    skipped = sorted(events.NON_GUILD_EVENTS)
+    active = bot.visibility.feature_enabled(guild.id, "event_rules")
+    return f"""
+<div class="eventspage" data-guild="{guild.id}">
+  <div class="statshead">
+    <div><a class="back" href="/guild/{guild.id}">← {html.escape(guild.name)}</a>
+      <h1>Event rules <span class="muted">· {len(rules)} rule(s)</span></h1></div>
+    <div class="chips"><a class="chip" href="/guild/{guild.id}/settings">⚙️ Settings</a>
+      <a class="chip" href="/guild/{guild.id}/stats">📊 Stats</a></div>
+  </div>
+  <p class="muted">When something happens on this server, post a message — optionally pinging
+  people. All {len(catalog)} events this discord.py build dispatches are available.
+  {"" if active else "<b>The event rules feature is currently off for this server</b> — turn it on under the event_actions cog on the "}
+  {"" if active else f'<a href="/guild/{guild.id}">main page</a>.'}</p>
+  <p class="muted small">Rules ignore anything the bot itself caused, and each rule is capped at
+  {event_actions_limit()} messages per minute so a busy event can't flood a channel.
+  {len(skipped)} events aren't listed because they carry no server
+  (<code>{html.escape(", ".join(skipped[:6]))}…</code>).</p>
+  <button id="addrule">+ New rule</button>
+  <div id="rulelist">{cards}</div>
+</div>
+<p id="status" class="status"></p>
+"""
+
+
+def event_actions_limit() -> int:
+    """The runtime's per-rule rate limit, shown on the page so the two agree."""
+    from cogs.event_actions import RATE_LIMIT
+
+    return RATE_LIMIT
 
 
 # --------------------------------------------------------------------------- #
@@ -770,6 +902,15 @@ async def guild_settings_page(request: web.Request):
 
 
 @require_owner
+async def guild_events_page(request: web.Request):
+    bot = request.app["bot"]
+    guild = bot.get_guild(int(request.match_info["gid"]))
+    if guild is None:
+        return web.Response(status=404, text="Guild not found.", content_type="text/plain")
+    return _page(f"{guild.name} · events", _events_html(bot, guild))
+
+
+@require_owner
 async def guild_stats_page(request: web.Request):
     """Activity stats for one guild. The aggregations are blocking pymongo calls,
     so they run in a worker thread — the bot shares this event loop."""
@@ -958,6 +1099,40 @@ async def api_guild_setting(request: web.Request):
 
 
 @require_owner
+async def api_guild_event_rule(request: web.Request):
+    """Create / update / delete one event rule.
+
+    Body: {action:"create"|"update"|"delete", id?, event?, channel_id?, message?,
+    name?, enabled?, ping_user_ids?, ping_role_ids?}.
+    """
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    if bot.get_guild(gid) is None:
+        return web.json_response({"ok": False, "error": "guild not found"}, status=404)
+    data = await request.json()
+    action = data.get("action")
+
+    try:
+        if action == "create":
+            event = data.get("event") or "member_join"
+            if event not in events.selectable_events():
+                return web.json_response({"ok": False, "error": "unknown event"}, status=200)
+            rule = bot.event_rules.create(gid, {**data, "event": event})
+            return web.json_response({"ok": True, "id": str(rule["_id"])})
+        if action == "delete":
+            bot.event_rules.delete(gid, data["id"])
+            return web.json_response({"ok": True})
+        if action == "update":
+            if "event" in data and data["event"] not in events.selectable_events():
+                return web.json_response({"ok": False, "error": "unknown event"}, status=200)
+            bot.event_rules.update(gid, data["id"], data)
+            return web.json_response({"ok": True})
+    except (KeyError, TypeError, ValueError) as error:
+        return web.json_response({"ok": False, "error": f"invalid rule: {error}"}, status=200)
+    return web.json_response({"ok": False, "error": "bad request"}, status=400)
+
+
+@require_owner
 async def api_lang(request: web.Request):
     """Body: {key, action:"reset"} OR {key, value:<text>, is_list:bool}."""
     bot = request.app["bot"]
@@ -997,7 +1172,9 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}", guild_page),
             web.get("/guild/{gid}/stats", guild_stats_page),
             web.get("/guild/{gid}/settings", guild_settings_page),
+            web.get("/guild/{gid}/events", guild_events_page),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
+            web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),

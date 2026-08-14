@@ -105,6 +105,8 @@ FEATURES: list[dict] = [
      "description": "Track configured messages, uploads and reactions."},
     {"key": "pat_decode", "cog": "pat", "label": "PAT screenshot decoding",
      "description": "Auto-decode trial-clear (PAT) table screenshots posted in chat."},
+    {"key": "event_rules", "cog": "event_actions", "label": "Event rules",
+     "description": "Run the 'when X happens, post this' rules built on the server's Events page."},
 ]
 
 _FEATURES_BY_COG: dict[str, list[dict]] = {}

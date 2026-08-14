@@ -352,3 +352,62 @@ if (_settingsPage) {
     });
   }
 }
+
+// --- Events page: the "when X happens, do Y" rule constructor ---
+const _eventsPage = document.querySelector(".eventspage");
+if (_eventsPage) {
+  const guildId = _eventsPage.dataset.guild;
+  const api = (body) => post(`/api/guild/${guildId}/event-rule`, body);
+
+  const readIds = (text) => (text.match(/\d{5,}/g) || []).map(Number);
+
+  const bindRule = (card) => {
+    const id = card.dataset.rule;
+    let roleIds = null;
+    const ms = card.querySelector(".ruleroles");
+    if (ms) {
+      const widget = bindMultiSelect(ms, (ids) => { roleIds = ids; });
+      roleIds = null; // only send roles once the user actually touches them
+      card._roles = widget;
+    }
+    const payload = () => {
+      const body = {
+        action: "update",
+        id,
+        name: card.querySelector(".rulename").value,
+        event: card.querySelector(".ruleevent").value,
+        channel_id: Number(card.querySelector(".rulechannel").value || 0),
+        message: card.querySelector(".rulemessage").value,
+        ping_user_ids: readIds(card.querySelector(".ruleusers").value),
+      };
+      if (roleIds !== null) body.ping_role_ids = roleIds;
+      return body;
+    };
+
+    card.querySelector(".rulesave").addEventListener("click", async () => {
+      const res = await api(payload());
+      flash(res.ok ? "rule saved ✓" : (res.error || "Failed"), res.ok);
+    });
+    card.querySelector(".ruletoggle").addEventListener("change", async (event) => {
+      const enabled = event.target.checked;
+      const res = await api({ action: "update", id, enabled });
+      flash(res.ok ? `rule ${enabled ? "enabled" : "disabled"} ✓` : (res.error || "Failed"), res.ok);
+      if (res.ok) card.classList.toggle("off", !enabled);
+      else event.target.checked = !enabled;
+    });
+    card.querySelector(".ruledelete").addEventListener("click", async () => {
+      if (!confirm("Delete this rule?")) return;
+      const res = await api({ action: "delete", id });
+      if (res.ok) { card.remove(); flash("rule deleted ✓", true); }
+      else flash(res.error || "Failed", false);
+    });
+  };
+
+  _eventsPage.querySelectorAll(".rulecard").forEach(bindRule);
+
+  document.getElementById("addrule").addEventListener("click", async () => {
+    const res = await api({ action: "create", event: "member_join", name: "New rule", message: "" });
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    location.reload(); // simplest way to render a fresh card with the full pickers
+  });
+}

@@ -32,6 +32,7 @@ from helpers.visibility import VisibilityManager
 from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
+from helpers.events import EventRuleManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -101,6 +102,9 @@ class DodoBot(commands.Bot):
         # Per-server command parameters (thresholds, limits, role lists, …).
         # Cogs read via self.params.get(guild_id, "key"); edited from the panel.
         self.params = ParamManager(config_py.command_params)
+        # "When X happens, post this" rules built on the panel's Events page;
+        # executed by the event_actions cog.
+        self.event_rules = EventRuleManager(config_py.event_rules)
 
     # ------------------------------------------------------------------ #
     #  Visibility enforcement (prefix/hybrid + slash)
