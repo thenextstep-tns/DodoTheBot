@@ -37,6 +37,7 @@ from helpers.panel_access import PanelAccessManager
 from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
 from helpers.tribes import TribeManager
+from helpers.trial_ranks import TrialRankManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -118,6 +119,8 @@ class DodoBot(commands.Bot):
         self.audit_log = AuditLog(config_py.config_audit)
         # Role rules ("tribes") built on the panel; applied hourly by cogs/tribes.py.
         self.tribes = TribeManager(config_py.tribes, config_py.tribe_members)
+        # Trial ranking: clears/achievements -> points -> rank role.
+        self.trial_ranks = TrialRankManager(config_py.trial_ranks, config_py.trial_standings)
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
         )

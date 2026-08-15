@@ -28,6 +28,7 @@ KIND_EVENT_RULE = "event_rule"
 KIND_ACCESS = "panel_access"
 KIND_LANG = "lang"
 KIND_TRIBE = "tribe"
+KIND_TRIAL = "trial_rank"
 
 KIND_LABELS = {
     KIND_COG: "Cog",
@@ -41,6 +42,7 @@ KIND_LABELS = {
     KIND_ACCESS: "Panel access",
     KIND_LANG: "String",
     KIND_TRIBE: "Tribe",
+    KIND_TRIAL: "Trial ranking",
 }
 
 PAGE_SIZE = 25

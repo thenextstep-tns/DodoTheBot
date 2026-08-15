@@ -495,3 +495,32 @@ main:has(.tribespage) { max-width: 1080px; }
 .ptrow .pt-name { width: 150px; }
 .pt-remove { margin: 0; padding: 1px 8px; font-size: 13px; line-height: 1.2; }
 .exclusivewrap { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* ------------------------------------------------------- Trial ranking page */
+main:has(.trialspage) { max-width: 1080px; }
+.trialbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0 10px;
+  padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); }
+.trialbar button { margin: 0; }
+.warnline { color: var(--color-error); font-size: 13px; margin: 6px 0; }
+.trialsection { padding: 10px 14px 14px; }
+.rolefilter { width: 100%; padding: 8px 10px; margin-bottom: 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.scorerows { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px; }
+.scorerow { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); }
+.scorerow .rolename { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.scorerow input { width: 92px; flex: none; padding: 5px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.scorerow.unpriced { background: rgba(193, 53, 21, .06); border-color: rgba(193, 53, 21, .35); }
+.scorerow.isrank { background: rgba(255, 56, 92, .06); border-color: rgba(255, 56, 92, .35); }
+.nopoints { font-size: 11px; color: var(--color-error); white-space: nowrap; }
+
+/* Top-bar guild navigation */
+nav { flex-wrap: wrap; gap: 12px; }
+nav .navguild { color: var(--color-muted); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .4px; padding-left: 8px; border-left: 1px solid var(--line); }
+nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }

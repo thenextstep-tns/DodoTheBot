@@ -729,3 +729,72 @@ document.querySelectorAll(".pointsbuilder").forEach((box) => {
   card._mode = () => (card.querySelector('.modeswitch input:checked') || {}).value || "condition";
   card._points = () => box._read();
 });
+
+// --- Trial ranking page ---
+const _trialsPage = document.querySelector(".trialspage");
+if (_trialsPage) {
+  const guildId = _trialsPage.dataset.guild;
+
+  // Type-to-find inside each section.
+  _trialsPage.querySelectorAll(".rolefilter").forEach((box) => {
+    const target = document.getElementById(box.dataset.target);
+    box.addEventListener("input", () => {
+      const q = box.value.trim().toLowerCase();
+      target.querySelectorAll(".scorerow").forEach((row) => {
+        row.style.display = !q || (row.dataset.search || "").includes(q) ? "" : "none";
+      });
+    });
+  });
+
+  // Flag a clear/achievement the moment it gets a value (or loses one).
+  _trialsPage.querySelectorAll(".rolepoints").forEach((input) => {
+    input.addEventListener("input", () => {
+      const row = input.closest(".scorerow");
+      const has = Number(input.value) !== 0 && input.value !== "";
+      row.classList.toggle("unpriced", !has);
+      const flag = row.querySelector(".nopoints");
+      if (flag) flag.style.display = has ? "none" : "";
+    });
+  });
+  _trialsPage.querySelectorAll(".rankmin").forEach((input) => {
+    input.addEventListener("input", () => {
+      input.closest(".scorerow").classList.toggle("isrank", input.value !== "");
+    });
+  });
+
+  const readSetup = () => {
+    const points = {};
+    _trialsPage.querySelectorAll(".rolepoints").forEach((input) => {
+      const value = Number(input.value);
+      if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
+    });
+    const ranks = [];
+    _trialsPage.querySelectorAll(".rankmin").forEach((input) => {
+      if (input.value === "") return;
+      ranks.push({
+        role_id: Number(input.dataset.role),
+        min_points: Number(input.value),
+        name: input.closest(".scorerow").querySelector(".rolename").textContent.trim(),
+      });
+    });
+    return {
+      action: "save", points: points, ranks: ranks,
+      enabled: document.getElementById("trialsenabled").checked,
+      exclusive: document.getElementById("trialsexclusive").checked,
+    };
+  };
+
+  document.getElementById("trialsave").addEventListener("click", async () => {
+    const res = await post(`/api/guild/${guildId}/trials`, readSetup());
+    flash(res.ok ? "trial ranking saved ✓" : (res.error || "Failed"), res.ok);
+  });
+
+  document.getElementById("trialrun").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    flash("recalculating…", true);
+    const res = await post(`/api/guild/${guildId}/trials`, { action: "run" });
+    e.target.disabled = false;
+    if (res.ok) { flash("ranks recalculated ✓", true); setTimeout(() => location.reload(), 900); }
+    else { flash(res.error || "Failed", false); }
+  });
+}

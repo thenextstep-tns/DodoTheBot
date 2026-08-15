@@ -29,6 +29,7 @@ from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, names, panel_access, parameters, stats, validate
 from helpers import tribes as tribe_rules
+from helpers import trial_ranks
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -226,7 +227,31 @@ def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
 # --------------------------------------------------------------------------- #
 #  HTML rendering
 # --------------------------------------------------------------------------- #
-def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER) -> web.Response:
+def _guild_nav(guild, scope: str, current: str) -> str:
+    """The per-guild links, rendered in the top bar next to Dashboard."""
+    if guild is None:
+        return ""
+    links = [("settings", "⚙️ Settings", panel_access.SCOPE_CONFIG),
+             ("events", "⚡ Events", panel_access.SCOPE_CONFIG),
+             ("trials", "🏆 Trial ranks", panel_access.SCOPE_CONFIG),
+             ("stats", "📊 Stats", panel_access.SCOPE_STATS),
+             ("log", "📝 Change log", panel_access.SCOPE_CONFIG),
+             # Tribes is bot-owner tooling: the rule engine can hand out any role.
+             ("tribes", "🏅 Tribes", panel_access.SCOPE_OWNER)]
+    out = ""
+    if panel_access.at_least(scope, panel_access.SCOPE_FULL):
+        active = " class=\"active\"" if current == "cogs" else ""
+        out += f'<a href="/guild/{guild.id}"{active}>🧩 Cogs</a>'
+    for key, label, needed in links:
+        if not panel_access.at_least(scope, needed):
+            continue
+        active = " class=\"active\"" if current == key else ""
+        out += f'<a href="/guild/{guild.id}/{key}"{active}>{label}</a>'
+    return f'<span class="navguild">{html.escape(guild.name)}</span>{out}'
+
+
+def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER,
+          guild=None, current: str = "") -> web.Response:
     doc = f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -238,7 +263,8 @@ def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER) -> we
 </head><body>
 <header>
 <a href="/" class="brand">🦤 Dodo Control Panel</a>
-<nav><a href="/">Dashboard</a>{'<a href="/lang">Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
+<nav><a href="/">Dashboard</a>{_guild_nav(guild, scope, current)}
+{'<a href="/lang">Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
 </header>
 <main>{body}</main>
 <script src="/static/panel.js?v={_ASSET_VER}"></script>
@@ -589,7 +615,7 @@ def _guild_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     <a href="/" class="back">← all guilds</a>
     <div class="ghead">{_guild_avatar(guild, size=48)}
       <div class="ginfo"><b>{html.escape(guild.name)}</b><span class="muted small">{guild.id}</span></div></div>
-    <div class="chips sidechips">{_nav_chips(guild.id, scope, "cogs")}</div>
+
     <div class="toolbar">
       <input id="cogfilter" type="search" placeholder="Filter cogs…" autocomplete="off">
       <button id="expandall" class="ghost">Expand all</button>
@@ -738,7 +764,7 @@ def _settings_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
   <div class="statshead">
     <div><span class="muted">{html.escape(guild.name)}</span>
       <h1>Server settings</h1></div>
-    <div class="chips">{_nav_chips(guild.id, scope, "settings")}</div>
+
   </div>
   <p class="muted">Channels, roles and messages this server's commands read. Anything left at its
   default is inherited from the bot's built-in configuration; <b>Reset</b> puts a setting back.
@@ -859,7 +885,7 @@ def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
   <div class="statshead">
     <div><span class="muted">{html.escape(guild.name)}</span>
       <h1>Event rules <span class="muted">· {len(rules)} rule(s)</span></h1></div>
-    <div class="chips">{_nav_chips(guild.id, scope, "events")}</div>
+
   </div>
   <p class="muted">When something happens on this server, post a message — optionally pinging
   people. All {len(catalog)} events this discord.py build dispatches are available.
@@ -1005,8 +1031,7 @@ def _tribes_html(bot, guild, scope: str) -> str:
     return f"""
 <div class="tribespage" data-guild="{guild.id}">
   <div class="statshead">
-    <div><div class="chips">{_nav_chips(guild.id, scope, "tribes")}</div>
-      <h1>Tribes <span class="muted">· {len(tribes)} rule(s)</span></h1></div>
+    <div><h1>Tribes <span class="muted">· {len(tribes)} rule(s)</span></h1></div>
   </div>
   <p class="muted">Build a rule from roles, tenure and activity; everyone who matches gets the
   role(s). Rules are re-evaluated <b>hourly</b>, and you can run one now.
@@ -1018,6 +1043,96 @@ def _tribes_html(bot, guild, scope: str) -> str:
   </div>
   {_tribe_pickers(guild)}
   <div id="tribelist">{cards}</div>
+</div>
+<p id="status" class="status"></p>
+"""
+
+
+# --------------------------------------------------------------------------- #
+#  Trial ranking page
+# --------------------------------------------------------------------------- #
+def _score_rows(roles: list, points: dict, *, section: str) -> str:
+    """One row per scoring role, with its value and an unpriced flag."""
+    rows = ""
+    for role in roles:
+        value = points.get(str(role.id))
+        missing = "" if value else ' <span class="nopoints">no points set</span>'
+        rows += (
+            f'<div class="scorerow{"" if value else " unpriced"}" data-role="{role.id}" '
+            f'data-search="{html.escape(role.name.lower())}">'
+            f'<span class="rolename">{html.escape(role.name)}</span>{missing}'
+            f'<input type="number" class="rolepoints" data-role="{role.id}" '
+            f'value="{html.escape(str(value)) if value else ""}" placeholder="0"></div>'
+        )
+    return rows or f'<p class="muted">No roles found under the {section} divider.</p>'
+
+
+def _rank_rows(roles: list, ranks: list[dict]) -> str:
+    by_role = {rank["role_id"]: rank["min_points"] for rank in ranks}
+    rows = ""
+    for role in roles:
+        value = by_role.get(role.id)
+        rows += (
+            f'<div class="scorerow{" isrank" if value is not None else ""}" '
+            f'data-search="{html.escape(role.name.lower())}">'
+            f'<span class="rolename">{html.escape(role.name)}</span>'
+            f'<input type="number" class="rankmin" data-role="{role.id}" '
+            f'value="{html.escape(str(value)) if value is not None else ""}" '
+            f'placeholder="not a rank"></div>'
+        )
+    return rows or '<p class="muted">No roles found under the ranks divider.</p>'
+
+
+def _trials_html(bot, guild, scope: str) -> str:
+    config = bot.trial_ranks.get(guild.id)
+    grouped = trial_ranks.sections(guild)
+    points = config.get("points") or {}
+    missing = trial_ranks.unpriced(guild, points)
+    cog = bot.get_cog("trial_ranks")
+    last = (cog.last_run.get(guild.id) if cog else None) or {}
+    last_line = (
+        f"Last run: {last.get('ranked', 0)} ranked of {last.get('members', 0)} members, "
+        f"{last.get('granted', 0)} rank(s) granted, {last.get('removed', 0)} replaced"
+        if last else "Not run yet this session."
+    )
+    total_possible = sum(int(v) for v in points.values()) if points else 0
+
+    return f"""
+<div class="trialspage" data-guild="{guild.id}">
+  <h1>Trial ranking</h1>
+  <p class="muted">Clears and achievements are worth points; reaching a threshold grants the rank
+  role. Sections are read from your divider roles, so a new trial role shows up here by itself.
+  Ranks update the moment someone gets a clear role, and are re-checked hourly.</p>
+  <div class="trialbar">
+    <label class="switch"><input type="checkbox" id="trialsenabled"
+      {"checked" if config.get("enabled") else ""}> enabled</label>
+    <label class="switch"><input type="checkbox" id="trialsexclusive"
+      {"checked" if config.get("exclusive", True) else ""}> only hold the highest rank</label>
+    <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
+    <button id="trialsave">Save</button>
+    <button id="trialrun" class="ghost">Recalculate now</button>
+  </div>
+  {'<p class="warnline">' + str(len(missing)) + ' clear/achievement role(s) have no points yet — they are highlighted below.</p>' if missing else ''}
+  <p class="muted small">{html.escape(last_line)}</p>
+
+  <details class="group" open><summary>Ranks <span class="muted">({len(grouped["ranks"])} roles under the ranks divider)</span></summary>
+    <div class="trialsection">
+      <input class="rolefilter" placeholder="Type to find a role…" data-target="rankrows">
+      <p class="muted small">Give a role a threshold to make it a rank. Leave blank to ignore it.</p>
+      <div class="scorerows" id="rankrows">{_rank_rows(grouped["ranks"], config.get("ranks") or [])}</div>
+    </div></details>
+
+  <details class="group" open><summary>Clears <span class="muted">({len(grouped["clears"])} roles)</span></summary>
+    <div class="trialsection">
+      <input class="rolefilter" placeholder="Type to find a clear…" data-target="clearrows">
+      <div class="scorerows" id="clearrows">{_score_rows(grouped["clears"], points, section="clears")}</div>
+    </div></details>
+
+  <details class="group" open><summary>Achievements <span class="muted">({len(grouped["achievements"])} roles)</span></summary>
+    <div class="trialsection">
+      <input class="rolefilter" placeholder="Type to find an achievement…" data-target="achrows">
+      <div class="scorerows" id="achrows">{_score_rows(grouped["achievements"], points, section="achievements")}</div>
+    </div></details>
 </div>
 <p id="status" class="status"></p>
 """
@@ -1072,8 +1187,7 @@ def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str 
     return f"""
 <div class="logpage" data-guild="{guild.id}">
   <div class="statshead">
-    <div><div class="chips">{_nav_chips(guild.id, scope, "log")}</div>
-      <h1>Change log <span class="muted">· {data["total"]:,} entr(ies)</span></h1></div>
+    <div><h1>Change log <span class="muted">· {data["total"]:,} entr(ies)</span></h1></div>
   </div>
   <p class="muted">Every change made from this panel, newest first — including your own.
   Old and new values are kept so anything can be put back.</p>
@@ -1194,8 +1308,7 @@ def _stats_html(guild, data: dict, users: dict, channels: dict, scope: str = pan
     return f"""
 <div class="statspage">
   <div class="statshead">
-    <div><div class="chips">{_nav_chips(guild.id, scope, "stats")}</div>
-      <h1>Server stats <span class="muted">· {html.escape(data["period_label"])}</span></h1></div>
+    <div><h1>Server stats <span class="muted">· {html.escape(data["period_label"])}</span></h1></div>
     <div class="chips">{selector}</div>
   </div>
 
@@ -1353,28 +1466,81 @@ async def dashboard(request: web.Request):
 @require_scope(panel_access.SCOPE_FULL)
 async def guild_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
-    return _page(guild.name, _guild_html(bot, guild, scope), scope=scope)
+    return _page(guild.name, _guild_html(bot, guild, scope), scope=scope, guild=guild, current="cogs")
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
 async def guild_settings_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
-    return _page(f"{guild.name} · settings", _settings_html(bot, guild, scope), scope=scope)
+    return _page(f"{guild.name} · settings", _settings_html(bot, guild, scope),
+                 scope=scope, guild=guild, current="settings")
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
 async def guild_events_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
-    return _page(f"{guild.name} · events", _events_html(bot, guild, scope), scope=scope)
+    return _page(f"{guild.name} · events", _events_html(bot, guild, scope),
+                 scope=scope, guild=guild, current="events")
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
+async def guild_trials_page(request: web.Request):
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    return _page(f"{guild.name} · trial ranks", _trials_html(bot, guild, scope),
+                 scope=scope, guild=guild, current="trials")
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def api_guild_trials(request: web.Request):
+    """Save the trial-ranking setup, or recalculate now.
+
+    Body: {action: "save"|"run", points?, ranks?, enabled?, exclusive?}.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    data = await request.json()
+    if data.get("action") == "run":
+        cog = bot.get_cog("trial_ranks")
+        if cog is None:
+            return _bad("The trial_ranks cog isn't loaded.")
+        summary = await cog.run_for_guild(guild)
+        await _record_change(request, audit_log.KIND_TRIAL, "(recalculate)", None, "run",
+                             "Recalculated trial ranks")
+        return web.json_response({"ok": True, "summary": summary})
+
+    try:
+        clean = {}
+        if "points" in data:
+            clean["points"] = trial_ranks.validate_points(data.get("points"), guild=guild)
+        if "ranks" in data:
+            ranks = trial_ranks.validate_ranks(data.get("ranks"), guild=guild)
+            for rank in ranks:
+                validate.assignable_role(guild, rank["role_id"], field=f"rank '{rank['name']}'")
+            clean["ranks"] = ranks
+        for flag in ("enabled", "exclusive"):
+            if flag in data:
+                clean[flag] = validate.boolean(data.get(flag), field=flag)
+    except (trial_ranks.TrialError, validate.ValidationError) as error:
+        return _bad(error)
+
+    was = bot.trial_ranks.get(guild.id)
+    bot.trial_ranks.save(guild.id, clean)
+    await _record_change(
+        request, audit_log.KIND_TRIAL, "setup",
+        f"{len(was.get('points') or {})} priced, {len(was.get('ranks') or [])} ranks",
+        f"{len(clean.get('points', was.get('points') or {}))} priced, "
+        f"{len(clean.get('ranks', was.get('ranks') or []))} ranks",
+        "Trial ranking setup changed")
+    return web.json_response({"ok": True})
+
+
+@require_scope(panel_access.SCOPE_OWNER)
 async def guild_tribes_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
-    return _page(f"{guild.name} · tribes", _tribes_html(bot, guild, scope), scope=scope)
+    return _page(f"{guild.name} · tribes", _tribes_html(bot, guild, scope),
+                 scope=scope, guild=guild, current="tribes")
 
 
-@require_scope(panel_access.SCOPE_CONFIG)
+@require_scope(panel_access.SCOPE_OWNER)
 async def api_guild_tribe(request: web.Request):
     """Create / update / delete a tribe, or run the sweep now.
 
@@ -1471,7 +1637,8 @@ async def guild_log_page(request: web.Request):
             actor_id=int(actor) if actor.isdigit() else None,
         ),
     )
-    return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor), scope=scope)
+    return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor),
+                 scope=scope, guild=guild, current="log")
 
 
 @require_scope(panel_access.SCOPE_STATS)
@@ -1502,7 +1669,8 @@ async def guild_stats_page(request: web.Request):
     user_ids = [row["id"] for row in data["users"]["rows"]] + [row["user_id"] for row in data["commands"]["rows"]]
     users = await names.resolve_users(bot, guild, user_ids)
     channels = await names.resolve_channels(bot, guild, [row["id"] for row in data["channels"]["rows"]])
-    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels, scope), scope=scope)
+    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels, scope),
+                 scope=scope, guild=guild, current="stats")
 
 
 @require_owner
@@ -1968,6 +2136,8 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/events", guild_events_page),
             web.get("/guild/{gid}/log", guild_log_page),
             web.get("/guild/{gid}/tribes", guild_tribes_page),
+            web.get("/guild/{gid}/trials", guild_trials_page),
+            web.post("/api/guild/{gid}/trials", api_guild_trials),
             web.post("/api/guild/{gid}/tribe", api_guild_tribe),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),

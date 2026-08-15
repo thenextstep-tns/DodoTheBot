@@ -84,4 +84,7 @@ config_audit = db["ConfigAudit"]              # {guild_id, actor_id, kind, targe
 # Role rules built on the panel ("tribes") and the membership each sweep produces.
 tribes = db["Tribes"]                         # {guild_id, name, condition, role_ids, ...}
 tribe_members = db["TribeMembers"]            # {guild_id, tribe_id, user_id, rank, position}
+# Trial ranking: clears/achievements -> points -> rank role (helpers/trial_ranks.py).
+trial_ranks = db["TrialRanks"]                # {_id: guild_id, points, ranks, enabled}
+trial_standings = db["TrialStandings"]        # {guild_id, user_id, score, rank}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables
