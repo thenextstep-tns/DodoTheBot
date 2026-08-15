@@ -742,6 +742,31 @@ const _trialsPage = document.querySelector(".trialspage");
 if (_trialsPage) {
   const guildId = _trialsPage.dataset.guild;
 
+  // --- side menu: one panel at a time ---
+  // Panels are hidden, never removed: Save and Push read every input on the
+  // page, so a detached panel would silently drop its values.
+  const navItems = Array.from(_trialsPage.querySelectorAll(".trialnavitem"));
+  const panels = Array.from(_trialsPage.querySelectorAll(".trialpanel"));
+  if (navItems.length) {
+    const show = (key) => {
+      if (!panels.some((p) => p.dataset.panel === key)) key = panels[0].dataset.panel;
+      panels.forEach((p) => { p.hidden = p.dataset.panel !== key; });
+      navItems.forEach((a) => a.classList.toggle("active", a.dataset.panel === key));
+      return key;
+    };
+    navItems.forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.preventDefault();
+        const key = show(item.dataset.panel);
+        // Replace rather than push: the back button should leave the page, not
+        // walk you through every tab you glanced at.
+        history.replaceState(null, "", `#${key}`);
+      });
+    });
+    // Deep links and reloads land where you left off.
+    show((location.hash || "").replace("#", "") || panels[0].dataset.panel);
+  }
+
   // Type-to-find inside each section.
   _trialsPage.querySelectorAll(".rolefilter").forEach((box) => {
     const target = document.getElementById(box.dataset.target);

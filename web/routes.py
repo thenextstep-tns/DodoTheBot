@@ -1594,6 +1594,30 @@ def _trials_html(bot, guild, scope: str) -> str:
     )
     total_possible = sum(int(v) for v in points.values()) if points else 0
 
+    # One panel at a time, picked from the sidebar. Six stacked accordions meant
+    # scrolling past a 46-row score table to reach the rollout board; the cogs
+    # page already solved this shape, so this borrows it rather than inventing a
+    # second navigation idiom. Hidden panels stay in the DOM — Save and Push read
+    # every input on the page, so unmounting one would quietly drop its values.
+    enrolled = len(bot.trial_ranks.enrolled_ids(guild.id))
+    panels = [
+        ("ranks", "🏆", "Ranks", f'{len(config.get("ranks") or [])} rung(s)'),
+        ("pilot", "👥", "Who it's turned on for", f"{enrolled} enrolled"),
+        ("interest", "🔥", "Prog interest", "who'd sign up"),
+        ("clears", "⚔️", "Clears", f'{len(grouped["clears"])} roles'),
+        ("trialmap", "🗺️", "Trial clear roles", "one per person"),
+        ("achievements", "🏅", "Achievements", f'{len(grouped["achievements"])} roles'),
+        ("sandbox", "🧪", "Try it out", "dry runs"),
+    ]
+    nav = "".join(
+        f'<a class="trialnavitem{" active" if key == "ranks" else ""}" '
+        f'href="#{key}" data-panel="{key}">'
+        f'<span class="navemoji">{emoji}</span>'
+        f'<span class="navlabel">{html.escape(label)}</span>'
+        f'<span class="navhint">{html.escape(hint)}</span></a>'
+        for key, emoji, label, hint in panels
+    )
+
     return f"""
 <div class="trialspage" data-guild="{guild.id}">
   <script type="application/json" id="all-roles">{_json_options(_sorted_roles(guild), "@")}</script>
@@ -1618,61 +1642,80 @@ def _trials_html(bot, guild, scope: str) -> str:
     <a class="chip" href="/guild/{guild.id}/trials.png" target="_blank" rel="noopener"
        title="A shareable chart of the current values">🖼 Chart</a>
   </div>
-  <div class="sandbox">
-    <div class="pointshead"><b>Try it before you commit</b>
-      <span class="muted small">scores against the weights on this screen — nothing is saved or applied</span></div>
-    <div class="sandboxrow">
-      <input id="trialnames" placeholder="Up to 10 names, comma separated — e.g. Nik, Fox, Mido">
-      <button id="trialpreview" class="ghost">Preview these</button>
-      <button id="trialpreviewall" class="ghost">Preview everyone</button>
-    </div>
-    <div id="previewout"></div>
-  </div>
   {_orphan_warning(guild, points)}
-  {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below.</p>' if missing else ''}
+  {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below in Clears and Achievements.</p>' if missing else ''}
   {'<p class="muted small">' + str(len(suggested)) + ' role(s) pre-filled with suggested values — review, then Push to live to store them.</p>' if suggested else ''}
-  <p class="muted small">{html.escape(last_line)}</p>
 
-  <details class="group" open><summary>Ranks
-    <span class="muted">· your roles, in the order they cost</span></summary>
-    <div class="trialsection">
-      <div class="explain">
-        <p>Points come from the <b>Clears</b> and <b>Achievements</b> below. When someone's total
-        reaches a rank's requirement, the bot gives them that rank's role and takes away the previous
-        one, so everyone shows only their highest rank.</p>
-        <p><b>A rank is just a role and a number.</b> Add as many as you want, name them by naming
-        the roles — rename the role and the rank is renamed everywhere, including the /rank card and
-        the chart. They sort themselves by the points they need, so the cheapest is the lowest rank.</p>
-        <p>The description and the picture are optional and only show up on the <code>/rank</code>
-        card. No picture simply means no picture — nothing breaks.</p>
-      </div>
-      <div class="ladder" id="rankrows">{_rank_rows(bot, guild, config)}</div>
-      <div class="trialactions"><button class="ghost" id="addrank">+ Add a rank</button></div>
-    </div></details>
+  <div class="triallayout">
+    <aside class="sidebar trialnav">{nav}
+      <p class="muted small navfoot">{html.escape(last_line)}</p>
+    </aside>
+    <main class="content">
 
-  <details class="group" open><summary>Who it's turned on for
-    <span class="muted">· the rollout, one person at a time</span></summary>
-    <div class="trialsection">{_pilot_html(bot, guild, config)}</div></details>
+      <section class="trialpanel" data-panel="ranks">
+        <h2 class="panelhead">Ranks <span class="muted">· your roles, in the order they cost</span></h2>
+        <div class="explain">
+          <p>Points come from <b>Clears</b> and <b>Achievements</b>. When someone's total reaches a
+          rank's requirement, the bot gives them that rank's role and takes away the previous one,
+          so everyone shows only their highest rank.</p>
+          <p><b>A rank is just a role and a number.</b> Add as many as you want, name them by naming
+          the roles — rename the role and the rank is renamed everywhere, including the /rank card and
+          the chart. They sort themselves by the points they need, so the cheapest is the lowest rank.</p>
+          <p>The description and the picture are optional and only show up on the <code>/rank</code>
+          card. No picture simply means no picture — nothing breaks.</p>
+        </div>
+        <div class="ladder" id="rankrows">{_rank_rows(bot, guild, config)}</div>
+        <div class="trialactions"><button class="ghost" id="addrank">+ Add a rank</button></div>
+      </section>
 
-  <details class="group" open><summary>Prog interest
-    <span class="muted">· who'd sign up for what</span></summary>
-    <div class="trialsection">{_interest_html(bot, guild, config)}</div></details>
+      <section class="trialpanel" data-panel="pilot" hidden>
+        <h2 class="panelhead">Who it's turned on for
+          <span class="muted">· the rollout, one person at a time</span></h2>
+        {_pilot_html(bot, guild, config)}
+      </section>
 
-  <details class="group" open><summary>Clears <span class="muted">({len(grouped["clears"])} roles)</span></summary>
-    <div class="trialsection">
-      <input class="rolefilter" placeholder="Type to find a clear…" data-target="clearrows">
-      <div class="scorerows" id="clearrows">{_score_rows(grouped["clears"], points, section="clears")}</div>
-    </div></details>
+      <section class="trialpanel" data-panel="interest" hidden>
+        <h2 class="panelhead">Prog interest <span class="muted">· who'd sign up for what</span></h2>
+        {_interest_html(bot, guild, config)}
+      </section>
 
-  <details class="group" open><summary>Trial clear roles
-    <span class="muted">· one role per person per trial</span></summary>
-    <div class="trialsection">{_trial_map_html(guild, config)}</div></details>
+      <section class="trialpanel" data-panel="clears" hidden>
+        <h2 class="panelhead">Clears <span class="muted">({len(grouped["clears"])} roles)</span></h2>
+        <input class="rolefilter" placeholder="Type to find a clear…" data-target="clearrows">
+        <div class="scorerows" id="clearrows">{_score_rows(grouped["clears"], points, section="clears")}</div>
+      </section>
 
-  <details class="group" open><summary>Achievements <span class="muted">({len(grouped["achievements"])} roles)</span></summary>
-    <div class="trialsection">
-      <input class="rolefilter" placeholder="Type to find an achievement…" data-target="achrows">
-      <div class="scorerows" id="achrows">{_score_rows(grouped["achievements"], points, section="achievements")}</div>
-    </div></details>
+      <section class="trialpanel" data-panel="trialmap" hidden>
+        <h2 class="panelhead">Trial clear roles
+          <span class="muted">· one role per person per trial</span></h2>
+        {_trial_map_html(guild, config)}
+      </section>
+
+      <section class="trialpanel" data-panel="achievements" hidden>
+        <h2 class="panelhead">Achievements
+          <span class="muted">({len(grouped["achievements"])} roles)</span></h2>
+        <input class="rolefilter" placeholder="Type to find an achievement…" data-target="achrows">
+        <div class="scorerows" id="achrows">{_score_rows(grouped["achievements"], points, section="achievements")}</div>
+      </section>
+
+      <section class="trialpanel" data-panel="sandbox" hidden>
+        <h2 class="panelhead">Try it out
+          <span class="muted">· nothing is saved or applied</span></h2>
+        <div class="sandbox">
+          <div class="explain"><p>Scores people against the weights currently <b>on this screen</b>,
+          including edits you haven't saved — so you can see what a change would do before
+          committing to it.</p></div>
+          <div class="sandboxrow">
+            <input id="trialnames" placeholder="Up to 10 names, comma separated — e.g. Nik, Fox, Mido">
+            <button id="trialpreview" class="ghost">Preview these</button>
+            <button id="trialpreviewall" class="ghost">Preview everyone</button>
+          </div>
+          <div id="previewout"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
 </div>
 <p id="status" class="status"></p>
 """
