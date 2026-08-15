@@ -756,9 +756,9 @@ if (_trialsPage) {
       if (flag) flag.style.display = has ? "none" : "";
     });
   });
-  _trialsPage.querySelectorAll(".rankmin").forEach((input) => {
-    input.addEventListener("input", () => {
-      input.closest(".scorerow").classList.toggle("isrank", input.value !== "");
+  _trialsPage.querySelectorAll(".rankrole").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      sel.closest(".ladderrow").classList.toggle("mapped", sel.value !== "0");
     });
   });
 
@@ -769,13 +769,12 @@ if (_trialsPage) {
       if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
     });
     const ranks = [];
-    _trialsPage.querySelectorAll(".rankmin").forEach((input) => {
-      if (input.value === "") return;
-      ranks.push({
-        role_id: Number(input.dataset.role),
-        min_points: Number(input.value),
-        name: input.closest(".scorerow").querySelector(".rolename").textContent.trim(),
-      });
+    _trialsPage.querySelectorAll(".ladderrow").forEach((row) => {
+      const roleSel = row.querySelector(".rankrole");
+      const roleId = Number(roleSel.value || 0);
+      if (!roleId) return;  // rung not in use
+      ranks.push({ tier: roleSel.dataset.tier, role_id: roleId,
+                   min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
     return {
       action: "save", points: points, ranks: ranks,
@@ -806,13 +805,12 @@ if (_sandbox) {
       if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
     });
     const ranks = [];
-    document.querySelectorAll(".rankmin").forEach((input) => {
-      if (input.value === "") return;
-      ranks.push({
-        role_id: Number(input.dataset.role),
-        min_points: Number(input.value),
-        name: input.closest(".scorerow").querySelector(".rolename").textContent.trim(),
-      });
+    document.querySelectorAll(".ladderrow").forEach((row) => {
+      const roleSel = row.querySelector(".rankrole");
+      const roleId = Number(roleSel.value || 0);
+      if (!roleId) return;  // rung not in use
+      ranks.push({ tier: roleSel.dataset.tier, role_id: roleId,
+                   min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
     return { points: points, ranks: ranks,
              enabled: document.getElementById("trialsenabled").checked,

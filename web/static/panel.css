@@ -538,3 +538,17 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 #previewout tr.moved { background: rgba(255, 56, 92, .07); }
 #previewout tr.moved td:last-child { font-weight: var(--weight-semibold); }
 #trialpush { background: var(--color-primary); }
+
+/* Trial ranking: the fixed ladder */
+.ladder { display: flex; flex-direction: column; gap: 4px; }
+.ladderrow { display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); }
+.ladderrow.mapped { background: rgba(255, 56, 92, .05); border-color: rgba(255, 56, 92, .3); }
+.rungindex { width: 20px; text-align: center; color: var(--color-muted); font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+.rungname { width: 96px; font-weight: var(--weight-semibold); font-size: 13px; }
+.ladderrow select { flex: 1 1 auto; min-width: 0; }
+.ladderrow select, .ladderrow input { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.ladderrow input[type="number"] { width: 96px; flex: none; }

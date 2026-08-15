@@ -1067,20 +1067,30 @@ def _score_rows(roles: list, points: dict, *, section: str) -> str:
     return rows or f'<p class="muted">No roles found under the {section} divider.</p>'
 
 
-def _rank_rows(roles: list, ranks: list[dict]) -> str:
-    by_role = {rank["role_id"]: rank["min_points"] for rank in ranks}
+def _ladder_rows(guild, config: dict) -> str:
+    """The seven rungs, worst to best. Each maps to a role and a threshold;
+    leave the role unset to skip a rung entirely."""
+    options = "".join(
+        f'<option value="{role.id}">@{html.escape(role.name)}</option>'
+        for role in _sorted_roles(guild)
+    )
     rows = ""
-    for role in roles:
-        value = by_role.get(role.id)
-        rows += (
-            f'<div class="scorerow{" isrank" if value is not None else ""}" '
-            f'data-search="{html.escape(role.name.lower())}">'
-            f'<span class="rolename">{html.escape(role.name)}</span>'
-            f'<input type="number" class="rankmin" data-role="{role.id}" '
-            f'value="{html.escape(str(value)) if value is not None else ""}" '
-            f'placeholder="not a rank"></div>'
-        )
-    return rows or '<p class="muted">No roles found under the ranks divider.</p>'
+    for index, rung in enumerate(trial_ranks.ladder_rows(config)):
+        mapped = bool(rung["role_id"])
+        selected = options.replace(
+            f'<option value="{rung["role_id"]}">', f'<option value="{rung["role_id"]}" selected>'
+        ) if mapped else options
+        rows += f"""
+    <div class="ladderrow{" mapped" if mapped else ""}">
+      <span class="rungindex">{index + 1}</span>
+      <span class="rungname">{html.escape(rung["tier"])}</span>
+      <select class="rankrole" data-tier="{html.escape(rung["tier"])}">
+        <option value="0">— not used —</option>{selected}</select>
+      <span class="muted small">from</span>
+      <input type="number" class="rankmin" data-tier="{html.escape(rung["tier"])}"
+        value="{rung["min_points"] if rung["min_points"] is not None else ""}" placeholder="points">
+    </div>"""
+    return rows
 
 
 def _trials_html(bot, guild, scope: str) -> str:
@@ -1125,11 +1135,12 @@ def _trials_html(bot, guild, scope: str) -> str:
   {'<p class="warnline">' + str(len(missing)) + ' clear/achievement role(s) have no points yet — they are highlighted below.</p>' if missing else ''}
   <p class="muted small">{html.escape(last_line)}</p>
 
-  <details class="group" open><summary>Ranks <span class="muted">({len(grouped["ranks"])} roles under the ranks divider)</span></summary>
+  <details class="group" open><summary>Ranks <span class="muted">· the ladder, worst to best</span></summary>
     <div class="trialsection">
-      <input class="rolefilter" placeholder="Type to find a role…" data-target="rankrows">
-      <p class="muted small">Give a role a threshold to make it a rank. Leave blank to ignore it.</p>
-      <div class="scorerows" id="rankrows">{_rank_rows(grouped["ranks"], config.get("ranks") or [])}</div>
+      <p class="muted small">Pick which role each rung grants and the points it starts at.
+      Leave a rung's role unset to skip it. Thresholds have to climb as you go down this list,
+      and only the highest rung a member reaches is kept.</p>
+      <div class="ladder">{_ladder_rows(guild, config)}</div>
     </div></details>
 
   <details class="group" open><summary>Clears <span class="muted">({len(grouped["clears"])} roles)</span></summary>

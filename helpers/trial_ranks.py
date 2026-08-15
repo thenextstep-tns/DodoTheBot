@@ -41,6 +41,13 @@ _SECTION_WORDS = (
     ("clears", ("CLEAR",)),
     ("groups", ("GROUP",)),
 )
+# The ladder is fixed and ordered — worst to best. Ranks aren't whatever roles
+# happen to sit under a divider (that section also holds Tank/Healer/DD and
+# other non-rank roles); they're these seven rungs, each mapped to a role of
+# your choosing. Order is what lets "keep only the coolest rank" mean anything.
+LADDER = ("Casual", "Raider", "Veteran", "Expert", "Master", "Legend", "Myth")
+LADDER_INDEX = {name: index for index, name in enumerate(LADDER)}
+
 SCORING_SECTIONS = ("clears", "achievements")
 SECTION_LABELS = {
     "ranks": "Ranks & roles",
@@ -114,9 +121,15 @@ def score_for(role_ids: Iterable[int], points: dict) -> int:
 
 
 def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
-    """The highest rank whose threshold this score reaches."""
+    """The best rung this score reaches — by ladder position, not by threshold.
+
+    Ordering off the ladder rather than the numbers means Myth beats Legend
+    because it *is* higher, not because someone typed a bigger threshold.
+    """
     reached = [rank for rank in ranks or () if score >= rank["min_points"]]
-    return max(reached, key=lambda rank: rank["min_points"]) if reached else None
+    if not reached:
+        return None
+    return max(reached, key=lambda rank: LADDER_INDEX.get(rank.get("tier"), -1))
 
 
 def breakdown_for(guild, role_ids: Iterable[int], points: dict) -> list[dict]:
@@ -203,37 +216,65 @@ def validate_points(value, *, guild=None) -> dict:
 
 
 def validate_ranks(value, *, guild=None) -> list[dict]:
-    """``[{role_id, min_points}]``, sorted, thresholds unique."""
+    """``[{tier, role_id, min_points}]`` for the rungs that are actually mapped.
+
+    A rung with no role is simply unused. Thresholds must climb with the ladder:
+    a Veteran who needs fewer points than a Raider is a setup mistake, not a
+    preference, so it's rejected rather than silently producing a rank nobody
+    can ever hold.
+    """
     if value in (None, ""):
         return []
     if not isinstance(value, list):
         raise TrialError("Ranks must be a list.")
-    if len(value) > 40:
-        raise TrialError("Too many ranks.")
     out = []
     for item in value:
         if not isinstance(item, dict):
             raise TrialError("Each rank must be an object.")
+        tier = item.get("tier") or item.get("name")
+        if tier not in LADDER_INDEX:
+            raise TrialError(f"Unknown rank '{tier}'. The ladder is: {', '.join(LADDER)}.")
+        if not item.get("role_id"):
+            continue  # rung left unmapped — fine, it just isn't used
         try:
-            role_id = int(item.get("role_id"))
-            min_points = int(item.get("min_points"))
+            role_id = int(item["role_id"])
+            min_points = int(item.get("min_points") or 0)
         except (TypeError, ValueError):
-            raise TrialError("A rank threshold isn't a whole number.") from None
+            raise TrialError(f"The threshold for {tier} isn't a whole number.") from None
         if min_points < 0:
-            raise TrialError("Rank thresholds can't be negative.")
-        role = guild.get_role(role_id) if guild is not None else None
-        if guild is not None and role is None:
-            raise TrialError("A rank role isn't in this server.")
-        out.append({"role_id": role_id, "min_points": min_points,
-                    "name": item.get("name") or (role.name if role else str(role_id))})
-    out.sort(key=lambda rank: rank["min_points"])
-    thresholds = [rank["min_points"] for rank in out]
-    if len(set(thresholds)) != len(thresholds):
-        raise TrialError("Two ranks share the same threshold — the ladder would be ambiguous.")
+            raise TrialError(f"{tier} can't have a negative threshold.")
+        if guild is not None and guild.get_role(role_id) is None:
+            raise TrialError(f"The role for {tier} isn't in this server.")
+        out.append({"tier": tier, "name": tier, "role_id": role_id, "min_points": min_points})
+
+    seen_tiers = [rank["tier"] for rank in out]
+    if len(set(seen_tiers)) != len(seen_tiers):
+        raise TrialError("The same rank is listed twice.")
     role_ids = [rank["role_id"] for rank in out]
     if len(set(role_ids)) != len(role_ids):
-        raise TrialError("The same role is used for two ranks.")
+        raise TrialError("Two ranks point at the same role.")
+
+    out.sort(key=lambda rank: LADDER_INDEX[rank["tier"]])
+    previous = None
+    for rank in out:
+        if previous is not None and rank["min_points"] <= previous["min_points"]:
+            raise TrialError(
+                f"{rank['tier']} needs more points than {previous['tier']} "
+                f"({rank['min_points']} is not above {previous['min_points']})."
+            )
+        previous = rank
     return out
+
+
+def ladder_rows(config: dict) -> list[dict]:
+    """Every rung in ladder order, mapped or not — what the panel renders."""
+    by_tier = {rank.get("tier"): rank for rank in config.get("ranks") or []}
+    return [
+        {"tier": tier,
+         "role_id": (by_tier.get(tier) or {}).get("role_id", 0),
+         "min_points": (by_tier.get(tier) or {}).get("min_points")}
+        for tier in LADDER
+    ]
 
 
 class TrialRankManager:
