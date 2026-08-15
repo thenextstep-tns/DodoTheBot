@@ -23,8 +23,9 @@ async function post(url, body) {
   });
   let data = {};
   try { data = await resp.json(); } catch (_) { /* ignore */ }
-  // `value` comes back from endpoints that resolve one (e.g. a reset to default).
-  return { ok: resp.ok && data.ok, error: data.error, value: data.value };
+  // Pass the whole payload through: endpoints also return `value`, `rows`,
+  // `summary`, … and dropping them silently turns a full answer into a blank one.
+  return { ...data, ok: resp.ok && data.ok, error: data.error };
 }
 
 // Searchable chip multi-select (list_role / list_channel). `save` receives the
@@ -825,7 +826,12 @@ if (_sandbox) {
 
   const render = (rows, meta) => {
     out.innerHTML = "";
-    if (!rows.length) { out.innerHTML = '<p class="muted">Nobody scored any points.</p>'; return; }
+    if (!rows.length) {
+      out.innerHTML = meta
+        ? '<p class="muted">Nobody scored any points with these weights.</p>'
+        : '<p class="muted">No names to look up.</p>';
+      return;
+    }
     if (meta) {
       const head = document.createElement("p");
       head.className = "muted small";

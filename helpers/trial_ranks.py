@@ -230,6 +230,10 @@ def find_members(guild, names: Iterable[str], *, limit: int = 10) -> list[dict]:
     out = []
     for raw in list(names)[:limit]:
         query = str(raw).strip()
+        # People paste mentions and @names; treat them as the name they contain.
+        if query.startswith("<@") and query.endswith(">"):
+            query = query[2:-1].lstrip("!&")
+        query = query.lstrip("@").strip()
         if not query:
             continue
         digits = "".join(ch for ch in query if ch.isdigit())
