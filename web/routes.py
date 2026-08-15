@@ -1395,6 +1395,66 @@ def _pilot_html(bot, guild, config: dict) -> str:
     </div>"""
 
 
+def _interest_html(bot, guild, config: dict) -> str:
+    """Who would prog what, per raid, against the twelve a group needs.
+
+    A count on its own doesn't answer the only question being asked — "can we
+    run this yet" — so every row is drawn against the same twelve slots and
+    coloured by how close it is.
+    """
+    rows = bot.trial_ranks.interest_rows(guild.id)
+    buckets = trial_ranks.interest_buckets(guild, config, rows)
+    if not buckets:
+        return ('<p class="muted">Nobody has pressed <b>"I\'d join a prog for one of those"</b> '
+                'yet. The button shows up under the recommendations on someone\'s '
+                '<code>/rank</code> card.</p>')
+
+    cards = ""
+    for bucket in buckets:
+        filled = min(bucket["count"], trial_ranks.GROUP_SIZE)
+        pips = ('<span class="pip on"></span>' * filled
+                + '<span class="pip"></span>' * (trial_ranks.GROUP_SIZE - filled))
+        names = ""
+        for entry in sorted(bucket["members"], key=lambda m: m["name"].lower()):
+            member = guild.get_member(entry["user_id"])
+            # The stored name is a snapshot from when they pressed; the live
+            # member is better when they're still around.
+            label = member.display_name if member is not None else entry["name"]
+            when = entry.get("at")
+            stamp = (f'<span class="muted small"> · {when:%Y-%m-%d}</span>'
+                     if hasattr(when, "strftime") else "")
+            names += f'<li>{html.escape(label)}{stamp}</li>'
+        over = (f' <span class="muted small">+{bucket["count"] - trial_ranks.GROUP_SIZE} more</span>'
+                if bucket["count"] > trial_ranks.GROUP_SIZE else "")
+        cards += f"""
+    <details class="progrow lvl-{bucket["level"]}">
+      <summary>
+        <span class="progname">{html.escape(bucket["name"])}</span>
+        <span class="progpips">{pips}</span>
+        <span class="progcount">{bucket["count"]}/{trial_ranks.GROUP_SIZE}</span>{over}
+      </summary>
+      <ul class="proglist">{names}</ul>
+    </details>"""
+
+    ready = sum(1 for b in buckets if b["level"] == trial_ranks.LEVEL_READY)
+    warm = sum(1 for b in buckets if b["level"] == trial_ranks.LEVEL_WARM)
+    return f"""
+    <div class="explain">
+      <p>One press of <b>"I'd join a prog for one of those"</b> on a <code>/rank</code> card
+      registers everything that card was recommending. Wanting a raid's hardmode and its
+      trifecta counts once — as wanting that raid.</p>
+      <p>A group is {trial_ranks.GROUP_SIZE}. Rows turn <b class="lvl-warm-ink">yellow at 6</b>
+      and <b class="lvl-ready-ink">green at 10</b>. Open a row for the names, or run
+      <code>/interest &lt;trial&gt;</code> in Discord.</p>
+    </div>
+    <div class="pilotstats">
+      <span class="pilotstat"><b>{ready}</b> ready to run</span>
+      <span class="pilotstat"><b>{warm}</b> getting there</span>
+      <span class="pilotstat"><b>{len(rows)}</b> people signed up in total</span>
+    </div>
+    <div class="proggrid">{cards}</div>"""
+
+
 def _trials_html(bot, guild, scope: str) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
@@ -1468,6 +1528,10 @@ def _trials_html(bot, guild, scope: str) -> str:
   <details class="group" open><summary>Who it's turned on for
     <span class="muted">· the rollout, one person at a time</span></summary>
     <div class="trialsection">{_pilot_html(bot, guild, config)}</div></details>
+
+  <details class="group" open><summary>Prog interest
+    <span class="muted">· who'd sign up for what</span></summary>
+    <div class="trialsection">{_interest_html(bot, guild, config)}</div></details>
 
   <details class="group" open><summary>Clears <span class="muted">({len(grouped["clears"])} roles)</span></summary>
     <div class="trialsection">

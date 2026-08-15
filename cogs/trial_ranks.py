@@ -99,6 +99,35 @@ class RankBoardView(discord.ui.View):
         await cog.handle_check(interaction)
 
 
+class InterestView(discord.ui.View):
+    """One button under the recommendations: "I'd join a prog for one of those".
+
+    Deliberately the whole interaction. No menu, no follow-up question, no
+    "which one?" — the card already lists what they'd be signing up for, so a
+    single press records the lot and says thank you. Anything more would be a
+    form, and nobody fills in a form to say "yeah, I'd raid".
+
+    Not persistent: the card it hangs under is ephemeral and short-lived, so the
+    button dies with the process rather than being restored on boot.
+    """
+
+    def __init__(self, cog, member, role_ids: list[int]) -> None:
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.member = member
+        self.role_ids = list(role_ids)
+        self.interest.label = lang.TRIAL_INTEREST_BUTTON
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.member.id
+
+    @discord.ui.button(label="I'd join a prog for one of those 🔥",
+                       style=discord.ButtonStyle.secondary)
+    async def interest(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self.cog.record_interest(interaction, self.member, self.role_ids)
+        self.stop()
+
+
 class ConsentView(discord.ui.View):
     """The "may I switch you over?" ask, shown to someone still ranked by hand.
 
@@ -341,8 +370,12 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             member.guild, held, config.get("points") or {}, config.get("ranks") or [],
             trials=config.get("trials") or [])
 
-    async def rank_embed(self, member) -> tuple[discord.Embed, list]:
-        """The pretty card: where they are, how far along, and what's next."""
+    async def rank_embed(self, member) -> tuple[discord.Embed, list, discord.ui.View | None]:
+        """The pretty card: where they are, how far along, and what's next.
+
+        Returns the view too — the interest button only exists when there are
+        recommendations for it to refer to.
+        """
         state = self.rank_view(member)
         current, upcoming = state["current"], state["next"]
         current_name = trial_ranks.rank_name(current, member.guild) if current else None
@@ -358,7 +391,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
             embed.add_field(name=lang.TRIAL_CARD_POINTS.format(points=state["score"]),
                             value=lang.TRIAL_NO_LADDER_POINTS, inline=False)
-            return embed, []
+            return embed, [], None
 
         # The rank line lives in the description, not the title: a title renders
         # a role mention as literal text, while a description renders it in the
@@ -366,8 +399,8 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # The stars go on their own line so a phone can't wrap them into the name.
         stars = rank_stars(state["position"], state["total"])
         role = member.guild.get_role(int(current["role_id"])) if current else None
-        heading = role.mention if role is not None else f"**{current_name or lang.TRIAL_CARD_NO_RANK}**"
-        blocks = [f"{heading}\n{stars}".strip()]
+        name = role.mention if role is not None else f"**{current_name or lang.TRIAL_CARD_NO_RANK}**"
+        blocks = [lang.TRIAL_CARD_HEADING.format(rank=name, stars=stars).strip()]
         if current and current.get("description"):
             blocks.append(current["description"])
 
@@ -417,7 +450,11 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 files.append(discord.File(io.BytesIO(bytes(picture["data"])), filename=name))
                 embed.set_thumbnail(url=f"attachment://{name}")
         embed.set_footer(text=lang.TRIAL_CARD_FOOTER)
-        return embed, files
+        # The button refers to "one of those", so it only makes sense when the
+        # card actually listed something.
+        view = (InterestView(self, member, [step["role_id"] for step in state["steps"]])
+                if state["steps"] else None)
+        return embed, files, view
 
     # ------------------------------------------------------------------ #
     #  The consent flow
@@ -434,8 +471,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             # thinking=True makes a fresh ephemeral message the "original
             # response", so editing it can't touch the pinned announcement.
             await interaction.response.defer(ephemeral=True, thinking=True)
-            embed, files = await self.rank_embed(member)
-            await interaction.edit_original_response(embed=embed, attachments=files)
+            embed, files, view = await self.rank_embed(member)
+            await interaction.edit_original_response(embed=embed, attachments=files,
+                                                     view=view)
             await self.log_event(guild, f"{member.mention} checked their rank.")
             return
 
@@ -453,10 +491,10 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # question — answering it turns that same message into the rank card.
         await interaction.response.defer()
         await self.enrol(member, source="button")
-        embed, files = await self.rank_embed(member)
+        embed, files, view = await self.rank_embed(member)
         await interaction.edit_original_response(
             content=lang.TRIAL_CONSENT_DONE,
-            embed=embed, attachments=files, view=None)
+            embed=embed, attachments=files, view=view)
 
     async def explain_system(self, interaction: discord.Interaction, member) -> None:
         """Send the brief description plus the chart, privately.
@@ -478,6 +516,33 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         await interaction.edit_original_response(content=lang.TRIAL_HOW_IT_WORKS, attachments=files)
         await self.log_event(
             member.guild, f"{member.mention} read how automatic ranking works.")
+
+    # ------------------------------------------------------------------ #
+    #  Prog interest
+    # ------------------------------------------------------------------ #
+    async def record_interest(self, interaction: discord.Interaction, member,
+                              role_ids: list[int]) -> None:
+        """Bank the "I'd prog for one of those" press and thank them for it."""
+        await self.bot.loop.run_in_executor(
+            None, self.bot.trial_ranks.record_interest, member.guild.id, member.id,
+            member.display_name, role_ids)
+        # edit_message keeps the card on screen and takes the button away, so
+        # the whole interaction is one press and one thank-you.
+        await interaction.response.edit_message(content=lang.TRIAL_INTEREST_THANKS, view=None)
+
+        config = self.bot.trial_ranks.get(member.guild.id)
+        wanted = []
+        for role_id in role_ids:
+            role = member.guild.get_role(int(role_id))
+            label = trial_ranks.trial_of_role(role_id, config.get("trials") or [])
+            wanted.append(label or (role.name if role else str(role_id)))
+        await self.log_event(
+            member.guild,
+            f"{member.mention} would join a prog for: "
+            # dict.fromkeys keeps first-seen order while dropping the repeats a
+            # hardmode and its trifecta produce for the same raid.
+            + ", ".join(list(dict.fromkeys(wanted))[:20]),
+            title="Trial ranks — prog interest")
 
     # ------------------------------------------------------------------ #
     #  Commands
@@ -503,9 +568,69 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await self.log_event(context.guild,
                                  f"{member.mention} was asked to switch to automatic ranking.")
             return
-        embed, files = await self.rank_embed(member)
-        await context.send(embed=embed, files=files, ephemeral=True)
+        embed, files, view = await self.rank_embed(member)
+        await context.send(embed=embed, files=files, view=view or discord.utils.MISSING,
+                           ephemeral=True)
         await self.log_event(context.guild, f"{member.mention} checked their rank.")
+
+    async def trial_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Offer the raids people have actually shown interest in, busiest first."""
+        guild = interaction.guild
+        if guild is None:
+            return []
+        config = self.bot.trial_ranks.get(guild.id)
+        rows = await self.bot.loop.run_in_executor(
+            None, self.bot.trial_ranks.interest_rows, guild.id)
+        buckets = trial_ranks.interest_buckets(guild, config, rows)
+        query = (current or "").lower()
+        return [
+            discord.app_commands.Choice(
+                name=f"{bucket['name']} — {bucket['count']}/{trial_ranks.GROUP_SIZE}",
+                value=bucket["name"])
+            for bucket in buckets if query in bucket["name"].lower()
+        ][:25]
+
+    @commands.hybrid_command(
+        name="interest",
+        description="Who would join a prog for a given trial.")
+    @commands.guild_only()
+    @discord.app_commands.describe(trial="Which trial, e.g. vKA")
+    @discord.app_commands.autocomplete(trial=trial_autocomplete)
+    async def interest(self, context: commands.Context, *, trial: str) -> None:
+        config = self.bot.trial_ranks.get(context.guild.id)
+        rows = await self.bot.loop.run_in_executor(
+            None, self.bot.trial_ranks.interest_rows, context.guild.id)
+        buckets = trial_ranks.interest_buckets(context.guild, config, rows)
+        wanted = (trial or "").strip().lower()
+        bucket = next((b for b in buckets if b["name"].lower() == wanted), None)
+        if bucket is None:
+            # A near miss is far more likely than a typo nobody meant, so try a
+            # contains-match before giving up.
+            bucket = next((b for b in buckets if wanted and wanted in b["name"].lower()), None)
+        if bucket is None:
+            known = {b["name"].lower() for b in buckets}
+            message = (lang.TRIAL_INTEREST_NONE.format(trial=trial)
+                       if wanted in known or not buckets
+                       else lang.TRIAL_INTEREST_UNKNOWN.format(trial=trial))
+            await context.send(message, ephemeral=True)
+            return
+
+        colour = {trial_ranks.LEVEL_READY: discord.Colour.green(),
+                  trial_ranks.LEVEL_WARM: discord.Colour.gold()}.get(
+                      bucket["level"], discord.Colour.dark_grey())
+        embed = discord.Embed(
+            title=lang.TRIAL_INTEREST_TITLE.format(trial=bucket["name"]),
+            description=lang.TRIAL_INTEREST_SUMMARY.format(
+                count=bucket["count"], group=trial_ranks.GROUP_SIZE),
+            colour=colour)
+        lines = []
+        for entry in sorted(bucket["members"], key=lambda m: m["name"].lower()):
+            member = context.guild.get_member(entry["user_id"])
+            when = entry.get("at")
+            stamp = f" · {when:%Y-%m-%d}" if hasattr(when, "strftime") else ""
+            lines.append(f"• {member.mention if member else entry['name']}{stamp}")
+        embed.add_field(name="​", value="\n".join(lines)[:1024] or "—", inline=False)
+        await context.send(embed=embed, ephemeral=True)
 
     # ------------------------------------------------------------------ #
     #  The announcement

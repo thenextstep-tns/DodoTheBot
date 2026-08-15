@@ -570,6 +570,32 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 .pilotadd input { flex: 1 1 240px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 13px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+/* Prog interest: one row per raid, drawn against the twelve a group needs. */
+.proggrid { display: flex; flex-direction: column; gap: 6px; }
+.progrow { border: 1px solid var(--color-hairline); border-left: 4px solid var(--color-ink);
+  border-radius: var(--radius-sm); background: var(--color-canvas); }
+.progrow > summary { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  cursor: pointer; list-style: none; }
+.progrow > summary::-webkit-details-marker { display: none; }
+.progname { flex: 1 1 auto; min-width: 0; font-weight: var(--weight-semibold); font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progcount { flex: none; font-size: 13px; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.progpips { display: flex; gap: 3px; flex: none; }
+.pip { width: 9px; height: 16px; border-radius: 2px; background: var(--color-surface-strong); }
+.pip.on { background: var(--color-ink); }
+/* 0–5 stays ink, 6–9 yellow, 10+ green — the only question is "can we run it". */
+.progrow.lvl-warm { border-left-color: var(--color-warning); }
+.progrow.lvl-warm .pip.on { background: var(--color-warning); }
+.progrow.lvl-warm .progcount { color: var(--color-warning); }
+.progrow.lvl-ready { border-left-color: var(--color-success); }
+.progrow.lvl-ready .pip.on { background: var(--color-success); }
+.progrow.lvl-ready .progcount { color: var(--color-success); }
+.lvl-warm-ink { color: var(--color-warning); }
+.lvl-ready-ink { color: var(--color-success); }
+.proglist { margin: 0; padding: 0 14px 12px 34px; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px; font-size: 13px; }
+
 .announcebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px;
   padding: 12px; background: var(--color-surface-soft); border-radius: var(--radius-sm); }
 .announcebar > div:first-child { flex: 1 1 260px; }

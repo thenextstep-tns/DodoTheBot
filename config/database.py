@@ -91,4 +91,6 @@ trial_standings = db["TrialStandings"]        # {guild_id, user_id, score, rank}
 # else — the automation only ever touches an "enrolled" row.
 trial_enrollment = db["TrialEnrollment"]      # {guild_id, user_id, state, name, source, *_at}
 trial_rank_images = db["TrialRankImages"]     # {guild_id, role_id, data, content_type}
+# "I'd join a prog for one of those" — one row per person, latest press wins.
+trial_interest = db["TrialInterest"]          # {guild_id, user_id, name, role_ids, at}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

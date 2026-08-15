@@ -981,7 +981,23 @@ TRIAL_CARD_OUTRO = (
     "You can use `/rank` anywhere on the server, any time — and I'll always be here too. ✨\n"
     "If you have a minute, let the mods know how well this matches your actual skill."
 )
+# The rank line at the top of the card. {rank} is a role mention, so it renders
+# in the role's own colour; {stars} is the earned/unearned row. The "##" makes it
+# a heading — drop to "###" for smaller, or "**{rank}**" for plain bold.
+TRIAL_CARD_HEADING = "## {rank}\n{stars}"
 TRIAL_CARD_FOOTER = "Only your best clear per trial counts towards the total."
+
+# "I'd join a prog for one of those" — the one-click interest button.
+TRIAL_INTEREST_BUTTON = "I'd join a prog for one of those 🔥"
+TRIAL_INTEREST_THANKS = (
+    "🔥 Noted, thank you!\n"
+    "Once we have enough people with the same answers, one of the RLs will poke you. "
+    "Thank you, and have a great day!"
+)
+TRIAL_INTEREST_TITLE = "Prog interest — {trial}"
+TRIAL_INTEREST_NONE = "Nobody has put their hand up for **{trial}** yet."
+TRIAL_INTEREST_SUMMARY = "**{count}** of {group} interested"
+TRIAL_INTEREST_UNKNOWN = "I don't know a trial called **{trial}**."
 TRIAL_CARD_NO_RANK = "No rank yet"
 
 TRIAL_NO_LADDER_TITLE = "No ranks set up yet"

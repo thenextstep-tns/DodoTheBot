@@ -210,6 +210,70 @@ def step_priority(slot: Optional[str]) -> int:
     """Hardmodes first, then trifectas, then everything else."""
     return _STEP_PRIORITY.get(slot or "", STEP_OTHER)
 
+
+# A prog group is twelve. Interest is measured against that, because "9 people
+# want this" only means something next to how many it takes to run it.
+GROUP_SIZE = 12
+# Where a raid sits on the way to being runnable. The thresholds are the point:
+# a third of a group is a conversation, three quarters is a plan.
+LEVEL_COLD, LEVEL_WARM, LEVEL_READY = "cold", "warm", "ready"
+
+
+def interest_level(count: int, group_size: int = GROUP_SIZE) -> str:
+    """``cold`` up to 5, ``warm`` 6–9, ``ready`` from 10 — scaled if a server
+    runs a different group size, so the bands keep their meaning."""
+    warm_at = round(group_size * 6 / GROUP_SIZE)
+    ready_at = round(group_size * 10 / GROUP_SIZE)
+    if count >= ready_at:
+        return LEVEL_READY
+    if count >= warm_at:
+        return LEVEL_WARM
+    return LEVEL_COLD
+
+
+def trial_of_role(role_id: int, trials: list[dict]) -> Optional[str]:
+    """The name of the trial a clear role belongs to, if it's mapped to one."""
+    found = slot_of(trials or []).get(int(role_id))
+    if found is None:
+        return None
+    try:
+        return (trials[found[0]].get("name") or "").strip() or None
+    except IndexError:
+        return None
+
+
+def interest_buckets(guild, config: dict, rows: list[dict]) -> list[dict]:
+    """Interest counted per raid, busiest first.
+
+    Rows are grouped by the trial a role belongs to, so wanting the hardmode and
+    the trifecta of one raid is one person wanting that raid, not two. A role
+    that isn't mapped to a trial stands as its own bucket rather than being
+    dropped — an achievement people want to prog is still a thing people want.
+    """
+    trials = config.get("trials") or []
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        seen: set[str] = set()
+        for role_id in row.get("role_ids") or ():
+            role_id = int(role_id)
+            role = guild.get_role(role_id) if guild else None
+            label = trial_of_role(role_id, trials) or (role.name if role else None)
+            if not label or label in seen:
+                continue      # one person counts once per raid
+            seen.add(label)
+            bucket = buckets.setdefault(label, {"name": label, "members": [], "roles": set()})
+            bucket["members"].append({"user_id": int(row["user_id"]),
+                                      "name": row.get("name") or str(row["user_id"]),
+                                      "at": row.get("at")})
+            bucket["roles"].add(role_id)
+    out = []
+    for bucket in buckets.values():
+        count = len(bucket["members"])
+        out.append({**bucket, "roles": sorted(bucket["roles"]), "count": count,
+                    "level": interest_level(count)})
+    out.sort(key=lambda b: (-b["count"], b["name"].lower()))
+    return out
+
 # Any slot may be empty — a trial without a second partial simply doesn't have
 # one, and the rest keep their order. Holding a stronger role means the weaker
 # ones are already implied, so exactly one of them is kept: the strongest.
@@ -730,11 +794,13 @@ class TrialRankManager:
     """One trial-ranking setup per guild. ``bot.trial_ranks``."""
 
     def __init__(self, collection, standings_collection, *,
-                 enrollment_collection=None, image_collection=None) -> None:
+                 enrollment_collection=None, image_collection=None,
+                 interest_collection=None) -> None:
         self._col = collection
         self._standings = standings_collection
         self._enrollment = enrollment_collection
         self._images = image_collection
+        self._interest = interest_collection
         self._cache: dict[int, dict] = {}
         self._enrolled_cache: dict[int, set[int]] = {}
 
@@ -854,6 +920,38 @@ class TrialRankManager:
         if self._images is None:
             return
         self._images.delete_one({"guild_id": int(guild_id), "role_id": int(role_id)})
+
+    # ------------------------------------------------------------------ #
+    #  Prog interest
+    # ------------------------------------------------------------------ #
+    def record_interest(self, guild_id: int, user_id: int, name: str,
+                        role_ids: Iterable[int]) -> None:
+        """Note that someone would prog for the clears they were just shown.
+
+        One row per person, overwritten on each press rather than appended:
+        what they'd sign up for changes as they clear things, and a list of
+        stale wishes is worse than no list. ``first_at`` keeps the date they
+        first put their hand up.
+        """
+        if self._interest is None:
+            return
+        now = datetime.datetime.now(datetime.timezone.utc)
+        self._interest.update_one(
+            {"guild_id": int(guild_id), "user_id": int(user_id)},
+            {"$set": {"name": name, "role_ids": [int(r) for r in role_ids], "at": now},
+             "$setOnInsert": {"first_at": now}},
+            upsert=True,
+        )
+
+    def interest_rows(self, guild_id: int, limit: int = 1000) -> list[dict]:
+        if self._interest is None:
+            return []
+        return list(self._interest.find({"guild_id": int(guild_id)}).sort("at", -1).limit(limit))
+
+    def clear_interest(self, guild_id: int, user_id: int) -> None:
+        if self._interest is None:
+            return
+        self._interest.delete_one({"guild_id": int(guild_id), "user_id": int(user_id)})
 
     # ---- standings, for the stats view ----
     def save_standing(self, guild_id: int, user_id: int, name: str, score: int, rank: Optional[str]) -> None:

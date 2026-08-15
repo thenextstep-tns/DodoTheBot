@@ -124,6 +124,7 @@ class DodoBot(commands.Bot):
             config_py.trial_ranks, config_py.trial_standings,
             enrollment_collection=config_py.trial_enrollment,
             image_collection=config_py.trial_rank_images,
+            interest_collection=config_py.trial_interest,
         )
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
