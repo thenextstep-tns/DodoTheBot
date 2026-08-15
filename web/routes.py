@@ -419,16 +419,17 @@ def _param_input(param: dict, guild) -> str:
             for c in param.get("choices", [])
         )
         return f'<select {common}>{opts}</select>'
-    if ptype in ("role", "channel"):
-        source = (guild.roles if ptype == "role" else guild.text_channels) if guild else []
-        rows = '<option value="0">— none —</option>'
-        for obj in source:
-            if getattr(obj, "is_default", lambda: False)():  # skip @everyone
-                continue
-            rows += f'<option value="{obj.id}"{" selected" if obj.id == value else ""}>{html.escape(obj.name)}</option>'
-        return f'<select {common}>{rows}</select>'
+    if ptype == "role":
+        return f'<select {common}>{_role_options(guild, value)}</select>' if guild else ""
+    if ptype == "channel":
+        # Same picker as the settings page: forums and voice count as channels,
+        # and a text-only list silently hides them.
+        return f'<select {common}>{_channel_options(guild, value)}</select>' if guild else ""
     if ptype in ("list_role", "list_channel"):
-        source = (guild.roles if ptype == "list_role" else guild.text_channels) if guild else []
+        source = (_sorted_roles(guild) if ptype == "list_role"
+                  else [c for c in guild.channels
+                        if isinstance(c, (discord.TextChannel, discord.ForumChannel,
+                                          discord.VoiceChannel))]) if guild else []
         selected = set(value)
         opts = ""
         for obj in source:
