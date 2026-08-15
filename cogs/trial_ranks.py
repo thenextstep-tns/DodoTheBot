@@ -173,12 +173,35 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     # ------------------------------------------------------------------ #
     #  Logging to Discord
     # ------------------------------------------------------------------ #
+    def log_channel(self, guild):
+        """Where trial-rank activity is reported.
+
+        Its own setting first — this is role-request traffic, not moderation, so
+        it doesn't belong in the moderation log by default. Falling back to the
+        role-request log keeps it in the right neighbourhood if nothing is
+        chosen; the moderation log is only ever the last resort, so a server
+        that has configured neither still gets its records somewhere.
+        """
+        chosen = int(self.bot.trial_ranks.get(guild.id).get("log_channel_id") or 0)
+        if chosen:
+            channel = guild.get_channel(chosen)
+            if channel is not None:
+                return channel
+        for key in ("E4D_ROLE_LOG", "LOG_CHANNEL"):
+            try:
+                channel_id = int(self.bot.guild_config.get(guild.id, key) or 0)
+            except (TypeError, ValueError):
+                continue
+            channel = guild.get_channel(channel_id) if channel_id else None
+            if channel is not None:
+                return channel
+        return None
+
     async def log_event(self, guild, description: str, *, title: str = "Trial ranks") -> None:
-        """Say what happened in the server's log channel. Never raises: a missing
-        log channel must not stop a role change that already happened."""
+        """Say what happened in the trial-rank log channel. Never raises: a
+        missing log channel must not stop a role change that already happened."""
         try:
-            channel_id = self.bot.guild_config.get(guild.id, "LOG_CHANNEL")
-            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            channel = self.log_channel(guild)
             if channel is None:
                 return
             embed = discord.Embed(title=title, description=description[:4000],

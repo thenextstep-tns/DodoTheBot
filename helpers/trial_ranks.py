@@ -734,13 +734,15 @@ class TrialRankManager:
                 "exclusive": doc.get("exclusive", True),
                 "announce_channel_id": int(doc.get("announce_channel_id") or 0),
                 "announce_message_id": int(doc.get("announce_message_id") or 0),
+                "log_channel_id": int(doc.get("log_channel_id") or 0),
             }
         return self._cache[guild_id]
 
     def save(self, guild_id: int, data: dict) -> None:
         fields = {key: data[key] for key in
                   ("points", "ranks", "trials", "enabled", "exclusive",
-                   "announce_channel_id", "announce_message_id") if key in data}
+                   "announce_channel_id", "announce_message_id",
+                   "log_channel_id") if key in data}
         if not fields:
             return
         fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc)

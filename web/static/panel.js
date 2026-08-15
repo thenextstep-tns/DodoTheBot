@@ -820,6 +820,19 @@ if (_trialsPage) {
     });
   }
 
+  // Saved on change rather than with the rest of the setup: it sits in the
+  // rollout section, nowhere near the Save button, so waiting for one would
+  // quietly lose the choice.
+  const logChannel = document.getElementById("triallogchannel");
+  if (logChannel) {
+    logChannel.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "log_channel", channel_id: logChannel.value });
+      flash(res.ok ? (res.channel ? `logging to #${res.channel} ✓` : "logging cleared")
+                   : (res.error || "Failed"), res.ok);
+    });
+  }
+
   const announce = document.getElementById("announcepost");
   if (announce) {
     announce.addEventListener("click", async () => {

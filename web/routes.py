@@ -1337,6 +1337,22 @@ def _pilot_html(bot, guild, config: dict) -> str:
         f"Currently posted in #{html.escape(where.name)}."
         if where is not None and posted else "Not posted anywhere yet."
     )
+    # Where the running commentary goes. Resolved the same way the cog resolves
+    # it, so the page names the channel that will actually be written to rather
+    # than "— none —" over a working fallback.
+    log_id = int(config.get("log_channel_id") or 0)
+    log_source = "chosen here"
+    if not log_id:
+        for key, why in (("E4D_ROLE_LOG", "your role request log"),
+                         ("LOG_CHANNEL", "your moderation log")):
+            try:
+                candidate = int(bot.guild_config.get(guild.id, key) or 0)
+            except Exception:  # noqa: BLE001 - an unset key is not an error
+                continue
+            if candidate and guild.get_channel(candidate) is not None:
+                log_id, log_source = candidate, f"defaulting to {why}"
+                break
+
     return f"""
     <div class="explain">
       <p><b>Nobody is ranked automatically until they opt in.</b> Turning the feature on
@@ -1369,6 +1385,13 @@ def _pilot_html(bot, guild, config: dict) -> str:
         "Check my rank (only I will see)" button. {posted_line}</div></div>
       <select id="announcechannel">{_channel_options(guild, announce_id)}</select>
       <button id="announcepost" class="ghost">Post / update announcement</button>
+    </div>
+
+    <div class="announcebar">
+      <div><b>Log channel</b>
+        <div class="muted small">Enrolments, recalculations, rank checks and consent all get
+        reported here — {html.escape(log_source)}.</div></div>
+      <select id="triallogchannel">{_channel_options(guild, log_id)}</select>
     </div>"""
 
 
@@ -1998,6 +2021,27 @@ async def api_guild_trials(request: web.Request):
             "ok": True, "rows": rows[:500], "total": len(rows),
             "moving": sum(1 for row in rows if row["changed"]),
         })
+
+    if action == "log_channel":
+        try:
+            channel_id = int(data.get("channel_id") or 0)
+        except (TypeError, ValueError):
+            return _bad("That isn't a channel id.")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel_id and channel is None:
+            return _bad("That channel isn't in this server.")
+        if channel is not None and not channel.permissions_for(guild.me).send_messages:
+            return _bad(f"I can't post in #{channel.name}.")
+        was = int(bot.trial_ranks.get(guild.id).get("log_channel_id") or 0)
+        bot.trial_ranks.save(guild.id, {"log_channel_id": channel_id})
+        await _record_change(
+            request, audit_log.KIND_TRIAL, "log channel",
+            f"#{getattr(guild.get_channel(was), 'name', was)}" if was else None,
+            f"#{channel.name}" if channel else None,
+            f"Trial rank log channel set to **#{channel.name}**" if channel
+            else "Trial rank log channel cleared")
+        return web.json_response({"ok": True,
+                                  "channel": channel.name if channel else ""})
 
     # ---- the rollout: who the automation is allowed to touch ----
     if action in ("enrol", "unenrol", "announce"):
