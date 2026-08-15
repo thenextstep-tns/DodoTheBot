@@ -540,18 +540,42 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 #trialpush { background: var(--color-primary); }
 
 /* Trial ranking: the fixed ladder */
-.ladder { display: flex; flex-direction: column; gap: 4px; }
-.ladderrow { display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+.ladder { display: flex; flex-direction: column; gap: 6px; }
+.rankrow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
   border: 1px solid transparent; border-radius: var(--radius-sm); }
-.ladderrow.mapped { background: rgba(255, 56, 92, .05); border-color: rgba(255, 56, 92, .3); }
+.rankrow.mapped { background: rgba(255, 56, 92, .05); border-color: rgba(255, 56, 92, .3); }
+.rankmain { display: flex; align-items: center; gap: 10px; }
 .rungindex { width: 20px; text-align: center; color: var(--color-muted); font-size: 12px;
+  font-variant-numeric: tabular-nums; flex: none; }
+.rankrow select { flex: 1 1 auto; min-width: 0; }
+.rankrow select, .rankrow input, .rankrow textarea { padding: 6px 8px; font: inherit;
+  font-size: 13px; background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.rankrow input[type="number"] { width: 96px; flex: none; }
+.rankdesc { width: 100%; resize: vertical; }
+.rankdel { flex: none; }
+
+/* Per-rank badge: shown on the /rank card, optional everywhere. */
+.rankimg { display: flex; align-items: center; gap: 6px; flex: none; }
+.rankimg-preview { width: 32px; height: 32px; object-fit: cover; flex: none;
+  border-radius: var(--radius-sm); border: 1px solid var(--color-hairline); }
+.rankimg-empty { width: 72px; font-size: 11px; color: var(--color-muted-soft); }
+
+/* The rollout board */
+.pilotstats { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 10px 0; }
+.pilotstat { font-size: 13px; color: var(--color-body); }
+.pilotstat b { font-size: 17px; color: var(--color-ink); margin-right: 4px;
   font-variant-numeric: tabular-nums; }
-.rungname { width: 96px; font-weight: var(--weight-semibold); font-size: 13px; }
-.ladderrow select { flex: 1 1 auto; min-width: 0; }
-.ladderrow select, .ladderrow input { padding: 6px 8px; font: inherit; font-size: 13px;
+.pilotadd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.pilotadd input { flex: 1 1 240px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 13px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
-.ladderrow input[type="number"] { width: 96px; flex: none; }
+.announcebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px;
+  padding: 12px; background: var(--color-surface-soft); border-radius: var(--radius-sm); }
+.announcebar > div:first-child { flex: 1 1 260px; }
+.announcebar select { flex: 0 1 240px; min-width: 0; padding: 7px 9px; font: inherit;
+  font-size: 13px; background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
 
 .rungoff { font-size: 11px; color: var(--color-muted-soft); border: 1px solid var(--color-hairline);
   border-radius: var(--radius-full); padding: 1px 8px; }
@@ -606,9 +630,9 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
   letter-spacing: .3px; }
 
 /* Unsaved edits in the points grid */
-.scorerow.edited, .ladderrow.edited { outline: 2px solid var(--color-primary);
+.scorerow.edited, .rankrow.edited { outline: 2px solid var(--color-primary);
   outline-offset: -1px; border-radius: var(--radius-sm); background: rgba(255, 56, 92, .05); }
-.scorerow.edited input, .ladderrow.edited input { border-color: var(--color-primary); }
+.scorerow.edited input, .rankrow.edited input { border-color: var(--color-primary); }
 .wasvalue { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
   background: var(--color-surface-strong); color: var(--color-muted); white-space: nowrap; }
 .wasvalue.up { color: var(--color-success); }

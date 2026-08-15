@@ -771,15 +771,8 @@ if (_trialsPage) {
       const value = Number(input.value);
       if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
     });
-    const ranks = [];
-    _trialsPage.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleId = (row.querySelector(".rolepick-id") || {}).value || "0";
-      if (roleId === "0") return;  // this rank is left empty
-      ranks.push({ tier: row.dataset.tier, role_id: roleId,
-                   min_points: Number(row.querySelector(".rankmin").value || 0) });
-    });
     return {
-      action: "save", points: points, ranks: ranks,
+      action: "save", points: points, ranks: window.readRanks(),
       trials: window.readTrialMap ? window.readTrialMap() : [],
       enabled: document.getElementById("trialsenabled").checked,
       exclusive: document.getElementById("trialsexclusive").checked,
@@ -791,6 +784,55 @@ if (_trialsPage) {
     flash(res.ok ? "trial ranking saved ✓" : (res.error || "Failed"), res.ok);
   });
 
+  // --- the rollout: turning it on for one person at a time ---
+  const enrol = document.getElementById("pilotenrol");
+  if (enrol) {
+    const tag = document.getElementById("pilottag");
+    const run = async () => {
+      const value = tag.value.trim();
+      if (!value) { flash("Type a user tag first", false); return; }
+      enrol.disabled = true;
+      const res = await post(`/api/guild/${guildId}/trials`, { action: "enrol", tag: value });
+      enrol.disabled = false;
+      if (res.ok) {
+        tag.value = "";
+        flash(`${res.member.name} is on: ${res.score} pts → ${res.rank || "no rank yet"}`
+              + (res.cleared ? `, ${res.cleared} stale clear role(s) removed` : ""), true);
+        // The roster, the counters and the log all move at once; a reload is
+        // the honest way to show that rather than patching one row in place.
+        setTimeout(() => window.location.reload(), 1200);
+      } else flash(res.error || "Failed", false);
+    };
+    enrol.addEventListener("click", run);
+    tag.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+  }
+
+  const rosterBody = document.getElementById("pilotrows");
+  if (rosterBody) {
+    rosterBody.addEventListener("click", async (e) => {
+      if (!e.target.classList.contains("pilotdel")) return;
+      const userId = e.target.dataset.user;
+      if (!confirm("Take this person off automatic ranking? Their roles stay as they are.")) return;
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "unenrol", user_id: userId });
+      if (res.ok) { e.target.closest("tr").remove(); flash("taken off ✓", true); }
+      else flash(res.error || "Failed", false);
+    });
+  }
+
+  const announce = document.getElementById("announcepost");
+  if (announce) {
+    announce.addEventListener("click", async () => {
+      const channel = document.getElementById("announcechannel");
+      const name = channel.options[channel.selectedIndex].text;
+      if (!confirm(`Post the announcement in ${name}? Everyone there will see it.`)) return;
+      announce.disabled = true;
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "announce", channel_id: channel.value });
+      announce.disabled = false;
+      flash(res.ok ? `posted in #${res.channel} ✓` : (res.error || "Failed"), res.ok);
+    });
+  }
 }
 
 // --- Trial ranking: balance sandbox (dry runs) + push to live ---
@@ -807,14 +849,7 @@ if (_sandbox) {
       const value = Number(input.value);
       if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
     });
-    const ranks = [];
-    document.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleId = (row.querySelector(".rolepick-id") || {}).value || "0";
-      if (roleId === "0") return;  // this rank is left empty
-      ranks.push({ tier: row.dataset.tier, role_id: roleId,
-                   min_points: Number(row.querySelector(".rankmin").value || 0) });
-    });
-    return { points: points, ranks: ranks,
+    return { points: points, ranks: window.readRanks(),
              trials: window.readTrialMap ? window.readTrialMap() : [],
              enabled: document.getElementById("trialsenabled").checked,
              exclusive: document.getElementById("trialsexclusive").checked };
@@ -1007,17 +1042,190 @@ function bindRolePickers(root, roles) {
   });
 }
 
-// Wire the trial-rank pickers and keep each row's on/off state in step.
+// --- Trial ranking: the ladder is whatever rows you build -------------------
+// No fixed rungs: a rank is a role, a threshold, an optional blurb and an
+// optional badge. Rows are read in DOM order and the server sorts them by
+// points, so nothing here has to care about ordering.
 const _trialRoles = document.getElementById("all-roles");
 if (_trialRoles) {
   const roles = JSON.parse(_trialRoles.textContent || "[]");
   const page = document.querySelector(".trialspage");
+  const rankRows = document.getElementById("rankrows");
+  const guildId = page.dataset.guild;
   bindRolePickers(page, roles);
-  page.addEventListener("rolechange", (e) => {
-    const row = e.target.closest(".ladderrow");
-    if (row) row.classList.toggle("mapped", (e.target.querySelector(".rolepick-id").value || "0") !== "0");
+
+  const renumber = () => {
+    rankRows.querySelectorAll(".rankrow").forEach((row, index) => {
+      row.querySelector(".rungindex").textContent = String(index + 1);
+    });
+  };
+
+  const roleIdOf = (row) => (row.querySelector(".rolepick-id") || {}).value || "0";
+
+  // ---- the badge: upload, preview, remove ----
+  const imageCell = (row) => row.querySelector(".rankimg");
+
+  const showPicture = (cell, url) => {
+    const old = cell.querySelector(".rankimg-preview, .rankimg-empty");
+    const img = document.createElement("img");
+    img.className = "rankimg-preview";
+    img.alt = "";
+    img.src = `${url}?v=${Date.now()}`;    // bust the cache after a re-upload
+    if (old) old.replaceWith(img); else cell.prepend(img);
+    cell.dataset.has = "1";
+    cell.querySelector(".rankimg-del").hidden = false;
+  };
+
+  const showEmpty = (cell) => {
+    const old = cell.querySelector(".rankimg-preview, .rankimg-empty");
+    const span = document.createElement("span");
+    span.className = "rankimg-empty";
+    span.textContent = "no picture";
+    if (old) old.replaceWith(span); else cell.prepend(span);
+    cell.dataset.has = "0";
+    cell.querySelector(".rankimg-del").hidden = true;
+  };
+
+  rankRows.addEventListener("click", async (e) => {
+    const row = e.target.closest(".rankrow");
+    if (!row) return;
+    if (e.target.classList.contains("rankdel")) {
+      row.remove();
+      renumber();
+      return;
+    }
+    if (e.target.classList.contains("rankimg-pick")) {
+      if (roleIdOf(row) === "0") { flash("Pick the rank's role first", false); return; }
+      row.querySelector(".rankimg-file").click();
+      return;
+    }
+    if (e.target.classList.contains("rankimg-del")) {
+      const roleId = roleIdOf(row);
+      if (roleId === "0") return;
+      const res = await fetch(`/api/guild/${guildId}/trials/image/${roleId}`, { method: "DELETE" })
+        .then((r) => r.json()).catch(() => ({ ok: false }));
+      if (res.ok) { showEmpty(imageCell(row)); flash("picture removed ✓", true); }
+      else flash(res.error || "Failed", false);
+    }
   });
+
+  rankRows.addEventListener("change", async (e) => {
+    if (!e.target.classList.contains("rankimg-file")) return;
+    const row = e.target.closest(".rankrow");
+    const roleId = roleIdOf(row);
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";                     // let the same file be picked again
+    if (!file || roleId === "0") return;
+    const body = new FormData();
+    body.append("image", file, file.name);
+    const res = await fetch(`/api/guild/${guildId}/trials/image/${roleId}`,
+                            { method: "POST", body: body })
+      .then((r) => r.json()).catch(() => ({ ok: false, error: "Upload failed" }));
+    if (res.ok) { showPicture(imageCell(row), res.url); flash("picture saved ✓", true); }
+    else flash(res.error || "Failed", false);
+  });
+
+  const addRank = () => {
+    const row = document.createElement("div");
+    row.className = "rankrow";
+    const main = document.createElement("div");
+    main.className = "rankmain";
+
+    const index = document.createElement("span");
+    index.className = "rungindex";
+
+    // Built with DOM calls rather than markup: role names are arbitrary text.
+    const pick = document.createElement("div");
+    pick.className = "rolepick";
+    pick.dataset.key = "rank";
+    const text = document.createElement("input");
+    text.className = "rolepick-text";
+    text.placeholder = "Type a role name…";
+    text.autocomplete = "off";
+    text.spellcheck = false;
+    const hiddenId = document.createElement("input");
+    hiddenId.type = "hidden";
+    hiddenId.className = "rolepick-id";
+    hiddenId.value = "0";
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "rolepick-clear";
+    clearBtn.title = "Clear";
+    clearBtn.textContent = "×";
+    const list = document.createElement("div");
+    list.className = "rolepick-list";
+    list.hidden = true;
+    pick.append(text, hiddenId, clearBtn, list);
+
+    const at = document.createElement("span");
+    at.className = "rungmid";
+    at.textContent = "at";
+    const min = document.createElement("input");
+    min.type = "number";
+    min.className = "rankmin";
+    min.placeholder = "0";
+    const pts = document.createElement("span");
+    pts.className = "rungmid";
+    pts.textContent = "points";
+
+    const cell = document.createElement("div");
+    cell.className = "rankimg";
+    cell.dataset.has = "0";
+    const empty = document.createElement("span");
+    empty.className = "rankimg-empty";
+    empty.textContent = "no picture";
+    const file = document.createElement("input");
+    file.type = "file";
+    file.className = "rankimg-file";
+    file.accept = "image/png,image/jpeg,image/webp,image/gif";
+    file.hidden = true;
+    const pickBtn = document.createElement("button");
+    pickBtn.type = "button";
+    pickBtn.className = "ghost rankimg-pick";
+    pickBtn.textContent = "Picture…";
+    const delImg = document.createElement("button");
+    delImg.type = "button";
+    delImg.className = "ghost rankimg-del";
+    delImg.textContent = "Remove";
+    delImg.hidden = true;
+    cell.append(empty, file, pickBtn, delImg);
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "ghost rankdel";
+    del.title = "Remove this rank";
+    del.textContent = "×";
+
+    main.append(index, pick, at, min, pts, cell, del);
+    const desc = document.createElement("textarea");
+    desc.className = "rankdesc";
+    desc.rows = 2;
+    desc.maxLength = 400;
+    desc.placeholder = "Optional — shown on the /rank card for this rank";
+    row.append(main, desc);
+    rankRows.appendChild(row);
+    bindRolePickers(row, roles);
+    renumber();
+  };
+
+  const addButton = document.getElementById("addrank");
+  if (addButton) addButton.addEventListener("click", addRank);
+
+  page.addEventListener("rolechange", (e) => {
+    const row = e.target.closest(".rankrow");
+    if (row) row.classList.toggle("mapped", roleIdOf(row) !== "0");
+  });
+
+  // Read the ladder back out for save / preview / push.
+  window.readRanks = () => Array.from(rankRows.querySelectorAll(".rankrow")).map((row) => {
+    const roleId = roleIdOf(row);
+    if (roleId === "0") return null;     // a row with no role picked yet
+    return { role_id: roleId,
+             min_points: Number(row.querySelector(".rankmin").value || 0),
+             description: row.querySelector(".rankdesc").value.trim() };
+  }).filter(Boolean);
 }
+if (!window.readRanks) window.readRanks = () => [];
 
 // --- Trial ranking: mapping which roles belong to which trial ---------------
 const _trialMap = document.getElementById("trialmap");
@@ -1169,7 +1377,7 @@ if (_trialMap) {
   };
 
   page.querySelectorAll(".rolepoints").forEach((i) => watch(i, ".scorerow"));
-  page.querySelectorAll(".rankmin").forEach((i) => watch(i, ".ladderrow"));
+  page.querySelectorAll(".rankmin").forEach((i) => watch(i, ".rankrow"));
 
   // Once the weights are live, the current values become the new baseline.
   page.addEventListener("trialspushed", () => {

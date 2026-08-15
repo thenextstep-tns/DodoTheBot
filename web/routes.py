@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime
 import functools
 import html
+import io
 import os
 import secrets
 from functools import wraps
@@ -1143,22 +1144,52 @@ def _role_picker(guild, *, key: str, selected_id: int = 0, placeholder: str = "T
     )
 
 
-def _ladder_rows(guild, config: dict) -> str:
-    """The seven rungs, worst to best. Each maps to a role and a threshold;
-    leave the role unset to skip a rung entirely."""
+def _rank_image_cell(guild_id: int, role_id: int, *, has_image: bool) -> str:
+    """Upload / preview / remove for one rung's badge.
+
+    The picture is optional everywhere it's used: no upload simply means the
+    /rank card carries no image, not a broken one.
+    """
+    preview = (
+        f'<img class="rankimg-preview" alt="" '
+        f'src="/guild/{guild_id}/trials/image/{role_id}.png?v={_ASSET_VER}">'
+        if has_image and role_id else '<span class="rankimg-empty">no picture</span>'
+    )
+    return (
+        f'<div class="rankimg" data-has="{1 if has_image and role_id else 0}">'
+        f'{preview}'
+        f'<input type="file" class="rankimg-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>'
+        f'<button type="button" class="ghost rankimg-pick">Picture…</button>'
+        f'<button type="button" class="ghost rankimg-del"'
+        f'{"" if has_image and role_id else " hidden"}>Remove</button>'
+        f'</div>'
+    )
+
+
+def _rank_rows(bot, guild, config: dict) -> str:
+    """One row per rung: a role, a threshold, a description and a badge.
+
+    There is no fixed ladder — a server adds as many rungs as it wants and calls
+    them whatever its roles are called. Rows render cheapest-first because that
+    is the only ordering the ranks have.
+    """
+    with_images = bot.trial_ranks.image_role_ids(guild.id)
     rows = ""
-    for index, rung in enumerate(trial_ranks.ladder_rows(config)):
-        mapped = bool(rung["role_id"])
+    for index, rung in enumerate(trial_ranks.rank_rows(config, guild)):
         rows += f"""
-    <div class="ladderrow{" mapped" if mapped else ""}" data-tier="{html.escape(rung["tier"])}">
-      <span class="rungindex">{index + 1}</span>
-      <span class="rungname">{html.escape(rung["tier"])}</span>
-      <span class="rungmid">gives</span>
-      {_role_picker(guild, key=rung["tier"], selected_id=rung["role_id"])}
-      <span class="rungmid">at</span>
-      <input type="number" class="rankmin" data-tier="{html.escape(rung["tier"])}"
-        value="{rung["min_points"] if rung["min_points"] is not None else ""}" placeholder="0">
-      <span class="rungmid">points</span>
+    <div class="rankrow mapped" data-index="{index}">
+      <div class="rankmain">
+        <span class="rungindex">{index + 1}</span>
+        {_role_picker(guild, key="rank", selected_id=rung["role_id"])}
+        <span class="rungmid">at</span>
+        <input type="number" class="rankmin" value="{rung["min_points"]}" placeholder="0">
+        <span class="rungmid">points</span>
+        {_rank_image_cell(guild.id, rung["role_id"], has_image=rung["role_id"] in with_images)}
+        <button type="button" class="ghost rankdel" title="Remove this rank">×</button>
+      </div>
+      <textarea class="rankdesc" rows="2" maxlength="{trial_ranks.MAX_DESCRIPTION}"
+        placeholder="Optional — shown on the /rank card for this rank"
+        >{html.escape(rung["description"])}</textarea>
     </div>"""
     return rows
 
@@ -1231,6 +1262,116 @@ def _trial_map_html(guild, config: dict) -> str:
     <div id="trialmap">{_trial_map_rows(guild, trials)}</div>"""
 
 
+_STATE_LABELS = {
+    trial_ranks.STATE_ENROLLED: "✅ on the new system",
+    trial_ranks.STATE_READ: "📖 read the explanation",
+    trial_ranks.STATE_DISMISSED: "💤 let it time out",
+    trial_ranks.STATE_PROMPTED: "❓ asked, no answer yet",
+}
+
+
+def _conversion_stats(bot, guild, config: dict) -> dict:
+    """The funnel: who's converted, who read it, who walked away, who's left.
+
+    Counted off the timestamps rather than the current state, so "23 people read
+    how it works" stays true after those 23 go on to enrol.
+    """
+    roster = bot.trial_ranks.roster(guild.id)
+    known = {int(row["user_id"]) for row in roster}
+    enrolled = [row for row in roster if row.get("state") == trial_ranks.STATE_ENROLLED]
+    enrolled_ids = {int(row["user_id"]) for row in enrolled}
+    # "Still to change" is only meaningful for people the system would rank at
+    # all — someone with no clears isn't waiting on anything.
+    scoring = {int(role_id) for role_id in (config.get("points") or {})}
+    candidates = [
+        member for member in guild.members
+        if not member.bot and scoring & {role.id for role in member.roles}
+    ]
+    return {
+        "roster": roster,
+        "enrolled": len(enrolled),
+        "read": sum(1 for row in roster if row.get("read_at")),
+        "dismissed": sum(1 for row in roster
+                         if row.get("dismissed_at") and int(row["user_id"]) not in enrolled_ids),
+        "waiting": sum(1 for row in roster
+                       if int(row["user_id"]) not in enrolled_ids
+                       and not row.get("dismissed_at") and row.get("prompted_at")),
+        "untouched": sum(1 for member in candidates if member.id not in known),
+        "candidates": len(candidates),
+    }
+
+
+def _pilot_html(bot, guild, config: dict) -> str:
+    """The rollout board: who is automated, and how the ask is going."""
+    stats = _conversion_stats(bot, guild, config)
+    rows = ""
+    for entry in stats["roster"]:
+        member = guild.get_member(int(entry["user_id"]))
+        name = member.display_name if member else (entry.get("name") or str(entry["user_id"]))
+        tag = f"@{member.name}" if member else "left the server"
+        when = entry.get("at")
+        stamp = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else "—"
+        state = entry.get("state") or ""
+        rows += (
+            f'<tr data-user="{int(entry["user_id"])}">'
+            f'<td>{html.escape(name)}<div class="muted small">{html.escape(tag)}</div></td>'
+            f'<td>{html.escape(_STATE_LABELS.get(state, state))}</td>'
+            f'<td class="muted small">{html.escape(entry.get("source") or "—")}</td>'
+            f'<td class="muted small">{stamp}</td>'
+            f'<td><button class="ghost pilotdel" data-user="{int(entry["user_id"])}">'
+            f'Take off</button></td></tr>'
+        )
+    rows = rows or '<tr><td colspan="5" class="muted">Nobody yet.</td></tr>'
+
+    announce_id = int(config.get("announce_channel_id") or 0)
+    if not announce_id:
+        # Nothing chosen yet: start on the admin channel rather than "— none —",
+        # since a first announcement wants a quiet room, not the whole server.
+        try:
+            announce_id = int(bot.guild_config.get(guild.id, "ADMIN") or 0)
+        except Exception:  # noqa: BLE001 - a missing setting is not an error here
+            announce_id = 0
+    posted = int(config.get("announce_message_id") or 0)
+    where = guild.get_channel(int(config.get("announce_channel_id") or 0))
+    posted_line = (
+        f"Currently posted in #{html.escape(where.name)}."
+        if where is not None and posted else "Not posted anywhere yet."
+    )
+    return f"""
+    <div class="explain">
+      <p><b>Nobody is ranked automatically until they opt in.</b> Turning the feature on
+      above changes nothing by itself: the hourly sweep and the live listener both skip
+      anyone who isn't on this list. Add a few people here to try it safely.</p>
+      <p>Enrolling someone does the whole switch-over at once — it takes off the clear roles
+      a better clear has replaced, adds up their points, gives them the rank those points
+      earn, and starts watching their roles from then on. Everything is logged to your log
+      channel.</p>
+    </div>
+    <div class="pilotstats">
+      <span class="pilotstat"><b>{stats["enrolled"]}</b> converted</span>
+      <span class="pilotstat"><b>{stats["read"]}</b> read how it works</span>
+      <span class="pilotstat"><b>{stats["dismissed"]}</b> let it time out</span>
+      <span class="pilotstat"><b>{stats["waiting"]}</b> asked, no answer</span>
+      <span class="pilotstat"><b>{stats["untouched"]}</b> still to change</span>
+      <span class="muted small">of {stats["candidates"]} member(s) holding a scoring role</span>
+    </div>
+    <div class="pilotadd">
+      <input id="pilottag" placeholder="Discord user tag — e.g. nikladushkin" autocomplete="off">
+      <button id="pilotenrol">Turn trial ranks on for this user</button>
+      <span class="muted small">Exact tag only, not a nickname — this edits their roles.</span>
+    </div>
+    <table class="stats"><thead><tr><th>Who</th><th>Stage</th><th>How</th><th>When</th><th></th></tr></thead>
+      <tbody id="pilotrows">{rows}</tbody></table>
+
+    <div class="announcebar">
+      <div><b>Announcement</b>
+        <div class="muted small">Posts the pinned message with the
+        "Check my rank (only I will see)" button. {posted_line}</div></div>
+      <select id="announcechannel">{_channel_options(guild, announce_id)}</select>
+      <button id="announcepost" class="ghost">Post / update announcement</button>
+    </div>"""
+
+
 def _trials_html(bot, guild, scope: str) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
@@ -1241,8 +1382,10 @@ def _trials_html(bot, guild, scope: str) -> str:
     cog = bot.get_cog("trial_ranks")
     last = (cog.last_run.get(guild.id) if cog else None) or {}
     last_line = (
-        f"Last run: {last.get('ranked', 0)} ranked of {last.get('members', 0)} members, "
-        f"{last.get('granted', 0)} rank(s) granted, {last.get('removed', 0)} replaced"
+        f"Last run: {last.get('ranked', 0)} ranked of {last.get('members', 0)} enrolled "
+        f"member(s), {last.get('granted', 0)} rank(s) granted, "
+        f"{last.get('removed', 0)} replaced"
+        + (f" — skipped ({last['skipped']})" if last.get("skipped") else "")
         if last else "Not run yet this session."
     )
     total_possible = sum(int(v) for v in points.values()) if points else 0
@@ -1255,7 +1398,8 @@ def _trials_html(bot, guild, scope: str) -> str:
   <h1>Trial ranking</h1>
   <p class="muted">Clears and achievements are worth points; reaching a threshold grants the rank
   role. Sections are read from your divider roles, so a new trial role shows up here by itself.
-  Ranks update the moment someone gets a clear role, and are re-checked hourly.</p>
+  Ranks update the moment someone gets a clear role, and are re-checked hourly — but only for the
+  people who have opted in, listed under <b>Who it's turned on for</b>.</p>
   <div class="trialbar">
     <label class="switch"><input type="checkbox" id="trialsenabled"
       {"checked" if config.get("enabled") else ""}> enabled</label>
@@ -1281,18 +1425,26 @@ def _trials_html(bot, guild, scope: str) -> str:
   {'<p class="muted small">' + str(len(suggested)) + ' role(s) pre-filled with suggested values — review, then Push to live to store them.</p>' if suggested else ''}
   <p class="muted small">{html.escape(last_line)}</p>
 
-  <details class="group" open><summary>Ranks <span class="muted">· Casual is the lowest, Myth the highest</span></summary>
+  <details class="group" open><summary>Ranks
+    <span class="muted">· your roles, in the order they cost</span></summary>
     <div class="trialsection">
       <div class="explain">
         <p>Points come from the <b>Clears</b> and <b>Achievements</b> below. When someone's total
         reaches a rank's requirement, the bot gives them that rank's role and takes away the previous
         one, so everyone shows only their highest rank.</p>
-        <p>For each rank, pick the role it should give and how many points it takes to get there.
-        <b>Leave a rank empty to skip it</b> — you can use three ranks instead of all seven. The
-        requirement has to go up as you move down the list.</p>
+        <p><b>A rank is just a role and a number.</b> Add as many as you want, name them by naming
+        the roles — rename the role and the rank is renamed everywhere, including the /rank card and
+        the chart. They sort themselves by the points they need, so the cheapest is the lowest rank.</p>
+        <p>The description and the picture are optional and only show up on the <code>/rank</code>
+        card. No picture simply means no picture — nothing breaks.</p>
       </div>
-      <div class="ladder">{_ladder_rows(guild, config)}</div>
+      <div class="ladder" id="rankrows">{_rank_rows(bot, guild, config)}</div>
+      <div class="trialactions"><button class="ghost" id="addrank">+ Add a rank</button></div>
     </div></details>
+
+  <details class="group" open><summary>Who it's turned on for
+    <span class="muted">· the rollout, one person at a time</span></summary>
+    <div class="trialsection">{_pilot_html(bot, guild, config)}</div></details>
 
   <details class="group" open><summary>Clears <span class="muted">({len(grouped["clears"])} roles)</span></summary>
     <div class="trialsection">
@@ -1708,6 +1860,83 @@ async def guild_trials_image(request: web.Request):
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
+async def guild_rank_image(request: web.Request):
+    """Serve one rank's badge for the panel's preview (behind the panel's auth)."""
+    bot, guild = request.app["bot"], request["guild"]
+    try:
+        role_id = int(request.match_info["role_id"])
+    except (TypeError, ValueError):
+        return web.Response(status=404, text="No such rank.", content_type="text/plain")
+    picture = bot.trial_ranks.image(guild.id, role_id)
+    if not picture or not picture.get("data"):
+        return web.Response(status=404, text="No picture.", content_type="text/plain")
+    return web.Response(body=bytes(picture["data"]),
+                        content_type=picture.get("content_type") or "image/png",
+                        headers={"Cache-Control": "private, max-age=60"})
+
+
+# What a badge is allowed to be. Pillow decides, not the filename or the
+# browser's content type — both are supplied by whoever is uploading.
+_IMAGE_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg",
+                  "WEBP": "image/webp", "GIF": "image/gif"}
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def api_guild_rank_image(request: web.Request):
+    """Upload (POST) or clear (DELETE) the badge for one rank role."""
+    bot, guild = request.app["bot"], request["guild"]
+    try:
+        role_id = int(request.match_info["role_id"])
+    except (TypeError, ValueError):
+        return _bad("That isn't a role.")
+    if guild.get_role(role_id) is None:
+        return _bad("That role isn't in this server.")
+
+    if request.method == "DELETE":
+        bot.trial_ranks.clear_image(guild.id, role_id)
+        await _record_change(request, audit_log.KIND_TRIAL, f"rank picture {role_id}",
+                             "set", None, "Rank picture removed")
+        return web.json_response({"ok": True})
+
+    reader = await request.multipart()
+    field = await reader.next()
+    while field is not None and field.name != "image":
+        field = await reader.next()
+    if field is None:
+        return _bad("No image was sent.")
+    data = b""
+    while True:
+        chunk = await field.read_chunk()
+        if not chunk:
+            break
+        data += chunk
+        if len(data) > trial_ranks.MAX_IMAGE_BYTES:
+            return _bad(f"Keep the picture under "
+                        f"{trial_ranks.MAX_IMAGE_BYTES // 1024} KB — it's a small badge.")
+    if not data:
+        return _bad("That file was empty.")
+    # Decode it before storing it: this ends up attached to a Discord message,
+    # so "the browser said it was a PNG" is not good enough.
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as probe:
+            probe.verify()
+            image_format = probe.format
+    except Exception:  # noqa: BLE001 - any failure means it isn't an image
+        return _bad("That doesn't look like an image file.")
+    content_type = _IMAGE_FORMATS.get(image_format or "")
+    if content_type is None:
+        return _bad("Use a PNG, JPEG, WEBP or GIF.")
+
+    bot.trial_ranks.set_image(guild.id, role_id, data, content_type)
+    await _record_change(request, audit_log.KIND_TRIAL, f"rank picture {role_id}",
+                         None, f"{len(data) // 1024} KB {image_format}",
+                         "Rank picture uploaded")
+    return web.json_response({"ok": True, "url": f"/guild/{guild.id}/trials/image/{role_id}.png"})
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
 async def api_guild_trials(request: web.Request):
     """Save the trial-ranking setup, or recalculate now.
 
@@ -1769,6 +1998,70 @@ async def api_guild_trials(request: web.Request):
             "ok": True, "rows": rows[:500], "total": len(rows),
             "moving": sum(1 for row in rows if row["changed"]),
         })
+
+    # ---- the rollout: who the automation is allowed to touch ----
+    if action in ("enrol", "unenrol", "announce"):
+        cog = bot.get_cog("trial_ranks")
+        if cog is None:
+            return _bad("The trial_ranks cog isn't loaded.")
+
+        if action == "enrol":
+            tag = str(data.get("tag") or "").strip()
+            if not tag:
+                return _bad("Give a Discord user tag.")
+            member = trial_ranks.find_by_tag(guild, tag)
+            if member is None:
+                return _bad(f"No member with the tag '{tag}' — it has to be the exact "
+                            "account tag, not a nickname.")
+            if bot.trial_ranks.is_enrolled(guild.id, member.id):
+                return _bad(f"{member.display_name} is already on the new system.")
+            actor = guild.get_member(request.get("uid")) if request.get("uid") else None
+            outcome = await cog.enrol(member, source="panel", actor=actor)
+            await _record_change(
+                request, audit_log.KIND_TRIAL, f"enrol {member.name}", None, "enrolled",
+                f"Trial ranks turned on for **{member.display_name}**")
+            return web.json_response({
+                "ok": True,
+                "member": {"id": str(member.id), "name": member.display_name,
+                           "tag": member.name},
+                "score": outcome["score"], "rank": outcome["rank_name"],
+                "cleared": outcome["cleared"],
+            })
+
+        if action == "unenrol":
+            try:
+                user_id = int(data.get("user_id") or 0)
+            except (TypeError, ValueError):
+                return _bad("That isn't a user id.")
+            if not user_id:
+                return _bad("Which user?")
+            bot.trial_ranks.forget(guild.id, user_id)
+            member = guild.get_member(user_id)
+            await _record_change(
+                request, audit_log.KIND_TRIAL, f"unenrol {user_id}", "enrolled", None,
+                f"Trial ranks turned off for **{member.display_name if member else user_id}**")
+            return web.json_response({"ok": True})
+
+        # ---- announce: posts into a live channel, so it only ever happens here ----
+        try:
+            channel_id = int(data.get("channel_id") or 0)
+        except (TypeError, ValueError):
+            return _bad("That isn't a channel id.")
+        channel = guild.get_channel(channel_id)
+        if channel is None or not isinstance(channel, discord.TextChannel):
+            return _bad("Pick a text channel to post the announcement in.")
+        permissions = channel.permissions_for(guild.me)
+        if not (permissions.send_messages and permissions.view_channel):
+            return _bad(f"I can't post in #{channel.name}.")
+        try:
+            message = await cog.post_announcement(guild, channel)
+        except discord.HTTPException as error:
+            return _bad(f"Discord refused the post: {error}")
+        await _record_change(
+            request, audit_log.KIND_TRIAL, "announcement", None, f"#{channel.name}",
+            f"Trial ranks announcement posted in **#{channel.name}**")
+        return web.json_response({"ok": True, "message_id": str(message.id),
+                                  "channel": channel.name})
 
     if action in ("run", "push"):
         cog = bot.get_cog("trial_ranks")
@@ -2439,6 +2732,9 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/trials", guild_trials_page),
             web.post("/api/guild/{gid}/trials", api_guild_trials),
             web.get("/guild/{gid}/trials.png", guild_trials_image),
+            web.get("/guild/{gid}/trials/image/{role_id}.png", guild_rank_image),
+            web.post("/api/guild/{gid}/trials/image/{role_id}", api_guild_rank_image),
+            web.delete("/api/guild/{gid}/trials/image/{role_id}", api_guild_rank_image),
             web.post("/api/guild/{gid}/tribe", api_guild_tribe),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),

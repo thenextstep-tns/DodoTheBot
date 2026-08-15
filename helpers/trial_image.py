@@ -101,15 +101,18 @@ def build(guild, config: dict) -> bytes:
     rank_font = _font(24, bold=True)
     small_font = _font(19)
 
-    # --- measure first, so the canvas is exactly tall enough ---
+    # --- measure first, then draw on a canvas with room to spare ---
+    # The canvas is deliberately over-tall and cropped to what was actually
+    # drawn at the end: an estimate that drifts from the drawing code by a few
+    # pixels per block used to land the footer on top of the last rank.
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     inner = WIDTH - MARGIN * 2
     layout, height = [], MARGIN + 60 + 34
     for value in sorted(bands, reverse=True):
         rows = _wrap(probe, bands[value], chip_font, inner - 150)
         layout.append((value, rows))
-        height += max(48, len(rows) * 42 + 18)
-    height += 40 + (len(ranks) * 44 + 70 if ranks else 0) + 70
+        height += max(48, len(rows) * 42 + 18) + 10
+    height += 62 + len(ranks) * 44 + 120
 
     image = Image.new("RGB", (WIDTH, height), CANVAS)
     draw = ImageDraw.Draw(image)
@@ -148,8 +151,7 @@ def build(guild, config: dict) -> bytes:
         draw.text((MARGIN, y), "Ranks", font=band_font, fill=INK)
         y += 40
         for index, rank in enumerate(ranks):
-            role = guild.get_role(rank["role_id"])
-            name = role.name if role else rank.get("name", "—")
+            name = _display_name(trial_ranks.rank_name(rank, guild))
             nxt = ranks[index + 1]["min_points"] if index + 1 < len(ranks) else None
             span = f"{rank['min_points']}+" if nxt is None else f"{rank['min_points']}–{nxt - 1}"
             draw.rounded_rectangle([MARGIN, y, WIDTH - MARGIN, y + 36], radius=10,
@@ -158,11 +160,16 @@ def build(guild, config: dict) -> bytes:
             draw.text((MARGIN + 320, y + 9), f"{span} points", font=small_font, fill=BODY)
             y += 44
 
+    # The footer follows the content instead of sitting at a precomputed offset,
+    # so it can never land on the last row of whatever came before it.
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    draw.text((MARGIN, height - 44),
+    y += 26
+    draw.text((MARGIN, y),
               f"Add up your best clear per trial. Updated {stamp}.",
               font=small_font, fill=MUTED)
+    y += 28
 
+    image = image.crop((0, 0, WIDTH, min(height, y + MARGIN)))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()

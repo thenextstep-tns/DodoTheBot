@@ -120,7 +120,11 @@ class DodoBot(commands.Bot):
         # Role rules ("tribes") built on the panel; applied hourly by cogs/tribes.py.
         self.tribes = TribeManager(config_py.tribes, config_py.tribe_members)
         # Trial ranking: clears/achievements -> points -> rank role.
-        self.trial_ranks = TrialRankManager(config_py.trial_ranks, config_py.trial_standings)
+        self.trial_ranks = TrialRankManager(
+            config_py.trial_ranks, config_py.trial_standings,
+            enrollment_collection=config_py.trial_enrollment,
+            image_collection=config_py.trial_rank_images,
+        )
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
         )

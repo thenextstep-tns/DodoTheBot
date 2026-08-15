@@ -25,6 +25,11 @@ hierarchy order), every role belongs to the last divider seen, so:
 That means adding a new trial to the server puts it in front of you here
 automatically, flagged as "no points set", instead of needing to be registered
 by hand.
+
+**The ladder is whatever roles you point at it.** A rung is a role, a points
+threshold, an optional description and an optional picture — no fixed names, no
+fixed number of rungs. Rungs are ordered by the points they require, so "higher"
+means "costs more" and a server can call its ranks anything it likes.
 """
 
 from __future__ import annotations
@@ -41,12 +46,10 @@ _SECTION_WORDS = (
     ("clears", ("CLEAR",)),
     ("groups", ("GROUP",)),
 )
-# The ladder is fixed and ordered — worst to best. Ranks aren't whatever roles
-# happen to sit under a divider (that section also holds Tank/Healer/DD and
-# other non-rank roles); they're these seven rungs, each mapped to a role of
-# your choosing. Order is what lets "keep only the coolest rank" mean anything.
-LADDER = ("Casual", "Raider", "Veteran", "Expert", "Master", "Legend", "Myth")
-LADDER_INDEX = {name: index for index, name in enumerate(LADDER)}
+# A rung's description and picture are for the /rank embed, not for scoring.
+MAX_DESCRIPTION = 400
+# Rank pictures are meant to be small badges, not screenshots.
+MAX_IMAGE_BYTES = 512 * 1024
 
 SCORING_SECTIONS = ("clears", "achievements")
 SECTION_LABELS = {
@@ -356,16 +359,130 @@ def _counted(role_ids: Iterable[int], points: dict, *, trials: list[dict] = None
     return rows
 
 
-def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
-    """The best rung this score reaches — by ladder position, not by threshold.
+def ordered_ranks(ranks: list[dict]) -> list[dict]:
+    """The rungs cheapest-first. Points are the only ordering there is."""
+    return sorted(ranks or (), key=lambda rank: int(rank.get("min_points") or 0))
 
-    Ordering off the ladder rather than the numbers means Myth beats Legend
-    because it *is* higher, not because someone typed a bigger threshold.
-    """
-    reached = [rank for rank in ranks or () if score >= rank["min_points"]]
+
+def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
+    """The best rung this score reaches — the most expensive one paid for."""
+    reached = [rank for rank in ranks or () if score >= int(rank.get("min_points") or 0)]
     if not reached:
         return None
-    return max(reached, key=lambda rank: LADDER_INDEX.get(rank.get("tier"), -1))
+    return max(reached, key=lambda rank: int(rank.get("min_points") or 0))
+
+
+def next_rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
+    """The cheapest rung still out of reach, or ``None`` at the top."""
+    ahead = [rank for rank in ranks or () if score < int(rank.get("min_points") or 0)]
+    if not ahead:
+        return None
+    return min(ahead, key=lambda rank: int(rank.get("min_points") or 0))
+
+
+def progress_for(score: int, ranks: list[dict]) -> dict:
+    """Where a score sits between the rung it holds and the next one.
+
+    ``fraction`` is 1.0 at the top of the ladder — someone who has finished
+    isn't 0% of the way to nothing.
+    """
+    current = rank_for(score, ranks)
+    upcoming = next_rank_for(score, ranks)
+    floor = int((current or {}).get("min_points") or 0)
+    if upcoming is None:
+        return {"current": current, "next": None, "floor": floor, "ceiling": None,
+                "needed": 0, "fraction": 1.0}
+    ceiling = int(upcoming["min_points"])
+    span = max(1, ceiling - floor)
+    return {
+        "current": current,
+        "next": upcoming,
+        "floor": floor,
+        "ceiling": ceiling,
+        "needed": max(0, ceiling - score),
+        "fraction": min(1.0, max(0.0, (score - floor) / span)),
+    }
+
+
+def _held_slot_state(role_ids: Iterable[int], points: dict, trials: list[dict]) -> tuple[dict, dict]:
+    """``(best slot per trial, points of the role filling it)`` for what's held."""
+    mapping = slot_of(trials or [])
+    extra_index = SLOT_INDEX["extra"]
+    best: dict[int, int] = {}
+    value_at: dict[int, int] = {}
+    for role_id in role_ids or ():
+        found = mapping.get(int(role_id))
+        if not found or found[1] == extra_index:
+            continue
+        trial_index, slot_index = found
+        if slot_index >= best.get(trial_index, -1):
+            best[trial_index] = slot_index
+            value_at[trial_index] = int((points or {}).get(str(int(role_id))) or 0)
+    return best, value_at
+
+
+def missing_for_next(guild, role_ids: Iterable[int], points: dict, ranks: list[dict],
+                     *, trials: list[dict] = None, limit: int = 12) -> dict:
+    """What this member could still earn, cheapest first, to reach the next rung.
+
+    Marginal, not nominal: a full hardmode when you already hold the veteran
+    clear is worth the *difference*, because a trial only ever pays once. Roles
+    a stronger clear already implies are left out entirely — telling someone to
+    go and get a clear they've outgrown is worse than saying nothing.
+    """
+    held = {int(role_id) for role_id in role_ids or ()}
+    score = score_for(held, points, trials=trials)
+    state = progress_for(score, ranks)
+    steps: list[dict] = []
+    if state["next"] is not None:
+        mapping = slot_of(trials or [])
+        extra_index = SLOT_INDEX["extra"]
+        best, value_at = _held_slot_state(held, points, trials or [])
+        for role_id, value in (points or {}).items():
+            role_id, value = int(role_id), int(value)
+            if role_id in held:
+                continue
+            role = guild.get_role(role_id) if guild else None
+            if role is None:
+                continue
+            gain, replaces = value, None
+            found = mapping.get(role_id)
+            if found and found[1] != extra_index:
+                trial_index, slot_index = found
+                current_slot = best.get(trial_index)
+                if current_slot is not None:
+                    if slot_index < current_slot:
+                        continue  # already implied by a stronger clear
+                    gain = value - value_at.get(trial_index, 0)
+                    replaces = trial_index
+            if gain <= 0:
+                continue
+            steps.append({"role_id": role_id, "name": role.name, "points": value,
+                          "gain": gain, "upgrade": replaces is not None,
+                          "trial": found[0] if found else None})
+        # Cheapest first, which is also roughly easiest first: the whole point is
+        # to answer "what do I do next", not to list the whole board.
+        steps.sort(key=lambda step: (step["gain"], step["name"].lower()))
+        # One suggestion per trial. Two rungs of the same trial can't both be
+        # earned on top of each other — only the stronger one ever pays — so
+        # listing both would promise points that don't add up.
+        seen_trials, unique = set(), []
+        for step in steps:
+            if step["trial"] is not None:
+                if step["trial"] in seen_trials:
+                    continue
+                seen_trials.add(step["trial"])
+            unique.append(step)
+        running, chosen = 0, []
+        for step in unique:
+            # Keep going a little past the finish line: the cheapest route isn't
+            # always the one they can actually run this week.
+            if running >= state["needed"] and len(chosen) >= 3:
+                break
+            running += step["gain"]
+            chosen.append(step)
+        steps = chosen[:limit]
+    return {**state, "score": score, "steps": steps}
 
 
 def breakdown_for(guild, role_ids: Iterable[int], points: dict, trials: list[dict] = None) -> list[dict]:
@@ -423,6 +540,37 @@ def find_members(guild, names: Iterable[str], *, limit: int = 10) -> list[dict]:
     return out
 
 
+def find_by_tag(guild, tag: str):
+    """Resolve an exact Discord user tag to a member, or ``None``.
+
+    Deliberately stricter than :func:`find_members`: enrolling somebody starts
+    editing their roles, so a near-miss on a display name is not good enough.
+    Only the account's own handle counts — ``name``, the legacy ``name#1234``,
+    or a mention of it — never a nickname, and never a prefix.
+    """
+    query = str(tag or "").strip()
+    if query.startswith("<@") and query.endswith(">"):
+        query = query[2:-1].lstrip("!&")
+    query = query.lstrip("@").strip()
+    if not query:
+        return None
+    if query.isdigit() and len(query) >= 15:
+        return guild.get_member(int(query))
+    lowered = query.lower()
+    for member in guild.members:
+        if member.bot:
+            continue
+        if member.name.lower() == lowered:
+            return member
+        if f"{member.name}#{member.discriminator}".lower() == lowered:
+            return member
+        # Modern accounts report discriminator "0"; "name#0" shouldn't be the
+        # only spelling that fails to match.
+        if member.discriminator == "0" and lowered == f"{member.name.lower()}#0":
+            return member
+    return None
+
+
 def unpriced(guild, points: dict) -> list:
     """Scoring roles with no points set yet — surfaced so nothing is forgotten."""
     priced = {int(role_id) for role_id, value in (points or {}).items()}
@@ -456,75 +604,115 @@ def validate_points(value, *, guild=None) -> dict:
     return out
 
 
-def validate_ranks(value, *, guild=None) -> list[dict]:
-    """``[{tier, role_id, min_points}]`` for the rungs that are actually mapped.
+def rank_name(rank: dict, guild=None) -> str:
+    """What to call a rung: the role's own name, falling back to a stored one.
 
-    A rung with no role is simply unused. Thresholds must climb with the ladder:
-    a Veteran who needs fewer points than a Raider is a setup mistake, not a
-    preference, so it's rejected rather than silently producing a rank nobody
-    can ever hold.
+    The role is the rank, so the server renames a rank by renaming the role and
+    nothing here needs to know the word "Veteran".
+    """
+    role = guild.get_role(int(rank.get("role_id") or 0)) if guild else None
+    return role.name if role is not None else (rank.get("name") or "Unmapped rank")
+
+
+def validate_ranks(value, *, guild=None) -> list[dict]:
+    """``[{role_id, min_points, description}]`` for the rungs actually mapped.
+
+    A rung with no role is simply dropped. Two rungs may not want the same
+    threshold — that would make "which rank does 40 points give" unanswerable —
+    and the list is stored cheapest-first so ordering never depends on the
+    caller. Names are deliberately *not* stored as the source of truth: the role
+    is the rank, so renaming the role renames the rank.
     """
     if value in (None, ""):
         return []
     if not isinstance(value, list):
         raise TrialError("Ranks must be a list.")
+    if len(value) > 40:
+        raise TrialError("Too many ranks.")
     out = []
     for item in value:
         if not isinstance(item, dict):
             raise TrialError("Each rank must be an object.")
-        tier = item.get("tier") or item.get("name")
-        if tier not in LADDER_INDEX:
-            raise TrialError(f"Unknown rank '{tier}'. The ladder is: {', '.join(LADDER)}.")
         if not item.get("role_id"):
-            continue  # rung left unmapped — fine, it just isn't used
+            continue  # a row with no role picked yet isn't a rank
         try:
             role_id = int(item["role_id"])
             min_points = int(item.get("min_points") or 0)
         except (TypeError, ValueError):
-            raise TrialError(f"The threshold for {tier} isn't a whole number.") from None
+            raise TrialError("A rank's threshold isn't a whole number.") from None
+        role = guild.get_role(role_id) if guild is not None else None
+        label = role.name if role is not None else str(role_id)
+        if guild is not None and role is None:
+            raise TrialError("A rank points at a role that isn't in this server.")
         if min_points < 0:
-            raise TrialError(f"{tier} can't have a negative threshold.")
-        if guild is not None and guild.get_role(role_id) is None:
-            raise TrialError(f"The role for {tier} isn't in this server.")
-        out.append({"tier": tier, "name": tier, "role_id": role_id, "min_points": min_points})
+            raise TrialError(f"'{label}' can't have a negative threshold.")
+        description = str(item.get("description") or "").strip()[:MAX_DESCRIPTION]
+        out.append({"role_id": role_id, "min_points": min_points,
+                    "name": label, "description": description})
 
-    seen_tiers = [rank["tier"] for rank in out]
-    if len(set(seen_tiers)) != len(seen_tiers):
-        raise TrialError("The same rank is listed twice.")
     role_ids = [rank["role_id"] for rank in out]
     if len(set(role_ids)) != len(role_ids):
         raise TrialError("Two ranks point at the same role.")
-
-    out.sort(key=lambda rank: LADDER_INDEX[rank["tier"]])
-    previous = None
-    for rank in out:
-        if previous is not None and rank["min_points"] <= previous["min_points"]:
-            raise TrialError(
-                f"{rank['tier']} needs more points than {previous['tier']} "
-                f"({rank['min_points']} is not above {previous['min_points']})."
-            )
-        previous = rank
-    return out
+    thresholds = [rank["min_points"] for rank in out]
+    if len(set(thresholds)) != len(thresholds):
+        duplicate = next(t for t in thresholds if thresholds.count(t) > 1)
+        raise TrialError(f"Two ranks both start at {duplicate} points — "
+                         "give them different thresholds.")
+    return ordered_ranks(out)
 
 
-def ladder_rows(config: dict) -> list[dict]:
-    """Every rung in ladder order, mapped or not — what the panel renders."""
-    by_tier = {rank.get("tier"): rank for rank in config.get("ranks") or []}
+def rank_rows(config: dict, guild=None) -> list[dict]:
+    """The rungs as the panel renders them: cheapest first, names resolved."""
     return [
-        {"tier": tier,
-         "role_id": (by_tier.get(tier) or {}).get("role_id", 0),
-         "min_points": (by_tier.get(tier) or {}).get("min_points")}
-        for tier in LADDER
+        {"role_id": int(rank.get("role_id") or 0),
+         "min_points": int(rank.get("min_points") or 0),
+         "description": rank.get("description") or "",
+         "name": rank_name(rank, guild)}
+        for rank in ordered_ranks(config.get("ranks") or [])
     ]
+
+
+def _migrate_ranks(stored: list) -> list[dict]:
+    """Read rungs saved before the ladder became free-form.
+
+    Old documents carried a ``tier`` out of a fixed seven-name ladder. The role
+    and the threshold were always the real content, so they're kept as-is and
+    the tier is dropped — an existing server keeps working, and its ranks are
+    now called whatever its roles are called.
+    """
+    out = []
+    for rank in stored or []:
+        if not isinstance(rank, dict) or not rank.get("role_id"):
+            continue
+        out.append({
+            "role_id": int(rank["role_id"]),
+            "min_points": int(rank.get("min_points") or 0),
+            # The old tier name is a decent fallback label if the role is gone.
+            "name": rank.get("name") or rank.get("tier") or "",
+            "description": rank.get("description") or "",
+        })
+    return ordered_ranks(out)
+
+
+# Where someone stands with the automated system, for the panel's conversion
+# board. "prompted" is the passive state: they've seen the ask and not answered.
+STATE_ENROLLED = "enrolled"
+STATE_READ = "read"
+STATE_DISMISSED = "dismissed"
+STATE_PROMPTED = "prompted"
 
 
 class TrialRankManager:
     """One trial-ranking setup per guild. ``bot.trial_ranks``."""
 
-    def __init__(self, collection, standings_collection) -> None:
+    def __init__(self, collection, standings_collection, *,
+                 enrollment_collection=None, image_collection=None) -> None:
         self._col = collection
         self._standings = standings_collection
+        self._enrollment = enrollment_collection
+        self._images = image_collection
         self._cache: dict[int, dict] = {}
+        self._enrolled_cache: dict[int, set[int]] = {}
 
     def get(self, guild_id: int) -> dict:
         guild_id = int(guild_id)
@@ -533,20 +721,113 @@ class TrialRankManager:
             self._cache[guild_id] = {
                 "enabled": doc.get("enabled", False),
                 "points": doc.get("points") or {},
-                "ranks": doc.get("ranks") or [],
+                "ranks": _migrate_ranks(doc.get("ranks")),
                 "trials": doc.get("trials") or [],
                 "exclusive": doc.get("exclusive", True),
+                "announce_channel_id": int(doc.get("announce_channel_id") or 0),
+                "announce_message_id": int(doc.get("announce_message_id") or 0),
             }
         return self._cache[guild_id]
 
     def save(self, guild_id: int, data: dict) -> None:
-        fields = {key: data[key]
-                  for key in ("points", "ranks", "trials", "enabled", "exclusive") if key in data}
+        fields = {key: data[key] for key in
+                  ("points", "ranks", "trials", "enabled", "exclusive",
+                   "announce_channel_id", "announce_message_id") if key in data}
         if not fields:
             return
         fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc)
         self._col.update_one({"_id": int(guild_id)}, {"$set": fields}, upsert=True)
         self._cache.pop(int(guild_id), None)
+
+    # ------------------------------------------------------------------ #
+    #  Who the automation is allowed to touch
+    # ------------------------------------------------------------------ #
+    # Nobody is automated until they say so (or an admin enrols them by hand).
+    # That's the whole safety story for the rollout: switching the feature on
+    # cannot rewrite a single role by itself.
+    def enrolled_ids(self, guild_id: int) -> set[int]:
+        guild_id = int(guild_id)
+        if guild_id not in self._enrolled_cache:
+            if self._enrollment is None:
+                self._enrolled_cache[guild_id] = set()
+            else:
+                self._enrolled_cache[guild_id] = {
+                    int(doc["user_id"])
+                    for doc in self._enrollment.find(
+                        {"guild_id": guild_id, "state": STATE_ENROLLED}, {"user_id": 1})
+                }
+        return self._enrolled_cache[guild_id]
+
+    def is_enrolled(self, guild_id: int, user_id: int) -> bool:
+        return int(user_id) in self.enrolled_ids(guild_id)
+
+    def set_state(self, guild_id: int, user_id: int, state: str, *,
+                  name: str = "", source: str = "") -> None:
+        """Record where someone is in the conversion, newest wins.
+
+        Every stage is stamped separately rather than overwritten, so the board
+        can say "23 read the explanation" even after those 23 went on to enrol.
+        """
+        if self._enrollment is None:
+            return
+        now = datetime.datetime.now(datetime.timezone.utc)
+        fields = {"state": state, "at": now}
+        if name:
+            fields["name"] = name
+        if source:
+            fields["source"] = source
+        fields[f"{state}_at"] = now
+        self._enrollment.update_one(
+            {"guild_id": int(guild_id), "user_id": int(user_id)},
+            {"$set": fields, "$setOnInsert": {"first_seen": now}},
+            upsert=True,
+        )
+        self._enrolled_cache.pop(int(guild_id), None)
+
+    def forget(self, guild_id: int, user_id: int) -> None:
+        """Take someone back off the automated system entirely."""
+        if self._enrollment is None:
+            return
+        self._enrollment.delete_one({"guild_id": int(guild_id), "user_id": int(user_id)})
+        self._enrolled_cache.pop(int(guild_id), None)
+
+    def roster(self, guild_id: int, limit: int = 500) -> list[dict]:
+        """Everyone the conversion has touched, whatever stage they reached."""
+        if self._enrollment is None:
+            return []
+        return list(self._enrollment.find({"guild_id": int(guild_id)})
+                    .sort("at", -1).limit(limit))
+
+    # ------------------------------------------------------------------ #
+    #  Rank pictures
+    # ------------------------------------------------------------------ #
+    def set_image(self, guild_id: int, role_id: int, data: bytes, content_type: str) -> None:
+        if self._images is None:
+            return
+        self._images.update_one(
+            {"guild_id": int(guild_id), "role_id": int(role_id)},
+            {"$set": {"data": data, "content_type": content_type,
+                      "at": datetime.datetime.now(datetime.timezone.utc)}},
+            upsert=True,
+        )
+
+    def image(self, guild_id: int, role_id: int) -> Optional[dict]:
+        if self._images is None:
+            return None
+        return self._images.find_one({"guild_id": int(guild_id), "role_id": int(role_id)})
+
+    def image_role_ids(self, guild_id: int) -> set[int]:
+        """Which rungs have a picture — enough to render the panel without
+        pulling every blob out of the database on page load."""
+        if self._images is None:
+            return set()
+        return {int(doc["role_id"]) for doc in
+                self._images.find({"guild_id": int(guild_id)}, {"role_id": 1})}
+
+    def clear_image(self, guild_id: int, role_id: int) -> None:
+        if self._images is None:
+            return
+        self._images.delete_one({"guild_id": int(guild_id), "role_id": int(role_id)})
 
     # ---- standings, for the stats view ----
     def save_standing(self, guild_id: int, user_id: int, name: str, score: int, rank: Optional[str]) -> None:

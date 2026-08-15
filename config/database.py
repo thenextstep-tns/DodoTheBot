@@ -87,4 +87,8 @@ tribe_members = db["TribeMembers"]            # {guild_id, tribe_id, user_id, ra
 # Trial ranking: clears/achievements -> points -> rank role (helpers/trial_ranks.py).
 trial_ranks = db["TrialRanks"]                # {_id: guild_id, points, ranks, enabled}
 trial_standings = db["TrialStandings"]        # {guild_id, user_id, score, rank}
+# Who has opted in to automated ranking, and how far the ask got with everyone
+# else — the automation only ever touches an "enrolled" row.
+trial_enrollment = db["TrialEnrollment"]      # {guild_id, user_id, state, name, source, *_at}
+trial_rank_images = db["TrialRankImages"]     # {guild_id, role_id, data, content_type}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables
