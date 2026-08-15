@@ -604,3 +604,12 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 .slotcell { display: flex; flex-direction: column; gap: 4px; }
 .slotlabel { font-size: 11px; color: var(--color-muted); text-transform: uppercase;
   letter-spacing: .3px; }
+
+/* Unsaved edits in the points grid */
+.scorerow.edited, .ladderrow.edited { outline: 2px solid var(--color-primary);
+  outline-offset: -1px; border-radius: var(--radius-sm); background: rgba(255, 56, 92, .05); }
+.scorerow.edited input, .ladderrow.edited input { border-color: var(--color-primary); }
+.wasvalue { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--color-muted); white-space: nowrap; }
+.wasvalue.up { color: var(--color-success); }
+.wasvalue.down { color: var(--color-error); }

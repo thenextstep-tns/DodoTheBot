@@ -911,7 +911,10 @@ if (_sandbox) {
     const res = await ask({ action: "push", ...draft() }, e.target);
     if (res) {
       const s = res.summary || {};
-      flash(`live ✓ ${s.ranked || 0} ranked, ${s.granted || 0} granted, ${s.removed || 0} replaced`, true);
+      flash(`live ✓ ${s.ranked || 0} ranked, ${s.granted || 0} granted, ${s.removed || 0} replaced`
+            + (s.cleared ? `, ${s.cleared} superseded role(s) removed` : ""), true);
+      document.querySelector(".trialspage")
+        .dispatchEvent(new CustomEvent("trialspushed", { bubbles: true }));
       setTimeout(() => location.reload(), 1200);
     }
   });
@@ -1099,3 +1102,57 @@ if (_trialMap) {
     return { name: row.querySelector(".trialname").value.trim(), slots: slots };
   }).filter((trial) => Object.keys(trial.slots).length);
 }
+
+// --- Edited-value feedback --------------------------------------------------
+// A points grid gives almost no sign that a number changed: same box, same
+// place, new digits. Every scoring input remembers what it was loaded with and
+// shows the difference until it's pushed, so an edit is visible without having
+// to remember what you typed.
+(function markEdits() {
+  const page = document.querySelector(".trialspage");
+  if (!page) return;
+
+  const badge = (row, from, to) => {
+    let tag = row.querySelector(".wasvalue");
+    if (!tag) {
+      tag = document.createElement("span");
+      tag.className = "wasvalue";
+      const anchor = row.querySelector(".rolename");
+      if (anchor) anchor.insertAdjacentElement("afterend", tag);
+      else row.appendChild(tag);
+    }
+    const arrow = Number(to) > Number(from) ? "↑" : "↓";
+    tag.textContent = `was ${from === "" ? "—" : from} ${arrow} ${to === "" ? "—" : to}`;
+    tag.classList.toggle("up", Number(to) > Number(from));
+    tag.classList.toggle("down", Number(to) < Number(from));
+  };
+
+  const watch = (input, rowSelector) => {
+    const row = input.closest(rowSelector);
+    if (!row) return;
+    // The value the page was rendered with — the thing "changed" is measured against.
+    const original = input.dataset.original !== undefined ? input.dataset.original : input.value;
+    input.dataset.original = original;
+    const update = () => {
+      const changed = String(input.value) !== String(original);
+      row.classList.toggle("edited", changed);
+      const tag = row.querySelector(".wasvalue");
+      if (changed) badge(row, original, input.value);
+      else if (tag) tag.remove();
+    };
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+  };
+
+  page.querySelectorAll(".rolepoints").forEach((i) => watch(i, ".scorerow"));
+  page.querySelectorAll(".rankmin").forEach((i) => watch(i, ".ladderrow"));
+
+  // Once the weights are live, the current values become the new baseline.
+  page.addEventListener("trialspushed", () => {
+    page.querySelectorAll(".rolepoints, .rankmin").forEach((input) => {
+      input.dataset.original = input.value;
+    });
+    page.querySelectorAll(".edited").forEach((row) => row.classList.remove("edited"));
+    page.querySelectorAll(".wasvalue").forEach((tag) => tag.remove());
+  });
+})();
