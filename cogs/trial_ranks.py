@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import math
 
 import discord
 from discord.ext import commands, tasks
@@ -194,7 +195,45 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     def __init__(self, bot):
         self.bot = bot
         self.last_run: dict[int, dict] = {}
+        # When each distinct problem was last reported, per guild. A role
+        # hierarchy that blocks one member blocks all of them, and the automatic
+        # paths run constantly — without this the log channel would get the same
+        # complaint every time anybody touched a role.
+        self._reported: dict[int, dict[str, float]] = {}
         self.sweep.start()
+
+    async def report_problems(self, guild, problems: list[str], *, context: str) -> None:
+        """Log role-edit failures from the automatic paths, at most hourly each.
+
+        The automation failing quietly is the thing that makes it untrustworthy:
+        a card shows a rank nobody was given and nothing anywhere says why. So
+        these are reported — just not forty times an hour.
+        """
+        if not problems:
+            return
+        now = asyncio.get_running_loop().time()
+        seen = self._reported.setdefault(int(guild.id), {})
+        fresh = [p for p in problems if now - seen.get(p, -math.inf) > 3600]
+        if not fresh:
+            return
+        for problem in fresh:
+            seen[problem] = now
+        await self.log_event(
+            guild,
+            f"⚠️ **Ranks could not be applied** ({context}):\n"
+            + "\n".join(f"• {problem}" for problem in fresh),
+            title="Trial ranks — needs attention")
+
+    def runs_here(self, guild) -> bool:
+        """Whether the automation should act in this guild at all.
+
+        Both the feature's own switch and the cog's per-guild enabled state: the
+        panel offers a toggle for this cog, and a listener that ignores it makes
+        that toggle a lie.
+        """
+        if not self.bot.trial_ranks.get(guild.id).get("enabled"):
+            return False
+        return self.bot.visibility.cog_enabled(guild.id, "trial_ranks")
 
     async def cog_load(self) -> None:
         # Re-attach the pinned message's button to this process.
@@ -763,9 +802,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     async def on_member_update(self, before, after) -> None:
         if before.roles == after.roles or after.bot:
             return
-        config = self.bot.trial_ranks.get(after.guild.id)
-        if not config.get("enabled"):
+        if not self.runs_here(after.guild):
             return
+        config = self.bot.trial_ranks.get(after.guild.id)
         # Opting in is what turns the listener on for a person.
         if not self.bot.trial_ranks.is_enrolled(after.guild.id, after.id):
             return
@@ -795,15 +834,28 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                     f"Rank: **{previous}** → **{outcome['rank_name'] or 'none'}**"
                     + (f"\nRemoved superseded: {', '.join(outcome['cleared_names'][:20])}"
                        if outcome["cleared_names"] else ""))
+            # A recalculation that changed nothing *because it was refused* is
+            # not a quiet success, and this is the path that runs unattended.
+            await self.report_problems(after.guild, outcome["errors"],
+                                       context=f"{after.display_name} gained or lost a clear role")
         except Exception as error:  # noqa: BLE001 - never break the gateway
             self.bot.logger.error(f"Trial rank update failed for {after.id}: {error}")
 
     @tasks.loop(hours=1)
     async def sweep(self) -> None:
+        """The safety net: whatever the listener missed, this catches within the hour.
+
+        It exists because gateway events can be missed — a restart, a dropped
+        connection, a role changed while the bot was down — and a ranking system
+        that drifts silently is worse than one that isn't automatic at all.
+        """
         for guild in list(self.bot.guilds):
             try:
-                if self.bot.trial_ranks.get(guild.id).get("enabled"):
-                    await self.run_for_guild(guild)
+                if not self.runs_here(guild):
+                    continue
+                summary = await self.run_for_guild(guild)
+                await self.report_problems(guild, summary.get("errors") or [],
+                                           context="hourly re-check")
             except Exception as error:  # noqa: BLE001
                 self.bot.logger.error(f"Trial rank sweep failed for {guild.id}: {error}")
 
