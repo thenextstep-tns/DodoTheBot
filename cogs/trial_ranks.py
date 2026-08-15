@@ -122,7 +122,7 @@ class InterestView(discord.ui.View):
         return interaction.user.id == self.member.id
 
     @discord.ui.button(label="I'd join a prog for one of those 🔥",
-                       style=discord.ButtonStyle.secondary)
+                       style=discord.ButtonStyle.success)
     async def interest(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self.cog.record_interest(interaction, self.member, self.role_ids)
         self.stop()
