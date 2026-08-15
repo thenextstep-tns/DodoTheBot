@@ -32,6 +32,24 @@ from typing import Any, Iterable, Optional
 
 from bson import ObjectId
 
+# A tribe works one of two ways:
+#   condition — you match a rule, you're in (a snapshot of who qualifies)
+#   points    — you accumulate loyalty currency from what you do, and cross
+#               thresholds into ranks (a record of what you keep doing)
+# Points tribes are deliberately silent: crossing a threshold changes a role and
+# nothing else. No announcement, no "you levelled up" — the tag is the reward.
+MODE_CONDITION = "condition"
+MODE_POINTS = "points"
+MODES = (MODE_CONDITION, MODE_POINTS)
+
+# Where points come from. Only roles today; the shape leaves room for
+# "messages in these channels" and similar without a migration.
+SOURCE_ROLE = "role"
+SOURCE_KINDS = (SOURCE_ROLE,)
+
+MAX_SOURCES = 100
+MAX_TIERS = 20
+
 GROUP_TYPES = ("all", "any", "not")
 LEAF_TYPES = ("has_role", "member_for", "account_for", "metric_min", "metric_top")
 METRICS = ("messages", "threads")
@@ -192,6 +210,103 @@ def describe(node: dict, guild=None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+#  Points model
+# --------------------------------------------------------------------------- #
+def validate_sources(value, *, guild=None) -> list[dict]:
+    """``[{kind: "role", role_id, points}]`` — what earns loyalty, and how much."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise RuleError("Point sources must be a list.")
+    if len(value) > MAX_SOURCES:
+        raise RuleError(f"Too many point sources (max {MAX_SOURCES}).")
+    out, seen = [], set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise RuleError("Each point source must be an object.")
+        kind = item.get("kind", SOURCE_ROLE)
+        if kind not in SOURCE_KINDS:
+            raise RuleError(f"Unknown point source: {kind!r}")
+        role_id = _positive_int(item.get("role_id"), "role")
+        if guild is not None and guild.get_role(role_id) is None:
+            raise RuleError("A role in this tribe's points isn't in this server.")
+        if role_id in seen:
+            raise RuleError("The same role is listed twice — give it one value.")
+        seen.add(role_id)
+        points = _points(item.get("points"))
+        out.append({"kind": kind, "role_id": role_id, "points": points})
+    return out
+
+
+def validate_tiers(value, *, guild=None) -> list[dict]:
+    """``[{name, min_points, role_id}]`` — the ladder, kept sorted by threshold."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise RuleError("Ranks must be a list.")
+    if len(value) > MAX_TIERS:
+        raise RuleError(f"Too many ranks (max {MAX_TIERS}).")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RuleError("Each rank must be an object.")
+        name = str(item.get("name") or "").strip()[:60]
+        if not name:
+            raise RuleError("Every rank needs a name.")
+        role_id = _positive_int(item.get("role_id"), "rank role")
+        if guild is not None and guild.get_role(role_id) is None:
+            raise RuleError(f"The role for rank '{name}' isn't in this server.")
+        out.append({"name": name, "min_points": _points(item.get("min_points")),
+                    "role_id": role_id})
+    out.sort(key=lambda tier: tier["min_points"])
+    thresholds = [tier["min_points"] for tier in out]
+    if len(set(thresholds)) != len(thresholds):
+        raise RuleError("Two ranks share the same threshold — the ladder would be ambiguous.")
+    return out
+
+
+def _points(value) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise RuleError("Points must be a whole number.") from None
+    if not -1_000_000 <= number <= 1_000_000:
+        raise RuleError("Points are out of range.")
+    return number
+
+
+def score_for(role_ids: Iterable[int], sources: Iterable[dict]) -> int:
+    """A member's loyalty score: every point-carrying role they hold, summed.
+
+    Holding several prog-group tags accumulates, which is the point — belonging
+    compounds rather than being replaced by your newest tag.
+    """
+    held = set(role_ids or ())
+    return sum(src["points"] for src in sources or () if src.get("role_id") in held)
+
+
+def tier_for(score: int, tiers: Iterable[dict]) -> Optional[dict]:
+    """The highest rank whose threshold this score has reached, or ``None``."""
+    reached = [tier for tier in tiers or () if score >= tier["min_points"]]
+    return max(reached, key=lambda tier: tier["min_points"]) if reached else None
+
+
+def describe_points(tribe: dict, guild=None) -> str:
+    """One-line summary of a points tribe, for the panel and the change log."""
+    sources = tribe.get("sources") or []
+    tiers = tribe.get("tiers") or []
+    if not sources and not tiers:
+        return "no points or ranks set up yet"
+    parts = []
+    if sources:
+        parts.append(f"{len(sources)} scoring role(s)")
+    if tiers:
+        ladder = " → ".join(f"{tier['name']} ({tier['min_points']})" for tier in tiers)
+        parts.append(ladder)
+    return " · ".join(parts)
+
+
+# --------------------------------------------------------------------------- #
 #  Facts + evaluation
 # --------------------------------------------------------------------------- #
 class MemberFacts:
@@ -329,6 +444,10 @@ class TribeManager:
             "role_ids": [int(r) for r in data.get("role_ids") or []],
             "remove_when_unmatched": bool(data.get("remove_when_unmatched", False)),
             "condition": data.get("condition") or {"type": "all", "children": []},
+            "mode": data.get("mode") or MODE_CONDITION,
+            "sources": data.get("sources") or [],
+            "tiers": data.get("tiers") or [],
+            "exclusive": bool(data.get("exclusive", True)),
             "created_at": datetime.datetime.now(datetime.timezone.utc),
         }
         doc["_id"] = self._col.insert_one(doc).inserted_id
@@ -337,12 +456,12 @@ class TribeManager:
 
     def update(self, guild_id: int, tribe_id: str, data: dict) -> None:
         fields = {}
-        for key in ("name", "condition"):
+        for key in ("name", "condition", "mode", "sources", "tiers"):
             if key in data:
                 fields[key] = data[key]
         if "role_ids" in data:
             fields["role_ids"] = [int(r) for r in data["role_ids"] or []]
-        for flag in ("enabled", "remove_when_unmatched"):
+        for flag in ("enabled", "remove_when_unmatched", "exclusive"):
             if flag in data:
                 fields[flag] = bool(data[flag])
         if fields:
@@ -364,6 +483,15 @@ class TribeManager:
         self._members.delete_many(key)
         if rows:
             self._members.insert_many([{**key, **row} for row in rows])
+
+    def save_score(self, guild_id: int, tribe_id: str, user_id: int, name: str,
+                   score: int, tier: Optional[str]) -> None:
+        """Update one member's standing without rewriting the whole tribe."""
+        self._members.update_one(
+            {"guild_id": int(guild_id), "tribe_id": str(tribe_id), "user_id": int(user_id)},
+            {"$set": {"name": name, "score": int(score), "tier": tier}},
+            upsert=True,
+        )
 
     def membership(self, guild_id: int, tribe_id: str) -> list[dict]:
         return list(

@@ -114,6 +114,74 @@ class Tribes(commands.Cog, name="tribes"):
         return tribe_rules.MemberFacts(messages, threads, joined, created, roles)
 
     # ------------------------------------------------------------------ #
+    #  Points tribes — recalculated the moment a scoring role changes
+    # ------------------------------------------------------------------ #
+    async def apply_points(self, member, tribe: dict) -> dict:
+        """Give ``member`` the rank their score has reached in this tribe.
+
+        Silent by design: the role changes and nothing is announced. Ranks are a
+        ladder, so the lower ones are taken off unless the tribe says otherwise
+        — you are one rank, not a collection of them.
+        """
+        result = {"score": 0, "tier": None, "granted": 0, "removed": 0}
+        sources, tiers = tribe.get("sources") or [], tribe.get("tiers") or []
+        if not tiers:
+            return result
+        held = {role.id for role in member.roles}
+        score = tribe_rules.score_for(held, sources)
+        tier = tribe_rules.tier_for(score, tiers)
+        result["score"], result["tier"] = score, tier
+
+        keep = tier["role_id"] if tier else None
+        exclusive = tribe.get("exclusive", True)
+        to_add, to_remove = [], []
+        for rung in tiers:
+            role = member.guild.get_role(rung["role_id"])
+            if role is None:
+                continue
+            if rung["role_id"] == keep and role.id not in held:
+                to_add.append(role)
+            elif rung["role_id"] != keep and role.id in held and exclusive:
+                to_remove.append(role)
+        try:
+            if to_add:
+                await member.add_roles(*to_add, reason=f"{tribe.get('name')}: {tier['name']} ({score} pts)")
+                result["granted"] = len(to_add)
+            if to_remove:
+                await member.remove_roles(*to_remove, reason=f"{tribe.get('name')}: rank changed")
+                result["removed"] = len(to_remove)
+        except discord.HTTPException:
+            pass
+        return result
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before, after) -> None:
+        """Re-score a member as soon as a role that carries points changes."""
+        if before.roles == after.roles or after.bot:
+            return
+        guild = after.guild
+        if not self.bot.visibility.feature_active(guild.id, "tribes", "tribes"):
+            return
+        changed = {r.id for r in before.roles} ^ {r.id for r in after.roles}
+        for tribe in self.bot.tribes.enabled_for(guild.id):
+            if tribe.get("mode") != tribe_rules.MODE_POINTS:
+                continue
+            scoring = {src["role_id"] for src in tribe.get("sources") or []}
+            tier_roles = {tier["role_id"] for tier in tribe.get("tiers") or []}
+            # Ignore our own rank changes, or this would chase its own tail.
+            if not (changed & scoring) or (changed <= tier_roles):
+                continue
+            try:
+                outcome = await self.apply_points(after, tribe)
+                await self.bot.loop.run_in_executor(
+                    None, self.bot.tribes.save_score, guild.id, str(tribe["_id"]),
+                    after.id, after.display_name, outcome["score"],
+                    (outcome["tier"] or {}).get("name"),
+                )
+            except Exception as error:  # noqa: BLE001 - never break the gateway
+                self.bot.logger.error(f"Points tribe {tribe.get('name')} failed: {error}")
+
+    # ------------------------------------------------------------------ #
     #  Sweep
     # ------------------------------------------------------------------ #
     async def run_for_guild(self, guild, *, apply_roles: bool = True) -> dict:
@@ -131,6 +199,30 @@ class Tribes(commands.Cog, name="tribes"):
             edits = 0
 
             for tribe in definitions:
+                if tribe.get("mode") == tribe_rules.MODE_POINTS:
+                    summary["tribes"] += 1
+                    rows = []
+                    for member in guild.members:
+                        if member.bot:
+                            continue
+                        outcome = await self.apply_points(member, tribe) if apply_roles else {
+                            "score": tribe_rules.score_for({r.id for r in member.roles},
+                                                           tribe.get("sources") or []),
+                            "tier": None, "granted": 0, "removed": 0}
+                        summary["granted"] += outcome["granted"]
+                        summary["removed"] += outcome["removed"]
+                        if outcome["score"] > 0:
+                            rows.append({"user_id": member.id, "name": member.display_name,
+                                         "score": outcome["score"],
+                                         "tier": (outcome["tier"] or {}).get("name")})
+                    rows.sort(key=lambda r: -r["score"])
+                    for position, row in enumerate(rows, start=1):
+                        row["rank"] = position
+                        row["position"] = position
+                    summary["matched"] += len(rows)
+                    await self.bot.loop.run_in_executor(
+                        None, self.bot.tribes.save_membership, guild.id, str(tribe["_id"]), rows)
+                    continue
                 condition = tribe.get("condition") or {}
                 if not condition.get("children") and condition.get("type") in tribe_rules.GROUP_TYPES:
                     continue  # an empty rule matches nobody rather than everybody

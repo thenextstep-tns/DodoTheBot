@@ -592,12 +592,18 @@ if (_tribesPage) {
     const ms = card.querySelector(".triberoles");
     if (ms) card._roles = bindMultiSelect(ms, (ids) => { roleIds = ids; });
     const payload = () => {
+      const mode = card._mode ? card._mode() : "condition";
       const body = {
-        action: "update", id: id,
+        action: "update", id: id, mode: mode,
         name: card.querySelector(".tribename").value,
-        condition: card.querySelector(".rulebuilder")._read(),
         remove_when_unmatched: card.querySelector(".triberemove").value === "1",
       };
+      if (mode === "points" && card._points) {
+        const pts = card._points();
+        body.sources = pts.sources; body.tiers = pts.tiers; body.exclusive = pts.exclusive;
+      } else {
+        body.condition = card.querySelector(".rulebuilder")._read();
+      }
       if (roleIds !== null) body.role_ids = roleIds;
       return body;
     };
@@ -635,3 +641,91 @@ if (_tribesPage) {
     else { flash(res.error || "Failed", false); }
   });
 }
+
+// --- Tribes page: points constructor (role -> points, and the rank ladder) ---
+document.querySelectorAll(".pointsbuilder").forEach((box) => {
+  const card = box.closest(".tribecard");
+  const roleOptions = JSON.parse(document.getElementById("tribe-role-options").textContent || "[]");
+  const sourceRows = box.querySelector(".sourcerows");
+  const tierRows = box.querySelector(".tierrows");
+
+  const roleSelect = (selected) => {
+    const sel = document.createElement("select");
+    sel.className = "pt-role";
+    roleOptions.forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.id; opt.textContent = o.name;
+      if (String(selected) === String(o.id)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    return sel;
+  };
+  const numberInput = (cls, value, placeholder) => {
+    const input = document.createElement("input");
+    input.type = "number"; input.className = cls;
+    input.value = value; input.placeholder = placeholder || "";
+    return input;
+  };
+  const removeButton = (row) => {
+    const btn = document.createElement("button");
+    btn.className = "ghost pt-remove"; btn.textContent = "×";
+    btn.addEventListener("click", () => row.remove());
+    return btn;
+  };
+
+  const addSource = (src) => {
+    src = src || {};
+    const row = document.createElement("div");
+    row.className = "ptrow";
+    row.append(roleSelect(src.role_id), numberInput("pt-points", src.points != null ? src.points : 10));
+    const label = document.createElement("span");
+    label.className = "muted small"; label.textContent = "points";
+    row.append(label, removeButton(row));
+    sourceRows.appendChild(row);
+  };
+
+  const addTier = (tier) => {
+    tier = tier || {};
+    const row = document.createElement("div");
+    row.className = "ptrow";
+    const name = document.createElement("input");
+    name.className = "pt-name"; name.value = tier.name || ""; name.placeholder = "Rank name";
+    const at = document.createElement("span");
+    at.className = "muted small"; at.textContent = "at";
+    const pts = numberInput("pt-min", tier.min_points != null ? tier.min_points : 0);
+    const grants = document.createElement("span");
+    grants.className = "muted small"; grants.textContent = "pts →";
+    row.append(name, at, pts, grants, roleSelect(tier.role_id), removeButton(row));
+    tierRows.appendChild(row);
+  };
+
+  (JSON.parse(box.dataset.sources || "[]")).forEach(addSource);
+  (JSON.parse(box.dataset.tiers || "[]")).forEach(addTier);
+  box.querySelector(".addsource").addEventListener("click", () => addSource(null));
+  box.querySelector(".addtier").addEventListener("click", () => addTier(null));
+
+  box._read = () => ({
+    sources: Array.from(sourceRows.children).map((row) => ({
+      kind: "role",
+      role_id: Number(row.querySelector(".pt-role").value),
+      points: Number(row.querySelector(".pt-points").value || 0),
+    })),
+    tiers: Array.from(tierRows.children).map((row) => ({
+      name: row.querySelector(".pt-name").value,
+      min_points: Number(row.querySelector(".pt-min").value || 0),
+      role_id: Number(row.querySelector(".pt-role").value),
+    })),
+    exclusive: box.querySelector(".tribeexclusive").checked,
+  });
+
+  // Mode switch shows one builder or the other; the save handler reads whichever is active.
+  card.querySelectorAll('.modeswitch input[type="radio"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      const points = radio.value === "points" && radio.checked;
+      box.hidden = !points;
+      card.querySelector(".rulebuilder").hidden = points;
+    });
+  });
+  card._mode = () => (card.querySelector('.modeswitch input:checked') || {}).value || "condition";
+  card._points = () => box._read();
+});

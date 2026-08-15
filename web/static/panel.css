@@ -480,3 +480,18 @@ main:has(.tribespage) { max-width: 1080px; }
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
 .condnode input[type="number"] { width: 90px; }
 .condnode select[multiple] { min-width: 190px; }
+
+/* Points constructor */
+.modeswitch { display: flex; gap: 16px; margin: 8px 0 10px; font-size: 13px; }
+.modeswitch label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pointsbuilder { border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--color-surface-soft); }
+.pointshead { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 6px; }
+.ptrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.ptrow input, .ptrow select { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.ptrow input[type="number"] { width: 90px; }
+.ptrow .pt-name { width: 150px; }
+.pt-remove { margin: 0; padding: 1px 8px; font-size: 13px; line-height: 1.2; }
+.exclusivewrap { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }

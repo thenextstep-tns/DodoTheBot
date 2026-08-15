@@ -923,14 +923,19 @@ def _json_channel_options(guild) -> str:
 def _tribe_card(tribe: dict, guild) -> str:
     import json as _json
     tribe_id = str(tribe["_id"])
+    mode = tribe.get("mode") or tribe_rules.MODE_CONDITION
     condition = tribe.get("condition") or {"type": "all", "children": []}
     role_options = "".join(
         f'<div class="ms-opt" data-id="{role.id}" data-name="@{html.escape(role.name)}" '
         f'data-selected="{1 if role.id in (tribe.get("role_ids") or []) else 0}">@{html.escape(role.name)}</div>'
         for role in _sorted_roles(guild)
     )
-    summary = html.escape(tribe_rules.describe(condition, guild)) if condition.get("children") else \
-        '<span class="muted">no conditions yet — matches nobody</span>'
+    if mode == tribe_rules.MODE_POINTS:
+        summary = html.escape(tribe_rules.describe_points(tribe, guild))
+    elif condition.get("children"):
+        summary = html.escape(tribe_rules.describe(condition, guild))
+    else:
+        summary = '<span class="muted">no conditions yet — matches nobody</span>'
     return f"""
 <div class="tribecard{"" if tribe.get("enabled", True) else " off"}" data-tribe="{tribe_id}">
   <div class="rulehead">
@@ -953,7 +958,32 @@ def _tribe_card(tribe: dict, guild) -> str:
       </select>
     </label>
   </div>
-  <div class="rulebuilder" data-condition='{html.escape(_json.dumps(condition))}'></div>
+  <div class="modeswitch">
+    <label><input type="radio" name="mode-{tribe_id}" value="condition"
+      {"checked" if mode != tribe_rules.MODE_POINTS else ""}> Rule (you match, you're in)</label>
+    <label><input type="radio" name="mode-{tribe_id}" value="points"
+      {"checked" if mode == tribe_rules.MODE_POINTS else ""}> Points (earn a rank)</label>
+  </div>
+  <div class="rulebuilder" data-condition='{html.escape(_json.dumps(condition))}'
+       {"hidden" if mode == tribe_rules.MODE_POINTS else ""}></div>
+  <div class="pointsbuilder" data-sources='{html.escape(_json.dumps(tribe.get("sources") or []))}'
+       data-tiers='{html.escape(_json.dumps(tribe.get("tiers") or []))}'
+       {"hidden" if mode != tribe_rules.MODE_POINTS else ""}>
+    <div class="pointshead">
+      <b>What earns points</b>
+      <span class="muted small">holding several scoring roles adds up</span>
+    </div>
+    <div class="sourcerows"></div>
+    <button class="ghost addsource">+ scoring role</button>
+    <div class="pointshead">
+      <b>Ranks</b>
+      <span class="muted small">reaching a threshold grants that rank; lower ranks come off</span>
+    </div>
+    <div class="tierrows"></div>
+    <button class="ghost addtier">+ rank</button>
+    <label class="switch exclusivewrap"><input type="checkbox" class="tribeexclusive"
+      {"checked" if tribe.get("exclusive", True) else ""}> only hold the highest rank</label>
+  </div>
   <div class="rulebtns"><button class="tribesave">Save tribe</button>
     <span class="muted small">{len(tribe.get("role_ids") or [])} role(s)</span></div>
 </div>"""
@@ -1379,7 +1409,16 @@ async def api_guild_tribe(request: web.Request):
         if "condition" in data or action == "create":
             clean["condition"] = tribe_rules.validate_root(
                 data.get("condition") or {"type": "all", "children": []}, guild=guild)
-        for flag in ("enabled", "remove_when_unmatched"):
+        if "mode" in data:
+            clean["mode"] = validate.choice(data.get("mode"), tribe_rules.MODES, field="mode")
+        if "sources" in data:
+            clean["sources"] = tribe_rules.validate_sources(data.get("sources"), guild=guild)
+        if "tiers" in data:
+            tiers = tribe_rules.validate_tiers(data.get("tiers"), guild=guild)
+            for tier in tiers:
+                validate.assignable_role(guild, tier["role_id"], field=f"rank '{tier['name']}'")
+            clean["tiers"] = tiers
+        for flag in ("enabled", "remove_when_unmatched", "exclusive"):
             if flag in data:
                 clean[flag] = validate.boolean(data.get(flag), field=flag)
         tribe_id = None
