@@ -257,18 +257,51 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # scoring below sees the same tidy set the member will end up with.
         stale = trial_ranks.superseded(held, trials)
         out = {"score": 0, "rank": None, "granted": 0, "removed": 0, "cleared": 0,
-               "cleared_names": [], "rank_name": None}
+               "cleared_names": [], "rank_name": None, "errors": []}
+
+        # Refusals used to be swallowed, which produced the worst possible
+        # outcome: a card confidently showing a rank the member had not been
+        # given, and nothing anywhere saying why. Every failure is collected and
+        # reported now — a rank that couldn't be applied is a bug to fix, not a
+        # detail to hide.
+        me = member.guild.me
+        if edit and (me is None or not me.guild_permissions.manage_roles):
+            out["errors"].append(
+                "I don't have the **Manage Roles** permission, so I can't change anyone's roles.")
+            edit = False
+
+        async def edit_roles(action, roles, reason, what):
+            """Apply one role change, turning a refusal into a plain sentence."""
+            blocked = [role for role in roles if me is not None and role >= me.top_role]
+            if blocked:
+                out["errors"].append(
+                    f"{', '.join(f'**{r.name}**' for r in blocked)} "
+                    f"{'sit' if len(blocked) > 1 else 'sits'} above my highest role, "
+                    f"so I can't {what} it. Drag my role above it in Server Settings → Roles.")
+                roles = [role for role in roles if role not in blocked]
+            if not roles:
+                return []
+            try:
+                await action(*roles, reason=reason)
+                return roles
+            except discord.Forbidden:
+                out["errors"].append(
+                    f"Discord refused to let me {what} "
+                    f"{', '.join(f'**{r.name}**' for r in roles)} (permissions).")
+            except discord.HTTPException as error:
+                out["errors"].append(f"Discord error while trying to {what} a role: {error}")
+            return []
+
         if stale and edit:
             roles = [member.guild.get_role(role_id) for role_id in stale]
             roles = [role for role in roles if role is not None]
             if roles:
-                try:
-                    await member.remove_roles(*roles, reason="Superseded by a better clear")
-                    out["cleared"] = len(roles)
-                    out["cleared_names"] = [role.name for role in roles]
-                    held -= stale
-                except discord.HTTPException:
-                    pass
+                removed = await edit_roles(member.remove_roles, roles,
+                                           "Superseded by a better clear", "remove")
+                if removed:
+                    out["cleared"] = len(removed)
+                    out["cleared_names"] = [role.name for role in removed]
+                    held -= {role.id for role in removed}
 
         score = trial_ranks.score_for(held, points, trials=trials)
         rank = trial_ranks.rank_for(score, ranks)
@@ -288,16 +321,13 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 to_add.append(role)
             elif role.id != keep and role.id in held and exclusive:
                 to_remove.append(role)
-        try:
-            if to_add:
-                await member.add_roles(
-                    *to_add, reason=f"Trial rank: {out['rank_name']} ({score} pts)")
-                out["granted"] = len(to_add)
-            if to_remove:
-                await member.remove_roles(*to_remove, reason="Trial rank changed")
-                out["removed"] = len(to_remove)
-        except discord.HTTPException:
-            pass
+        if to_add:
+            out["granted"] = len(await edit_roles(
+                member.add_roles, to_add,
+                f"Trial rank: {out['rank_name']} ({score} pts)", "give"))
+        if to_remove:
+            out["removed"] = len(await edit_roles(
+                member.remove_roles, to_remove, "Trial rank changed", "remove"))
         return out
 
     async def enrol(self, member, *, source: str, actor=None) -> dict:
@@ -328,13 +358,16 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             lines.append("Rank role granted.")
         if outcome["removed"]:
             lines.append("Previous rank role(s) removed.")
+        if outcome["errors"]:
+            lines.append("⚠️ **The roles were not changed:**")
+            lines.extend(f"• {problem}" for problem in outcome["errors"])
         await self.log_event(member.guild, "\n".join(lines), title="Trial ranks — enrolled")
         return outcome
 
     async def run_for_guild(self, guild, *, edit: bool = True) -> dict:
         config = self.bot.trial_ranks.get(guild.id)
         summary = {"members": 0, "ranked": 0, "granted": 0, "removed": 0, "cleared": 0,
-                   "enrolled": 0}
+                   "enrolled": 0, "errors": []}
         if not config.get("enabled"):
             return {**summary, "skipped": "feature off"}
         enrolled = self.bot.trial_ranks.enrolled_ids(guild.id)
@@ -355,6 +388,11 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             summary["members"] += 1
             summary["granted"] += outcome["granted"]
             summary["removed"] += outcome["removed"]
+            # Distinct problems only — one misplaced role produces the same
+            # complaint for every member, and 40 copies of it help nobody.
+            for problem in outcome["errors"]:
+                if problem not in summary["errors"]:
+                    summary["errors"].append(problem)
             if outcome["score"]:
                 summary["ranked"] += 1
                 await self.bot.loop.run_in_executor(

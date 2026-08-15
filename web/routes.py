@@ -1301,9 +1301,48 @@ def _conversion_stats(bot, guild, config: dict) -> dict:
     }
 
 
+def _rank_role_warnings(guild, config: dict) -> list[str]:
+    """Reasons the bot won't actually be able to hand out the ranks configured.
+
+    Checked on the page rather than only at the moment of failure: a rank role
+    sitting above the bot is invisible until someone notices their roles didn't
+    change, and by then the card has already told them they're a Master.
+    """
+    me = guild.me
+    problems = []
+    if me is None:
+        return problems
+    if not me.guild_permissions.manage_roles:
+        problems.append("I don't have the <b>Manage Roles</b> permission, so I can't "
+                        "change anyone's roles at all.")
+        return problems
+    blocked = []
+    for rank in config.get("ranks") or []:
+        role = guild.get_role(int(rank.get("role_id") or 0))
+        if role is not None and role >= me.top_role:
+            blocked.append(role.name)
+    if blocked:
+        problems.append(
+            "These rank roles sit above my highest role, so I can't give or take them: "
+            + ", ".join(f"<b>{html.escape(name)}</b>" for name in blocked)
+            + ". Drag my role above them in <b>Server Settings → Roles</b>.")
+    # The clear roles matter too: superseded ones can't be tidied up without the
+    # same reach, even though ranks are what people notice.
+    unreachable = sum(
+        1 for role_id in trial_ranks.slot_of(config.get("trials") or [])
+        if (role := guild.get_role(int(role_id))) is not None and role >= me.top_role)
+    if unreachable:
+        problems.append(f"{unreachable} clear role(s) also sit above my highest role, so "
+                        "superseded ones can't be tidied up.")
+    return problems
+
+
 def _pilot_html(bot, guild, config: dict) -> str:
     """The rollout board: who is automated, and how the ask is going."""
     stats = _conversion_stats(bot, guild, config)
+    warnings = _rank_role_warnings(guild, config)
+    warning_html = ("".join(f'<p class="warnline">⚠️ {problem}</p>' for problem in warnings)
+                    if warnings else "")
     rows = ""
     for entry in stats["roster"]:
         member = guild.get_member(int(entry["user_id"]))
@@ -1363,6 +1402,7 @@ def _pilot_html(bot, guild, config: dict) -> str:
       earn, and starts watching their roles from then on. Everything is logged to your log
       channel.</p>
     </div>
+    {warning_html}
     <div class="pilotstats">
       <span class="pilotstat"><b>{stats["enrolled"]}</b> converted</span>
       <span class="pilotstat"><b>{stats["read"]}</b> read how it works</span>
@@ -2154,7 +2194,10 @@ async def api_guild_trials(request: web.Request):
                 "member": {"id": str(member.id), "name": member.display_name,
                            "tag": member.name},
                 "score": outcome["score"], "rank": outcome["rank_name"],
-                "cleared": outcome["cleared"],
+                "cleared": outcome["cleared"], "granted": outcome["granted"],
+                # A rank that was worked out but couldn't be applied is a
+                # failure, and saying "done ✓" over it is how it went unnoticed.
+                "errors": outcome.get("errors") or [],
             })
 
         if action == "unenrol":

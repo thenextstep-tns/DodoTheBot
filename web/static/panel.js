@@ -794,7 +794,16 @@ if (_trialsPage) {
       enrol.disabled = true;
       const res = await post(`/api/guild/${guildId}/trials`, { action: "enrol", tag: value });
       enrol.disabled = false;
-      if (res.ok) {
+      if (res.ok && res.errors && res.errors.length) {
+        // Enrolled, rank worked out, roles refused. Saying "done ✓" over that
+        // is exactly how it went unnoticed the first time.
+        tag.value = "";
+        alert(`${res.member.name} is enrolled and scores ${res.score} `
+              + `(${res.rank || "no rank"}), but their roles were NOT changed:\n\n`
+              + res.errors.map((e) => `• ${e.replace(/\*\*/g, "")}`).join("\n")
+              + "\n\nFix that, then press Recalculate to apply it.");
+        setTimeout(() => window.location.reload(), 500);
+      } else if (res.ok) {
         tag.value = "";
         flash(`${res.member.name} is on: ${res.score} pts → ${res.rank || "no rank yet"}`
               + (res.cleared ? `, ${res.cleared} stale clear role(s) removed` : ""), true);
