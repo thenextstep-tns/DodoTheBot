@@ -47,8 +47,8 @@ _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
                "image/webp": "webp", "image/gif": "gif"}
 
 ANNOUNCEMENT_TEXT = (
-    "## ✨ Dodo does the ranks now\n"
-    "Your clears, added up, straight into a rank — no more waiting for someone to notice.\n"
+    "## ✨ Dodo can do your ranks now!\n"
+    "We're testing a new smarty pants system to update our ranks! "
     "Press the button to see where you stand. Only you will see it."
 )
 
