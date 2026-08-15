@@ -929,3 +929,67 @@ GILANE_SPREADSHEET_LINKS = [
     "https://www.imdb.com/title/tt0450428/"
 
 ]
+
+# --------------------------------------------------------------------------- #
+#  Trial ranks cog
+# --------------------------------------------------------------------------- #
+# Everything the automatic ranking says out loud. Editable from the panel's
+# Strings page like the rest of this file — the cog reads these at call time, so
+# an edit lands without a restart. Repost the announcement after editing it, so
+# the pinned message picks the new wording up.
+TRIAL_ANNOUNCEMENT = (
+    "## ✨ Dodo can do your ranks now!\n"
+    "We're testing a new smarty pants system to update our ranks! "
+    "Press the button to see where you stand. Only you will see it."
+)
+TRIAL_BUTTON_LABEL = "✨ CHECK MY RANK ✨"
+
+TRIAL_HOW_IT_WORKS = (
+    "## ✨ How it works\n"
+    "• Every clear is worth points — **the newer and harder it is, the more it's worth.**\n"
+    "• Only your **best clear per trial** counts, so a trifecta doesn't pay twice.\n"
+    "• **More points, higher rank.** Hit the number, get the role.\n"
+    "• New clear role? Your rank moves within seconds.\n\n"
+    "The chart below has every price on it. 👇"
+)
+
+# {mention} is the person being asked.
+TRIAL_CONSENT_ASK = (
+    "Hey {mention}! I see that we have been updating your rank manually up until this "
+    "point. Do you mind if I switch you to the new system?\n\n"
+    "It reads the clears you already have and works your rank out from them. Nothing "
+    "else about your roles changes."
+)
+TRIAL_CONSENT_YES = "Sure!"
+TRIAL_CONSENT_EXPLAIN = "How exactly does it work?"
+TRIAL_CONSENT_TIMEOUT = (
+    "Hey, no biggie — thank you for getting this far. Your rank stays exactly as it is, "
+    "and you can press the button again whenever you like."
+)
+TRIAL_CONSENT_DONE = "You're on the automatic system now — here's where you stand."
+TRIAL_CONSENT_NOT_YOURS = "That question wasn't for you."
+
+# The /rank card. {points} {needed} {next} {score} {target} are filled in by the cog.
+TRIAL_CARD_TOP = "Top of the ladder. Nothing left to prove. 🏆"
+TRIAL_CARD_PROGRESS = "**{needed}** more to reach {next}"
+TRIAL_CARD_POINTS = "{points} points"
+TRIAL_CARD_STEPS_TITLE = "Next steps:"
+TRIAL_CARD_STEPS_EMPTY = (
+    "Nothing on the board is priced for you yet — ask an officer what's worth points."
+)
+TRIAL_CARD_OUTRO = (
+    "You can use `/rank` anywhere on the server, any time — and I'll always be here too. ✨\n"
+    "If you have a minute, let the mods know how well this matches your actual skill."
+)
+TRIAL_CARD_FOOTER = "Only your best clear per trial counts towards the total."
+TRIAL_CARD_NO_RANK = "No rank yet"
+
+TRIAL_NO_LADDER_TITLE = "No ranks set up yet"
+TRIAL_NO_LADDER_BODY = (
+    "This server hasn't set its rank ladder up, so there's nothing to measure you "
+    "against. Your clears still count — ask an officer."
+)
+TRIAL_NO_LADDER_POINTS = "from the clears you hold"
+
+TRIAL_ERROR_UNAVAILABLE = "Ranking is not available right now — try again in a minute."
+TRIAL_ERROR_GUILD_ONLY = "This only works inside the server."

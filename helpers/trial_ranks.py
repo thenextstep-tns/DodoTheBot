@@ -196,6 +196,20 @@ SLOT_INDEX = {slot: index for index, slot in enumerate(SLOTS)}
 # progression where the strongest held role is the only one kept.
 SUPERSEDING_SLOTS = tuple(slot for slot in SLOTS if slot != "extra")
 
+# What to recommend first, and why. Points alone are a poor guide to effort: a
+# hardmode is a night's work while a trifecta of the same value is a project, so
+# advice is grouped by *kind* of content first and only then by what it's worth.
+STEP_HARDMODE, STEP_TRIFECTA, STEP_OTHER = 0, 1, 2
+_STEP_PRIORITY = {
+    "partial1": STEP_HARDMODE, "partial2": STEP_HARDMODE, "full_hm": STEP_HARDMODE,
+    "trifecta": STEP_TRIFECTA,
+}
+
+
+def step_priority(slot: Optional[str]) -> int:
+    """Hardmodes first, then trifectas, then everything else."""
+    return _STEP_PRIORITY.get(slot or "", STEP_OTHER)
+
 # Any slot may be empty — a trial without a second partial simply doesn't have
 # one, and the rest keep their order. Holding a stronger role means the weaker
 # ones are already implied, so exactly one of them is kept: the strongest.
@@ -465,12 +479,14 @@ def missing_for_next(guild, role_ids: Iterable[int], points: dict, ranks: list[d
                     replaces = trial_index
             if gain <= 0:
                 continue
+            slot = SLOTS[found[1]] if found else None
             steps.append({"role_id": role_id, "name": role.name, "points": value,
                           "gain": gain, "upgrade": replaces is not None,
-                          "trial": found[0] if found else None})
-        # Cheapest first, which is also roughly easiest first: the whole point is
-        # to answer "what do I do next", not to list the whole board.
-        steps.sort(key=lambda step: (step["gain"], step["name"].lower()))
+                          "trial": found[0] if found else None, "slot": slot,
+                          "priority": step_priority(slot)})
+        # Easiest first, not cheapest first: missing hardmodes, then trifectas
+        # (oldest first, which is what the cheaper ones are), then the rest.
+        steps.sort(key=lambda step: (step["priority"], step["gain"], step["name"].lower()))
         # One suggestion per trial. Two rungs of the same trial can't both be
         # earned on top of each other — only the stronger one ever pays — so
         # listing both would promise points that don't add up.

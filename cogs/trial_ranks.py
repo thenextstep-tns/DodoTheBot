@@ -22,6 +22,7 @@ import io
 import discord
 from discord.ext import commands, tasks
 
+import lang
 from helpers import trial_ranks, trial_image
 
 # Role edits per guild per sweep, paced — a first run can re-rank everyone.
@@ -46,20 +47,10 @@ STAR_EARNED, STAR_TODO = "⭐", "⚪"
 _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
                "image/webp": "webp", "image/gif": "gif"}
 
-ANNOUNCEMENT_TEXT = (
-    "## ✨ Dodo can do your ranks now!\n"
-    "We're testing a new smarty pants system to update our ranks! "
-    "Press the button to see where you stand. Only you will see it."
-)
-
-HOW_IT_WORKS = (
-    "## ✨ How it works\n"
-    "• Every clear is worth points — **the newer and harder it is, the more it's worth.**\n"
-    "• Only your **best clear per trial** counts, so a trifecta doesn't pay twice.\n"
-    "• **More points, higher rank.** Hit the number, get the role.\n"
-    "• New clear role? Your rank moves within seconds.\n\n"
-    "The chart below has every price on it. 👇"
-)
+# Every user-facing string lives in lang.py so it can be edited from the panel's
+# Strings page. They are read through the module (``lang.TRIAL_…``) at call time,
+# never bound to a local at import, because that is what makes an override on a
+# running bot take effect without a restart.
 
 
 def progress_bar(fraction: float, width: int = BAR_WIDTH) -> str:
@@ -93,6 +84,8 @@ class RankBoardView(discord.ui.View):
     def __init__(self, bot) -> None:
         super().__init__(timeout=None)
         self.bot = bot
+        # The decorator's label is fixed at import; the live string isn't.
+        self.check.label = lang.TRIAL_BUTTON_LABEL
 
     @discord.ui.button(label="✨ CHECK MY RANK ✨",
                        style=discord.ButtonStyle.success,
@@ -101,7 +94,7 @@ class RankBoardView(discord.ui.View):
         cog = self.bot.get_cog("trial_ranks")
         if cog is None:
             await interaction.response.send_message(
-                "Ranking is not available right now — try again in a minute.", ephemeral=True)
+                lang.TRIAL_ERROR_UNAVAILABLE, ephemeral=True)
             return
         await cog.handle_check(interaction)
 
@@ -122,10 +115,13 @@ class ConsentView(discord.ui.View):
         self.interaction: discord.Interaction | None = None
         self.message: discord.Message | None = None
         self.settled = False
+        self.accept.label = lang.TRIAL_CONSENT_YES
+        self.explain.label = lang.TRIAL_CONSENT_EXPLAIN
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.member.id:
-            await interaction.response.send_message("That question wasn't for you.", ephemeral=True)
+            await interaction.response.send_message(
+                lang.TRIAL_CONSENT_NOT_YOURS, ephemeral=True)
             return False
         return True
 
@@ -145,9 +141,7 @@ class ConsentView(discord.ui.View):
         self.cog.bot.trial_ranks.set_state(
             self.member.guild.id, self.member.id, trial_ranks.STATE_DISMISSED,
             name=self.member.display_name, source="button")
-        text = ("Hey, no biggie — thank you for getting this far. "
-                "Your rank stays exactly as it is, and you can press the button again "
-                "whenever you like.")
+        text = lang.TRIAL_CONSENT_TIMEOUT
         try:
             if self.interaction is not None:
                 await self.interaction.edit_original_response(content=text, embed=None, view=None)
@@ -358,56 +352,58 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             # No rungs configured: "you're at the top of the ladder" would be a
             # lie about a ladder that doesn't exist yet.
             embed = discord.Embed(
-                title="No ranks set up yet",
-                description="This server hasn't set its rank ladder up, so there's nothing "
-                            "to measure you against. Your clears still count — ask an officer.",
+                title=lang.TRIAL_NO_LADDER_TITLE,
+                description=lang.TRIAL_NO_LADDER_BODY,
                 colour=discord.Colour.blurple())
             embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-            embed.add_field(name=f"{state['score']} points", value="from the clears you hold",
-                            inline=False)
+            embed.add_field(name=lang.TRIAL_CARD_POINTS.format(points=state["score"]),
+                            value=lang.TRIAL_NO_LADDER_POINTS, inline=False)
             return embed, []
 
+        # The rank line lives in the description, not the title: a title renders
+        # a role mention as literal text, while a description renders it in the
+        # role's own colour — and mentions inside an embed never notify anyone.
+        # The stars go on their own line so a phone can't wrap them into the name.
         stars = rank_stars(state["position"], state["total"])
+        role = member.guild.get_role(int(current["role_id"])) if current else None
+        heading = role.mention if role is not None else f"**{current_name or lang.TRIAL_CARD_NO_RANK}**"
+        blocks = [f"{heading}\n{stars}".strip()]
+        if current and current.get("description"):
+            blocks.append(current["description"])
+
         embed = discord.Embed(
-            title=f"{current_name or 'No rank yet'}  {stars}".strip(),
-            colour=member.colour if member.colour.value else discord.Colour.blurple(),
+            description="\n\n".join(blocks),
+            colour=role.colour if role is not None and role.colour.value
+            else (member.colour if member.colour.value else discord.Colour.blurple()),
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-        if current and current.get("description"):
-            embed.description = current["description"]
 
+        points_label = lang.TRIAL_CARD_POINTS.format(points=state["score"])
         if upcoming is None:
-            embed.add_field(
-                name=f"{state['score']} points",
-                value=f"{progress_bar(1.0)}\nTop of the ladder. Nothing left to prove. 🏆",
-                inline=False)
+            embed.add_field(name=points_label,
+                            value=f"{progress_bar(1.0)}\n{lang.TRIAL_CARD_TOP}",
+                            inline=False)
         else:
-            next_name = trial_ranks.rank_name(upcoming, member.guild)
+            next_role = member.guild.get_role(int(upcoming["role_id"]))
+            next_name = (next_role.mention if next_role is not None
+                         else f"**{trial_ranks.rank_name(upcoming, member.guild)}**")
             # Points, not a percentage: "1%" right after a rank-up told nobody
             # anything, while "252 → 375" is the actual question being asked.
             embed.add_field(
-                name=f"{state['score']} points",
+                name=points_label,
                 value=(f"{progress_bar(state['fraction'])}  "
                        f"{state['score']} → {upcoming['min_points']}\n"
-                       f"**{state['needed']}** more to reach **{next_name}**"),
+                       + lang.TRIAL_CARD_PROGRESS.format(needed=state["needed"],
+                                                         next=next_name)),
                 inline=False)
             if state["steps"]:
                 lines = [f"• **+{step['gain']}** — {step['name']}" for step in state["steps"]]
-                embed.add_field(name="Next steps:", value="\n".join(lines)[:1024], inline=False)
+                value = "\n".join(lines)[:1024]
             else:
-                embed.add_field(
-                    name="Next steps:",
-                    value="Nothing on the board is priced for you yet — ask an officer "
-                          "what's worth points.",
-                    inline=False)
+                value = lang.TRIAL_CARD_STEPS_EMPTY
+            embed.add_field(name=lang.TRIAL_CARD_STEPS_TITLE, value=value, inline=False)
 
-        embed.add_field(
-            name="​",
-            value=("You can use `/rank` anywhere on the server, any time — and I'll always "
-                   "be here too. ✨\n"
-                   "If you have a minute, let the mods know how well this matches your "
-                   "actual skill."),
-            inline=False)
+        embed.add_field(name="​", value=lang.TRIAL_CARD_OUTRO, inline=False)
 
         files = []
         if current:
@@ -420,7 +416,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 name = f"rank.{extension}"
                 files.append(discord.File(io.BytesIO(bytes(picture["data"])), filename=name))
                 embed.set_thumbnail(url=f"attachment://{name}")
-        embed.set_footer(text="Only your best clear per trial counts towards the total.")
+        embed.set_footer(text=lang.TRIAL_CARD_FOOTER)
         return embed, files
 
     # ------------------------------------------------------------------ #
@@ -432,7 +428,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         guild = interaction.guild
         if guild is None or not isinstance(member, discord.Member):
             await interaction.response.send_message(
-                "This only works inside the server.", ephemeral=True)
+                lang.TRIAL_ERROR_GUILD_ONLY, ephemeral=True)
             return
         if self.bot.trial_ranks.is_enrolled(guild.id, member.id):
             # thinking=True makes a fresh ephemeral message the "original
@@ -447,10 +443,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                                        name=member.display_name, source="button")
         view = ConsentView(self, member)
         await interaction.response.send_message(
-            content=(f"Hey {member.mention}! I see that we have been updating your rank "
-                     "manually up until this point. Do you mind if I switch you to the new "
-                     "system?\n\nIt reads the clears you already have and works your rank out "
-                     "from them. Nothing else about your roles changes."),
+            content=lang.TRIAL_CONSENT_ASK.format(mention=member.mention),
             view=view, ephemeral=True)
         view.interaction = interaction
         await self.log_event(guild, f"{member.mention} was asked to switch to automatic ranking.")
@@ -462,7 +455,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         await self.enrol(member, source="button")
         embed, files = await self.rank_embed(member)
         await interaction.edit_original_response(
-            content="You're on the automatic system now — here's where you stand.",
+            content=lang.TRIAL_CONSENT_DONE,
             embed=embed, attachments=files, view=None)
 
     async def explain_system(self, interaction: discord.Interaction, member) -> None:
@@ -482,7 +475,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             files.append(discord.File(io.BytesIO(png), filename="trial-ranks.png"))
         except Exception as error:  # noqa: BLE001 - the words matter more than the picture
             self.bot.logger.error(f"Trial rank chart failed for {member.guild.id}: {error}")
-        await interaction.edit_original_response(content=HOW_IT_WORKS, attachments=files)
+        await interaction.edit_original_response(content=lang.TRIAL_HOW_IT_WORKS, attachments=files)
         await self.log_event(
             member.guild, f"{member.mention} read how automatic ranking works.")
 
@@ -501,8 +494,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 name=member.display_name, source="command")
             view = ConsentView(self, member)
             message = await context.send(
-                f"Hey {member.mention}! I see that we have been updating your rank manually "
-                "up until this point. Do you mind if I switch you to the new system?",
+                lang.TRIAL_CONSENT_ASK.format(mention=member.mention),
                 view=view, ephemeral=True)
             # A prefix invocation has no interaction, so the message it sent is
             # what gets the closing word when the ask times out.
@@ -531,11 +523,11 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         if existing_id and int(config.get("announce_channel_id") or 0) == channel.id:
             try:
                 message = await channel.fetch_message(existing_id)
-                await message.edit(content=ANNOUNCEMENT_TEXT, view=view)
+                await message.edit(content=lang.TRIAL_ANNOUNCEMENT, view=view)
             except discord.HTTPException:
                 message = None
         if message is None:
-            message = await channel.send(ANNOUNCEMENT_TEXT, view=view)
+            message = await channel.send(lang.TRIAL_ANNOUNCEMENT, view=view)
             try:
                 await message.pin(reason="Trial ranks announcement")
             except discord.HTTPException:
