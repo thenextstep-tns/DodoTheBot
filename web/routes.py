@@ -1552,6 +1552,9 @@ def _trials_html(bot, guild, scope: str) -> str:
     <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
     <button id="trialpush">Push to live</button>
     <button id="trialsave" class="ghost">Save draft</button>
+    <button id="trialrun" class="ghost"
+      title="Re-apply the saved setup to everyone enrolled, without saving what's on screen"
+      >Recalculate now</button>
     <a class="chip" href="/guild/{guild.id}/trials.png" target="_blank" rel="noopener"
        title="A shareable chart of the current values">🖼 Chart</a>
   </div>

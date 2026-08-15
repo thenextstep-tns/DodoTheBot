@@ -784,6 +784,27 @@ if (_trialsPage) {
     flash(res.ok ? "trial ranking saved ✓" : (res.error || "Failed"), res.ok);
   });
 
+  // Re-apply the *saved* setup to everyone enrolled. Separate from "Push to
+  // live" on purpose: after fixing a role hierarchy you want to retry, not to
+  // overwrite the stored weights with whatever the page happens to show.
+  const run = document.getElementById("trialrun");
+  if (run) {
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      const res = await post(`/api/guild/${guildId}/trials`, { action: "run" });
+      run.disabled = false;
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      const s = res.summary || {};
+      if (s.errors && s.errors.length) {
+        alert(`Recalculated ${s.members || 0} member(s), but roles could not be changed:\n\n`
+              + s.errors.map((e) => `• ${e.replace(/\*\*/g, "")}`).join("\n"));
+      } else {
+        flash(`recalculated: ${s.ranked || 0} ranked, ${s.granted || 0} granted, `
+              + `${s.removed || 0} replaced ✓`, true);
+      }
+    });
+  }
+
   // --- the rollout: turning it on for one person at a time ---
   const enrol = document.getElementById("pilotenrol");
   if (enrol) {
