@@ -386,12 +386,19 @@ def progress_for(score: int, ranks: list[dict]) -> dict:
     ``fraction`` is 1.0 at the top of the ladder — someone who has finished
     isn't 0% of the way to nothing.
     """
+    ordered = ordered_ranks(ranks)
     current = rank_for(score, ranks)
     upcoming = next_rank_for(score, ranks)
     floor = int((current or {}).get("min_points") or 0)
+    # Which rung out of how many — what the star row on the /rank card counts.
+    position = 0
+    if current is not None:
+        position = next((i + 1 for i, rank in enumerate(ordered)
+                         if int(rank.get("role_id") or 0) == int(current.get("role_id") or 0)), 0)
+    place = {"position": position, "total": len(ordered)}
     if upcoming is None:
         return {"current": current, "next": None, "floor": floor, "ceiling": None,
-                "needed": 0, "fraction": 1.0}
+                "needed": 0, "fraction": 1.0, **place}
     ceiling = int(upcoming["min_points"])
     span = max(1, ceiling - floor)
     return {
@@ -401,6 +408,7 @@ def progress_for(score: int, ranks: list[dict]) -> dict:
         "ceiling": ceiling,
         "needed": max(0, ceiling - score),
         "fraction": min(1.0, max(0.0, (score - floor) / span)),
+        **place,
     }
 
 

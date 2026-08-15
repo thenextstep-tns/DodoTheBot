@@ -29,41 +29,55 @@ MAX_EDITS = 200
 EDIT_PAUSE = 0.35
 # How long the "may I switch you over?" ask waits before letting it go.
 CONSENT_TIMEOUT = 120.0
-# Segments in the /rank progress bar.
-BAR_WIDTH = 18
+# Segments in the /rank progress bar. Discord's font renders these two cleanly
+# at any size; the block characters (█/░) turn into visual static instead.
+BAR_FULL, BAR_EMPTY = "▰", "▱"
+BAR_WIDTH = 12
+# Past this many rungs a star row stops being readable and becomes a wall.
+MAX_STARS = 12
 # Badge file extension per stored type — Discord renders an attachment by its
 # name, so a JPEG called .png is a broken thumbnail.
 _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
                "image/webp": "webp", "image/gif": "gif"}
 
 ANNOUNCEMENT_TEXT = (
-    "**Dodo now works out ranks by itself.**\n\n"
-    "Your rank used to be set by hand. From now on Dodo can read the clears you already "
-    "have, add up what they're worth, and give you the rank those points earn — the same "
-    "system you're used to, just without waiting on someone to notice.\n\n"
-    "It's off for you until you say yes. Press the button below to see where you stand; "
-    "only you will see the answer.\n\n"
-    "*This is new, so tell us what you think — if it gets your rank wrong we want to hear "
-    "about it.*"
+    "## ✨ Dodo does the ranks now\n"
+    "Your clears, added up, straight into a rank — no more waiting for someone to notice.\n"
+    "Press the button to see where you stand. Only you will see it."
 )
 
 HOW_IT_WORKS = (
-    "**How the automatic ranking works**\n\n"
-    "Nothing about what counts has changed — it's the same ladder, worked out in a smarter way.\n\n"
-    "• Every clear and achievement is worth points. **The newer and the harder the content, "
-    "the more points it brings.**\n"
-    "• Only your **best clear per trial** counts, so a trifecta doesn't also pay for the "
-    "hardmode and the partials underneath it.\n"
-    "• Add it all up: **the more points you have, the higher your rank.** Reach a rank's "
-    "requirement and Dodo gives you the role.\n"
-    "• It re-checks the moment you get a new clear role, so your rank keeps up with you.\n\n"
-    "The picture below is the whole thing: what each clear is worth, and what each rank costs."
+    "## ✨ How it works\n"
+    "• Every clear is worth points — **the newer and harder it is, the more it's worth.**\n"
+    "• Only your **best clear per trial** counts, so a trifecta doesn't pay twice.\n"
+    "• **More points, higher rank.** Hit the number, get the role.\n"
+    "• New clear role? Your rank moves within seconds.\n\n"
+    "The chart below has every price on it. 👇"
 )
 
 
 def progress_bar(fraction: float, width: int = BAR_WIDTH) -> str:
+    """A bar whose ends mean what they look like.
+
+    Rounding alone renders the first points after a rank-up as an empty bar
+    ("broken", not "just started") and the last point before one as a full bar
+    ("arrived", when they haven't). Both ends are reserved for the real thing.
+    """
     filled = max(0, min(width, round(fraction * width)))
-    return "█" * filled + "░" * (width - filled)
+    if fraction > 0:
+        filled = max(1, filled)
+    if fraction < 1:
+        filled = min(width - 1, filled)
+    return BAR_FULL * filled + BAR_EMPTY * (width - filled)
+
+
+def rank_stars(position: int, total: int) -> str:
+    """The ladder as stars: how far up, out of how many rungs there are."""
+    if total <= 0:
+        return ""
+    if total > MAX_STARS:
+        return f"⭐ {position}/{total}"
+    return "★" * position + "☆" * (total - position)
 
 
 class RankBoardView(discord.ui.View):
@@ -74,8 +88,8 @@ class RankBoardView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    @discord.ui.button(label="Check my rank (only I will see)",
-                       style=discord.ButtonStyle.primary,
+    @discord.ui.button(label="✨ CHECK MY RANK ✨",
+                       style=discord.ButtonStyle.success,
                        custom_id="trialranks:check")
     async def check(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         cog = self.bot.get_cog("trial_ranks")
@@ -324,8 +338,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                             inline=False)
             return embed, []
 
+        stars = rank_stars(state["position"], state["total"])
         embed = discord.Embed(
-            title=current_name or "No rank yet",
+            title=f"{current_name or 'No rank yet'}  {stars}".strip(),
             colour=member.colour if member.colour.value else discord.Colour.blurple(),
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
@@ -333,34 +348,37 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             embed.description = current["description"]
 
         if upcoming is None:
-            bar = progress_bar(1.0)
             embed.add_field(
                 name=f"{state['score']} points",
-                value=f"`{bar}`\nYou're at the top of the ladder. Nothing left to prove.",
+                value=f"{progress_bar(1.0)}\nTop of the ladder. Nothing left to prove. 🏆",
                 inline=False)
         else:
             next_name = trial_ranks.rank_name(upcoming, member.guild)
-            bar = progress_bar(state["fraction"])
+            # Points, not a percentage: "1%" right after a rank-up told nobody
+            # anything, while "252 → 375" is the actual question being asked.
             embed.add_field(
                 name=f"{state['score']} points",
-                value=(f"`{bar}` {int(state['fraction'] * 100)}%\n"
-                       f"**{state['needed']}** more to reach **{next_name}** "
-                       f"({upcoming['min_points']} points)"),
+                value=(f"{progress_bar(state['fraction'])}  "
+                       f"{state['score']} → {upcoming['min_points']}\n"
+                       f"**{state['needed']}** more to reach **{next_name}**"),
                 inline=False)
             if state["steps"]:
-                lines = []
-                for step in state["steps"]:
-                    suffix = " *(upgrade)*" if step["upgrade"] else ""
-                    lines.append(f"• **+{step['gain']}** — {step['name']}{suffix}")
-                embed.add_field(
-                    name=f"Cheapest way to {next_name}",
-                    value="\n".join(lines)[:1024], inline=False)
+                lines = [f"• **+{step['gain']}** — {step['name']}" for step in state["steps"]]
+                embed.add_field(name="Next steps:", value="\n".join(lines)[:1024], inline=False)
             else:
                 embed.add_field(
-                    name=f"Getting to {next_name}",
+                    name="Next steps:",
                     value="Nothing on the board is priced for you yet — ask an officer "
                           "what's worth points.",
                     inline=False)
+
+        embed.add_field(
+            name="​",
+            value=("You can use `/rank` anywhere on the server, any time — and I'll always "
+                   "be here too. ✨\n"
+                   "If you have a minute, let the mods know how well this matches your "
+                   "actual skill."),
+            inline=False)
 
         files = []
         if current:
