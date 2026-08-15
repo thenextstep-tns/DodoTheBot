@@ -828,9 +828,7 @@ if (_sandbox) {
       .map((b) => b.counted === false
         ? `${b.name}: ${b.points} (superseded — same trial)`
         : `${b.name}: ${b.points}`)
-      .join("
-") + `
-— total ${row.score}`;
+      .join("\n") + `\n— total ${row.score}`;
   };
 
   const render = (rows, meta) => {
