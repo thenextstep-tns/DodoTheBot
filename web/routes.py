@@ -1084,8 +1084,9 @@ def _ladder_rows(guild, config: dict) -> str:
     <div class="ladderrow{" mapped" if mapped else ""}">
       <span class="rungindex">{index + 1}</span>
       <span class="rungname">{html.escape(rung["tier"])}</span>
+      {'' if mapped else '<span class="rungoff">off</span>'}
       <select class="rankrole" data-tier="{html.escape(rung["tier"])}">
-        <option value="0">— not used —</option>{selected}</select>
+        <option value="0">— pick the role this rank grants —</option>{selected}</select>
       <span class="muted small">from</span>
       <input type="number" class="rankmin" data-tier="{html.escape(rung["tier"])}"
         value="{rung["min_points"] if rung["min_points"] is not None else ""}" placeholder="points">
@@ -1137,9 +1138,10 @@ def _trials_html(bot, guild, scope: str) -> str:
 
   <details class="group" open><summary>Ranks <span class="muted">· the ladder, worst to best</span></summary>
     <div class="trialsection">
-      <p class="muted small">Pick which role each rung grants and the points it starts at.
-      Leave a rung's role unset to skip it. Thresholds have to climb as you go down this list,
-      and only the highest rung a member reaches is kept.</p>
+      <p class="muted small"><b>These seven names are just the ladder.</b> For each rung, choose the
+      role in your server it should grant and the points it starts at. A rung with no role picked is
+      skipped — so a three-rung ladder is fine. Thresholds must climb as you go down the list, and a
+      member only keeps the highest rung they reach.</p>
       <div class="ladder">{_ladder_rows(guild, config)}</div>
     </div></details>
 

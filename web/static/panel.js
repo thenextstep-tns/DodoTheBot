@@ -758,7 +758,16 @@ if (_trialsPage) {
   });
   _trialsPage.querySelectorAll(".rankrole").forEach((sel) => {
     sel.addEventListener("change", () => {
-      sel.closest(".ladderrow").classList.toggle("mapped", sel.value !== "0");
+      const row = sel.closest(".ladderrow");
+      const on = sel.value !== "0";
+      row.classList.toggle("mapped", on);
+      let off = row.querySelector(".rungoff");
+      if (on && off) { off.remove(); }
+      if (!on && !off) {
+        off = document.createElement("span");
+        off.className = "rungoff"; off.textContent = "off";
+        row.querySelector(".rungname").insertAdjacentElement("afterend", off);
+      }
     });
   });
 
