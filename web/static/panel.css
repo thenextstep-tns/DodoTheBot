@@ -593,8 +593,24 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 .progrow.lvl-ready .progcount { color: var(--color-success); }
 .lvl-warm-ink { color: var(--color-warning); }
 .lvl-ready-ink { color: var(--color-success); }
-.proglist { margin: 0; padding: 0 14px 12px 34px; display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 2px; font-size: 13px; }
+.progbody { padding: 0 14px 12px 34px; }
+/* Per-boss/title/clear inside a raid — which fight the night gets built around. */
+.progclears { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.progclear { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.progclearname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.progclearbar { flex: 0 0 120px; height: 6px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); overflow: hidden; }
+.progclearbar > i { display: block; height: 100%; background: var(--color-ink); }
+.progclear.lvl-warm .progclearbar > i { background: var(--color-warning); }
+.progclear.lvl-ready .progclearbar > i { background: var(--color-success); }
+.progclearcount { flex: none; width: 42px; text-align: right; font-size: 12px;
+  font-variant-numeric: tabular-nums; color: var(--color-muted); }
+.proglist { margin: 0; padding: 0; list-style: none; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 3px; font-size: 13px;
+  border-top: 1px solid var(--color-hairline-soft); padding-top: 8px; }
+.progneeds { color: var(--color-muted); font-size: 12px; }
+.progneeds::before { content: " — "; }
 
 .announcebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px;
   padding: 12px; background: var(--color-surface-soft); border-radius: var(--radius-sm); }

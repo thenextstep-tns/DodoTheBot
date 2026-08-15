@@ -214,6 +214,10 @@ def step_priority(slot: Optional[str]) -> int:
 # A prog group is twelve. Interest is measured against that, because "9 people
 # want this" only means something next to how many it takes to run it.
 GROUP_SIZE = 12
+# How long a "I'd prog that" stays true. Interest is a statement about now, so
+# it lapses rather than accumulating into a list nobody trusts. Pressing the
+# button again restarts the clock.
+INTEREST_TTL_DAYS = 60
 # Where a raid sits on the way to being runnable. The thresholds are the point:
 # a third of a group is a conversation, three quarters is a plan.
 LEVEL_COLD, LEVEL_WARM, LEVEL_READY = "cold", "warm", "ready"
@@ -253,24 +257,38 @@ def interest_buckets(guild, config: dict, rows: list[dict]) -> list[dict]:
     trials = config.get("trials") or []
     buckets: dict[str, dict] = {}
     for row in rows:
-        seen: set[str] = set()
+        # Collect this person's wants per raid first, so they're counted once
+        # for the raid while still carrying *which* clears they're after — "3
+        # people want vRG" and "2 of them need the hardmode" are different
+        # questions and a raid lead needs both.
+        wanted: dict[str, list[dict]] = {}
         for role_id in row.get("role_ids") or ():
             role_id = int(role_id)
             role = guild.get_role(role_id) if guild else None
             label = trial_of_role(role_id, trials) or (role.name if role else None)
-            if not label or label in seen:
-                continue      # one person counts once per raid
-            seen.add(label)
-            bucket = buckets.setdefault(label, {"name": label, "members": [], "roles": set()})
+            if not label:
+                continue
+            entry = {"role_id": role_id, "name": role.name if role else str(role_id)}
+            if entry not in wanted.setdefault(label, []):
+                wanted[label].append(entry)
+        for label, roles in wanted.items():
+            bucket = buckets.setdefault(
+                label, {"name": label, "members": [], "role_counts": {}})
             bucket["members"].append({"user_id": int(row["user_id"]),
                                       "name": row.get("name") or str(row["user_id"]),
-                                      "at": row.get("at")})
-            bucket["roles"].add(role_id)
+                                      "at": row.get("at"), "roles": roles})
+            for entry in roles:
+                tally = bucket["role_counts"].setdefault(
+                    entry["role_id"], {**entry, "count": 0})
+                tally["count"] += 1
     out = []
     for bucket in buckets.values():
         count = len(bucket["members"])
-        out.append({**bucket, "roles": sorted(bucket["roles"]), "count": count,
-                    "level": interest_level(count)})
+        by_role = sorted(bucket.pop("role_counts").values(),
+                         key=lambda r: (-r["count"], r["name"].lower()))
+        out.append({**bucket, "count": count, "level": interest_level(count),
+                    "by_role": [{**r, "level": interest_level(r["count"])} for r in by_role],
+                    "roles": [r["role_id"] for r in by_role]})
     out.sort(key=lambda b: (-b["count"], b["name"].lower()))
     return out
 
@@ -801,6 +819,7 @@ class TrialRankManager:
         self._enrollment = enrollment_collection
         self._images = image_collection
         self._interest = interest_collection
+        self._interest_indexed = False
         self._cache: dict[int, dict] = {}
         self._enrolled_cache: dict[int, set[int]] = {}
 
@@ -924,6 +943,23 @@ class TrialRankManager:
     # ------------------------------------------------------------------ #
     #  Prog interest
     # ------------------------------------------------------------------ #
+    def _ensure_interest_index(self) -> None:
+        """Ask Mongo to expire stale interest for us.
+
+        Belt and braces with the cutoff applied on read: the index keeps the
+        collection from growing forever, the read filter makes the numbers right
+        immediately — TTL only sweeps once a minute, and an index that failed to
+        build would otherwise mean silently stale counts.
+        """
+        if self._interest is None or self._interest_indexed:
+            return
+        self._interest_indexed = True
+        try:
+            self._interest.create_index(
+                "at", expireAfterSeconds=INTEREST_TTL_DAYS * 86400, background=True)
+        except Exception:  # noqa: BLE001 - never let housekeeping break a press
+            pass
+
     def record_interest(self, guild_id: int, user_id: int, name: str,
                         role_ids: Iterable[int]) -> None:
         """Note that someone would prog for the clears they were just shown.
@@ -935,6 +971,7 @@ class TrialRankManager:
         """
         if self._interest is None:
             return
+        self._ensure_interest_index()
         now = datetime.datetime.now(datetime.timezone.utc)
         self._interest.update_one(
             {"guild_id": int(guild_id), "user_id": int(user_id)},
@@ -944,9 +981,19 @@ class TrialRankManager:
         )
 
     def interest_rows(self, guild_id: int, limit: int = 1000) -> list[dict]:
+        """Live interest only — anything older than the window is already gone.
+
+        Wanting to prog something is a statement about right now. Two months on
+        it's a fossil, and counting fossils towards "we have twelve" is how a
+        raid lead ends up pinging people about a plan they've forgotten.
+        """
         if self._interest is None:
             return []
-        return list(self._interest.find({"guild_id": int(guild_id)}).sort("at", -1).limit(limit))
+        self._ensure_interest_index()
+        cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                  - datetime.timedelta(days=INTEREST_TTL_DAYS))
+        return list(self._interest.find({"guild_id": int(guild_id), "at": {"$gte": cutoff}})
+                    .sort("at", -1).limit(limit))
 
     def clear_interest(self, guild_id: int, user_id: int) -> None:
         if self._interest is None:

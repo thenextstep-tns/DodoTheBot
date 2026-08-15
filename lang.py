@@ -998,6 +998,13 @@ TRIAL_INTEREST_TITLE = "Prog interest — {trial}"
 TRIAL_INTEREST_NONE = "Nobody has put their hand up for **{trial}** yet."
 TRIAL_INTEREST_SUMMARY = "**{count}** of {group} interested"
 TRIAL_INTEREST_UNKNOWN = "I don't know a trial called **{trial}**."
+TRIAL_INTEREST_BREAKDOWN = "What they still need"
+TRIAL_INTEREST_WHO = "Who"
+TRIAL_INTEREST_OVERVIEW = "Prog interest"
+TRIAL_INTEREST_EMPTY = (
+    "Nobody has put their hand up yet. The button appears under the recommendations "
+    "on a `/rank` card."
+)
 TRIAL_CARD_NO_RANK = "No rank yet"
 
 TRIAL_NO_LADDER_TITLE = "No ranks set up yet"

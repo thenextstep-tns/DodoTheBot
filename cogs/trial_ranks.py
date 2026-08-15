@@ -42,6 +42,10 @@ MAX_STARS = 12
 # the grey counterpart: same size, same baseline, recedes against the gold.
 # (⚫ is the dark-theme-only version of the same idea; it vanishes on light.)
 STAR_EARNED, STAR_TODO = "⭐", "⚪"
+# How close a raid (or a single clear) is to having a group, at a glance. Same
+# bands as the panel's colours, so the two never disagree.
+INTEREST_MARKS = {trial_ranks.LEVEL_READY: "🟢", trial_ranks.LEVEL_WARM: "🟡",
+                  trial_ranks.LEVEL_COLD: "⚪"}
 # Badge file extension per stored type — Discord renders an attachment by its
 # name, so a JPEG called .png is a broken thumbnail.
 _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
@@ -592,29 +596,46 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
 
     @commands.hybrid_command(
         name="interest",
-        description="Who would join a prog for a given trial.")
+        description="Who would join a prog, and which clears they still need.")
     @commands.guild_only()
-    @discord.app_commands.describe(trial="Which trial, e.g. vKA")
+    @discord.app_commands.describe(trial="Which trial, e.g. vRG — leave empty for all of them")
     @discord.app_commands.autocomplete(trial=trial_autocomplete)
-    async def interest(self, context: commands.Context, *, trial: str) -> None:
+    async def interest(self, context: commands.Context, *, trial: str = "") -> None:
         config = self.bot.trial_ranks.get(context.guild.id)
         rows = await self.bot.loop.run_in_executor(
             None, self.bot.trial_ranks.interest_rows, context.guild.id)
         buckets = trial_ranks.interest_buckets(context.guild, config, rows)
+        if not buckets:
+            await context.send(lang.TRIAL_INTEREST_EMPTY, ephemeral=True)
+            return
+
         wanted = (trial or "").strip().lower()
+        if not wanted:
+            await context.send(embed=self._interest_overview(buckets), ephemeral=True)
+            return
+
         bucket = next((b for b in buckets if b["name"].lower() == wanted), None)
         if bucket is None:
             # A near miss is far more likely than a typo nobody meant, so try a
             # contains-match before giving up.
-            bucket = next((b for b in buckets if wanted and wanted in b["name"].lower()), None)
+            bucket = next((b for b in buckets if wanted in b["name"].lower()), None)
         if bucket is None:
-            known = {b["name"].lower() for b in buckets}
-            message = (lang.TRIAL_INTEREST_NONE.format(trial=trial)
-                       if wanted in known or not buckets
-                       else lang.TRIAL_INTEREST_UNKNOWN.format(trial=trial))
-            await context.send(message, ephemeral=True)
+            await context.send(lang.TRIAL_INTEREST_UNKNOWN.format(trial=trial), ephemeral=True)
             return
+        await context.send(embed=self._interest_detail(context.guild, bucket), ephemeral=True)
 
+    def _interest_overview(self, buckets: list[dict]) -> discord.Embed:
+        """Every raid at a glance, busiest first."""
+        embed = discord.Embed(title=lang.TRIAL_INTEREST_OVERVIEW,
+                              colour=discord.Colour.blurple())
+        lines = [f"{INTEREST_MARKS[b['level']]} **{b['count']}**/{trial_ranks.GROUP_SIZE}"
+                 f" — {b['name']}" for b in buckets[:25]]
+        embed.description = "\n".join(lines)
+        embed.set_footer(text="/interest <trial> for who, and what they still need.")
+        return embed
+
+    def _interest_detail(self, guild, bucket: dict) -> discord.Embed:
+        """One raid, down to the individual clear each person is missing."""
         colour = {trial_ranks.LEVEL_READY: discord.Colour.green(),
                   trial_ranks.LEVEL_WARM: discord.Colour.gold()}.get(
                       bucket["level"], discord.Colour.dark_grey())
@@ -623,14 +644,29 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             description=lang.TRIAL_INTEREST_SUMMARY.format(
                 count=bucket["count"], group=trial_ranks.GROUP_SIZE),
             colour=colour)
+
+        # The whole point: a raid lead needs to know it's the Bahsei hardmode
+        # three people are short of, not just that three people want vRG.
+        breakdown = [
+            f"{INTEREST_MARKS[entry['level']]} **{entry['count']}**/{trial_ranks.GROUP_SIZE}"
+            f" — {entry['name']}"
+            for entry in bucket["by_role"]
+        ]
+        if breakdown:
+            embed.add_field(name=lang.TRIAL_INTEREST_BREAKDOWN,
+                            value="\n".join(breakdown)[:1024], inline=False)
+
         lines = []
         for entry in sorted(bucket["members"], key=lambda m: m["name"].lower()):
-            member = context.guild.get_member(entry["user_id"])
+            member = guild.get_member(entry["user_id"])
+            who = member.mention if member else entry["name"]
+            needs = ", ".join(role["name"] for role in entry.get("roles") or ())
             when = entry.get("at")
             stamp = f" · {when:%Y-%m-%d}" if hasattr(when, "strftime") else ""
-            lines.append(f"• {member.mention if member else entry['name']}{stamp}")
-        embed.add_field(name="​", value="\n".join(lines)[:1024] or "—", inline=False)
-        await context.send(embed=embed, ephemeral=True)
+            lines.append(f"• {who} — {needs}{stamp}" if needs else f"• {who}{stamp}")
+        embed.add_field(name=lang.TRIAL_INTEREST_WHO,
+                        value="\n".join(lines)[:1024] or "—", inline=False)
+        return embed
 
     # ------------------------------------------------------------------ #
     #  The announcement

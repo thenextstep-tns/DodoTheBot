@@ -1414,6 +1414,19 @@ def _interest_html(bot, guild, config: dict) -> str:
         filled = min(bucket["count"], trial_ranks.GROUP_SIZE)
         pips = ('<span class="pip on"></span>' * filled
                 + '<span class="pip"></span>' * (trial_ranks.GROUP_SIZE - filled))
+        # Down to the individual clear: "three people want vRG" doesn't tell a
+        # raid lead which boss to build the night around.
+        by_role = ""
+        for entry in bucket["by_role"]:
+            width = min(100, round(entry["count"] / trial_ranks.GROUP_SIZE * 100))
+            by_role += (
+                f'<div class="progclear lvl-{entry["level"]}">'
+                f'<span class="progclearname">{html.escape(entry["name"])}</span>'
+                f'<span class="progclearbar"><i style="width:{width}%"></i></span>'
+                f'<span class="progclearcount">{entry["count"]}/{trial_ranks.GROUP_SIZE}</span>'
+                f'</div>'
+            )
+
         names = ""
         for entry in sorted(bucket["members"], key=lambda m: m["name"].lower()):
             member = guild.get_member(entry["user_id"])
@@ -1423,7 +1436,9 @@ def _interest_html(bot, guild, config: dict) -> str:
             when = entry.get("at")
             stamp = (f'<span class="muted small"> · {when:%Y-%m-%d}</span>'
                      if hasattr(when, "strftime") else "")
-            names += f'<li>{html.escape(label)}{stamp}</li>'
+            needs = ", ".join(role["name"] for role in entry.get("roles") or ())
+            wants = (f'<span class="progneeds">{html.escape(needs)}</span>' if needs else "")
+            names += f'<li>{html.escape(label)}{wants}{stamp}</li>'
         over = (f' <span class="muted small">+{bucket["count"] - trial_ranks.GROUP_SIZE} more</span>'
                 if bucket["count"] > trial_ranks.GROUP_SIZE else "")
         cards += f"""
@@ -1433,7 +1448,10 @@ def _interest_html(bot, guild, config: dict) -> str:
         <span class="progpips">{pips}</span>
         <span class="progcount">{bucket["count"]}/{trial_ranks.GROUP_SIZE}</span>{over}
       </summary>
-      <ul class="proglist">{names}</ul>
+      <div class="progbody">
+        <div class="progclears">{by_role}</div>
+        <ul class="proglist">{names}</ul>
+      </div>
     </details>"""
 
     ready = sum(1 for b in buckets if b["level"] == trial_ranks.LEVEL_READY)
@@ -1444,8 +1462,11 @@ def _interest_html(bot, guild, config: dict) -> str:
       registers everything that card was recommending. Wanting a raid's hardmode and its
       trifecta counts once — as wanting that raid.</p>
       <p>A group is {trial_ranks.GROUP_SIZE}. Rows turn <b class="lvl-warm-ink">yellow at 6</b>
-      and <b class="lvl-ready-ink">green at 10</b>. Open a row for the names, or run
-      <code>/interest &lt;trial&gt;</code> in Discord.</p>
+      and <b class="lvl-ready-ink">green at 10</b>. Open a row for the exact bosses and
+      titles people are short of, or run <code>/interest &lt;trial&gt;</code> in Discord.</p>
+      <p class="muted small">Interest lapses after {trial_ranks.INTEREST_TTL_DAYS} days —
+      it's a statement about right now, and a list nobody trusts is worse than a short one.
+      Pressing the button again restarts the clock.</p>
     </div>
     <div class="pilotstats">
       <span class="pilotstat"><b>{ready}</b> ready to run</span>
