@@ -119,6 +119,56 @@ def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
     return max(reached, key=lambda rank: rank["min_points"]) if reached else None
 
 
+def breakdown_for(guild, role_ids: Iterable[int], points: dict) -> list[dict]:
+    """Which roles produced a member's score, biggest contribution first.
+
+    This is what makes a weighting decision inspectable: not "142 points" but
+    "vDSR 40 + vSE 40 + vKA 25 …".
+    """
+    held = set(role_ids or ())
+    rows = []
+    for role_id, value in (points or {}).items():
+        role_id = int(role_id)
+        if role_id not in held:
+            continue
+        role = guild.get_role(role_id)
+        rows.append({"role_id": role_id, "name": role.name if role else str(role_id),
+                     "points": int(value)})
+    rows.sort(key=lambda row: (-row["points"], row["name"]))
+    return rows
+
+
+def find_members(guild, names: Iterable[str], *, limit: int = 10) -> list[dict]:
+    """Resolve typed names to members: id, mention, exact, prefix, then substring.
+
+    Returns one row per input so an unmatched name is reported rather than
+    silently dropped — a typo shouldn't look like "this player scores zero".
+    """
+    members = [m for m in guild.members if not m.bot]
+    out = []
+    for raw in list(names)[:limit]:
+        query = str(raw).strip()
+        if not query:
+            continue
+        digits = "".join(ch for ch in query if ch.isdigit())
+        member = None
+        if digits and len(digits) >= 15:
+            member = guild.get_member(int(digits))
+        if member is None:
+            lowered = query.lower()
+            candidates = [
+                next((m for m in members if m.display_name.lower() == lowered
+                      or m.name.lower() == lowered), None),
+                next((m for m in members if m.display_name.lower().startswith(lowered)
+                      or m.name.lower().startswith(lowered)), None),
+                next((m for m in members if lowered in m.display_name.lower()
+                      or lowered in m.name.lower()), None),
+            ]
+            member = next((c for c in candidates if c is not None), None)
+        out.append({"query": query, "member": member})
+    return out
+
+
 def unpriced(guild, points: dict) -> list:
     """Scoring roles with no points set yet — surfaced so nothing is forgotten."""
     priced = {int(role_id) for role_id, value in (points or {}).items()}

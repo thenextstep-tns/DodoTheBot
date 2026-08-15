@@ -789,12 +789,118 @@ if (_trialsPage) {
     flash(res.ok ? "trial ranking saved ✓" : (res.error || "Failed"), res.ok);
   });
 
-  document.getElementById("trialrun").addEventListener("click", async (e) => {
-    e.target.disabled = true;
-    flash("recalculating…", true);
-    const res = await post(`/api/guild/${guildId}/trials`, { action: "run" });
-    e.target.disabled = false;
-    if (res.ok) { flash("ranks recalculated ✓", true); setTimeout(() => location.reload(), 900); }
-    else { flash(res.error || "Failed", false); }
+}
+
+// --- Trial ranking: balance sandbox (dry runs) + push to live ---
+const _sandbox = document.querySelector(".trialspage .sandbox");
+if (_sandbox) {
+  const guildId = document.querySelector(".trialspage").dataset.guild;
+  const out = document.getElementById("previewout");
+
+  // Read the weights currently on screen — the whole point is previewing
+  // edits that haven't been saved.
+  const draft = () => {
+    const points = {};
+    document.querySelectorAll(".rolepoints").forEach((input) => {
+      const value = Number(input.value);
+      if (input.value !== "" && value !== 0) points[input.dataset.role] = value;
+    });
+    const ranks = [];
+    document.querySelectorAll(".rankmin").forEach((input) => {
+      if (input.value === "") return;
+      ranks.push({
+        role_id: Number(input.dataset.role),
+        min_points: Number(input.value),
+        name: input.closest(".scorerow").querySelector(".rolename").textContent.trim(),
+      });
+    });
+    return { points: points, ranks: ranks,
+             enabled: document.getElementById("trialsenabled").checked,
+             exclusive: document.getElementById("trialsexclusive").checked };
+  };
+
+  const tip = (row) => {
+    if (!row.breakdown || !row.breakdown.length) return "no scoring roles";
+    return row.breakdown.map((b) => `${b.name}: ${b.points}`).join("\n")
+      + `\n— total ${row.score}`;
+  };
+
+  const render = (rows, meta) => {
+    out.innerHTML = "";
+    if (!rows.length) { out.innerHTML = '<p class="muted">Nobody scored any points.</p>'; return; }
+    if (meta) {
+      const head = document.createElement("p");
+      head.className = "muted small";
+      head.textContent = `${meta.total} member(s) with points`
+        + (meta.moving ? ` · ${meta.moving} would change rank` : " · nobody changes rank")
+        + (rows.length < meta.total ? ` · showing the top ${rows.length}` : "");
+      out.appendChild(head);
+    }
+    const table = document.createElement("table");
+    table.className = "stats previewtable";
+    table.innerHTML = "<thead><tr><th>#</th><th>Player</th><th class='num'>Points</th>"
+      + "<th>Rank now</th><th>Would be</th></tr></thead>";
+    const body = document.createElement("tbody");
+    rows.forEach((row, index) => {
+      const tr = document.createElement("tr");
+      if (row.missing) {
+        tr.innerHTML = `<td class="muted">—</td><td colspan="4" class="muted">`
+          + `no member matched “${row.query}”</td>`;
+        body.appendChild(tr);
+        return;
+      }
+      if (row.changed) tr.className = "moved";
+      // Hover shows where the points came from — on demand, not on screen.
+      tr.title = tip(row);
+      const cells = [
+        String(index + 1),
+        row.name,
+        String(row.score),
+        row.current || "—",
+        row.rank || "—",
+      ];
+      cells.forEach((text, i) => {
+        const td = document.createElement("td");
+        if (i === 2) td.className = "num";
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    out.appendChild(table);
+  };
+
+  const ask = async (body, button) => {
+    button.disabled = true;
+    const res = await post(`/api/guild/${guildId}/trials`, body);
+    button.disabled = false;
+    if (!res.ok) { flash(res.error || "Failed", false); return null; }
+    return res;
+  };
+
+  document.getElementById("trialpreview").addEventListener("click", async (e) => {
+    const names = document.getElementById("trialnames").value
+      .split(/[,\n]/).map((n) => n.trim()).filter(Boolean).slice(0, 10);
+    if (!names.length) { flash("Type a name or two first", false); return; }
+    const res = await ask({ action: "preview", names: names, ...draft() }, e.target);
+    if (res) render(res.rows || [], null);
+  });
+
+  document.getElementById("trialpreviewall").addEventListener("click", async (e) => {
+    flash("scoring everyone…", true);
+    const res = await ask({ action: "preview_all", ...draft() }, e.target);
+    if (res) render(res.rows || [], { total: res.total, moving: res.moving });
+  });
+
+  document.getElementById("trialpush").addEventListener("click", async (e) => {
+    if (!confirm("Save these weights and apply the ranks to everyone now?")) return;
+    flash("pushing live…", true);
+    const res = await ask({ action: "push", ...draft() }, e.target);
+    if (res) {
+      const s = res.summary || {};
+      flash(`live ✓ ${s.ranked || 0} ranked, ${s.granted || 0} granted, ${s.removed || 0} replaced`, true);
+      setTimeout(() => location.reload(), 1200);
+    }
   });
 }

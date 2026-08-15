@@ -524,3 +524,17 @@ nav { flex-wrap: wrap; gap: 12px; }
 nav .navguild { color: var(--color-muted); font-size: 12px; text-transform: uppercase;
   letter-spacing: .4px; padding-left: 8px; border-left: 1px solid var(--line); }
 nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
+
+/* Trial ranking: balance sandbox */
+.sandbox { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 12px 14px; margin-bottom: 14px; }
+.sandboxrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sandboxrow input { flex: 1 1 320px; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.sandboxrow button { margin: 0; }
+#previewout { margin-top: 12px; }
+#previewout table.previewtable td { cursor: help; }
+#previewout tr.moved { background: rgba(255, 56, 92, .07); }
+#previewout tr.moved td:last-child { font-weight: var(--weight-semibold); }
+#trialpush { background: var(--color-primary); }

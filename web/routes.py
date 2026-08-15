@@ -1109,8 +1109,18 @@ def _trials_html(bot, guild, scope: str) -> str:
     <label class="switch"><input type="checkbox" id="trialsexclusive"
       {"checked" if config.get("exclusive", True) else ""}> only hold the highest rank</label>
     <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
-    <button id="trialsave">Save</button>
-    <button id="trialrun" class="ghost">Recalculate now</button>
+    <button id="trialpush">Push to live</button>
+    <button id="trialsave" class="ghost">Save draft</button>
+  </div>
+  <div class="sandbox">
+    <div class="pointshead"><b>Try it before you commit</b>
+      <span class="muted small">scores against the weights on this screen — nothing is saved or applied</span></div>
+    <div class="sandboxrow">
+      <input id="trialnames" placeholder="Up to 10 names, comma separated — e.g. Nik, Fox, Mido">
+      <button id="trialpreview" class="ghost">Preview these</button>
+      <button id="trialpreviewall" class="ghost">Preview everyone</button>
+    </div>
+    <div id="previewout"></div>
   </div>
   {'<p class="warnline">' + str(len(missing)) + ' clear/achievement role(s) have no points yet — they are highlighted below.</p>' if missing else ''}
   <p class="muted small">{html.escape(last_line)}</p>
@@ -1498,13 +1508,84 @@ async def api_guild_trials(request: web.Request):
     """
     bot, guild = request.app["bot"], request["guild"]
     data = await request.json()
-    if data.get("action") == "run":
+    action = data.get("action")
+
+    # ---- dry runs: score against the weights in the browser, touch nothing ----
+    if action in ("preview", "preview_all"):
+        try:
+            points = trial_ranks.validate_points(data.get("points"), guild=guild)
+            ranks = trial_ranks.validate_ranks(data.get("ranks"), guild=guild)
+        except (trial_ranks.TrialError, validate.ValidationError) as error:
+            return _bad(error)
+
+        def row_for(member):
+            held = {role.id for role in member.roles}
+            score = trial_ranks.score_for(held, points)
+            projected = trial_ranks.rank_for(score, ranks)
+            # What they hold now, so a re-balance shows movement rather than
+            # just a number.
+            current = next((rank["name"] for rank in ranks if rank["role_id"] in held), None)
+            return {
+                "id": str(member.id),
+                "name": member.display_name,
+                "score": score,
+                "rank": (projected or {}).get("name"),
+                "current": current,
+                "changed": (projected or {}).get("name") != current,
+                "breakdown": trial_ranks.breakdown_for(guild, held, points),
+            }
+
+        if action == "preview":
+            names = data.get("names") or []
+            if not isinstance(names, list):
+                return _bad("Give a list of names.")
+            rows = []
+            for found in trial_ranks.find_members(guild, names):
+                if found["member"] is None:
+                    rows.append({"query": found["query"], "missing": True})
+                else:
+                    rows.append({**row_for(found["member"]), "query": found["query"]})
+            return web.json_response({"ok": True, "rows": rows})
+
+        # preview_all is deliberately on-demand: it walks every member, so it
+        # runs when asked for and never on page load.
+        rows = [row_for(member) for member in guild.members if not member.bot]
+        rows = [row for row in rows if row["score"] > 0]
+        rows.sort(key=lambda row: (-row["score"], row["name"].lower()))
+        return web.json_response({
+            "ok": True, "rows": rows[:500], "total": len(rows),
+            "moving": sum(1 for row in rows if row["changed"]),
+        })
+
+    if action in ("run", "push"):
         cog = bot.get_cog("trial_ranks")
         if cog is None:
             return _bad("The trial_ranks cog isn't loaded.")
+        # "push" saves the weights being previewed, then applies them.
+        if action == "push":
+            try:
+                clean = {
+                    "points": trial_ranks.validate_points(data.get("points"), guild=guild),
+                    "ranks": trial_ranks.validate_ranks(data.get("ranks"), guild=guild),
+                }
+                for rank in clean["ranks"]:
+                    validate.assignable_role(guild, rank["role_id"], field=f"rank '{rank['name']}'")
+                for flag in ("enabled", "exclusive"):
+                    if flag in data:
+                        clean[flag] = validate.boolean(data.get(flag), field=flag)
+            except (trial_ranks.TrialError, validate.ValidationError) as error:
+                return _bad(error)
+            was = bot.trial_ranks.get(guild.id)
+            bot.trial_ranks.save(guild.id, clean)
+            await _record_change(
+                request, audit_log.KIND_TRIAL, "setup",
+                f"{len(was.get('points') or {})} priced, {len(was.get('ranks') or [])} ranks",
+                f"{len(clean['points'])} priced, {len(clean['ranks'])} ranks",
+                "Trial ranking pushed live")
         summary = await cog.run_for_guild(guild)
-        await _record_change(request, audit_log.KIND_TRIAL, "(recalculate)", None, "run",
-                             "Recalculated trial ranks")
+        if action == "run":
+            await _record_change(request, audit_log.KIND_TRIAL, "(recalculate)", None, "run",
+                                 "Recalculated trial ranks")
         return web.json_response({"ok": True, "summary": summary})
 
     try:
