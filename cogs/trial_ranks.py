@@ -269,6 +269,25 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             out["errors"].append(
                 "I don't have the **Manage Roles** permission, so I can't change anyone's roles.")
             edit = False
+        elif edit:
+            # The rule that actually bites: Discord blocks a bot from touching
+            # *any* role on a member whose highest role is at or above the
+            # bot's own — the rank role being safely below me counts for
+            # nothing. This is why it silently did nothing for staff while
+            # working fine for everyone else.
+            if member.id == getattr(member.guild, "owner_id", None):
+                out["errors"].append(
+                    "Discord never lets a bot change the **server owner's** roles, "
+                    "whatever the hierarchy says. This one has to be done by hand.")
+                edit = False
+            elif member.top_role >= me.top_role:
+                out["errors"].append(
+                    f"**{member.display_name}**'s highest role "
+                    f"(**{member.top_role.name}**) is above mine, so Discord won't let me "
+                    f"change *any* of their roles — including ones below me. "
+                    f"Drag my role above **{member.top_role.name}** in "
+                    f"Server Settings → Roles.")
+                edit = False
 
         async def edit_roles(action, roles, reason, what):
             """Apply one role change, turning a refusal into a plain sentence."""

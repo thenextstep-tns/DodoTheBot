@@ -1301,6 +1301,24 @@ def _conversion_stats(bot, guild, config: dict) -> dict:
     }
 
 
+def _unreachable_member(guild, member) -> str:
+    """Why the bot can't change this member's roles, or ``""`` if it can.
+
+    Separate from the role checks because it's a separate Discord rule, and the
+    one that actually catches people out: a member whose highest role is at or
+    above the bot's is untouchable *entirely*, even for roles the bot could
+    otherwise hand out freely.
+    """
+    me = guild.me
+    if me is None or member is None:
+        return ""
+    if member.id == getattr(guild, "owner_id", None):
+        return "server owner — Discord never lets a bot change their roles"
+    if member.top_role >= me.top_role:
+        return f"their top role ({member.top_role.name}) is above mine"
+    return ""
+
+
 def _rank_role_warnings(guild, config: dict) -> list[str]:
     """Reasons the bot won't actually be able to hand out the ranks configured.
 
@@ -1334,6 +1352,20 @@ def _rank_role_warnings(guild, config: dict) -> list[str]:
     if unreachable:
         problems.append(f"{unreachable} clear role(s) also sit above my highest role, so "
                         "superseded ones can't be tidied up.")
+    # By far the most common cause, and the least obvious: staff sit above the
+    # bot, so nothing can be done to them however the rank roles are ordered.
+    stuck = sorted(
+        {member.top_role.name
+         for member in guild.members
+         if not member.bot and member.top_role >= me.top_role}
+    )
+    if stuck:
+        problems.append(
+            "Anyone whose highest role is "
+            + ", ".join(f"<b>{html.escape(name)}</b>" for name in stuck[:8])
+            + " is out of my reach entirely — Discord won't let me change <i>any</i> of "
+            "their roles, even ones below me. Drag my role above those in "
+            "<b>Server Settings → Roles</b>.")
     return problems
 
 
@@ -1351,9 +1383,15 @@ def _pilot_html(bot, guild, config: dict) -> str:
         when = entry.get("at")
         stamp = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else "—"
         state = entry.get("state") or ""
+        blocked = _unreachable_member(guild, member)
+        # An enrolled member the bot can't touch is the failure mode that looks
+        # like success: their card shows a rank they were never given.
+        flag = (f'<div class="warnline small">⚠️ Roles can\'t be changed — '
+                f'{html.escape(blocked)}</div>' if blocked and state ==
+                trial_ranks.STATE_ENROLLED else "")
         rows += (
             f'<tr data-user="{int(entry["user_id"])}">'
-            f'<td>{html.escape(name)}<div class="muted small">{html.escape(tag)}</div></td>'
+            f'<td>{html.escape(name)}<div class="muted small">{html.escape(tag)}</div>{flag}</td>'
             f'<td>{html.escape(_STATE_LABELS.get(state, state))}</td>'
             f'<td class="muted small">{html.escape(entry.get("source") or "—")}</td>'
             f'<td class="muted small">{stamp}</td>'
