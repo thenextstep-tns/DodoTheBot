@@ -15,6 +15,7 @@ can't use, but the decorators are what actually enforce it.
 
 from __future__ import annotations
 
+import datetime
 import functools
 import html
 import os
@@ -29,7 +30,7 @@ from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, names, panel_access, parameters, stats, validate
 from helpers import tribes as tribe_rules
-from helpers import trial_ranks
+from helpers import trial_ranks, trial_image
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -1223,6 +1224,8 @@ def _trials_html(bot, guild, scope: str) -> str:
     <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
     <button id="trialpush">Push to live</button>
     <button id="trialsave" class="ghost">Save draft</button>
+    <a class="chip" href="/guild/{guild.id}/trials.png" target="_blank" rel="noopener"
+       title="A shareable chart of the current values">🖼 Chart</a>
   </div>
   <div class="sandbox">
     <div class="pointshead"><b>Try it before you commit</b>
@@ -1638,6 +1641,29 @@ async def guild_trials_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
     return _page(f"{guild.name} · trial ranks", _trials_html(bot, guild, scope),
                  scope=scope, guild=guild, current="trials")
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def guild_trials_image(request: web.Request):
+    """The current setup as a shareable PNG.
+
+    Rendering is CPU work in Pillow, so it goes to a worker thread rather than
+    stalling the bot's event loop.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    config = bot.trial_ranks.get(guild.id)
+    try:
+        data = await bot.loop.run_in_executor(
+            None, functools.partial(trial_image.build, guild, config))
+    except Exception as error:  # noqa: BLE001 - report instead of a 500 page
+        return web.Response(status=500, text=f"Could not draw the chart: {error}",
+                            content_type="text/plain")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    return web.Response(
+        body=data, content_type="image/png",
+        headers={"Content-Disposition":
+                 f'inline; filename="trial-ranks-{stamp}.png"'},
+    )
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
@@ -2370,6 +2396,7 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/tribes", guild_tribes_page),
             web.get("/guild/{gid}/trials", guild_trials_page),
             web.post("/api/guild/{gid}/trials", api_guild_trials),
+            web.get("/guild/{gid}/trials.png", guild_trials_image),
             web.post("/api/guild/{gid}/tribe", api_guild_tribe),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
