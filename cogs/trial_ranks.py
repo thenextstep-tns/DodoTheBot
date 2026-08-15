@@ -35,10 +35,12 @@ BAR_FULL, BAR_EMPTY = "▰", "▱"
 BAR_WIDTH = 12
 # Past this many rungs a star row stops being readable and becomes a wall.
 MAX_STARS = 12
-# Earned rungs get the colour emoji; the ones still to come get the flat
-# outline glyph on purpose — the contrast is what makes the row read as
-# progress at a glance instead of as decoration.
-STAR_EARNED, STAR_TODO = "⭐", "☆"
+# Both halves of the row have to be emoji. Mixing ⭐ with the text glyph ☆ put
+# two different rendering systems side by side — different size, weight and
+# baseline — which looked like a mistake rather than like an empty slot. ⚪ is
+# the grey counterpart: same size, same baseline, recedes against the gold.
+# (⚫ is the dark-theme-only version of the same idea; it vanishes on light.)
+STAR_EARNED, STAR_TODO = "⭐", "⚪"
 # Badge file extension per stored type — Discord renders an attachment by its
 # name, so a JPEG called .png is a broken thumbnail.
 _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
