@@ -555,3 +555,22 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 
 .rungoff { font-size: 11px; color: var(--color-muted-soft); border: 1px solid var(--color-hairline);
   border-radius: var(--radius-full); padding: 1px 8px; }
+
+/* Type-to-pick role selector */
+.rolepick { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+.rolepick-text { width: 100%; padding: 6px 26px 6px 9px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.rolepick-clear { position: absolute; right: 4px; margin: 0; padding: 0 6px; line-height: 1.3;
+  background: transparent; color: var(--color-muted); border: 0; font-size: 15px; }
+.rolepick-clear:hover { background: transparent; color: var(--color-ink); }
+.rolepick-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 30;
+  max-height: 240px; overflow-y: auto; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float); }
+.rolepick-item { padding: 7px 10px; font-size: 13px; cursor: pointer; }
+.rolepick-item:hover, .rolepick-item.active { background: var(--color-surface-soft); }
+.rolepick-empty { padding: 7px 10px; font-size: 13px; color: var(--color-muted); }
+.rungmid { color: var(--color-muted); font-size: 12px; flex: none; }
+.explain { font-size: 13px; color: var(--color-body); margin-bottom: 12px; }
+.explain p { margin: 0 0 8px; }

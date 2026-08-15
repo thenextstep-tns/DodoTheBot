@@ -756,20 +756,7 @@ if (_trialsPage) {
       if (flag) flag.style.display = has ? "none" : "";
     });
   });
-  _trialsPage.querySelectorAll(".rankrole").forEach((sel) => {
-    sel.addEventListener("change", () => {
-      const row = sel.closest(".ladderrow");
-      const on = sel.value !== "0";
-      row.classList.toggle("mapped", on);
-      let off = row.querySelector(".rungoff");
-      if (on && off) { off.remove(); }
-      if (!on && !off) {
-        off = document.createElement("span");
-        off.className = "rungoff"; off.textContent = "off";
-        row.querySelector(".rungname").insertAdjacentElement("afterend", off);
-      }
-    });
-  });
+
 
   const readSetup = () => {
     const points = {};
@@ -779,10 +766,9 @@ if (_trialsPage) {
     });
     const ranks = [];
     _trialsPage.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleSel = row.querySelector(".rankrole");
-      const roleId = Number(roleSel.value || 0);
-      if (!roleId) return;  // rung not in use
-      ranks.push({ tier: roleSel.dataset.tier, role_id: roleId,
+      const roleId = Number((row.querySelector(".rolepick-id") || {}).value || 0);
+      if (!roleId) return;  // this rank is left empty
+      ranks.push({ tier: row.dataset.tier, role_id: roleId,
                    min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
     return {
@@ -815,10 +801,9 @@ if (_sandbox) {
     });
     const ranks = [];
     document.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleSel = row.querySelector(".rankrole");
-      const roleId = Number(roleSel.value || 0);
-      if (!roleId) return;  // rung not in use
-      ranks.push({ tier: roleSel.dataset.tier, role_id: roleId,
+      const roleId = Number((row.querySelector(".rolepick-id") || {}).value || 0);
+      if (!roleId) return;  // this rank is left empty
+      ranks.push({ tier: row.dataset.tier, role_id: roleId,
                    min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
     return { points: points, ranks: ranks,
@@ -909,5 +894,96 @@ if (_sandbox) {
       flash(`live ✓ ${s.ranked || 0} ranked, ${s.granted || 0} granted, ${s.removed || 0} replaced`, true);
       setTimeout(() => location.reload(), 1200);
     }
+  });
+}
+
+// --- Type-to-pick role selector -------------------------------------------
+// A text box that filters the server's roles as you type. The hidden field
+// holds the id, so half-typed text is never mistaken for a selection.
+function bindRolePickers(root, roles) {
+  root.querySelectorAll(".rolepick").forEach((pick) => {
+    const text = pick.querySelector(".rolepick-text");
+    const hidden = pick.querySelector(".rolepick-id");
+    const list = pick.querySelector(".rolepick-list");
+    const clear = pick.querySelector(".rolepick-clear");
+    let active = -1;
+
+    const chosen = () => Number(hidden.value || 0);
+    const announce = () => pick.dispatchEvent(new CustomEvent("rolechange", { bubbles: true }));
+
+    const close = () => { list.hidden = true; active = -1; };
+    const commit = (role) => {
+      hidden.value = role ? role.id : 0;
+      text.value = role ? role.name : "";
+      close();
+      announce();
+    };
+
+    const render = () => {
+      const q = text.value.trim().toLowerCase().replace(/^@/, "");
+      const matches = roles
+        .filter((r) => !q || r.name.toLowerCase().replace(/^@/, "").includes(q))
+        .slice(0, 40);
+      list.innerHTML = "";
+      if (!matches.length) {
+        const empty = document.createElement("div");
+        empty.className = "rolepick-empty";
+        empty.textContent = "No role matches that";
+        list.appendChild(empty);
+      }
+      matches.forEach((role, index) => {
+        const item = document.createElement("div");
+        item.className = "rolepick-item" + (index === active ? " active" : "");
+        item.textContent = role.name;
+        // mousedown, not click: blur would close the list first.
+        item.addEventListener("mousedown", (e) => { e.preventDefault(); commit(role); });
+        list.appendChild(item);
+      });
+      list.hidden = false;
+    };
+
+    text.addEventListener("focus", () => { active = -1; render(); });
+    text.addEventListener("input", () => { active = -1; render(); });
+    text.addEventListener("keydown", (e) => {
+      const items = Array.from(list.querySelectorAll(".rolepick-item"));
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (list.hidden) { render(); return; }
+        active += e.key === "ArrowDown" ? 1 : -1;
+        active = Math.max(0, Math.min(items.length - 1, active));
+        items.forEach((el, i) => el.classList.toggle("active", i === active));
+        if (items[active]) items[active].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const q = text.value.trim().toLowerCase().replace(/^@/, "");
+        const visible = roles.filter((r) => !q || r.name.toLowerCase().replace(/^@/, "").includes(q));
+        const role = visible[active >= 0 ? active : 0];
+        if (role) commit(role);
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+    // Leaving without choosing restores whatever was actually selected, so the
+    // box can never show a role that isn't stored.
+    text.addEventListener("blur", () => {
+      setTimeout(() => {
+        const role = roles.find((r) => Number(r.id) === chosen());
+        text.value = role ? role.name : "";
+        close();
+      }, 120);
+    });
+    clear.addEventListener("click", () => { commit(null); text.focus(); });
+  });
+}
+
+// Wire the trial-rank pickers and keep each row's on/off state in step.
+const _trialRoles = document.getElementById("all-roles");
+if (_trialRoles) {
+  const roles = JSON.parse(_trialRoles.textContent || "[]");
+  const page = document.querySelector(".trialspage");
+  bindRolePickers(page, roles);
+  page.addEventListener("rolechange", (e) => {
+    const row = e.target.closest(".ladderrow");
+    if (row) row.classList.toggle("mapped", Number(e.target.querySelector(".rolepick-id").value) > 0);
   });
 }

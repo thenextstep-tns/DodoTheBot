@@ -1067,29 +1067,40 @@ def _score_rows(roles: list, points: dict, *, section: str) -> str:
     return rows or f'<p class="muted">No roles found under the {section} divider.</p>'
 
 
+def _role_picker(guild, *, key: str, selected_id: int = 0, placeholder: str = "Type a role name…") -> str:
+    """A text box that filters roles as you type, backed by a hidden id.
+
+    A plain <select> means scrolling a hundred roles; this lets you type three
+    letters and pick. The visible input never carries the value — the hidden
+    field does — so a half-typed name can't be mistaken for a choice.
+    """
+    role = guild.get_role(selected_id) if selected_id else None
+    return (
+        f'<div class="rolepick" data-key="{html.escape(key)}">'
+        f'<input class="rolepick-text" placeholder="{html.escape(placeholder)}" '
+        f'value="{html.escape("@" + role.name) if role else ""}" autocomplete="off" spellcheck="false">'
+        f'<input type="hidden" class="rolepick-id" value="{selected_id or 0}">'
+        f'<button type="button" class="rolepick-clear" title="Clear">×</button>'
+        f'<div class="rolepick-list" hidden></div></div>'
+    )
+
+
 def _ladder_rows(guild, config: dict) -> str:
     """The seven rungs, worst to best. Each maps to a role and a threshold;
     leave the role unset to skip a rung entirely."""
-    options = "".join(
-        f'<option value="{role.id}">@{html.escape(role.name)}</option>'
-        for role in _sorted_roles(guild)
-    )
     rows = ""
     for index, rung in enumerate(trial_ranks.ladder_rows(config)):
         mapped = bool(rung["role_id"])
-        selected = options.replace(
-            f'<option value="{rung["role_id"]}">', f'<option value="{rung["role_id"]}" selected>'
-        ) if mapped else options
         rows += f"""
-    <div class="ladderrow{" mapped" if mapped else ""}">
+    <div class="ladderrow{" mapped" if mapped else ""}" data-tier="{html.escape(rung["tier"])}">
       <span class="rungindex">{index + 1}</span>
       <span class="rungname">{html.escape(rung["tier"])}</span>
-      {'' if mapped else '<span class="rungoff">off</span>'}
-      <select class="rankrole" data-tier="{html.escape(rung["tier"])}">
-        <option value="0">— pick the role this rank grants —</option>{selected}</select>
-      <span class="muted small">from</span>
+      <span class="rungmid">gives</span>
+      {_role_picker(guild, key=rung["tier"], selected_id=rung["role_id"])}
+      <span class="rungmid">at</span>
       <input type="number" class="rankmin" data-tier="{html.escape(rung["tier"])}"
-        value="{rung["min_points"] if rung["min_points"] is not None else ""}" placeholder="points">
+        value="{rung["min_points"] if rung["min_points"] is not None else ""}" placeholder="0">
+      <span class="rungmid">points</span>
     </div>"""
     return rows
 
@@ -1110,6 +1121,7 @@ def _trials_html(bot, guild, scope: str) -> str:
 
     return f"""
 <div class="trialspage" data-guild="{guild.id}">
+  <script type="application/json" id="all-roles">{_json_options(_sorted_roles(guild), "@")}</script>
   <h1>Trial ranking</h1>
   <p class="muted">Clears and achievements are worth points; reaching a threshold grants the rank
   role. Sections are read from your divider roles, so a new trial role shows up here by itself.
@@ -1136,12 +1148,16 @@ def _trials_html(bot, guild, scope: str) -> str:
   {'<p class="warnline">' + str(len(missing)) + ' clear/achievement role(s) have no points yet — they are highlighted below.</p>' if missing else ''}
   <p class="muted small">{html.escape(last_line)}</p>
 
-  <details class="group" open><summary>Ranks <span class="muted">· the ladder, worst to best</span></summary>
+  <details class="group" open><summary>Ranks <span class="muted">· Casual is the lowest, Myth the highest</span></summary>
     <div class="trialsection">
-      <p class="muted small"><b>These seven names are just the ladder.</b> For each rung, choose the
-      role in your server it should grant and the points it starts at. A rung with no role picked is
-      skipped — so a three-rung ladder is fine. Thresholds must climb as you go down the list, and a
-      member only keeps the highest rung they reach.</p>
+      <div class="explain">
+        <p>Points come from the <b>Clears</b> and <b>Achievements</b> below. When someone's total
+        reaches a rank's requirement, the bot gives them that rank's role and takes away the previous
+        one, so everyone shows only their highest rank.</p>
+        <p>For each rank, pick the role it should give and how many points it takes to get there.
+        <b>Leave a rank empty to skip it</b> — you can use three ranks instead of all seven. The
+        requirement has to go up as you move down the list.</p>
+      </div>
       <div class="ladder">{_ladder_rows(guild, config)}</div>
     </div></details>
 
