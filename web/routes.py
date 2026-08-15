@@ -1146,7 +1146,7 @@ def _trial_map_rows(guild, trials: list[dict]) -> str:
             pickers += (
                 f'<label class="slotcell"><span class="slotlabel">'
                 f'{html.escape(trial_ranks.SLOT_LABELS[slot])}</span>'
-                f'{_role_picker(guild, key=f"{index}:{slot}", selected_id=slots.get(slot) or 0, placeholder="—")}'
+                f'{_role_picker(guild, key=slot, selected_id=slots.get(slot) or 0, placeholder="—")}'
                 f"</label>"
             )
         rows += (
