@@ -35,6 +35,10 @@ BAR_FULL, BAR_EMPTY = "▰", "▱"
 BAR_WIDTH = 12
 # Past this many rungs a star row stops being readable and becomes a wall.
 MAX_STARS = 12
+# Earned rungs get the colour emoji; the ones still to come get the flat
+# outline glyph on purpose — the contrast is what makes the row read as
+# progress at a glance instead of as decoration.
+STAR_EARNED, STAR_TODO = "⭐", "☆"
 # Badge file extension per stored type — Discord renders an attachment by its
 # name, so a JPEG called .png is a broken thumbnail.
 _EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg",
@@ -76,8 +80,8 @@ def rank_stars(position: int, total: int) -> str:
     if total <= 0:
         return ""
     if total > MAX_STARS:
-        return f"⭐ {position}/{total}"
-    return "★" * position + "☆" * (total - position)
+        return f"{STAR_EARNED} {position}/{total}"
+    return STAR_EARNED * position + STAR_TODO * (total - position)
 
 
 class RankBoardView(discord.ui.View):
