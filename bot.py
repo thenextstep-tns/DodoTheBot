@@ -36,6 +36,7 @@ from helpers.events import EventRuleManager
 from helpers.panel_access import PanelAccessManager
 from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
+from helpers.tribes import TribeManager
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -115,6 +116,8 @@ class DodoBot(commands.Bot):
         # changes now bind everyone, owners included (see helpers/visibility.py).
         # Durable record of every panel change (owner's included).
         self.audit_log = AuditLog(config_py.config_audit)
+        # Role rules ("tribes") built on the panel; applied hourly by cogs/tribes.py.
+        self.tribes = TribeManager(config_py.tribes, config_py.tribe_members)
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
         )

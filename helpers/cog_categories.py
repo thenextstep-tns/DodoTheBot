@@ -105,6 +105,8 @@ FEATURES: list[dict] = [
      "description": "Track configured messages, uploads and reactions."},
     {"key": "pat_decode", "cog": "pat", "label": "PAT screenshot decoding",
      "description": "Auto-decode trial-clear (PAT) table screenshots posted in chat."},
+    {"key": "tribes", "cog": "tribes", "label": "Tribe role rules",
+     "description": "Hourly sweep that grants roles from the rules on the server's Tribes page."},
     {"key": "event_rules", "cog": "event_actions", "label": "Event rules",
      "description": "Run the 'when X happens, post this' rules built on the server's Events page."},
 ]

@@ -81,4 +81,7 @@ event_rules = db["EventRules"]                # {guild_id, event, channel_id, me
 panel_access = db["PanelAccess"]              # {guild_id, kind: role|user, target_id, scope}
 # Every configuration change made from the panel: who, when, old -> new.
 config_audit = db["ConfigAudit"]              # {guild_id, actor_id, kind, target, old, new, at}
+# Role rules built on the panel ("tribes") and the membership each sweep produces.
+tribes = db["Tribes"]                         # {guild_id, name, condition, role_ids, ...}
+tribe_members = db["TribeMembers"]            # {guild_id, tribe_id, user_id, rank, position}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

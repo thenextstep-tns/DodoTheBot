@@ -28,6 +28,7 @@ import discord
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, names, panel_access, parameters, stats, validate
+from helpers import tribes as tribe_rules
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -256,6 +257,8 @@ def _nav_chips(guild_id: int, scope: str, current: str) -> str:
         links.append((f"/guild/{guild_id}/events", "⚡ Events"))
     if panel_access.at_least(scope, panel_access.SCOPE_STATS) and current != "stats":
         links.append((f"/guild/{guild_id}/stats", "📊 Stats"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "tribes":
+        links.append((f"/guild/{guild_id}/tribes", "🏅 Tribes"))
     if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "log":
         links.append((f"/guild/{guild_id}/log", "📝 Change log"))
     return "".join(f'<a class="chip" href="{href}">{label}</a>' for href, label in links)
@@ -632,6 +635,12 @@ def _channel_options(guild, selected, *, blank: str = "— none —") -> str:
     return options
 
 
+def _sorted_roles(guild) -> list:
+    """This guild's roles in the server's own hierarchy order (highest first),
+    minus @everyone — the order people expect to see in a picker."""
+    return [role for role in sorted(guild.roles, key=lambda r: -r.position) if not role.is_default()]
+
+
 def _role_options(guild, selected) -> str:
     options = '<option value="0">— none —</option>'
     for role in sorted(guild.roles, key=lambda r: -r.position):
@@ -659,7 +668,7 @@ def _setting_input(spec: dict, value, guild) -> str:
     if kind == "emoji":
         return f'<input type="text" {common} value="{html.escape(str(value or ""))}" class="setting emoji" size="4">'
     if kind in ("list_role", "list_channel"):
-        source = guild.roles if kind == "list_role" else guild.channels
+        source = _sorted_roles(guild) if kind == "list_role" else guild.channels
         selected = set(value or [])
         options = ""
         for obj in source:
@@ -872,6 +881,116 @@ def event_actions_limit() -> int:
     from cogs.event_actions import RATE_LIMIT
 
     return RATE_LIMIT
+
+
+# --------------------------------------------------------------------------- #
+#  Tribes page
+# --------------------------------------------------------------------------- #
+def _tribe_pickers(guild) -> str:
+    """Role and channel option lists the builder clones for each condition."""
+    roles = "".join(
+        f'<option value="{role.id}">@{html.escape(role.name)}</option>' for role in _sorted_roles(guild)
+    )
+    channels = ""
+    for channel in guild.channels:
+        if not isinstance(channel, (discord.TextChannel, discord.ForumChannel, discord.VoiceChannel)):
+            continue
+        prefix = "🗂" if isinstance(channel, discord.ForumChannel) else "#"
+        channels += f'<option value="{channel.id}">{html.escape(prefix + channel.name)}</option>'
+    return (
+        f'<datalist id="tribe-roles">{roles}</datalist>'
+        f'<datalist id="tribe-channels">{channels}</datalist>'
+        f'<script type="application/json" id="tribe-role-options">{_json_options(_sorted_roles(guild), "@")}</script>'
+        f'<script type="application/json" id="tribe-channel-options">{_json_channel_options(guild)}</script>'
+    )
+
+
+def _json_options(items, prefix: str) -> str:
+    import json as _json
+    return _json.dumps([{"id": str(i.id), "name": prefix + i.name} for i in items])
+
+
+def _json_channel_options(guild) -> str:
+    import json as _json
+    out = []
+    for channel in guild.channels:
+        if isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
+            prefix = "🗂" if isinstance(channel, discord.ForumChannel) else "#"
+            out.append({"id": str(channel.id), "name": prefix + channel.name})
+    return _json.dumps(out)
+
+
+def _tribe_card(tribe: dict, guild) -> str:
+    import json as _json
+    tribe_id = str(tribe["_id"])
+    condition = tribe.get("condition") or {"type": "all", "children": []}
+    role_options = "".join(
+        f'<div class="ms-opt" data-id="{role.id}" data-name="@{html.escape(role.name)}" '
+        f'data-selected="{1 if role.id in (tribe.get("role_ids") or []) else 0}">@{html.escape(role.name)}</div>'
+        for role in _sorted_roles(guild)
+    )
+    summary = html.escape(tribe_rules.describe(condition, guild)) if condition.get("children") else \
+        '<span class="muted">no conditions yet — matches nobody</span>'
+    return f"""
+<div class="tribecard{"" if tribe.get("enabled", True) else " off"}" data-tribe="{tribe_id}">
+  <div class="rulehead">
+    <input class="rulename tribename" value="{html.escape(tribe.get("name") or "")}" placeholder="Tribe name">
+    <label class="switch"><input type="checkbox" class="tribetoggle"
+      {"checked" if tribe.get("enabled", True) else ""}> on</label>
+    <button class="ghost tribedelete">Delete</button>
+  </div>
+  <div class="tribesummary muted small">{summary}</div>
+  <div class="rulegrid">
+    <label>Grant these roles
+      <div class="multiselect triberoles"><div class="ms-chips"></div>
+        <input class="ms-search" placeholder="Search roles…" autocomplete="off">
+        <div class="ms-options">{role_options}</div></div>
+    </label>
+    <label>When someone stops matching
+      <select class="triberemove">
+        <option value="0"{"" if tribe.get("remove_when_unmatched") else " selected"}>Keep the role</option>
+        <option value="1"{" selected" if tribe.get("remove_when_unmatched") else ""}>Take the role back</option>
+      </select>
+    </label>
+  </div>
+  <div class="rulebuilder" data-condition='{html.escape(_json.dumps(condition))}'></div>
+  <div class="rulebtns"><button class="tribesave">Save tribe</button>
+    <span class="muted small">{len(tribe.get("role_ids") or [])} role(s)</span></div>
+</div>"""
+
+
+def _tribes_html(bot, guild, scope: str) -> str:
+    tribes = bot.tribes.for_guild(guild.id)
+    cards = "".join(_tribe_card(t, guild) for t in tribes) or \
+        '<p class="muted">No tribes yet. Add one to start.</p>'
+    cog = bot.get_cog("tribes")
+    last = (cog.last_run.get(guild.id) if cog else None) or {}
+    when = last.get("at")
+    last_line = (
+        f"Last sweep {when:%Y-%m-%d %H:%M} UTC · {last.get('matched', 0)} membership(s), "
+        f"{last.get('granted', 0)} role(s) granted, {last.get('removed', 0)} removed"
+        if when else "No sweep has run yet this session."
+    )
+    active = bot.visibility.feature_enabled(guild.id, "tribes")
+    return f"""
+<div class="tribespage" data-guild="{guild.id}">
+  <div class="statshead">
+    <div><div class="chips">{_nav_chips(guild.id, scope, "tribes")}</div>
+      <h1>Tribes <span class="muted">· {len(tribes)} rule(s)</span></h1></div>
+  </div>
+  <p class="muted">Build a rule from roles, tenure and activity; everyone who matches gets the
+  role(s). Rules are re-evaluated <b>hourly</b>, and you can run one now.
+  {"" if active else "<b>The tribes feature is off for this server</b> — turn it on under the tribes cog."}</p>
+  <p class="muted small">{html.escape(last_line)}</p>
+  <div class="tribeactions">
+    <button id="addtribe">+ New tribe</button>
+    <button id="runtribes" class="ghost">Run now</button>
+  </div>
+  {_tribe_pickers(guild)}
+  <div id="tribelist">{cards}</div>
+</div>
+<p id="status" class="status"></p>
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -1217,6 +1336,82 @@ async def guild_settings_page(request: web.Request):
 async def guild_events_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
     return _page(f"{guild.name} · events", _events_html(bot, guild, scope), scope=scope)
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def guild_tribes_page(request: web.Request):
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    return _page(f"{guild.name} · tribes", _tribes_html(bot, guild, scope), scope=scope)
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def api_guild_tribe(request: web.Request):
+    """Create / update / delete a tribe, or run the sweep now.
+
+    Body: {action: create|update|delete|run, id?, name?, role_ids?, condition?,
+    enabled?, remove_when_unmatched?}.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    gid = guild.id
+    data = await request.json()
+    action = data.get("action")
+
+    if action == "run":
+        cog = bot.get_cog("tribes")
+        if cog is None:
+            return _bad("The tribes cog isn't loaded.")
+        summary = await cog.run_for_guild(guild)
+        await _record_change(request, audit_log.KIND_TRIBE, "(sweep)", None, "run now",
+                             "Ran the tribe sweep")
+        return web.json_response({"ok": True, "summary": {
+            k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in summary.items()}})
+
+    try:
+        clean: dict = {}
+        if "name" in data or action == "create":
+            clean["name"] = validate.text(data.get("name") or "New tribe", field="name",
+                                          max_length=validate.MAX_NAME, allow_empty=False)
+        if "role_ids" in data or action == "create":
+            role_ids = validate.guild_roles(guild, data.get("role_ids") or [], field="roles")
+            for role_id in role_ids:
+                validate.assignable_role(guild, role_id, field="role")
+            clean["role_ids"] = role_ids
+        if "condition" in data or action == "create":
+            clean["condition"] = tribe_rules.validate_node(
+                data.get("condition") or {"type": "all", "children": []}, guild=guild)
+        for flag in ("enabled", "remove_when_unmatched"):
+            if flag in data:
+                clean[flag] = validate.boolean(data.get(flag), field=flag)
+        tribe_id = None
+        if action in ("update", "delete"):
+            tribe_id = validate.text(data.get("id"), field="tribe id", max_length=64, allow_empty=False)
+    except (validate.ValidationError, tribe_rules.RuleError) as error:
+        return _bad(error)
+
+    try:
+        if action == "create":
+            tribe = bot.tribes.create(gid, clean)
+            await _record_change(request, audit_log.KIND_TRIBE, clean["name"], None, "created",
+                                 f"Tribe **{clean['name']}** created")
+            return web.json_response({"ok": True, "id": str(tribe["_id"])})
+        if action == "delete":
+            existing = next((t for t in bot.tribes.for_guild(gid) if str(t["_id"]) == tribe_id), None)
+            bot.tribes.delete(gid, tribe_id)
+            await _record_change(request, audit_log.KIND_TRIBE, (existing or {}).get("name", tribe_id),
+                                 "existed", None, f"Tribe **{(existing or {}).get('name')}** deleted")
+            return web.json_response({"ok": True})
+        if action == "update":
+            existing = next((t for t in bot.tribes.for_guild(gid) if str(t["_id"]) == tribe_id), None)
+            bot.tribes.update(gid, tribe_id, clean)
+            await _record_change(
+                request, audit_log.KIND_TRIBE, clean.get("name") or (existing or {}).get("name", tribe_id),
+                tribe_rules.describe((existing or {}).get("condition") or {}, guild) if existing else None,
+                tribe_rules.describe(clean["condition"], guild) if "condition" in clean else None,
+                f"Tribe **{clean.get('name') or tribe_id}** edited")
+            return web.json_response({"ok": True})
+    except (KeyError, TypeError, ValueError) as error:
+        return _bad(f"invalid tribe: {error}")
+    return web.json_response({"ok": False, "error": "bad request"}, status=400)
 
 
 @require_scope(panel_access.SCOPE_CONFIG)
@@ -1733,6 +1928,8 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/settings", guild_settings_page),
             web.get("/guild/{gid}/events", guild_events_page),
             web.get("/guild/{gid}/log", guild_log_page),
+            web.get("/guild/{gid}/tribes", guild_tribes_page),
+            web.post("/api/guild/{gid}/tribe", api_guild_tribe),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
             web.post("/api/guild/{gid}/access", api_guild_access),

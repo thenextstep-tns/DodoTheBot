@@ -27,6 +27,7 @@ KIND_SETTING = "setting"
 KIND_EVENT_RULE = "event_rule"
 KIND_ACCESS = "panel_access"
 KIND_LANG = "lang"
+KIND_TRIBE = "tribe"
 
 KIND_LABELS = {
     KIND_COG: "Cog",
@@ -39,6 +40,7 @@ KIND_LABELS = {
     KIND_EVENT_RULE: "Event rule",
     KIND_ACCESS: "Panel access",
     KIND_LANG: "String",
+    KIND_TRIBE: "Tribe",
 }
 
 PAGE_SIZE = 25

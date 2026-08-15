@@ -459,3 +459,24 @@ main:has(.logpage) { max-width: 1180px; }
 select.coglevel { margin-left: auto; margin-right: 10px; padding: 4px 8px; font-size: 12px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+
+/* ---------------------------------------------------------------- Tribes page */
+main:has(.tribespage) { max-width: 1080px; }
+.tribeactions { display: flex; gap: 8px; margin: 4px 0 16px; }
+.tribeactions button { margin: 0; }
+.tribecard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 14px 16px; margin-bottom: 12px; }
+.tribecard.off { opacity: .55; }
+.tribesummary { margin: -4px 0 10px; font-family: var(--font-mono); }
+.rulebuilder { margin: 6px 0 4px; }
+.condnode { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px;
+  margin: 6px 0; background: var(--color-surface-soft); }
+.condhead { display: flex; align-items: center; gap: 8px; }
+.condremove { margin: 0 0 0 auto; padding: 1px 8px; font-size: 13px; line-height: 1.2; }
+.condbody { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.condkids { width: 100%; padding-left: 14px; border-left: 2px solid var(--color-hairline); }
+.condnode select, .condnode input { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.condnode input[type="number"] { width: 90px; }
+.condnode select[multiple] { min-width: 190px; }

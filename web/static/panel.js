@@ -474,3 +474,164 @@ document.querySelectorAll("select.coglevel").forEach((sel) => {
     }
   });
 });
+
+// --- Tribes page: recursive condition builder ---
+const _tribesPage = document.querySelector(".tribespage");
+if (_tribesPage) {
+  const guildId = _tribesPage.dataset.guild;
+  const roleOpts = JSON.parse(document.getElementById("tribe-role-options").textContent || "[]");
+  const chanOpts = JSON.parse(document.getElementById("tribe-channel-options").textContent || "[]");
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const picker = (options, selected, multiple) => {
+    const sel = el("select", "cond-ids");
+    if (multiple) sel.multiple = true;
+    options.forEach((o) => {
+      const opt = el("option", null, o.name);
+      opt.value = o.id;
+      if ((selected || []).map(String).includes(String(o.id))) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (multiple) sel.size = Math.min(6, Math.max(3, options.length));
+    return sel;
+  };
+
+  // Render one condition; the element carries read(), which rebuilds its JSON.
+  function renderNode(node, onRemove) {
+    node = node || { type: "has_role", role_ids: [], mode: "all" };
+    const box = el("div", "condnode");
+    const head = el("div", "condhead");
+    const kind = el("select", "condtype");
+    [["all", "ALL of"], ["any", "ANY of"], ["not", "NONE of"], ["has_role", "Has role(s)"],
+     ["member_for", "On server for ≥ days"], ["account_for", "Account older than days"],
+     ["metric_min", "At least N messages/threads"], ["metric_top", "Top N by messages/threads"]]
+      .forEach(([v, label]) => { const o = el("option", null, label); o.value = v; kind.appendChild(o); });
+    kind.value = node.type;
+    head.appendChild(kind);
+    if (onRemove) {
+      const del = el("button", "ghost condremove", "×");
+      del.addEventListener("click", onRemove);
+      head.appendChild(del);
+    }
+    box.appendChild(head);
+    const body = el("div", "condbody");
+    box.appendChild(body);
+
+    const build = () => {
+      body.innerHTML = "";
+      const type = kind.value;
+      if (["all", "any", "not"].includes(type)) {
+        const kids = el("div", "condkids");
+        body.appendChild(kids);
+        const addChild = (child) => {
+          const wrap = renderNode(child, () => wrap.remove());
+          kids.appendChild(wrap);
+        };
+        (node.children || []).forEach(addChild);
+        const add = el("button", "ghost", "+ condition");
+        add.addEventListener("click", () => addChild(null));
+        body.appendChild(add);
+        box.read = () => ({ type: type, children: Array.from(kids.children).map((c) => c.read()) });
+      } else if (type === "has_role") {
+        const mode = el("select", "condmode");
+        [["all", "has ALL of"], ["any", "has ANY of"]].forEach(([v, l]) => {
+          const o = el("option", null, l); o.value = v; mode.appendChild(o);
+        });
+        mode.value = node.mode || "all";
+        const ids = picker(roleOpts, node.role_ids, true);
+        body.append(mode, ids);
+        box.read = () => ({ type: type, mode: mode.value,
+                            role_ids: Array.from(ids.selectedOptions).map((o) => Number(o.value)) });
+      } else if (type === "member_for" || type === "account_for") {
+        const days = el("input", "conddays");
+        days.type = "number"; days.min = "0"; days.value = node.days != null ? node.days : 30;
+        body.append(days, el("span", "muted small", " days"));
+        box.read = () => ({ type: type, days: Number(days.value || 0) });
+      } else {
+        const metric = el("select", "condmetric");
+        [["messages", "messages sent"], ["threads", "threads created"]].forEach(([v, l]) => {
+          const o = el("option", null, l); o.value = v; metric.appendChild(o);
+        });
+        metric.value = node.metric || "messages";
+        const num = el("input", "condnum");
+        num.type = "number"; num.min = "1";
+        num.value = type === "metric_min" ? (node.min != null ? node.min : 100)
+                                          : (node.n != null ? node.n : 10);
+        const chans = picker(chanOpts, node.channel_ids, true);
+        const hint = el("span", "muted small", " (no channels selected = whole server)");
+        body.append(num, metric, chans, hint);
+        box.read = () => {
+          const out = { type: type, metric: metric.value,
+                        channel_ids: Array.from(chans.selectedOptions).map((o) => Number(o.value)) };
+          if (type === "metric_min") { out.min = Number(num.value || 0); }
+          else { out.n = Number(num.value || 1); }
+          return out;
+        };
+      }
+    };
+    kind.addEventListener("change", () => { node = { type: kind.value }; build(); });
+    build();
+    return box;
+  }
+
+  _tribesPage.querySelectorAll(".rulebuilder").forEach((holder) => {
+    const condition = JSON.parse(holder.dataset.condition || '{"type":"all","children":[]}');
+    const root = renderNode(condition, null);
+    holder.appendChild(root);
+    holder._read = () => root.read();
+  });
+
+  const bindTribe = (card) => {
+    const id = card.dataset.tribe;
+    let roleIds = null;
+    const ms = card.querySelector(".triberoles");
+    if (ms) card._roles = bindMultiSelect(ms, (ids) => { roleIds = ids; });
+    const payload = () => {
+      const body = {
+        action: "update", id: id,
+        name: card.querySelector(".tribename").value,
+        condition: card.querySelector(".rulebuilder")._read(),
+        remove_when_unmatched: card.querySelector(".triberemove").value === "1",
+      };
+      if (roleIds !== null) body.role_ids = roleIds;
+      return body;
+    };
+    card.querySelector(".tribesave").addEventListener("click", async () => {
+      const res = await post(`/api/guild/${guildId}/tribe`, payload());
+      flash(res.ok ? "tribe saved ✓" : (res.error || "Failed"), res.ok);
+      if (res.ok) setTimeout(() => location.reload(), 600);
+    });
+    card.querySelector(".tribetoggle").addEventListener("change", async (e) => {
+      const res = await post(`/api/guild/${guildId}/tribe`,
+                             { action: "update", id: id, enabled: e.target.checked });
+      flash(res.ok ? "saved ✓" : (res.error || "Failed"), res.ok);
+      if (res.ok) { card.classList.toggle("off", !e.target.checked); }
+      else { e.target.checked = !e.target.checked; }
+    });
+    card.querySelector(".tribedelete").addEventListener("click", async () => {
+      if (!confirm("Delete this tribe? Members keep any roles already granted.")) return;
+      const res = await post(`/api/guild/${guildId}/tribe`, { action: "delete", id: id });
+      if (res.ok) { card.remove(); flash("tribe deleted ✓", true); }
+      else { flash(res.error || "Failed", false); }
+    });
+  };
+  _tribesPage.querySelectorAll(".tribecard").forEach(bindTribe);
+
+  document.getElementById("addtribe").addEventListener("click", async () => {
+    const res = await post(`/api/guild/${guildId}/tribe`, { action: "create", name: "New tribe" });
+    if (res.ok) { location.reload(); } else { flash(res.error || "Failed", false); }
+  });
+  document.getElementById("runtribes").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    flash("running sweep…", true);
+    const res = await post(`/api/guild/${guildId}/tribe`, { action: "run" });
+    e.target.disabled = false;
+    if (res.ok) { flash("sweep finished ✓", true); setTimeout(() => location.reload(), 800); }
+    else { flash(res.error || "Failed", false); }
+  });
+}
