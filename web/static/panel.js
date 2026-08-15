@@ -855,8 +855,16 @@ if (_sandbox) {
     rows.forEach((row, index) => {
       const tr = document.createElement("tr");
       if (row.missing) {
-        tr.innerHTML = `<td class="muted">—</td><td colspan="4" class="muted">`
-          + `no member matched “${row.query}”</td>`;
+        // The query is whatever was typed; build the cells so it can never be
+        // parsed as markup.
+        const dash = document.createElement("td");
+        dash.className = "muted";
+        dash.textContent = "—";
+        const msg = document.createElement("td");
+        msg.className = "muted";
+        msg.colSpan = 4;
+        msg.textContent = `no member matched “${row.query}”`;
+        tr.append(dash, msg);
         body.appendChild(tr);
         return;
       }
@@ -1059,12 +1067,28 @@ if (_trialMap) {
       pick.className = "rolepick";
       pick.dataset.key = slot;
       const chosen = (trial.slots || {})[slot];
-      pick.innerHTML =
-        `<input class="rolepick-text" placeholder="—" autocomplete="off" spellcheck="false"` +
-        ` value="${chosen ? roleName(chosen).replace(/"/g, "&quot;") : ""}">` +
-        `<input type="hidden" class="rolepick-id" value="${chosen || 0}">` +
-        `<button type="button" class="rolepick-clear" title="Clear">×</button>` +
-        `<div class="rolepick-list" hidden></div>`;
+      // Built with DOM calls, not markup: a role name is arbitrary text chosen
+      // by whoever created the role, and .value as a property is never parsed
+      // as HTML.
+      const text = document.createElement("input");
+      text.className = "rolepick-text";
+      text.placeholder = "—";
+      text.autocomplete = "off";
+      text.spellcheck = false;
+      text.value = chosen ? roleName(chosen) : "";
+      const hiddenId = document.createElement("input");
+      hiddenId.type = "hidden";
+      hiddenId.className = "rolepick-id";
+      hiddenId.value = chosen || 0;
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "rolepick-clear";
+      clear.title = "Clear";
+      clear.textContent = "×";
+      const list = document.createElement("div");
+      list.className = "rolepick-list";
+      list.hidden = true;
+      pick.append(text, hiddenId, clear, list);
       cell.append(label, pick);
       grid.appendChild(cell);
     });
