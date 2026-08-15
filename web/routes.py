@@ -1377,7 +1377,7 @@ async def api_guild_tribe(request: web.Request):
                 validate.assignable_role(guild, role_id, field="role")
             clean["role_ids"] = role_ids
         if "condition" in data or action == "create":
-            clean["condition"] = tribe_rules.validate_node(
+            clean["condition"] = tribe_rules.validate_root(
                 data.get("condition") or {"type": "all", "children": []}, guild=guild)
         for flag in ("enabled", "remove_when_unmatched"):
             if flag in data:

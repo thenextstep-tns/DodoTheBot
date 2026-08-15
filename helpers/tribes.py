@@ -122,6 +122,19 @@ def validate_node(node: Any, *, guild=None, depth: int = 0, counter: Optional[li
     raise RuleError(f"Unknown condition type: {kind!r}")
 
 
+def validate_root(node: Any, *, guild=None) -> dict:
+    """Validate a tribe's top-level condition, allowing it to be empty.
+
+    A tribe you've just created has no conditions yet, and one you're still
+    building may be momentarily empty — that has to be storable. An empty rule
+    matches **nobody** (the sweep skips it), so it is safe to save. Empty groups
+    *nested* inside a rule are still rejected: those are mistakes, not drafts.
+    """
+    if isinstance(node, dict) and node.get("type") in GROUP_TYPES and not node.get("children"):
+        return {"type": node["type"], "children": []}
+    return validate_node(node, guild=guild)
+
+
 def _ids(value, field: str) -> list[int]:
     if value in (None, ""):
         return []
@@ -234,12 +247,20 @@ class MemberFacts:
 def evaluate(node: dict, user_id: int, facts: MemberFacts) -> bool:
     """Does this member satisfy the condition tree?"""
     kind = node.get("type")
-    if kind == "all":
-        return all(evaluate(child, user_id, facts) for child in node["children"])
-    if kind == "any":
-        return any(evaluate(child, user_id, facts) for child in node["children"])
-    if kind == "not":
-        return not any(evaluate(child, user_id, facts) for child in node["children"])
+    if kind in GROUP_TYPES:
+        children = node.get("children") or []
+        # An empty rule matches NOBODY. Python's all([]) is True, which would
+        # hand the tribe's role to the entire server — the one mistake this
+        # feature must never make, so it's caught here rather than relying on
+        # every caller to pre-check.
+        if not children:
+            return False
+        results = (evaluate(child, user_id, facts) for child in children)
+        if kind == "all":
+            return all(results)
+        if kind == "any":
+            return any(results)
+        return not any(results)
     if kind == "has_role":
         held = facts.roles.get(user_id) or set()
         wanted = set(node["role_ids"])
