@@ -100,6 +100,14 @@ class Racing(commands.Cog, name="racing"):
             return
 
         mice = self.assign_mice_classes(mouse_users)
+        left_out = [user for user in mouse_users if user.id not in mice]
+        mouse_users = [user for user in mouse_users if user.id in mice]
+        if not mouse_users:
+            await context.send(lang.RACING_NO_MICE)
+            return
+        if left_out:
+            await context.send(lang.RACING_SHORT_ON_MICE.format(count=len(left_out)))
+
         await self.send_lineup_embed(race_message, context, mice)
         await self.run_race_lights(race_message, race_starter, track_length, mice)
 
@@ -133,26 +141,39 @@ class Racing(commands.Cog, name="racing"):
             await asyncio.sleep(interval)
 
     async def get_reaction_users(self, race_message, emoji) -> list:
-        """Return everyone who reacted to ``race_message`` with ``emoji``."""
+        """Return every non-bot user who reacted to ``race_message`` with ``emoji``.
+
+        The bot seeds the sign-up reaction itself, so without the filter it joins
+        its own races as an extra mouse.
+        """
         for reaction in race_message.reactions:
             if str(reaction.emoji) == emoji:
-                return [user async for user in reaction.users()]
+                return [user async for user in reaction.users() if not user.bot]
         return []
 
     def assign_mice_classes(self, mouse_users) -> dict:
-        """Assign a random registered mouse (with its class) to each racer."""
+        """Assign a random registered mouse (with its class) to each racer.
+
+        A mouse whose class no longer exists in ``MouseClasses`` is passed over
+        rather than handed out, and racers are only left out once the pen runs
+        dry — so the returned mapping always covers exactly the racers the caller
+        should race, and the two can't drift apart.
+        """
         available_mice = list(config_py.user_mice.find())
         random.shuffle(available_mice)
+        classes = {doc["name"]: doc for doc in config_py.mouse_classes.find()}
         assigned = {}
         for user in mouse_users:
-            mouse = available_mice.pop()
-            mouse_class = config_py.mouse_classes.find_one({"name": mouse["class"]})
-            if mouse_class:
-                assigned[user.id] = {
-                    "name": mouse["name"],
-                    "class": mouse_class["name"],
-                    "class_description": mouse_class["description"],
-                }
+            while available_mice:
+                mouse = available_mice.pop()
+                mouse_class = classes.get(mouse.get("class"))
+                if mouse_class:
+                    assigned[user.id] = {
+                        "name": mouse["name"],
+                        "class": mouse_class["name"],
+                        "class_description": mouse_class["description"],
+                    }
+                    break
         return assigned
 
     async def send_lineup_embed(self, race_message, context, mice) -> None:
@@ -188,15 +209,32 @@ class Racing(commands.Cog, name="racing"):
     # --------------------------------------------------------------------- #
     #  Core race loop
     # --------------------------------------------------------------------- #
+    def _roll_move_plan(self, moves: int, lucky_ids, non_lucky_classes) -> list:
+        """Roll ``moves`` worth of per-move randomness in one go.
+
+        Everything that used to be decided (and re-queried) in the middle of a move
+        lives here: the event roll, and which class each Lucky Mouse is wearing.
+        Deciding it up front keeps the move loop off the database entirely, and
+        means a Lucky Mouse's class for a move is known *before* the event phase —
+        which is what lets one summon and read a treasure map.
+        """
+        return [
+            {
+                "event_roll": random.randint(1, 100),
+                "lucky_classes": {uid: random.choice(non_lucky_classes) for uid in lucky_ids},
+            }
+            for _ in range(moves)
+        ]
+
     async def run_race(self, context, race_message, race_starter, mouse_users, user_mouse_names_classes,
                        positions, completed_mice, track_length, finished_order, debug_log):
         """Main race loop: random events, per-mouse dice rolls, and finishing logic."""
         initial_players = len(mouse_users)
-        bonus_roll_users = set()
-        bomb_user = None
-        bomb_effect_applied = False
         move_counter = 0
         green_flag = lang.RACING_EVENT_RACING
+        grab_window = self.bot.params.get(
+            context.guild.id if context.guild else None, "race_reaction_window"
+        )
 
         adopted_owners = {}
         for user in mouse_users:
@@ -205,83 +243,99 @@ class Racing(commands.Cog, name="racing"):
             if doc and doc.get("adopted_by") == user.id:
                 adopted_owners[user.id] = True
 
+        # The class table is a handful of documents that can't change mid-race, so
+        # read it once here instead of once per mouse per move.
+        classes_by_name = {doc["name"]: doc for doc in config_py.mouse_classes.find()}
+        non_lucky_classes = [doc for name, doc in classes_by_name.items() if name != "Lucky Mouse"]
+        lucky_ids = (
+            [u.id for u in mouse_users if user_mouse_names_classes[u.id]["class"] == "Lucky Mouse"]
+            if non_lucky_classes
+            else []
+        )
+        move_plan = self._roll_move_plan(track_length * 2, lucky_ids, non_lucky_classes)
+
+        def effective_class(user_id, plan):
+            """The class a mouse is wearing this move — a Lucky Mouse rerolls each move."""
+            name = user_mouse_names_classes[user_id]["class"]
+            if name == "Lucky Mouse" and user_id in plan["lucky_classes"]:
+                return plan["lucky_classes"][user_id]
+            return classes_by_name.get(name)
+
         starry_boost = {}
         bomb_dodges_used = defaultdict(int)
-        any_navigator = any(info["class"] == "Navigator" for info in user_mouse_names_classes.values())
 
         while len(finished_order) < initial_players:
             await race_message.clear_reactions()
-            event_roll = random.randint(1, 100)
+            if move_counter >= len(move_plan):
+                move_plan.extend(self._roll_move_plan(track_length, lucky_ids, non_lucky_classes))
+            plan = move_plan[move_counter]
+            event_roll = plan["event_roll"]
             event_text = green_flag
 
+            # Events only concern mice still on the track, and a grab lasts exactly
+            # one move — nobody carries a bonus into a later event.
+            racing_users = [u for u in mouse_users if u.id not in completed_mice]
+            cheese_user = wine_user = bomb_user = None
+            # Resolved before the event phase, so a Lucky Mouse wearing Navigator
+            # this move can both summon a map and read it.
+            move_classes = {u.id: effective_class(u.id, plan) for u in racing_users}
+            navigator_racing = any(cls and cls["name"] == "Navigator" for cls in move_classes.values())
+
             # --- POSSIBLE EVENTS ---
-            if any_navigator and event_roll == 95:
+            if navigator_racing and event_roll == 95:
                 event_text = lang.RACING_EVENT_MAP
-                await race_message.add_reaction(MAP)
-
-                def check_map(reaction, user):
-                    return str(reaction.emoji) == MAP and user in mouse_users and not user.bot
-
-                try:
-                    _reaction, user = await self.bot.wait_for("reaction_add", timeout=2.0, check=check_map)
-                    if user_mouse_names_classes[user.id]["class"] == "Navigator":
-                        positions[user.id] += 20
+                await race_message.edit(content=event_text)
+                map_reader = await self._grab_event(race_message, racing_users, MAP, grab_window)
+                if map_reader is not None:
+                    reader_class = move_classes[map_reader.id]
+                    if reader_class and reader_class["name"] == "Navigator":
+                        positions[map_reader.id] += 20
                         debug_log.append(
-                            f"Move {move_counter + 1}: {user_mouse_names_classes[user.id]['name']} used the Treasure Map! +20 move."
+                            f"Move {move_counter + 1}: {user_mouse_names_classes[map_reader.id]['name']} used the Treasure Map! +20 move."
                         )
                     else:
                         debug_log.append(
                             f"Move {move_counter + 1}: Mouse picked up a map but doesn't know how to read, so it just looks at it in confusion and nothing happens."
                         )
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    await race_message.clear_reaction(MAP)
 
-            elif 81 <= event_roll <= 82 and adopted_owners:
+            elif 81 <= event_roll <= 82 and (
+                star_eligible := [u for u in racing_users if u.id in adopted_owners]
+            ):
                 event_text = lang.RACING_EVENT_STARRY
                 await race_message.edit(content=event_text)
-                eligible = [u for u in mouse_users if u.id in adopted_owners]
-                star_owner = await self._grab_event(race_message, eligible, STAR)
+                star_owner = await self._grab_event(race_message, star_eligible, STAR, grab_window)
                 if star_owner:
                     starry_boost[star_owner.id] = config_py.STAR_INSPIRATION_DURATION
 
             elif 86 <= event_roll <= 88:
                 event_text = lang.RACING_EVENT_CHEESE
                 await race_message.edit(content=event_text)
-                if bonus_user := await self._grab_event(race_message, mouse_users, CHEESE):
-                    bonus_roll_users.add(bonus_user)
+                cheese_user = await self._grab_event(race_message, racing_users, CHEESE, grab_window)
 
             elif 89 <= event_roll <= 92:
                 event_text = lang.RACING_EVENT_WINE
                 await race_message.edit(content=event_text)
-                if bonus_user := await self._grab_event(race_message, mouse_users, WINE):
-                    bonus_roll_users.add(bonus_user)
+                wine_user = await self._grab_event(race_message, racing_users, WINE, grab_window)
 
             elif 93 <= event_roll <= 94:
                 event_text = lang.RACING_EVENT_BOMB
                 await race_message.edit(content=event_text)
-                bomb_user = await self._grab_event(race_message, mouse_users, BOMB)
-                bomb_effect_applied = False
+                bomb_user = await self._grab_event(race_message, racing_users, BOMB, grab_window)
             else:
                 await asyncio.sleep(1)
 
             # --- PER-USER MOVE LOGIC ---
+            bomb_hits, bomb_dodgers = [], []
             for user in mouse_users:
                 if user.id in completed_mice:
                     continue
                 roll = self.roll_dice()
                 mouse_info = user_mouse_names_classes[user.id]
-                mouse_class = mouse_info["class"]
+                class_data = move_classes[user.id]
                 debug_message = f"Move {move_counter + 1}: {mouse_info['name']}: {roll} "
 
-                class_data = config_py.mouse_classes.find_one({"name": mouse_class})
-                if mouse_class == "Lucky Mouse":
-                    all_classes = list(config_py.mouse_classes.find({"name": {"$ne": "Lucky Mouse"}}))
-                    if all_classes:
-                        random_class = random.choice(all_classes)
-                        debug_message += f"[Lucky Mouse: randomly got {random_class['name']}!] "
-                        class_data = random_class
+                if mouse_info["class"] == "Lucky Mouse" and class_data:
+                    debug_message += f"[Lucky Mouse: randomly got {class_data['name']}!] "
 
                 if user.id in starry_boost and starry_boost[user.id] > 0:
                     roll += config_py.STAR_INSPIRATION_BOOST
@@ -290,9 +344,7 @@ class Racing(commands.Cog, name="racing"):
                     if starry_boost[user.id] == 0:
                         del starry_boost[user.id]
 
-                pre_event_roll = roll
-
-                if user in bonus_roll_users and 86 <= event_roll <= 88:
+                if user == cheese_user:
                     roll += 1
                     debug_message += f"({mouse_info['name']} munched on cheese! +1) "
                     if "cheese_bonus" in class_data.get("bonus", {}):
@@ -300,36 +352,47 @@ class Racing(commands.Cog, name="racing"):
                         roll += cheese_bonus
                         debug_message += f"(Cheese Seeker bonus +{cheese_bonus}!) "
 
-                if user in bonus_roll_users and 89 <= event_roll <= 92:
-                    if mouse_class == "Wine Connoisseur":
-                        if pre_event_roll < 0:
+                if user == wine_user:
+                    # Read the *effective* class so a Lucky Mouse that rolled Wine
+                    # Connoisseur this move gets its perk, like every other class.
+                    if class_data and class_data["name"] == "Wine Connoisseur":
+                        if roll < 0:
                             roll = 0
                             debug_message += "(Wine Connoisseur negated negative roll to 0!) "
                         else:
-                            roll = pre_event_roll * 2
-                            debug_message += f"(Wine Connoisseur doubled roll from {pre_event_roll} to {roll}!) "
+                            roll = roll * 2
+                            debug_message += f"(Wine Connoisseur doubled the roll to {roll}!) "
                     else:
                         roll = roll * 2
                         debug_message += f"(Wine event doubled the roll to {roll}!) "
 
-                if bomb_user and user != bomb_user and 93 <= event_roll <= 94 and not bomb_effect_applied:
+                bomb_damage_taken = False
+                guardian_absorbed_bomb = False
+                if bomb_user and user != bomb_user:
                     if class_data and class_data["name"] == "Bomb Dodger":
                         if bomb_dodges_used[user.id] < 3:
                             bomb_dodges_used[user.id] += 1
+                            bomb_dodgers.append(mouse_info["name"])
                             debug_message += f"({mouse_info['name']} dodged the bomb! {bomb_dodges_used[user.id]}/3) "
                         else:
                             roll -= 5
+                            bomb_damage_taken = True
+                            bomb_hits.append(mouse_info["name"])
                             debug_message += f"({mouse_info['name']} couldn't dodge any more bombs and got hit by one, -5 => {roll}) "
                     elif class_data and "reduce_negative" in class_data.get("bonus", {}) and class_data["name"] == "Guardian":
                         half_damage = int(5 * class_data["bonus"]["reduce_negative"])
                         roll -= half_damage
+                        bomb_damage_taken = True
+                        # This *is* the Guardian perk applied to the blast — flag it so
+                        # the generic negative-roll halving below can't apply it twice.
+                        guardian_absorbed_bomb = True
+                        bomb_hits.append(mouse_info["name"])
                         debug_message += f"(Guardian halved bomb effect to -{half_damage} => {roll}) "
                     else:
                         roll -= 5
+                        bomb_damage_taken = True
+                        bomb_hits.append(mouse_info["name"])
                         debug_message += f"({mouse_info['name']} got hit by a bomb => {roll}) "
-
-                if 93 <= event_roll <= 94:
-                    bomb_effect_applied = True
 
                 if "speed_bonus" in class_data.get("bonus", {}):
                     if random.randint(1, 100) <= 15:
@@ -337,22 +400,24 @@ class Racing(commands.Cog, name="racing"):
                         roll += bonus_amount
                         debug_message += f"(Speedster triggered +{bonus_amount}!) "
 
-                if class_data and "reduce_negative" in class_data.get("bonus", {}) and roll < 0:
+                if (
+                    class_data
+                    and not guardian_absorbed_bomb
+                    and "reduce_negative" in class_data.get("bonus", {})
+                    and roll < 0
+                ):
                     original_roll = roll
                     roll = math.ceil(roll * class_data["bonus"]["reduce_negative"])
                     debug_message += f"(Guardian halved negative roll from {original_roll} to {roll}) "
 
-                positions[user.id] = min(positions[user.id] + roll, track_length)
-
-                # If only one mouse remains, force it to finish.
-                if len(mouse_users) - len(completed_mice) == 1:
-                    for remaining_user in mouse_users:
-                        if remaining_user.id not in completed_mice:
-                            positions[remaining_user.id] = track_length
-                            completed_mice.add(remaining_user.id)
-                            finished_order.append(remaining_user)
-                            debug_message += f"({mouse_info['name']} forced finish!) "
-                            break
+                # A mouse never backs off the start line under its own steam, but a
+                # bomb can throw it clean off the back of the track — and it has to
+                # crawl all the way back from there.
+                target = min(positions[user.id] + roll, track_length)
+                if bomb_damage_taken:
+                    positions[user.id] = target
+                else:
+                    positions[user.id] = max(min(0, positions[user.id]), target)
 
                 if positions[user.id] >= track_length and user.id not in completed_mice:
                     positions[user.id] = track_length
@@ -361,6 +426,46 @@ class Racing(commands.Cog, name="racing"):
                     debug_message += f"({mouse_info['name']} finished!) "
 
                 debug_log.append(debug_message)
+                if positions[user.id] < 0:
+                    debug_log.append(
+                        lang.RACING_LOG_YEETED.format(
+                            move=move_counter + 1,
+                            mouse=mouse_info["name"],
+                            position=positions[user.id],
+                        )
+                    )
+
+            # Who threw the bomb and who caught the blast — reported after everyone
+            # has moved so these land at the end of the footer, where they're visible.
+            if bomb_user:
+                move_number = move_counter + 1
+                debug_log.append(
+                    lang.RACING_LOG_BOMB_THROWN.format(
+                        move=move_number, mouse=user_mouse_names_classes[bomb_user.id]["name"]
+                    )
+                )
+                if bomb_hits:
+                    debug_log.append(
+                        lang.RACING_LOG_BOMB_HITS.format(move=move_number, mice=", ".join(bomb_hits))
+                    )
+                if bomb_dodgers:
+                    debug_log.append(
+                        lang.RACING_LOG_BOMB_DODGED.format(move=move_number, mice=", ".join(bomb_dodgers))
+                    )
+                if not bomb_hits and not bomb_dodgers:
+                    debug_log.append(lang.RACING_LOG_BOMB_FIZZLE.format(move=move_number))
+
+            # Everyone has moved: if a single mouse is left it has nobody to race,
+            # so wave it home rather than make it crawl the rest alone.
+            if len(mouse_users) - len(completed_mice) == 1:
+                last_user = next(u for u in mouse_users if u.id not in completed_mice)
+                positions[last_user.id] = track_length
+                completed_mice.add(last_user.id)
+                finished_order.append(last_user)
+                debug_log.append(
+                    f"Move {move_counter + 1}: "
+                    f"{user_mouse_names_classes[last_user.id]['name']} forced finish!"
+                )
 
             move_counter += 1
             await self.update_race_progress(
@@ -368,19 +473,30 @@ class Racing(commands.Cog, name="racing"):
                 track_length, debug_log, event_text, move_counter,
             )
 
-    async def _grab_event(self, race_message, eligible_users, emoji):
+    async def _grab_event(self, race_message, eligible_users, emoji, timeout):
         """Add ``emoji`` and return the first eligible racer to click it (or None).
 
-        Unifies the cheese / wine / bomb / starry-eyes events, which only differed
-        by emoji and eligibility.
+        Unifies the cheese / wine / bomb / starry-eyes / treasure-map events, which
+        only differ by emoji and eligibility.
+
+        Listens on ``raw_reaction_add`` rather than ``reaction_add``: the latter
+        only fires for messages still in the gateway's message cache, which a
+        gigarace sign-up message — nine hours old by the time the race starts —
+        has long since been evicted from.
         """
         await race_message.add_reaction(emoji)
+        eligible_by_id = {user.id: user for user in eligible_users}
 
-        def check(reaction, user):
-            return str(reaction.emoji) == emoji and user in eligible_users and not user.bot
+        def check(payload):
+            return (
+                payload.message_id == race_message.id
+                and str(payload.emoji) == emoji
+                and payload.user_id in eligible_by_id
+            )
 
         try:
-            _reaction, user = await self.bot.wait_for("reaction_add", timeout=2.0, check=check)
+            payload = await self.bot.wait_for("raw_reaction_add", timeout=timeout, check=check)
+            user = eligible_by_id[payload.user_id]
             await race_message.remove_reaction(emoji, user)
             await race_message.remove_reaction(emoji, self.bot.user)
             return user

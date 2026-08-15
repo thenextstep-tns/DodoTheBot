@@ -638,7 +638,8 @@ LOG_EVENT_EDIT = "✏️ **Event Updated:** `{name}`{actor} - <t:{now}:f>\n\n{ch
 LOG_GUILD_UPDATE = "⚙️ **Server Settings Updated**{actor} - <t:{now}:f>\n\n{changes}"
 
 # --------------------------------------------------------------------------- #
-#  Racing cog (user-facing copy; per-move battle-log fragments stay inline)
+#  Racing cog (user-facing copy; whole-field battle-log announcements live here
+#  too — only the per-mouse roll fragments stay inline in the cog)
 # --------------------------------------------------------------------------- #
 RACING_MOUSE_EXISTS = "The mouse name '{name}' already exists in the list."
 RACING_CHOOSE_CLASS = "Choose a class for your mouse:\n{classes}"
@@ -663,6 +664,11 @@ RACING_GIGA_COUNTDOWN = (
     "1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold "
 )
 RACING_NO_JOIN = "No one joined the race. Race cancelled."
+RACING_NO_MICE = (
+    "There isn't a single skeevaton with a valid class in the pen, so there's nothing to race. "
+    "Register one with `newmouse` first!"
+)
+RACING_SHORT_ON_MICE = "The pen ran dry — {count} racer(s) couldn't be given a skeevaton and have to sit this one out."
 RACING_LINEUP_TITLE = "Race Line-up"
 RACING_LINEUP_DESCRIPTION = "The race is about to start!\n"
 RACING_LIGHTS_TITLE = "Race is about to start!"
@@ -670,7 +676,9 @@ RACING_LIGHTS_DESCRIPTION = (
     "{roster}\n\nReactions:\n"
     "🧀 Cheese: Increases your move by 1\n"
     "🍷 Wine: Multiplies your move by 2\n"
-    "💣 Bomb: Drops everyone else back by 5"
+    "💣 Bomb: Drops everyone else back by 5\n"
+    "✨ Starry Eyes: +5 to your move for 5 moves — only a mouse racing for the owner who adopted it can grab this\n"
+    "🗺️ Treasure Map: teleports you 20 steps ahead — only a Navigator can read it, anyone else wastes it"
 )
 RACING_LIGHTS_GO = "{roster}\n\nGOOOO!!!"
 RACING_EVENT_RACING = "## We are racing :mouse2:"
@@ -679,6 +687,13 @@ RACING_EVENT_STARRY = "## Starry Eyes! Click ✨ to inspire your mouse!"
 RACING_EVENT_CHEESE = "## Cheese appeared! Click the cheese emoji to grab it!"
 RACING_EVENT_WINE = "## Wine appeared! Click the wine emoji to grab it!"
 RACING_EVENT_BOMB = "## Bomb appeared! Click the bomb emoji to grab it!"
+# Battle-log lines for the race footer. The per-mouse roll fragments stay inline in
+# the cog; these are the shared, whole-field announcements.
+RACING_LOG_BOMB_THROWN = "Move {move}: 💣 {mouse} set off the bomb!"
+RACING_LOG_BOMB_HITS = "Move {move}: the blast caught {mice}."
+RACING_LOG_BOMB_DODGED = "Move {move}: {mice} dodged the blast."
+RACING_LOG_BOMB_FIZZLE = "Move {move}: the bomb went off with nobody left to catch the blast."
+RACING_LOG_YEETED = "Move {move}: 💥 {mouse} was blasted clean off the back of the track (position {position})!"
 RACING_PROGRESS_TITLE = "THE SKEEVATON RACE IS ON!"
 RACING_SUMMARY_HEADER = "The race has ended!\nRace Results:\n"
 RACING_SUMMARY_LINE = "{mention}'s {mouse} - {points} points\n"
