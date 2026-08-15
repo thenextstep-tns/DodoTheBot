@@ -104,6 +104,75 @@ def scoring_roles(guild) -> list:
 
 
 # --------------------------------------------------------------------------- #
+#  Default point values
+# --------------------------------------------------------------------------- #
+# The values ESO for Dodos arrived at, keyed by role name so they apply to any
+# server using the same trial names. Matching ignores case, spacing, punctuation
+# and superscript HM, so "vRG Bahsei(HM)", "vRG Bahseiᴴᴹ" and "vrg bahsei hm"
+# all land on the same entry. These only ever pre-fill an empty box — a value
+# you have set is never overwritten.
+DEFAULT_POINTS_BY_NAME: dict[str, int] = {
+    # --- clears: base ---
+    "vAA": 1, "vHRC": 2, "vSO": 3, "vMoL": 4, "vHoF": 5, "vAS+0": 2, "vCR+0": 4,
+    "vSS": 4, "vKA": 4, "vRG": 5, "vDSR": 6, "vSE": 5, "vLC": 5, "vOC": 6,
+    # --- clears: hardmode / partial ---
+    "vAA HM": 2, "vHRC HM": 4, "vSO HM": 4, "vMoL HM": 6, "vHoF HM": 6,
+    "vAS+Llothis": 3, "vAS+Felms": 3, "vAS+2": 15,
+    "vCR+1": 5, "vCR+2": 8, "vCR+3": 15,
+    "vSS Lokke HM": 7, "vSS Yolna HM": 5, "vSS HM": 15,
+    "vKA Yandir HM": 5, "vKA Vrol HM": 5, "vKA HM": 15,
+    "vRG Oaxiltso HM": 8, "vRG Bahsei HM": 15, "vRG HM": 25,
+    "vDSR Turlassil & Lylanar HM": 12, "vDSR Reef Guardian HM": 12, "vDSR HM": 27,
+    "vSE Yaseyla HM": 10, "vSE Chimera HM": 10, "vSE HM": 25,
+    "vLC Count HM": 10, "vLC Orphic HM": 10, "vLC HM": 25,
+    "vOC Shapers of Flesh HM": 10, "vOC Jynorah & Skorkhif HM": 15, "vOC HM": 30,
+    # --- achievements ---
+    "Master Angler": 20, "Opulent Ordeal ND": 25, "Misery's Master": 55,
+    "Unstoppable": 50, "Mindmender": 45, "Soul of the Squall": 50,
+    "Planesbreaker": 40, "Dawnbringer": 25, "Godslayer": 30, "Gryphon Heart": 20,
+    "Immortal Redeemer": 20, "Tick-Tock Tormentor": 15, "The Unchained": 30,
+    "Dro-m'Athra Destroyer": 10,
+}
+
+# Superscript letters Discord role names use for the HM suffix.
+_SUPERSCRIPT = str.maketrans({"\u1d34": "H", "\u1d39": "M", "\u02b0": "h", "\u1d50": "m"})
+
+
+def normalise_role_name(name: str) -> str:
+    """Fold a role name to a comparable key: no case, spacing or punctuation."""
+    folded = (name or "").translate(_SUPERSCRIPT).lower()
+    return "".join(ch for ch in folded if ch.isalnum())
+
+
+DEFAULT_POINTS: dict[str, int] = {
+    normalise_role_name(name): points for name, points in DEFAULT_POINTS_BY_NAME.items()
+}
+
+
+def default_points_for(role) -> int:
+    """The suggested value for a role, or 0 if we have no opinion about it."""
+    return DEFAULT_POINTS.get(normalise_role_name(getattr(role, "name", "")), 0)
+
+
+def with_defaults(guild, points: dict) -> dict:
+    """Stored points, with suggestions filled in for roles that have none.
+
+    Returns ``{role_id: (value, is_default)}`` so the panel can show a
+    suggestion differently from a decision.
+    """
+    out = {}
+    for role in scoring_roles(guild):
+        stored = (points or {}).get(str(role.id))
+        if stored:
+            out[role.id] = (int(stored), False)
+        else:
+            suggested = default_points_for(role)
+            if suggested:
+                out[role.id] = (suggested, True)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 #  Scoring
 # --------------------------------------------------------------------------- #
 def score_for(role_ids: Iterable[int], points: dict) -> int:

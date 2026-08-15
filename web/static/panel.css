@@ -574,3 +574,6 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 .rungmid { color: var(--color-muted); font-size: 12px; flex: none; }
 .explain { font-size: 13px; color: var(--color-body); margin-bottom: 12px; }
 .explain p { margin: 0 0 8px; }
+
+.scorerow.suggestedrow { background: rgba(0, 0, 0, .02); border-color: var(--color-hairline-soft); }
+.suggested { font-size: 11px; color: var(--color-muted-soft); white-space: nowrap; }

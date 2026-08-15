@@ -1052,15 +1052,28 @@ def _tribes_html(bot, guild, scope: str) -> str:
 #  Trial ranking page
 # --------------------------------------------------------------------------- #
 def _score_rows(roles: list, points: dict, *, section: str) -> str:
-    """One row per scoring role, with its value and an unpriced flag."""
+    """One row per scoring role.
+
+    A role with no stored value is pre-filled from the built-in defaults and
+    marked as a suggestion, so a fresh server starts with a sensible board and
+    you can still tell which numbers you actually decided. Roles we have no
+    default for stay empty and are flagged.
+    """
     rows = ""
     for role in roles:
-        value = points.get(str(role.id))
-        missing = "" if value else ' <span class="nopoints">no points set</span>'
+        stored = points.get(str(role.id))
+        suggested = 0 if stored else trial_ranks.default_points_for(role)
+        value = stored or suggested
+        if stored:
+            flag, css = "", ""
+        elif suggested:
+            flag, css = ' <span class="suggested">suggested</span>', " suggestedrow"
+        else:
+            flag, css = ' <span class="nopoints">no points set</span>', " unpriced"
         rows += (
-            f'<div class="scorerow{"" if value else " unpriced"}" data-role="{role.id}" '
+            f'<div class="scorerow{css}" data-role="{role.id}" '
             f'data-search="{html.escape(role.name.lower())}">'
-            f'<span class="rolename">{html.escape(role.name)}</span>{missing}'
+            f'<span class="rolename">{html.escape(role.name)}</span>{flag}'
             f'<input type="number" class="rolepoints" data-role="{role.id}" '
             f'value="{html.escape(str(value)) if value else ""}" placeholder="0"></div>'
         )
@@ -1072,7 +1085,8 @@ def _role_picker(guild, *, key: str, selected_id: int = 0, placeholder: str = "T
 
     A plain <select> means scrolling a hundred roles; this lets you type three
     letters and pick. The visible input never carries the value — the hidden
-    field does — so a half-typed name can't be mistaken for a choice.
+    field does — so a half-typed name can't be mistaken for a choice. The id
+    stays a string all the way to the server: it doesn't fit in a JS number.
     """
     role = guild.get_role(selected_id) if selected_id else None
     return (
@@ -1109,7 +1123,9 @@ def _trials_html(bot, guild, scope: str) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
     points = config.get("points") or {}
-    missing = trial_ranks.unpriced(guild, points)
+    unset = trial_ranks.unpriced(guild, points)
+    missing = [role for role in unset if not trial_ranks.default_points_for(role)]
+    suggested = [role for role in unset if trial_ranks.default_points_for(role)]
     cog = bot.get_cog("trial_ranks")
     last = (cog.last_run.get(guild.id) if cog else None) or {}
     last_line = (
@@ -1145,7 +1161,8 @@ def _trials_html(bot, guild, scope: str) -> str:
     </div>
     <div id="previewout"></div>
   </div>
-  {'<p class="warnline">' + str(len(missing)) + ' clear/achievement role(s) have no points yet — they are highlighted below.</p>' if missing else ''}
+  {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below.</p>' if missing else ''}
+  {'<p class="muted small">' + str(len(suggested)) + ' role(s) pre-filled with suggested values — review, then Push to live to store them.</p>' if suggested else ''}
   <p class="muted small">{html.escape(last_line)}</p>
 
   <details class="group" open><summary>Ranks <span class="muted">· Casual is the lowest, Myth the highest</span></summary>

@@ -1,5 +1,10 @@
 "use strict";
 
+// Discord ids are 64-bit and exceed JavaScript's safe integer range, so they
+// are kept as STRINGS everywhere in this file. Number("1418516519297912852")
+// silently becomes ...800 — a different, non-existent id. Python parses the
+// strings back to ints server-side.
+
 const statusEl = () => document.getElementById("status");
 
 function flash(message, ok) {
@@ -28,39 +33,39 @@ function bindMultiSelect(ms, save) {
   const chips = ms.querySelector(".ms-chips");
   const search = ms.querySelector(".ms-search");
   const opts = Array.from(ms.querySelectorAll(".ms-opt"));
-  const selected = new Set(opts.filter((o) => o.dataset.selected === "1").map((o) => Number(o.dataset.id)));
+  const selected = new Set(opts.filter((o) => o.dataset.selected === "1").map((o) => o.dataset.id));
 
   const applyFilter = () => {
     const q = search.value.trim().toLowerCase();
     opts.forEach((o) => {
-      const hidden = selected.has(Number(o.dataset.id)) || (q && !o.dataset.name.toLowerCase().includes(q));
+      const hidden = selected.has(o.dataset.id) || (q && !o.dataset.name.toLowerCase().includes(q));
       o.style.display = hidden ? "none" : "";
     });
   };
   const render = () => {
     chips.innerHTML = "";
     opts.forEach((o) => {
-      if (!selected.has(Number(o.dataset.id))) return;
+      if (!selected.has(o.dataset.id)) return;
       const chip = document.createElement("span");
       chip.className = "ms-chip";
       chip.textContent = o.dataset.name + " ";
       const x = document.createElement("b");
       x.textContent = "×";
-      x.addEventListener("click", () => { selected.delete(Number(o.dataset.id)); render(); save([...selected]); });
+      x.addEventListener("click", () => { selected.delete(o.dataset.id); render(); save([...selected]); });
       chip.appendChild(x);
       chips.appendChild(chip);
     });
     applyFilter();
   };
   opts.forEach((o) => o.addEventListener("click", () => {
-    selected.add(Number(o.dataset.id));
+    selected.add(o.dataset.id);
     search.value = "";
     render();
     save([...selected]);
   }));
   search.addEventListener("input", applyFilter);
   render();
-  return { set: (ids) => { selected.clear(); ids.forEach((id) => selected.add(Number(id))); render(); } };
+  return { set: (ids) => { selected.clear(); ids.forEach((id) => selected.add(String(id))); render(); } };
 }
 
 // --- Dashboard: process-wide cog load/reload/unload ---
@@ -114,8 +119,9 @@ document.querySelectorAll(".cogcard").forEach((card) => {
     const type = el.dataset.type;
     const readValue = () => {
       if (type === "bool") return el.checked;
-      if (type === "list_role" || type === "list_channel") return Array.from(el.selectedOptions).map((o) => Number(o.value));
-      if (type === "int" || type === "float" || type === "role" || type === "channel") return Number(el.value);
+      if (type === "list_role" || type === "list_channel") return Array.from(el.selectedOptions).map((o) => o.value);
+      if (type === "role" || type === "channel") return el.value;          // id: string
+      if (type === "int" || type === "float") return Number(el.value);
       return el.value; // str, secret, text, list_str, list_int — server coerces
     };
     el.addEventListener("change", async () => {
@@ -359,7 +365,7 @@ if (_eventsPage) {
   const guildId = _eventsPage.dataset.guild;
   const api = (body) => post(`/api/guild/${guildId}/event-rule`, body);
 
-  const readIds = (text) => (text.match(/\d{5,}/g) || []).map(Number);
+  const readIds = (text) => (text.match(/\d{5,}/g) || []);
 
   const bindRule = (card) => {
     const id = card.dataset.rule;
@@ -376,7 +382,7 @@ if (_eventsPage) {
         id,
         name: card.querySelector(".rulename").value,
         event: card.querySelector(".ruleevent").value,
-        channel_id: Number(card.querySelector(".rulechannel").value || 0),
+        channel_id: card.querySelector(".rulechannel").value || "0",
         message: card.querySelector(".rulemessage").value,
         ping_user_ids: readIds(card.querySelector(".ruleusers").value),
       };
@@ -546,7 +552,7 @@ if (_tribesPage) {
         const ids = picker(roleOpts, node.role_ids, true);
         body.append(mode, ids);
         box.read = () => ({ type: type, mode: mode.value,
-                            role_ids: Array.from(ids.selectedOptions).map((o) => Number(o.value)) });
+                            role_ids: Array.from(ids.selectedOptions).map((o) => o.value) });
       } else if (type === "member_for" || type === "account_for") {
         const days = el("input", "conddays");
         days.type = "number"; days.min = "0"; days.value = node.days != null ? node.days : 30;
@@ -567,7 +573,7 @@ if (_tribesPage) {
         body.append(num, metric, chans, hint);
         box.read = () => {
           const out = { type: type, metric: metric.value,
-                        channel_ids: Array.from(chans.selectedOptions).map((o) => Number(o.value)) };
+                        channel_ids: Array.from(chans.selectedOptions).map((o) => o.value) };
           if (type === "metric_min") { out.min = Number(num.value || 0); }
           else { out.n = Number(num.value || 1); }
           return out;
@@ -707,13 +713,13 @@ document.querySelectorAll(".pointsbuilder").forEach((box) => {
   box._read = () => ({
     sources: Array.from(sourceRows.children).map((row) => ({
       kind: "role",
-      role_id: Number(row.querySelector(".pt-role").value),
+      role_id: row.querySelector(".pt-role").value,
       points: Number(row.querySelector(".pt-points").value || 0),
     })),
     tiers: Array.from(tierRows.children).map((row) => ({
       name: row.querySelector(".pt-name").value,
       min_points: Number(row.querySelector(".pt-min").value || 0),
-      role_id: Number(row.querySelector(".pt-role").value),
+      role_id: row.querySelector(".pt-role").value,
     })),
     exclusive: box.querySelector(".tribeexclusive").checked,
   });
@@ -766,8 +772,8 @@ if (_trialsPage) {
     });
     const ranks = [];
     _trialsPage.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleId = Number((row.querySelector(".rolepick-id") || {}).value || 0);
-      if (!roleId) return;  // this rank is left empty
+      const roleId = (row.querySelector(".rolepick-id") || {}).value || "0";
+      if (roleId === "0") return;  // this rank is left empty
       ranks.push({ tier: row.dataset.tier, role_id: roleId,
                    min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
@@ -801,8 +807,8 @@ if (_sandbox) {
     });
     const ranks = [];
     document.querySelectorAll(".ladderrow").forEach((row) => {
-      const roleId = Number((row.querySelector(".rolepick-id") || {}).value || 0);
-      if (!roleId) return;  // this rank is left empty
+      const roleId = (row.querySelector(".rolepick-id") || {}).value || "0";
+      if (roleId === "0") return;  // this rank is left empty
       ranks.push({ tier: row.dataset.tier, role_id: roleId,
                    min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
@@ -908,7 +914,7 @@ function bindRolePickers(root, roles) {
     const clear = pick.querySelector(".rolepick-clear");
     let active = -1;
 
-    const chosen = () => Number(hidden.value || 0);
+    const chosen = () => String(hidden.value || "0");
     const announce = () => pick.dispatchEvent(new CustomEvent("rolechange", { bubbles: true }));
 
     const close = () => { list.hidden = true; active = -1; };
@@ -967,7 +973,7 @@ function bindRolePickers(root, roles) {
     // box can never show a role that isn't stored.
     text.addEventListener("blur", () => {
       setTimeout(() => {
-        const role = roles.find((r) => Number(r.id) === chosen());
+        const role = roles.find((r) => String(r.id) === chosen());
         text.value = role ? role.name : "";
         close();
       }, 120);
@@ -984,6 +990,6 @@ if (_trialRoles) {
   bindRolePickers(page, roles);
   page.addEventListener("rolechange", (e) => {
     const row = e.target.closest(".ladderrow");
-    if (row) row.classList.toggle("mapped", Number(e.target.querySelector(".rolepick-id").value) > 0);
+    if (row) row.classList.toggle("mapped", (e.target.querySelector(".rolepick-id").value || "0") !== "0");
   });
 }
