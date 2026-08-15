@@ -1554,6 +1554,28 @@ def _interest_html(bot, guild, config: dict) -> str:
     <div class="proggrid">{cards}</div>"""
 
 
+def _orphan_warning(guild, points: dict) -> str:
+    """Flag roles that still score but have fallen out of a scoring section.
+
+    Deleting or moving a divider re-files every role beneath it. Points are
+    keyed by role id, so they keep counting — the role just stops being listed
+    here, and the page quietly stops telling the truth about what scores.
+    """
+    orphans = trial_ranks.orphaned_points(guild, points)
+    if not orphans:
+        return ""
+    listed = ", ".join(
+        f'<b>{html.escape(row["name"])}</b> ({row["points"]})' for row in orphans[:12])
+    more = f" and {len(orphans) - 12} more" if len(orphans) > 12 else ""
+    return (
+        f'<p class="warnline">⚠️ {len(orphans)} role(s) still count towards everyone\'s '
+        f'score but no longer sit under a <b>Clears</b> or <b>Achievements</b> divider, '
+        f'so they aren\'t listed below and can\'t be edited here: {listed}{more}. '
+        f'Move them under a scoring divider to get them back, or set them to 0 to stop '
+        f'them counting.</p>'
+    )
+
+
 def _trials_html(bot, guild, scope: str) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
@@ -1606,6 +1628,7 @@ def _trials_html(bot, guild, scope: str) -> str:
     </div>
     <div id="previewout"></div>
   </div>
+  {_orphan_warning(guild, points)}
   {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below.</p>' if missing else ''}
   {'<p class="muted small">' + str(len(suggested)) + ' role(s) pre-filled with suggested values — review, then Push to live to store them.</p>' if suggested else ''}
   <p class="muted small">{html.escape(last_line)}</p>

@@ -683,6 +683,24 @@ def unpriced(guild, points: dict) -> list:
     return [role for role in scoring_roles(guild) if role.id not in priced]
 
 
+def orphaned_points(guild, points: dict) -> list:
+    """Roles that still score but no longer sit under a scoring divider.
+
+    Sections decide what the panel *shows*; the stored points decide what
+    actually *counts*. Move a divider and those two can part company without a
+    word: the role vanishes from the editor and the chart while quietly carrying
+    on adding to everyone's total. This is how you find out.
+    """
+    visible = {role.id for role in scoring_roles(guild)}
+    out = []
+    for role_id, value in (points or {}).items():
+        role = guild.get_role(int(role_id))
+        if role is not None and role.id not in visible:
+            out.append({"role_id": role.id, "name": role.name, "points": int(value)})
+    out.sort(key=lambda row: (-row["points"], row["name"].lower()))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 #  Validation + storage
 # --------------------------------------------------------------------------- #
