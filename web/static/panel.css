@@ -449,3 +449,13 @@ table.stats code, .chip code, .setrow code { color: var(--color-ink); }
    Rausch at 13px would be 3.5:1). */
 .chip.on { background: var(--color-ink); border-color: var(--color-ink); }
 .chip.on:hover { color: var(--color-on-primary); }
+
+/* ------------------------------------------------------------ Change log page */
+main:has(.logpage) { max-width: 1180px; }
+.logfilters { display: flex; gap: 8px; margin: 10px 0 16px; flex-wrap: wrap; }
+.logfilters select { padding: 7px 9px; font: inherit; font-size: 13px; }
+.logfilters button { margin: 0; }
+.logpage table.stats td { vertical-align: top; }
+select.coglevel { margin-left: auto; margin-right: 10px; padding: 4px 8px; font-size: 12px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }

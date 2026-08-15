@@ -79,4 +79,6 @@ entity_names = db["EntityNames"]              # {_id: "user:123", name, updated_
 event_rules = db["EventRules"]                # {guild_id, event, channel_id, message, ...}
 # Who may open the control panel for a guild, and how much of it they see.
 panel_access = db["PanelAccess"]              # {guild_id, kind: role|user, target_id, scope}
+# Every configuration change made from the panel: who, when, old -> new.
+config_audit = db["ConfigAudit"]              # {guild_id, actor_id, kind, target, old, new, at}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

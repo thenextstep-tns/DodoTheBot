@@ -27,7 +27,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import cog_categories, events, names, panel_access, stats
+from helpers import audit_log, cog_categories, events, names, panel_access, parameters, stats, validate
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -177,6 +177,21 @@ def _cog_inventory(bot) -> list[dict]:
     )
 
 
+LEVEL_CUSTOM = "custom"
+
+
+def cog_level(commands: list[dict]) -> str:
+    """The level shared by every command in a cog, or ``custom`` when they differ.
+
+    ``custom`` isn't stored anywhere — it's derived, so a cog shows it the moment
+    its commands stop agreeing (including when one is changed individually).
+    """
+    levels = {command["level"] for command in commands}
+    if not levels:
+        return LEVEL_VISIBLE
+    return levels.pop() if len(levels) == 1 else LEVEL_CUSTOM
+
+
 def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
     """Per-guild enabled state + command levels for one cog (commands may be empty
     for listener-only cogs like cheese/spam — they're still toggleable)."""
@@ -199,6 +214,8 @@ def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
     return {
         "cog": cog_name,
         "enabled": bot.visibility.cog_enabled(guild_id, cog_name),
+        # One level if every command agrees, otherwise "custom" (display only).
+        "level": cog_level(commands),
         "commands": commands,
         "features": features,
         "params": bot.params.entries_for_cog(guild_id, cog_name),
@@ -239,6 +256,8 @@ def _nav_chips(guild_id: int, scope: str, current: str) -> str:
         links.append((f"/guild/{guild_id}/events", "⚡ Events"))
     if panel_access.at_least(scope, panel_access.SCOPE_STATS) and current != "stats":
         links.append((f"/guild/{guild_id}/stats", "📊 Stats"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "log":
+        links.append((f"/guild/{guild_id}/log", "📝 Change log"))
     return "".join(f'<a class="chip" href="{href}">{label}</a>' for href, label in links)
 
 
@@ -412,6 +431,27 @@ def _param_rows(params: list[dict], guild) -> str:
     return f'<div class="params"><div class="muted small feathead">Parameters</div>{rows}</div>'
 
 
+def _cog_level_select(detail: dict, scope: str) -> str:
+    """Set every command in the cog to one level at once.
+
+    ``custom`` is shown (and selected) when the cog's commands disagree, but it
+    can't be chosen — you get back to a single level by picking one.
+    """
+    if not detail["commands"]:
+        return ""
+    current = detail["level"]
+    levels = VALID_LEVELS if scope == panel_access.SCOPE_OWNER else (LEVEL_VISIBLE, LEVEL_ADMIN)
+    options = ""
+    if current == LEVEL_CUSTOM:
+        options += f'<option value="{LEVEL_CUSTOM}" selected>\u2699 custom</option>'
+    for level in levels:
+        selected = " selected" if level == current else ""
+        options += f'<option value="{level}"{selected}>{_LEVEL_ICON[level]} all {level}</option>'
+    return (
+        f'<select class="coglevel" title="Set every command in this cog">{options}</select>'
+    )
+
+
 def _cog_block(detail: dict, guild, *, toggleable: bool, scope: str = panel_access.SCOPE_OWNER) -> str:
     """One cog inside a category: optional per-cog toggle, passive-feature toggles,
     per-server parameters, and its per-command visibility cards."""
@@ -424,7 +464,8 @@ def _cog_block(detail: dict, guild, *, toggleable: bool, scope: str = panel_acce
     )
     return f"""
 <div class="cogcard" id="cog-{html.escape(detail["cog"])}" data-cog="{html.escape(detail["cog"])}">
-  <div class="coghead"><h3>{html.escape(detail["cog"])}</h3>{toggle}</div>
+  <div class="coghead"><h3>{html.escape(detail["cog"])}</h3>
+    {_cog_level_select(detail, scope)}{toggle}</div>
   {_feature_rows(detail["features"])}
   {_param_rows(detail["params"], guild)}
   {body}
@@ -834,6 +875,73 @@ def event_actions_limit() -> int:
 
 
 # --------------------------------------------------------------------------- #
+#  Change log page
+# --------------------------------------------------------------------------- #
+def _value_cell(value) -> str:
+    """Render a stored old/new value compactly."""
+    if value is None:
+        return '<span class="muted">—</span>'
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, list):
+        if not value:
+            return '<span class="muted">(empty)</span>'
+        return html.escape(", ".join(str(v) for v in value)[:120])
+    text_value = str(value)
+    return html.escape(text_value if len(text_value) <= 120 else text_value[:120] + "…")
+
+
+def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str = "") -> str:
+    base = f"/guild/{guild.id}/log?kind={html.escape(kind)}&amp;actor={html.escape(actor)}"
+    rows = ""
+    for entry in data["rows"]:
+        when = entry.get("at")
+        stamp = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else "—"
+        who = html.escape(entry.get("actor_name") or "unknown")
+        if entry.get("actor_is_owner"):
+            who += ' <span class="muted small">(owner)</span>'
+        rows += (
+            f'<tr><td class="muted small">{stamp}</td>'
+            f"<td>{who}</td>"
+            f'<td><span class="chip static">{html.escape(audit_log.KIND_LABELS.get(entry.get("kind"), entry.get("kind") or "?"))}</span></td>'
+            f"<td><code>{html.escape(str(entry.get('target') or ''))}</code></td>"
+            f'<td class="muted">{_value_cell(entry.get("old"))}</td>'
+            f"<td>{_value_cell(entry.get('new'))}</td></tr>"
+        )
+    rows = rows or '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>'
+
+    kind_options = '<option value="">All kinds</option>' + "".join(
+        f'<option value="{key}"{" selected" if key == kind else ""}>{html.escape(label)}</option>'
+        for key, label in audit_log.KIND_LABELS.items()
+    )
+    actor_options = '<option value="">Anyone</option>' + "".join(
+        f'<option value="{row["id"]}"{" selected" if str(row["id"]) == actor else ""}>'
+        f'{html.escape(row["name"])} ({row["count"]})</option>'
+        for row in bot.audit_log.actors(guild.id)
+    )
+
+    return f"""
+<div class="logpage" data-guild="{guild.id}">
+  <div class="statshead">
+    <div><div class="chips">{_nav_chips(guild.id, scope, "log")}</div>
+      <h1>Change log <span class="muted">· {data["total"]:,} entr(ies)</span></h1></div>
+  </div>
+  <p class="muted">Every change made from this panel, newest first — including your own.
+  Old and new values are kept so anything can be put back.</p>
+  <form class="logfilters" method="get" action="/guild/{guild.id}/log">
+    <select name="kind">{kind_options}</select>
+    <select name="actor">{actor_options}</select>
+    <button type="submit">Filter</button>
+  </form>
+  <table class="stats"><thead><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Target</th>
+    <th>Was</th><th>Now</th></tr></thead><tbody>{rows}</tbody></table>
+  {_pager(base, "p", data["page"], data["pages"])}
+</div>
+<p id="status" class="status"></p>
+"""
+
+
+# --------------------------------------------------------------------------- #
 #  Stats page
 # --------------------------------------------------------------------------- #
 def _pager(base: str, param: str, page: int, pages: int) -> str:
@@ -1111,6 +1219,27 @@ async def guild_events_page(request: web.Request):
     return _page(f"{guild.name} · events", _events_html(bot, guild, scope), scope=scope)
 
 
+@require_scope(panel_access.SCOPE_CONFIG)
+async def guild_log_page(request: web.Request):
+    """Who changed what, when, and what it was before."""
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+    try:
+        page = max(1, int(request.query.get("p", 1)))
+    except ValueError:
+        page = 1
+    kind = request.query.get("kind", "")
+    actor = request.query.get("actor", "")
+    data = await bot.loop.run_in_executor(
+        None,
+        functools.partial(
+            bot.audit_log.page, guild.id, page=page,
+            kind=kind if kind in audit_log.KIND_LABELS else None,
+            actor_id=int(actor) if actor.isdigit() else None,
+        ),
+    )
+    return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor), scope=scope)
+
+
 @require_scope(panel_access.SCOPE_STATS)
 async def guild_stats_page(request: web.Request):
     """Activity stats for one guild. The aggregations are blocking pymongo calls,
@@ -1147,23 +1276,36 @@ async def lang_page(request: web.Request):
     return _page("Strings", _lang_html(request.app["bot"]))
 
 
-async def _notify_change(request: web.Request, line: str) -> None:
-    """Tell the owner that a non-owner changed this guild's configuration.
+async def _record_change(request: web.Request, kind: str, target: str, old, new, line: str) -> None:
+    """Log a configuration change, and DM the owner if someone else made it.
 
-    A no-op when the actor is an owner. Never raises: a failed notification
-    must not fail the save that already happened.
+    Everything is logged, owner included, so the history is complete; only
+    non-owner changes are worth a DM. Never raises — the write it describes has
+    already happened, and a failed log must not turn a successful save into an
+    error.
     """
     try:
-        if request.get("scope") == panel_access.SCOPE_OWNER:
-            return
         bot = request.app["bot"]
         guild = request.get("guild") or bot.get_guild(int(request.match_info["gid"]))
         if guild is None:
             return
-        actor = guild.get_member(request["uid"])
-        bot.audit_notify.record(guild, actor, line)
+        uid = request.get("uid")
+        actor = guild.get_member(uid) if uid else None
+        is_owner = request.get("scope") == panel_access.SCOPE_OWNER
+        bot.audit_log.record(
+            guild.id, uid,
+            getattr(actor, "display_name", None) or (str(uid) if uid else "unknown"),
+            kind, target, old, new, is_owner=is_owner,
+        )
+        if not is_owner:
+            bot.audit_notify.record(guild, actor, line)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _bad(error, status: int = 200):
+    """A validation failure, shaped the way panel.js expects."""
+    return web.json_response({"ok": False, "error": str(error)}, status=status)
 
 
 # --------------------------------------------------------------------------- #
@@ -1200,11 +1342,20 @@ async def api_guild_cog(request: web.Request):
     bot = request.app["bot"]
     gid = int(request.match_info["gid"])
     data = await request.json()
-    cog, enabled = data.get("cog"), bool(data.get("enabled"))
-    if not cog:
-        return web.json_response({"ok": False, "error": "bad request"}, status=400)
+    try:
+        cog = validate.text(data.get("cog"), field="cog", max_length=64, allow_empty=False)
+        enabled = validate.boolean(data.get("enabled"), field="enabled")
+    except validate.ValidationError as error:
+        return _bad(error)
+    if cog not in {c["name"] for c in _cog_inventory(bot)}:
+        return _bad("Unknown cog.")
+    was = bot.visibility.cog_enabled(gid, cog)
     bot.visibility.set_cog_enabled(gid, cog, enabled)
-    await _notify_change(request, f"Cog **{cog}** {'enabled' if enabled else 'disabled'}")
+    await _record_change(
+        request, audit_log.KIND_COG, cog, "enabled" if was else "disabled",
+        "enabled" if enabled else "disabled",
+        f"Cog **{cog}** {'enabled' if enabled else 'disabled'}",
+    )
     bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True})
 
@@ -1215,18 +1366,60 @@ async def api_guild_command(request: web.Request):
     bot = request.app["bot"]
     gid = int(request.match_info["gid"])
     data = await request.json()
-    command, level = data.get("command"), data.get("level")
-    if not command or level not in VALID_LEVELS:
-        return web.json_response({"ok": False, "error": "bad request"}, status=400)
+    try:
+        command = validate.text(data.get("command"), field="command", max_length=64, allow_empty=False)
+        level = validate.choice(data.get("level"), VALID_LEVELS, field="level")
+    except validate.ValidationError as error:
+        return _bad(error)
     # Only the bot owner may set or clear the owner level — otherwise a guild
     # admin could lock the owner out of a command, or unlock one for themselves.
     if request["scope"] != panel_access.SCOPE_OWNER:
         if level == LEVEL_OWNER or bot.visibility.stored_level(gid, command) == LEVEL_OWNER:
             return web.json_response({"ok": False, "error": "owner-only setting"}, status=200)
+    was = bot.visibility.level(gid, command)
     bot.visibility.set_level(gid, command, level)
-    await _notify_change(request, f"Command `/{command}` set to **{level}**")
+    await _record_change(request, audit_log.KIND_COMMAND, command, was, level,
+                         f"Command `/{command}` set to **{level}**")
     bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True})
+
+
+@require_scope(panel_access.SCOPE_FULL)
+async def api_guild_cog_level(request: web.Request):
+    """Set every command in a cog to one level. Body: {cog, level}.
+
+    ``custom`` is a derived display state, never something you can set — you
+    leave it by choosing a real level for the whole cog.
+    """
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    data = await request.json()
+    try:
+        cog_name = validate.text(data.get("cog"), field="cog", max_length=64, allow_empty=False)
+        level = validate.choice(data.get("level"), VALID_LEVELS, field="level")
+    except validate.ValidationError as error:
+        return _bad(error)
+    cog = bot.cogs.get(cog_name)
+    if cog is None:
+        return _bad("Unknown cog.")
+    # Same rule as single commands: only owners touch the owner level, in
+    # either direction.
+    if request["scope"] != panel_access.SCOPE_OWNER and level == LEVEL_OWNER:
+        return _bad("Only the bot owner can set the owner level.")
+
+    detail = _cog_detail(bot, gid, cog_name)
+    was = detail["level"]
+    changed = 0
+    for command in detail["commands"]:
+        if request["scope"] != panel_access.SCOPE_OWNER and command["level"] == LEVEL_OWNER:
+            continue  # owner-locked commands stay put for a guild admin
+        if command["level"] != level:
+            bot.visibility.set_level(gid, command["name"], level)
+            changed += 1
+    bot.command_syncer.request_sync(gid)
+    await _record_change(request, audit_log.KIND_COG_LEVEL, cog_name, was, level,
+                         f"Cog **{cog_name}** set to **{level}** ({changed} command(s))")
+    return web.json_response({"ok": True, "changed": changed})
 
 
 @require_scope(panel_access.SCOPE_FULL)
@@ -1236,7 +1429,11 @@ async def api_guild_category(request: web.Request):
     bot = request.app["bot"]
     gid = int(request.match_info["gid"])
     data = await request.json()
-    category, enabled = data.get("category"), bool(data.get("enabled"))
+    try:
+        category = validate.text(data.get("category"), field="category", max_length=64, allow_empty=False)
+        enabled = validate.boolean(data.get("enabled"), field="enabled")
+    except validate.ValidationError as error:
+        return _bad(error)
     members = cog_categories.member_cogs(category)
     if not members:
         return web.json_response({"ok": False, "error": "unknown or empty category"}, status=400)
@@ -1245,9 +1442,10 @@ async def api_guild_category(request: web.Request):
             continue
         bot.visibility.set_cog_enabled(gid, cog, enabled)
     bot.command_syncer.request_sync(gid)
-    # One line for the whole category rather than one per member cog.
-    await _notify_change(
-        request, f"Category **{category}** {'enabled' if enabled else 'disabled'} (all its cogs)"
+    # One entry for the whole category rather than one per member cog.
+    await _record_change(
+        request, audit_log.KIND_CATEGORY, category, None, "enabled" if enabled else "disabled",
+        f"Category **{category}** {'enabled' if enabled else 'disabled'} (all its cogs)",
     )
     return web.json_response({"ok": True})
 
@@ -1259,11 +1457,18 @@ async def api_guild_feature(request: web.Request):
     bot = request.app["bot"]
     gid = int(request.match_info["gid"])
     data = await request.json()
-    feature, enabled = data.get("feature"), bool(data.get("enabled"))
-    if not feature or not any(f["key"] == feature for f in cog_categories.FEATURES):
-        return web.json_response({"ok": False, "error": "unknown feature"}, status=400)
+    try:
+        feature = validate.text(data.get("feature"), field="feature", max_length=64, allow_empty=False)
+        enabled = validate.boolean(data.get("enabled"), field="enabled")
+    except validate.ValidationError as error:
+        return _bad(error)
+    if not any(f["key"] == feature for f in cog_categories.FEATURES):
+        return _bad("Unknown feature.")
+    was = bot.visibility.feature_enabled(gid, feature)
     bot.visibility.set_feature_enabled(gid, feature, enabled)
-    await _notify_change(request, f"Feature **{feature}** turned {'on' if enabled else 'off'}")
+    await _record_change(request, audit_log.KIND_FEATURE, feature,
+                         "on" if was else "off", "on" if enabled else "off",
+                         f"Feature **{feature}** turned {'on' if enabled else 'off'}")
     return web.json_response({"ok": True})
 
 
@@ -1274,16 +1479,41 @@ async def api_guild_param(request: web.Request):
     bot = request.app["bot"]
     gid = int(request.match_info["gid"])
     data = await request.json()
-    key = data.get("key")
-    if not key:
-        return web.json_response({"ok": False, "error": "bad request"}, status=400)
+    guild = request["guild"]
     try:
-        bot.params.set(gid, key, data.get("value"))
+        key = validate.text(data.get("key"), field="key", max_length=64, allow_empty=False)
+    except validate.ValidationError as error:
+        return _bad(error)
+    spec = next((p for p in parameters.PARAMETERS if p["key"] == key), None)
+    if spec is None:
+        return _bad("Unknown parameter.")
+    value = data.get("value")
+    # Ids must belong to this guild — the panel is per-guild, so accepting a
+    # foreign role/channel id would let one server point at another's.
+    try:
+        if spec["type"] == "role":
+            value = validate.guild_role(guild, value, field=key)
+        elif spec["type"] == "channel":
+            value = validate.guild_channel(guild, value, field=key)
+        elif spec["type"] == "list_role":
+            value = validate.guild_roles(guild, value, field=key)
+        elif spec["type"] == "list_channel":
+            value = validate.guild_channels(guild, value, field=key)
+        elif spec["type"] in ("str", "text", "secret"):
+            value = validate.text(value, field=key, max_length=validate.MAX_TEXT)
+    except validate.ValidationError as error:
+        return _bad(error)
+    was = bot.params.get(gid, key)
+    try:
+        bot.params.set(gid, key, value)
     except KeyError:
-        return web.json_response({"ok": False, "error": "unknown parameter"}, status=400)
+        return _bad("Unknown parameter.")
     except (ValueError, TypeError) as error:
-        return web.json_response({"ok": False, "error": f"invalid value: {error}"}, status=200)
-    await _notify_change(request, f"Parameter `{key}` changed")
+        return _bad(f"invalid value: {error}")
+    # Never write a secret's value into the log.
+    logged_old, logged_new = ("(hidden)", "(changed)") if spec["type"] == "secret" else (was, value)
+    await _record_change(request, audit_log.KIND_PARAM, key, logged_old, logged_new,
+                         f"Parameter `{key}` changed")
     return web.json_response({"ok": True})
 
 
@@ -1307,25 +1537,53 @@ async def api_guild_setting(request: web.Request):
     if key in ("channel_id", "delete_channel_id"):
         log_cog = bot.get_cog("log")
         if log_cog is None:
-            return web.json_response({"ok": False, "error": "log cog not loaded"}, status=200)
+            return _bad("The log cog isn't loaded.")
         try:
-            log_cog.set_guild_log_channel(guild, key, int(data.get("value") or 0))
-        except (TypeError, ValueError):
-            return web.json_response({"ok": False, "error": "invalid channel"}, status=200)
-        await _notify_change(request, f"Setting `{key}` changed")
+            channel_id = validate.guild_channel(guild, data.get("value"), field="log channel")
+        except validate.ValidationError as error:
+            return _bad(error)
+        was = (log_cog.guild_log_channels(guild) or {}).get(key, 0)
+        log_cog.set_guild_log_channel(guild, key, channel_id)
+        await _record_change(request, audit_log.KIND_SETTING, key, was, channel_id,
+                             f"Log destination `{key}` changed")
         return web.json_response({"ok": True})
 
+    spec = guild_config.SPECS_BY_KEY.get(key)
+    if spec is None:
+        return _bad("Unknown setting.")
+    was = bot.guild_config.get(gid, key)
     try:
         if data.get("action") == "reset":
             bot.guild_config.reset(gid, key)
             value = guild_config.DEFAULTS.get(key)
         else:
-            value = guild_config.coerce(key, data.get("value"))
+            raw = data.get("value")
+            # Channel/role ids are checked against THIS guild, so a foreign id
+            # can't be stored (the panel is per-guild by scope alone).
+            kind = spec["type"]
+            if kind == "channel":
+                value = validate.guild_channel(guild, raw, field=spec["label"])
+            elif kind == "role":
+                value = validate.guild_role(guild, raw, field=spec["label"])
+            elif kind == "list_channel":
+                value = validate.guild_channels(guild, raw, field=spec["label"])
+            elif kind == "list_role":
+                value = validate.guild_roles(guild, raw, field=spec["label"])
+            elif kind == "message":
+                value = validate.snowflake(raw, field=spec["label"])
+            elif kind == "emoji":
+                value = validate.text(raw, field=spec["label"], max_length=64)
+            else:
+                value = validate.text(raw, field=spec["label"], max_length=validate.MAX_TEXT)
             bot.guild_config.set(gid, key, value)
+    except validate.ValidationError as error:
+        return _bad(error)
     except KeyError:
-        return web.json_response({"ok": False, "error": "unknown setting"}, status=400)
+        return _bad("Unknown setting.")
     except (TypeError, ValueError) as error:
-        return web.json_response({"ok": False, "error": f"invalid value: {error}"}, status=200)
+        return _bad(f"invalid value: {error}")
+    await _record_change(request, audit_log.KIND_SETTING, key, was, value,
+                         f"Setting `{key}` changed")
     return web.json_response({"ok": True, "value": value})
 
 
@@ -1343,23 +1601,55 @@ async def api_guild_event_rule(request: web.Request):
     data = await request.json()
     action = data.get("action")
 
+    guild = request["guild"]
+    try:
+        clean: dict = {}
+        if "event" in data or action == "create":
+            clean["event"] = validate.choice(
+                data.get("event") or "member_join", events.selectable_events(), field="event")
+        if "name" in data or action == "create":
+            clean["name"] = validate.text(data.get("name") or "", field="name",
+                                          max_length=validate.MAX_NAME)
+        if "message" in data or action == "create":
+            clean["message"] = validate.text(data.get("message") or "", field="message",
+                                             max_length=validate.MAX_MESSAGE)
+        if "channel_id" in data or action == "create":
+            clean["channel_id"] = validate.guild_channel(guild, data.get("channel_id"), field="channel")
+        if "ping_role_ids" in data:
+            clean["ping_role_ids"] = validate.guild_roles(guild, data.get("ping_role_ids"), field="ping roles")
+        if "ping_user_ids" in data:
+            clean["ping_user_ids"] = validate.snowflake_list(data.get("ping_user_ids"), field="ping users")
+        if "enabled" in data:
+            clean["enabled"] = validate.boolean(data.get("enabled"), field="enabled")
+        rule_id = None
+        if action in ("update", "delete"):
+            rule_id = validate.text(data.get("id"), field="rule id", max_length=64, allow_empty=False)
+    except validate.ValidationError as error:
+        return _bad(error)
+
     try:
         if action == "create":
-            event = data.get("event") or "member_join"
-            if event not in events.selectable_events():
-                return web.json_response({"ok": False, "error": "unknown event"}, status=200)
-            rule = bot.event_rules.create(gid, {**data, "event": event})
+            rule = bot.event_rules.create(gid, clean)
+            await _record_change(request, audit_log.KIND_EVENT_RULE, clean.get("name") or clean["event"],
+                                 None, clean.get("event"), f"Event rule **{clean.get('name')}** created")
             return web.json_response({"ok": True, "id": str(rule["_id"])})
         if action == "delete":
-            bot.event_rules.delete(gid, data["id"])
+            existing = next((r for r in bot.event_rules.for_guild(gid) if str(r["_id"]) == rule_id), None)
+            bot.event_rules.delete(gid, rule_id)
+            await _record_change(request, audit_log.KIND_EVENT_RULE,
+                                 (existing or {}).get("name", rule_id), (existing or {}).get("event"), None,
+                                 f"Event rule **{(existing or {}).get('name', rule_id)}** deleted")
             return web.json_response({"ok": True})
         if action == "update":
-            if "event" in data and data["event"] not in events.selectable_events():
-                return web.json_response({"ok": False, "error": "unknown event"}, status=200)
-            bot.event_rules.update(gid, data["id"], data)
+            existing = next((r for r in bot.event_rules.for_guild(gid) if str(r["_id"]) == rule_id), None)
+            bot.event_rules.update(gid, rule_id, clean)
+            await _record_change(request, audit_log.KIND_EVENT_RULE,
+                                 clean.get("name") or (existing or {}).get("name", rule_id),
+                                 (existing or {}).get("event"), clean.get("event"),
+                                 f"Event rule **{clean.get('name') or rule_id}** edited")
             return web.json_response({"ok": True})
     except (KeyError, TypeError, ValueError) as error:
-        return web.json_response({"ok": False, "error": f"invalid rule: {error}"}, status=200)
+        return _bad(f"invalid rule: {error}")
     return web.json_response({"ok": False, "error": "bad request"}, status=400)
 
 
@@ -1374,21 +1664,30 @@ async def api_guild_access(request: web.Request):
     gid = int(request.match_info["gid"])
     if bot.get_guild(gid) is None:
         return web.json_response({"ok": False, "error": "guild not found"}, status=404)
+    guild = bot.get_guild(gid)
     data = await request.json()
-    kind = data.get("kind")
     try:
-        target_id = int(data.get("target_id") or 0)
-    except (TypeError, ValueError):
-        return web.json_response({"ok": False, "error": "invalid id"}, status=200)
-    if not target_id:
-        return web.json_response({"ok": False, "error": "pick a role or user"}, status=200)
+        kind = validate.choice(data.get("kind"), ("role", "user"), field="kind")
+        if kind == "role":
+            target_id = validate.guild_role(guild, data.get("target_id"), field="role", allow_zero=False)
+        else:
+            target_id = validate.snowflake(data.get("target_id"), field="user id", allow_zero=False)
+        removing = data.get("action") == "remove"
+        scope = None if removing else validate.choice(
+            data.get("scope"), panel_access.GRANTABLE_SCOPES, field="access level")
+    except validate.ValidationError as error:
+        return _bad(error)
     try:
-        if data.get("action") == "remove":
+        if removing:
             bot.panel_access.remove_grant(gid, kind, target_id)
         else:
-            bot.panel_access.set_grant(gid, kind, target_id, data.get("scope"))
+            bot.panel_access.set_grant(gid, kind, target_id, scope)
     except ValueError as error:
-        return web.json_response({"ok": False, "error": str(error)}, status=200)
+        return _bad(error)
+    await _record_change(request, audit_log.KIND_ACCESS, f"{kind}:{target_id}",
+                         None, "removed" if removing else scope,
+                         f"Panel access for {kind} `{target_id}` "
+                         f"{'removed' if removing else 'set to ' + scope}")
     return web.json_response({"ok": True})
 
 
@@ -1433,12 +1732,14 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/stats", guild_stats_page),
             web.get("/guild/{gid}/settings", guild_settings_page),
             web.get("/guild/{gid}/events", guild_events_page),
+            web.get("/guild/{gid}/log", guild_log_page),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
             web.post("/api/guild/{gid}/access", api_guild_access),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),
+            web.post("/api/guild/{gid}/cog-level", api_guild_cog_level),
             web.post("/api/guild/{gid}/command", api_guild_command),
             web.post("/api/guild/{gid}/category", api_guild_category),
             web.post("/api/guild/{gid}/feature", api_guild_feature),

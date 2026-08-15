@@ -449,3 +449,28 @@ if (_accessCard) {
     });
   });
 }
+
+// --- Guild page: set every command in a cog to one level ---
+document.querySelectorAll("select.coglevel").forEach((sel) => {
+  const card = sel.closest(".cogcard");
+  const guildId = card.closest("[data-guild]").dataset.guild;
+  const cog = card.dataset.cog;
+  let previous = sel.value;
+  sel.addEventListener("change", async () => {
+    if (sel.value === "custom") { sel.value = previous; return; }  // derived, not settable
+    const res = await post(`/api/guild/${guildId}/cog-level`, { cog, level: sel.value });
+    if (res.ok) {
+      flash(`${cog} → all ${sel.value} ✓`, true);
+      previous = sel.value;
+      // Every command card in this cog now shows the new level.
+      card.querySelectorAll("select.level").forEach((cmd) => {
+        if (cmd.querySelector(`option[value="${sel.value}"]`)) cmd.value = sel.value;
+      });
+      const customOpt = sel.querySelector('option[value="custom"]');
+      if (customOpt) customOpt.remove();
+    } else {
+      flash(res.error || "Failed", false);
+      sel.value = previous;
+    }
+  });
+});
