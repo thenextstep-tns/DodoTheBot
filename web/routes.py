@@ -197,15 +197,33 @@ def cog_level(commands: list[dict]) -> str:
     return levels.pop() if len(levels) == 1 else LEVEL_CUSTOM
 
 
-def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
+def hides_owner_level(scope: str) -> bool:
+    """Whether this panel scope must not be shown the owner level at all.
+
+    A guild admin can't set the owner level, so showing them owner-only commands
+    (or the cogs that hold nothing else) only advertises tooling they can neither
+    use nor change. They are filtered out of the page rather than rendered locked.
+    """
+    return scope != panel_access.SCOPE_OWNER
+
+
+def _cog_detail(bot, guild_id: int, cog_name: str, *, scope: str = panel_access.SCOPE_OWNER) -> dict:
     """Per-guild enabled state + command levels for one cog (commands may be empty
-    for listener-only cogs like cheese/spam — they're still toggleable)."""
+    for listener-only cogs like cheese/spam — they're still toggleable).
+
+    ``hidden`` counts the commands withheld from ``scope``, which lets the caller
+    tell "owner-only cog" apart from "genuinely command-less passive cog".
+    """
     cog = bot.cogs.get(cog_name)
     commands = []
+    hidden = 0
     if cog is not None:
         for command in sorted(cog.get_commands(), key=lambda c: c.name):
             stored = bot.visibility.stored_level(guild_id, command.name)
             level = stored or (LEVEL_OWNER if command.hidden else LEVEL_VISIBLE)
+            if level == LEVEL_OWNER and hides_owner_level(scope):
+                hidden += 1
+                continue
             commands.append({"name": command.name, "description": command.description or "", "level": level})
     features = [
         {
@@ -220,8 +238,11 @@ def _cog_detail(bot, guild_id: int, cog_name: str) -> dict:
         "cog": cog_name,
         "enabled": bot.visibility.cog_enabled(guild_id, cog_name),
         # One level if every command agrees, otherwise "custom" (display only).
+        # Derived from the commands this scope can see, so a hidden owner-only
+        # command can't leak as an unexplained "custom".
         "level": cog_level(commands),
         "commands": commands,
+        "hidden": hidden,
         "features": features,
         "params": bot.params.entries_for_cog(guild_id, cog_name),
     }
@@ -286,7 +307,10 @@ def _nav_chips(guild_id: int, scope: str, current: str) -> str:
         links.append((f"/guild/{guild_id}/events", "⚡ Events"))
     if panel_access.at_least(scope, panel_access.SCOPE_STATS) and current != "stats":
         links.append((f"/guild/{guild_id}/stats", "📊 Stats"))
-    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "tribes":
+    # Tribes is bot-owner tooling (the rule engine can hand out any role), same
+    # as in the top bar — the page itself is owner-gated, so anyone else only
+    # got a chip that 403s.
+    if panel_access.at_least(scope, panel_access.SCOPE_OWNER) and current != "tribes":
         links.append((f"/guild/{guild_id}/tribes", "🏅 Tribes"))
     if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "log":
         links.append((f"/guild/{guild_id}/log", "📝 Change log"))
@@ -351,8 +375,18 @@ def _dashboard_html(bot, entries: list, scope: str) -> str:
 _LEVEL_ICON = {LEVEL_VISIBLE: "🌐", LEVEL_ADMIN: "🛡️", LEVEL_OWNER: "🔒"}
 
 
+def _level_legend(scope: str) -> str:
+    """The "visible / admin / owner" key, listing only the levels this scope uses."""
+    levels = VALID_LEVELS if scope == panel_access.SCOPE_OWNER else (LEVEL_VISIBLE, LEVEL_ADMIN)
+    return " / ".join(f"<b>{_LEVEL_ICON[lvl]} {lvl}</b>" for lvl in levels)
+
+
 def _command_cards(commands: list[dict], scope: str = panel_access.SCOPE_OWNER) -> str:
     """Each command as a small card with a name, description and level selector."""
+    # Owner-only commands are not shown to anyone else. _cog_detail already drops
+    # them; repeated here so no caller can render one by accident.
+    if hides_owner_level(scope):
+        commands = [c for c in commands if c["level"] != LEVEL_OWNER]
     if not commands:
         return ""
     # Only the bot owner may mark a command owner-only; a guild admin who could
@@ -364,9 +398,6 @@ def _command_cards(commands: list[dict], scope: str = panel_access.SCOPE_OWNER) 
             f'<option value="{lvl}"{" selected" if lvl == cmd["level"] else ""}>{_LEVEL_ICON[lvl]} {lvl}</option>'
             for lvl in levels
         )
-        if cmd["level"] == LEVEL_OWNER and scope != panel_access.SCOPE_OWNER:
-            # Owner-locked here: show it, but don't let them change it.
-            options = f'<option value="{LEVEL_OWNER}" selected>{_LEVEL_ICON[LEVEL_OWNER]} owner</option>'
         cards += (
             f'<div class="cmdcard lvl-{cmd["level"]}">'
             f'<code class="cmdname">/{html.escape(cmd["name"])}</code>'
@@ -563,15 +594,21 @@ def _guild_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     nav = ""
     for category in cog_categories.group_loaded_cogs(bot.cogs.keys()):
         toggleable = category["toggleable"]
-        members = [_cog_detail(bot, guild.id, name) for name in category["present"]]
+        members = [_cog_detail(bot, guild.id, name, scope=scope) for name in category["present"]]
+        if hides_owner_level(scope):
+            # A cog whose whole surface is owner-only (e.g. the owner cog) drops
+            # out entirely — an empty shell would just advertise it. A cog that
+            # never had commands is a real passive cog and keeps its toggle.
+            members = [
+                m for m in members
+                if m["commands"] or m["features"] or m["params"] or not m["hidden"]
+            ]
         if not toggleable:
             # Core: no enable/disable, only per-command visibility for cogs that have commands.
             members = [m for m in members if m["commands"]]
-            if not members:
-                continue
-            blocks = "".join(_cog_block(m, guild, toggleable=False, scope=scope) for m in members)
-            master = '<span class="muted small">always on</span>'
-        else:
+        if not members:
+            continue
+        if toggleable:
             states = [m["enabled"] for m in members]
             state = "on" if all(states) else ("off" if not any(states) else "mixed")
             checked = "checked" if state == "on" else ""
@@ -580,6 +617,9 @@ def _guild_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
                 f'data-category="{category["key"]}" data-state="{state}" {checked}> on</label>'
             )
             blocks = "".join(_cog_block(m, guild, toggleable=True, scope=scope) for m in members)
+        else:
+            blocks = "".join(_cog_block(m, guild, toggleable=False, scope=scope) for m in members)
+            master = '<span class="muted small">always on</span>'
 
         sections += f"""
 <section class="catcard" id="cat-{category["key"]}" data-category="{category["key"]}">
@@ -630,8 +670,8 @@ def _guild_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
   <main class="content">
     {_access_html(bot, guild) if scope == panel_access.SCOPE_OWNER else ""}
     <p class="muted">Toggle a whole category on/off for this server, or expand a cog for its
-    features, parameters and per-command visibility (<b>🌐 visible</b> / <b>🛡️ admin</b> /
-    <b>🔒 owner</b>). Changes apply to this guild within a few seconds.</p>
+    features, parameters and per-command visibility ({_level_legend(scope)}).
+    Changes apply to this guild within a few seconds.</p>
     {sections}
   </main>
 </div>
@@ -1320,7 +1360,8 @@ def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str 
     actor_options = '<option value="">Anyone</option>' + "".join(
         f'<option value="{row["id"]}"{" selected" if str(row["id"]) == actor else ""}>'
         f'{html.escape(row["name"])} ({row["count"]})</option>'
-        for row in bot.audit_log.actors(guild.id, allowed)
+        for row in bot.audit_log.actors(guild.id, allowed,
+                                        hide_owner_level=hides_owner_level(scope))
     )
 
     return f"""
@@ -1893,6 +1934,7 @@ async def guild_log_page(request: web.Request):
             kind=kind if kind in allowed else None,
             actor_id=int(actor) if actor.isdigit() else None,
             allowed_kinds=allowed,
+            hide_owner_level=hides_owner_level(scope),
         ),
     )
     return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor, allowed=allowed),

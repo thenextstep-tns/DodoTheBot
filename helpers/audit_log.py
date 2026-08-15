@@ -75,6 +75,16 @@ def visible_kinds(scope: str) -> list[str]:
     return [kind for kind, needed in KIND_SCOPE.items() if have >= _SCOPE_RANK[needed]]
 
 
+# Command/cog-level history mentioning the owner level: the panel doesn't show a
+# non-owner those commands, so the log shouldn't name them either.
+_OWNER_LEVEL_FILTER = {
+    "$nor": [{
+        "kind": {"$in": [KIND_COMMAND, KIND_COG_LEVEL]},
+        "$or": [{"old": "owner"}, {"new": "owner"}],
+    }]
+}
+
+
 PAGE_SIZE = 25
 # Values are stored for display, not for replay; long text is truncated.
 MAX_VALUE_CHARS = 300
@@ -153,14 +163,20 @@ class AuditLog:
             pass
 
     def page(self, guild_id: int, *, page: int = 1, kind: Optional[str] = None,
-             actor_id: Optional[int] = None, allowed_kinds: Optional[list] = None) -> dict:
+             actor_id: Optional[int] = None, allowed_kinds: Optional[list] = None,
+             hide_owner_level: bool = False) -> dict:
         """One page of history for a guild, newest first.
 
         ``allowed_kinds`` is applied whatever else is asked for, so a filter
-        can only ever narrow what the viewer may already see.
+        can only ever narrow what the viewer may already see. ``hide_owner_level``
+        additionally drops entries naming an owner-only command, which a
+        non-owner can't see on the cogs page either. Both are applied in the
+        query so the totals and page count match what is shown.
         """
         self._ensure_indexes()
         query: dict = {"guild_id": int(guild_id)}
+        if hide_owner_level:
+            query.update(_OWNER_LEVEL_FILTER)
         if allowed_kinds is not None:
             query["kind"] = {"$in": list(allowed_kinds)}
         if kind and (allowed_kinds is None or kind in allowed_kinds):
@@ -180,7 +196,8 @@ class AuditLog:
             "pages": max(1, -(-total // PAGE_SIZE)),
         }
 
-    def actors(self, guild_id: int, allowed_kinds: Optional[list] = None) -> list[dict]:
+    def actors(self, guild_id: int, allowed_kinds: Optional[list] = None,
+               *, hide_owner_level: bool = False) -> list[dict]:
         """Distinct people who have changed this guild, for the filter dropdown.
 
         Limited to the entries the viewer can see, so the dropdown doesn't
@@ -188,6 +205,8 @@ class AuditLog:
         """
         try:
             match = {"guild_id": int(guild_id), "actor_id": {"$ne": None}}
+            if hide_owner_level:
+                match.update(_OWNER_LEVEL_FILTER)
             if allowed_kinds is not None:
                 match["kind"] = {"$in": list(allowed_kinds)}
             pipeline = [
