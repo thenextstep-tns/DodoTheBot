@@ -34,6 +34,8 @@ from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LE
 from web import auth, charts
 
 _SECURE = WEB_PUBLIC_URL.startswith("https")
+# Repeat sign-ins inside this window aren't logged again.
+LOGIN_QUIET_PERIOD = 3600
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
@@ -1285,7 +1287,8 @@ def _value_cell(value) -> str:
     return html.escape(text_value if len(text_value) <= 120 else text_value[:120] + "…")
 
 
-def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str = "") -> str:
+def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str = "",
+              allowed: list = None) -> str:
     base = f"/guild/{guild.id}/log?kind={html.escape(kind)}&amp;actor={html.escape(actor)}"
     rows = ""
     for entry in data["rows"]:
@@ -1304,14 +1307,16 @@ def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str 
         )
     rows = rows or '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>'
 
+    allowed = allowed if allowed is not None else list(audit_log.KIND_LABELS)
     kind_options = '<option value="">All kinds</option>' + "".join(
-        f'<option value="{key}"{" selected" if key == kind else ""}>{html.escape(label)}</option>'
-        for key, label in audit_log.KIND_LABELS.items()
+        f'<option value="{key}"{" selected" if key == kind else ""}>'
+        f'{html.escape(audit_log.KIND_LABELS.get(key, key))}</option>'
+        for key in audit_log.KIND_LABELS if key in allowed
     )
     actor_options = '<option value="">Anyone</option>' + "".join(
         f'<option value="{row["id"]}"{" selected" if str(row["id"]) == actor else ""}>'
         f'{html.escape(row["name"])} ({row["count"]})</option>'
-        for row in bot.audit_log.actors(guild.id)
+        for row in bot.audit_log.actors(guild.id, allowed)
     )
 
     return f"""
@@ -1556,6 +1561,20 @@ async def oauth_callback(request: web.Request):
             ),
             content_type="text/plain",
         )
+    # Record the sign-in wherever it grants access, so each server's log shows
+    # who has been in its panel. Quiet about repeats: signing in twice in an
+    # hour isn't two events worth reading.
+    try:
+        who = user.get("global_name") or user.get("username") or str(uid)
+        for guild, scope in await accessible_guilds(bot, uid):
+            bot.audit_log.record(
+                guild.id, uid, who, audit_log.KIND_LOGIN, "panel sign-in",
+                None, scope, is_owner=(scope == panel_access.SCOPE_OWNER),
+                once_within=LOGIN_QUIET_PERIOD,
+            )
+    except Exception:  # noqa: BLE001 - logging must never block a login
+        pass
+
     response = web.HTTPFound("/")
     _set_cookie(
         response,
@@ -1839,15 +1858,17 @@ async def guild_log_page(request: web.Request):
         page = 1
     kind = request.query.get("kind", "")
     actor = request.query.get("actor", "")
+    allowed = audit_log.visible_kinds(scope)
     data = await bot.loop.run_in_executor(
         None,
         functools.partial(
             bot.audit_log.page, guild.id, page=page,
-            kind=kind if kind in audit_log.KIND_LABELS else None,
+            kind=kind if kind in allowed else None,
             actor_id=int(actor) if actor.isdigit() else None,
+            allowed_kinds=allowed,
         ),
     )
-    return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor),
+    return _page(f"{guild.name} · log", _log_html(bot, guild, data, scope, kind=kind, actor=actor, allowed=allowed),
                  scope=scope, guild=guild, current="log")
 
 
