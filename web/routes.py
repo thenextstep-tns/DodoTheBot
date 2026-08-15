@@ -1119,6 +1119,74 @@ def _ladder_rows(guild, config: dict) -> str:
     return rows
 
 
+def _json_dumps(value) -> str:
+    """JSON for an inline <script> block, with ids kept as strings."""
+    import json as _json
+
+    def _stringify(item):
+        if isinstance(item, dict):
+            return {k: _stringify(v) for k, v in item.items()}
+        if isinstance(item, list):
+            return [_stringify(v) for v in item]
+        # Discord ids don't survive JavaScript's number type.
+        return str(item) if isinstance(item, int) and item > 2**53 else item
+
+    return _json.dumps(_stringify(value))
+
+
+def _trial_map_rows(guild, trials: list[dict]) -> str:
+    """One row per trial: a name plus a role picker for each slot."""
+    rows = ""
+    for index, trial in enumerate(trials):
+        slots = trial.get("slots") or {}
+        pickers = ""
+        for slot in trial_ranks.SLOTS:
+            pickers += (
+                f'<label class="slotcell"><span class="slotlabel">'
+                f'{html.escape(trial_ranks.SLOT_LABELS[slot])}</span>'
+                f'{_role_picker(guild, key=f"{index}:{slot}", selected_id=slots.get(slot) or 0, placeholder="—")}'
+                f"</label>"
+            )
+        rows += (
+            f'<div class="trialrow" data-index="{index}">'
+            f'<div class="trialhead">'
+            f'<input class="trialname" value="{html.escape(trial.get("name") or "")}" '
+            f'placeholder="Trial name (e.g. Kyne\'s Aegis)">'
+            f'<button class="ghost trialdel" title="Remove this trial">×</button></div>'
+            f'<div class="slotgrid">{pickers}</div></div>'
+        )
+    return rows
+
+
+def _trial_map_html(guild, config: dict) -> str:
+    """The mapping section: what belongs to which trial, and in what order."""
+    trials = config.get("trials") or []
+    suggestion_count = 0 if trials else len(trial_ranks.suggest_trials(guild))
+    hint = (
+        f'<p class="muted small">Nothing mapped yet. <b>Suggest from role names</b> will '
+        f'propose {suggestion_count} trial(s) from your clear roles for you to check — '
+        f'trifectas can\'t be guessed, so add those yourself.</p>'
+        if not trials else ""
+    )
+    return f"""
+    <div class="explain">
+      <p>Within one trial the roles are a progression: <b>veteran clear → partial hardmode 1 →
+      partial hardmode 2 → full hardmode → trifecta</b>. Holding a stronger one means the weaker
+      ones are already implied, so the bot keeps <b>one role per person per trial</b> and takes the
+      rest off.</p>
+      <p><b>Extra achievement</b> is the exception: it adds its points on top and removes nothing.
+      Pointing it at the same role as the trifecta is fine — that role still scores once.</p>
+      <p>Leave a slot empty if the trial doesn't have it. The order above is what counts, not the
+      points.</p>
+    </div>
+    {hint}
+    <div class="trialactions">
+      <button class="ghost" id="addtrial">+ Add a trial</button>
+      <button class="ghost" id="suggesttrials">Suggest from role names</button>
+    </div>
+    <div id="trialmap">{_trial_map_rows(guild, trials)}</div>"""
+
+
 def _trials_html(bot, guild, scope: str) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
@@ -1138,6 +1206,8 @@ def _trials_html(bot, guild, scope: str) -> str:
     return f"""
 <div class="trialspage" data-guild="{guild.id}">
   <script type="application/json" id="all-roles">{_json_options(_sorted_roles(guild), "@")}</script>
+  <script type="application/json" id="trial-suggestions">{_json_dumps(trial_ranks.suggest_trials(guild))}</script>
+  <script type="application/json" id="trial-slots">{_json_dumps(list(trial_ranks.SLOTS))}</script>
   <h1>Trial ranking</h1>
   <p class="muted">Clears and achievements are worth points; reaching a threshold grants the rank
   role. Sections are read from your divider roles, so a new trial role shows up here by itself.
@@ -1183,6 +1253,10 @@ def _trials_html(bot, guild, scope: str) -> str:
       <input class="rolefilter" placeholder="Type to find a clear…" data-target="clearrows">
       <div class="scorerows" id="clearrows">{_score_rows(grouped["clears"], points, section="clears")}</div>
     </div></details>
+
+  <details class="group" open><summary>Trial clear roles
+    <span class="muted">· one role per person per trial</span></summary>
+    <div class="trialsection">{_trial_map_html(guild, config)}</div></details>
 
   <details class="group" open><summary>Achievements <span class="muted">({len(grouped["achievements"])} roles)</span></summary>
     <div class="trialsection">
@@ -1561,12 +1635,17 @@ async def api_guild_trials(request: web.Request):
         try:
             points = trial_ranks.validate_points(data.get("points"), guild=guild)
             ranks = trial_ranks.validate_ranks(data.get("ranks"), guild=guild)
+            trials = trial_ranks.validate_trials(data.get("trials"), guild=guild)
         except (trial_ranks.TrialError, validate.ValidationError) as error:
             return _bad(error)
 
         def row_for(member):
             held = {role.id for role in member.roles}
-            score = trial_ranks.score_for(held, points)
+            # Preview the tidied state: what they'd have after the weaker clears
+            # come off, so nobody has to clean up the server before the numbers
+            # make sense.
+            dropped = trial_ranks.superseded(held, trials)
+            score = trial_ranks.score_for(held, points, trials=trials)
             projected = trial_ranks.rank_for(score, ranks)
             # What they hold now, so a re-balance shows movement rather than
             # just a number.
@@ -1578,7 +1657,8 @@ async def api_guild_trials(request: web.Request):
                 "rank": (projected or {}).get("name"),
                 "current": current,
                 "changed": (projected or {}).get("name") != current,
-                "breakdown": trial_ranks.breakdown_for(guild, held, points),
+                "breakdown": trial_ranks.breakdown_for(guild, held, points, trials),
+                "cleanup": len(dropped),
             }
 
         if action == "preview":
@@ -1613,6 +1693,7 @@ async def api_guild_trials(request: web.Request):
                 clean = {
                     "points": trial_ranks.validate_points(data.get("points"), guild=guild),
                     "ranks": trial_ranks.validate_ranks(data.get("ranks"), guild=guild),
+                    "trials": trial_ranks.validate_trials(data.get("trials"), guild=guild),
                 }
                 for rank in clean["ranks"]:
                     validate.assignable_role(guild, rank["role_id"], field=f"rank '{rank['name']}'")
@@ -1638,6 +1719,8 @@ async def api_guild_trials(request: web.Request):
         clean = {}
         if "points" in data:
             clean["points"] = trial_ranks.validate_points(data.get("points"), guild=guild)
+        if "trials" in data:
+            clean["trials"] = trial_ranks.validate_trials(data.get("trials"), guild=guild)
         if "ranks" in data:
             ranks = trial_ranks.validate_ranks(data.get("ranks"), guild=guild)
             for rank in ranks:

@@ -35,12 +35,30 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     #  Applying
     # ------------------------------------------------------------------ #
     async def apply(self, member, config: dict, *, edit: bool = True) -> dict:
-        """Bring one member's rank role in line with their score."""
-        points, ranks = config.get("points") or {}, config.get("ranks") or []
+        """Tidy a member's trial roles, then set the rank their score earns."""
+        points = config.get("points") or {}
+        ranks = config.get("ranks") or []
+        trials = config.get("trials") or []
         held = {role.id for role in member.roles}
-        score = trial_ranks.score_for(held, points)
+
+        # One role per trial: a stronger clear replaces the weaker ones, so the
+        # scoring below sees the same tidy set the member will end up with.
+        stale = trial_ranks.superseded(held, trials)
+        out = {"score": 0, "rank": None, "granted": 0, "removed": 0, "cleared": 0}
+        if stale and edit:
+            roles = [member.guild.get_role(role_id) for role_id in stale]
+            roles = [role for role in roles if role is not None]
+            if roles:
+                try:
+                    await member.remove_roles(*roles, reason="Superseded by a better clear")
+                    out["cleared"] = len(roles)
+                    held -= stale
+                except discord.HTTPException:
+                    pass
+
+        score = trial_ranks.score_for(held, points, trials=trials)
         rank = trial_ranks.rank_for(score, ranks)
-        out = {"score": score, "rank": rank, "granted": 0, "removed": 0}
+        out["score"], out["rank"] = score, rank
         if not ranks or not edit:
             return out
 
@@ -68,7 +86,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
 
     async def run_for_guild(self, guild, *, edit: bool = True) -> dict:
         config = self.bot.trial_ranks.get(guild.id)
-        summary = {"members": 0, "ranked": 0, "granted": 0, "removed": 0}
+        summary = {"members": 0, "ranked": 0, "granted": 0, "removed": 0, "cleared": 0}
         if not config.get("enabled"):
             return {**summary, "skipped": "feature off"}
         edits = 0
@@ -76,7 +94,8 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             if member.bot:
                 continue
             outcome = await self.apply(member, config, edit=edit and edits < MAX_EDITS)
-            if outcome["granted"] or outcome["removed"]:
+            summary["cleared"] += outcome.get("cleared", 0)
+            if outcome["granted"] or outcome["removed"] or outcome.get("cleared"):
                 edits += 1
                 await asyncio.sleep(EDIT_PAUSE)
             summary["members"] += 1
@@ -104,6 +123,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             return
         changed = {r.id for r in before.roles} ^ {r.id for r in after.roles}
         scoring = {int(role_id) for role_id in (config.get("points") or {})}
+        scoring |= set(trial_ranks.slot_of(config.get("trials") or []))
         rank_roles = {rank["role_id"] for rank in config.get("ranks") or []}
         # Only react to scoring roles, and never to our own rank changes.
         if not (changed & scoring) or changed <= rank_roles:

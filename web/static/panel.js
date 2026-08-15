@@ -780,6 +780,7 @@ if (_trialsPage) {
     });
     return {
       action: "save", points: points, ranks: ranks,
+      trials: window.readTrialMap ? window.readTrialMap() : [],
       enabled: document.getElementById("trialsenabled").checked,
       exclusive: document.getElementById("trialsexclusive").checked,
     };
@@ -814,14 +815,22 @@ if (_sandbox) {
                    min_points: Number(row.querySelector(".rankmin").value || 0) });
     });
     return { points: points, ranks: ranks,
+             trials: window.readTrialMap ? window.readTrialMap() : [],
              enabled: document.getElementById("trialsenabled").checked,
              exclusive: document.getElementById("trialsexclusive").checked };
   };
 
   const tip = (row) => {
     if (!row.breakdown || !row.breakdown.length) return "no scoring roles";
-    return row.breakdown.map((b) => `${b.name}: ${b.points}`).join("\n")
-      + `\n— total ${row.score}`;
+    // A superseded role is shown, not hidden: seeing why a total is lower
+    // than the roles held is the whole point of the hover.
+    return row.breakdown
+      .map((b) => b.counted === false
+        ? `${b.name}: ${b.points} (superseded — same trial)`
+        : `${b.name}: ${b.points}`)
+      .join("
+") + `
+— total ${row.score}`;
   };
 
   const render = (rows, meta) => {
@@ -855,7 +864,8 @@ if (_sandbox) {
       }
       if (row.changed) tr.className = "moved";
       // Hover shows where the points came from — on demand, not on screen.
-      tr.title = tip(row);
+      tr.title = tip(row) + (row.cleanup ? `
+(${row.cleanup} superseded role(s) would come off)` : "");
       const cells = [
         String(index + 1),
         row.name,
@@ -998,4 +1008,96 @@ if (_trialRoles) {
     const row = e.target.closest(".ladderrow");
     if (row) row.classList.toggle("mapped", (e.target.querySelector(".rolepick-id").value || "0") !== "0");
   });
+}
+
+// --- Trial ranking: mapping which roles belong to which trial ---------------
+const _trialMap = document.getElementById("trialmap");
+if (_trialMap) {
+  const roles = JSON.parse(document.getElementById("all-roles").textContent || "[]");
+  const SLOTS = JSON.parse(document.getElementById("trial-slots").textContent || "[]");
+  const SUGGESTIONS = JSON.parse(document.getElementById("trial-suggestions").textContent || "[]");
+  const LABELS = {
+    veteran: "Veteran clear", partial1: "Partial HM 1", partial2: "Partial HM 2",
+    full_hm: "Full hardmode", trifecta: "Trifecta", extra: "Extra achievement",
+  };
+
+  const roleName = (id) => {
+    const found = roles.find((r) => String(r.id) === String(id));
+    return found ? found.name : "";
+  };
+
+  const addRow = (trial) => {
+    trial = trial || { name: "", slots: {} };
+    const index = _trialMap.children.length;
+    const row = document.createElement("div");
+    row.className = "trialrow";
+    row.dataset.index = String(index);
+
+    const head = document.createElement("div");
+    head.className = "trialhead";
+    const name = document.createElement("input");
+    name.className = "trialname";
+    name.value = trial.name || "";
+    name.placeholder = "Trial name (e.g. Kyne's Aegis)";
+    const del = document.createElement("button");
+    del.className = "ghost trialdel";
+    del.textContent = "×";
+    del.title = "Remove this trial";
+    del.addEventListener("click", () => row.remove());
+    head.append(name, del);
+
+    const grid = document.createElement("div");
+    grid.className = "slotgrid";
+    SLOTS.forEach((slot) => {
+      const cell = document.createElement("label");
+      cell.className = "slotcell";
+      const label = document.createElement("span");
+      label.className = "slotlabel";
+      label.textContent = LABELS[slot] || slot;
+      const pick = document.createElement("div");
+      pick.className = "rolepick";
+      pick.dataset.key = slot;
+      const chosen = (trial.slots || {})[slot];
+      pick.innerHTML =
+        `<input class="rolepick-text" placeholder="—" autocomplete="off" spellcheck="false"` +
+        ` value="${chosen ? roleName(chosen).replace(/"/g, "&quot;") : ""}">` +
+        `<input type="hidden" class="rolepick-id" value="${chosen || 0}">` +
+        `<button type="button" class="rolepick-clear" title="Clear">×</button>` +
+        `<div class="rolepick-list" hidden></div>`;
+      cell.append(label, pick);
+      grid.appendChild(cell);
+    });
+
+    row.append(head, grid);
+    _trialMap.appendChild(row);
+    bindRolePickers(row, roles);   // the new pickers need wiring too
+    return row;
+  };
+
+  document.getElementById("addtrial").addEventListener("click", () => addRow(null));
+
+  document.getElementById("suggesttrials").addEventListener("click", () => {
+    if (_trialMap.children.length &&
+        !confirm("Add suggested trials to what's already mapped?")) return;
+    const existing = new Set(
+      Array.from(_trialMap.querySelectorAll(".trialname")).map((i) => i.value.trim().toLowerCase())
+    );
+    let added = 0;
+    SUGGESTIONS.forEach((trial) => {
+      if (existing.has((trial.name || "").trim().toLowerCase())) return;
+      addRow(trial);
+      added += 1;
+    });
+    flash(added ? `${added} trial(s) suggested — check them, then Push to live` : "nothing new to suggest", true);
+  });
+
+  // Read the mapping back out for save/preview.
+  window.readTrialMap = () => Array.from(_trialMap.querySelectorAll(".trialrow")).map((row) => {
+    const slots = {};
+    row.querySelectorAll(".rolepick").forEach((pick) => {
+      const id = (pick.querySelector(".rolepick-id") || {}).value || "0";
+      if (id !== "0") slots[pick.dataset.key] = id;   // ids stay strings
+    });
+    return { name: row.querySelector(".trialname").value.trim(), slots: slots };
+  }).filter((trial) => Object.keys(trial.slots).length);
 }

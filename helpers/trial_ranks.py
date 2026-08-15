@@ -173,20 +173,187 @@ def with_defaults(guild, points: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Scoring
+#  Trial clear roles — one role per person per trial
 # --------------------------------------------------------------------------- #
-def score_for(role_ids: Iterable[int], points: dict) -> int:
-    """Sum the point value of every scoring role the member holds.
+# A trial's roles are a ladder of their own, mapped by hand rather than guessed
+# from names (names lie: "vKAᴴᴹ" and "vKA Vrolᴴᴹ" look alike and mean very
+# different things). Each trial has up to six slots, weakest to strongest:
+SLOTS = ("veteran", "partial1", "partial2", "full_hm", "trifecta", "extra")
+SLOT_LABELS = {
+    "veteran": "Veteran clear",
+    "partial1": "Partial HM 1",
+    "partial2": "Partial HM 2",
+    "full_hm": "Full hardmode",
+    "trifecta": "Trifecta",
+    "extra": "Extra achievement",
+}
+SLOT_INDEX = {slot: index for index, slot in enumerate(SLOTS)}
+# "Extra" sits outside the chain on purpose: it's worth points of its own but
+# doesn't replace anything, and nothing replaces it. Everything else is a strict
+# progression where the strongest held role is the only one kept.
+SUPERSEDING_SLOTS = tuple(slot for slot in SLOTS if slot != "extra")
 
-    Clears and achievements go into the same total, so a decorated player and a
-    prolific clearer can arrive at the same rank by different routes.
+# Any slot may be empty — a trial without a second partial simply doesn't have
+# one, and the rest keep their order. Holding a stronger role means the weaker
+# ones are already implied, so exactly one of them is kept: the strongest.
+
+
+def validate_trials(value, *, guild=None) -> list[dict]:
+    """``[{name, slots: {slot: role_id}}]`` — the mapped lineups."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise TrialError("Trials must be a list.")
+    if len(value) > 60:
+        raise TrialError("Too many trials.")
+    out, seen_roles = [], {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise TrialError("Each trial must be an object.")
+        name = str(item.get("name") or "").strip()[:60]
+        slots = {}
+        raw_slots = item.get("slots") or {}
+        if not isinstance(raw_slots, dict):
+            raise TrialError("A trial's slots must be an object.")
+        for slot, role_id in raw_slots.items():
+            if slot not in SLOT_INDEX:
+                raise TrialError(f"Unknown slot '{slot}'.")
+            if not role_id:
+                continue
+            try:
+                role_id = int(role_id)
+            except (TypeError, ValueError):
+                raise TrialError(f"The {SLOT_LABELS[slot]} role isn't a valid id.") from None
+            if guild is not None and guild.get_role(role_id) is None:
+                raise TrialError(f"The {SLOT_LABELS[slot]} role for '{name or 'a trial'}' "
+                                 "isn't in this server.")
+            # The same role may fill two slots of ONE trial (a server whose
+            # trifecta role is also its extra achievement is common) — it still
+            # scores once. Across two different trials it's a mistake, because
+            # then "which trial does this clear belong to" has no answer.
+            owner = seen_roles.get(role_id)
+            if owner is not None and owner != (name or "a trial"):
+                raise TrialError(f"A role is mapped to two different trials "
+                                 f"('{owner}' and '{name or 'a trial'}').")
+            seen_roles[role_id] = name or "a trial"
+            slots[slot] = role_id
+        if not slots:
+            continue  # an empty lineup isn't a trial
+        if not name:
+            raise TrialError("Every mapped trial needs a name.")
+        out.append({"name": name, "slots": slots})
+    return out
+
+
+def slot_of(trials: list[dict]) -> dict[int, tuple[int, int]]:
+    """``role_id -> (trial index, slot index)`` for fast look-ups while scoring."""
+    mapping = {}
+    for trial_index, trial in enumerate(trials or []):
+        for slot, role_id in (trial.get("slots") or {}).items():
+            role_id = int(role_id)
+            existing = mapping.get(role_id)
+            # A role in two slots of one trial keeps its strongest SUPERSEDING
+            # slot, so pointing trifecta and extra at the same role behaves as
+            # the trifecta (and still scores once).
+            if existing is None or (slot != "extra" and existing[1] == SLOT_INDEX["extra"]):
+                mapping[role_id] = (trial_index, SLOT_INDEX[slot])
+            elif slot != "extra" and SLOT_INDEX[slot] > existing[1]:
+                mapping[role_id] = (trial_index, SLOT_INDEX[slot])
+    return mapping
+
+
+def superseded(role_ids: Iterable[int], trials: list[dict]) -> set[int]:
+    """Roles a member holds that a stronger role in the same trial replaces.
+
+    This is what "one role per person per trial" means in practice: hold the
+    trifecta and the full hardmode, the partials and the veteran clear all fall
+    away. Returns only roles the member actually has.
     """
     held = set(role_ids or ())
-    total = 0
+    mapping = slot_of(trials)
+    extra_index = SLOT_INDEX["extra"]
+    # An "extra" role is never dropped and never causes a drop — it's additional
+    # credit, not a higher rung.
+    extras = {role_id for role_id, (_t, slot) in mapping.items() if slot == extra_index}
+    best: dict[int, int] = {}
+    for role_id in held:
+        found = mapping.get(role_id)
+        if found and role_id not in extras:
+            trial_index, slot_index = found
+            best[trial_index] = max(best.get(trial_index, -1), slot_index)
+    drop = set()
+    for role_id in held:
+        found = mapping.get(role_id)
+        if found and role_id not in extras and found[1] < best[found[0]]:
+            drop.add(role_id)
+    return drop
+
+
+def kept_roles(role_ids: Iterable[int], trials: list[dict]) -> set[int]:
+    """What's left after the weaker roles of each trial are dropped."""
+    held = set(role_ids or ())
+    return held - superseded(held, trials)
+
+
+def suggest_trials(guild) -> list[dict]:
+    """A starting point built from role names, for review — never applied blind.
+
+    Names are a decent hint even though they're a bad rule, so this fills the
+    veteran / partial / full-hardmode slots and leaves you to correct it.
+    Trifectas can't be guessed (nothing in "Dawnbringer" says Kyne's Aegis), so
+    those slots stay empty.
+    """
+    grouped: dict[str, dict] = {}
+    for role in sections(guild)["clears"]:
+        folded = role.name.translate(_SUPERSCRIPT).strip()
+        # Take the hardmode marker off FIRST: otherwise "vKAHM" reads as a trial
+        # called "KAHM" instead of Kyne's Aegis on hardmode.
+        is_hm = bool(re.search(r"\(?\s*hm\s*\)?\s*$", folded, re.I))
+        without_hm = re.sub(r"\(?\s*hm\s*\)?\s*$", "", folded, flags=re.I).strip()
+        match = re.match(r"^v\s*([A-Za-z]{2,4})(.*)$", without_hm)
+        if not match:
+            continue
+        code = match.group(1).upper()
+        rest = match.group(2).strip(" +()-")
+        entry = grouped.setdefault(code, {"name": f"v{code}", "slots": {}, "_partials": []})
+        if is_hm and not rest:
+            entry["slots"]["full_hm"] = role.id          # vKAᴴᴹ
+        elif not is_hm and (not rest or rest == "0"):
+            entry["slots"]["veteran"] = role.id          # vKA, vAS+0
+        else:
+            entry["_partials"].append(role.id)           # vKA Vrolᴴᴹ, vCR+1
+    out = []
+    for entry in grouped.values():
+        partials = entry.pop("_partials")
+        for slot, role_id in zip(("partial1", "partial2"), partials):
+            entry["slots"][slot] = role_id
+        if entry["slots"]:
+            out.append(entry)
+    return sorted(out, key=lambda trial: trial["name"])
+
+
+# --------------------------------------------------------------------------- #
+#  Scoring
+# --------------------------------------------------------------------------- #
+def score_for(role_ids: Iterable[int], points: dict, *, trials: list[dict] = None, guild=None) -> int:
+    """Sum the points of the scoring roles a member holds.
+
+    With ``trials`` mapped, each trial contributes once — its strongest held
+    role — so a trifecta doesn't also pay for the hardmode and partials it
+    already implies.
+    """
+    return sum(row["points"] for row in _counted(role_ids, points, trials=trials))
+
+
+def _counted(role_ids: Iterable[int], points: dict, *, trials: list[dict] = None) -> list[dict]:
+    """The rows that actually score, after each trial is reduced to one role."""
+    held = kept_roles(role_ids, trials) if trials else set(role_ids or ())
+    rows = []
     for role_id, value in (points or {}).items():
-        if int(role_id) in held:
-            total += int(value)
-    return total
+        role_id = int(role_id)
+        if role_id in held:
+            rows.append({"role_id": role_id, "points": int(value)})
+    return rows
 
 
 def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
@@ -201,13 +368,14 @@ def rank_for(score: int, ranks: list[dict]) -> Optional[dict]:
     return max(reached, key=lambda rank: LADDER_INDEX.get(rank.get("tier"), -1))
 
 
-def breakdown_for(guild, role_ids: Iterable[int], points: dict) -> list[dict]:
-    """Which roles produced a member's score, biggest contribution first.
+def breakdown_for(guild, role_ids: Iterable[int], points: dict, trials: list[dict] = None) -> list[dict]:
+    """Which roles produced a score, and which a stronger clear replaced.
 
-    This is what makes a weighting decision inspectable: not "142 points" but
-    "vDSR 40 + vSE 40 + vKA 25 …".
+    Replaced rows are returned too (``counted: False``) so a preview can explain
+    a total rather than assert it.
     """
     held = set(role_ids or ())
+    counted = {row["role_id"] for row in _counted(held, points, trials=trials)}
     rows = []
     for role_id, value in (points or {}).items():
         role_id = int(role_id)
@@ -215,8 +383,8 @@ def breakdown_for(guild, role_ids: Iterable[int], points: dict) -> list[dict]:
             continue
         role = guild.get_role(role_id)
         rows.append({"role_id": role_id, "name": role.name if role else str(role_id),
-                     "points": int(value)})
-    rows.sort(key=lambda row: (-row["points"], row["name"]))
+                     "points": int(value), "counted": role_id in counted})
+    rows.sort(key=lambda row: (not row["counted"], -row["points"], row["name"]))
     return rows
 
 
@@ -366,12 +534,14 @@ class TrialRankManager:
                 "enabled": doc.get("enabled", False),
                 "points": doc.get("points") or {},
                 "ranks": doc.get("ranks") or [],
+                "trials": doc.get("trials") or [],
                 "exclusive": doc.get("exclusive", True),
             }
         return self._cache[guild_id]
 
     def save(self, guild_id: int, data: dict) -> None:
-        fields = {key: data[key] for key in ("points", "ranks", "enabled", "exclusive") if key in data}
+        fields = {key: data[key]
+                  for key in ("points", "ranks", "trials", "enabled", "exclusive") if key in data}
         if not fields:
             return
         fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc)
