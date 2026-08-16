@@ -6,9 +6,9 @@ and whenever someone asks where they stand. There is no periodic sweep — an
 hourly pass over the whole guild spent nearly all its effort confirming nothing
 had changed, and left an answer up to an hour stale when it hadn't.
 
-**Nobody is automated until they opt in.** The feature being enabled is not
-consent: every path skips anyone who isn't enrolled, so switching this on cannot
-rewrite a single role by itself. People arrive on the
+**Nobody is automated until they opt in.** Enrolment is the only switch there
+is: every path skips anyone who isn't on the list, so nothing here can rewrite a
+role for somebody who never said yes. People arrive on the
 list one of two ways — an admin enrols a specific user tag from the panel, or
 the person presses the button on the announcement and says yes. Both are
 recorded, and every action the automation takes is logged to the server's log
@@ -229,12 +229,8 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         """Why the automation is inert here, or "" if it isn't.
 
         Kept apart from :meth:`runs_here` so the listener can *say* what stopped
-        it. A master switch that silently swallows every role change is
-        indistinguishable from a broken bot, which is exactly how this was found.
+        it, rather than swallowing a role change in silence.
         """
-        if not self.bot.trial_ranks.get(guild.id).get("enabled"):
-            return ("trial ranking is switched **off** for this server "
-                    "(turn on **enabled** at the top of the Trial ranks page)")
         if not self.bot.visibility.cog_enabled(guild.id, "trial_ranks"):
             return "the **trial_ranks** cog is disabled for this server"
         return ""
@@ -242,12 +238,12 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     def runs_here(self, guild) -> bool:
         """Whether the automation should act in this guild at all.
 
-        Both the feature's own switch and the cog's per-guild enabled state: the
-        panel offers a toggle for this cog, and a listener that ignores it makes
-        that toggle a lie.
+        Enrolment is the switch. There is no separate feature toggle: a master
+        flag above an opt-in list only ever meant one more way for a setup to be
+        silently inert, and it is the enrolled list that decides who is touched.
+        The cog's own per-guild state is still honoured, because the panel offers
+        that toggle and a listener ignoring it would make the toggle a lie.
         """
-        if not self.bot.trial_ranks.get(guild.id).get("enabled"):
-            return False
         return self.bot.visibility.cog_enabled(guild.id, "trial_ranks")
 
     async def cog_load(self) -> None:
@@ -438,8 +434,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         config = self.bot.trial_ranks.get(guild.id)
         summary = {"members": 0, "ranked": 0, "granted": 0, "removed": 0, "cleared": 0,
                    "enrolled": 0, "errors": []}
-        if not config.get("enabled"):
-            return {**summary, "skipped": "feature off"}
         enrolled = self.bot.trial_ranks.enrolled_ids(guild.id)
         summary["enrolled"] = len(enrolled)
         if not enrolled:

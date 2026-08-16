@@ -808,7 +808,6 @@ if (_trialsPage) {
     return {
       action: "save", points: points, ranks: window.readRanks(),
       trials: window.readTrialMap ? window.readTrialMap() : [],
-      enabled: document.getElementById("trialsenabled").checked,
       exclusive: document.getElementById("trialsexclusive").checked,
     };
   };
@@ -1033,7 +1032,6 @@ if (_sandbox) {
     });
     return { points: points, ranks: window.readRanks(),
              trials: window.readTrialMap ? window.readTrialMap() : [],
-             enabled: document.getElementById("trialsenabled").checked,
              exclusive: document.getElementById("trialsexclusive").checked };
   };
 

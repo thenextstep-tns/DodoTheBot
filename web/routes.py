@@ -1724,14 +1724,6 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
         ("trialmap", "🗺️", "Trials Setup", f"{len(config.get('trials') or [])} trials"),
         ("sandbox", "🧪", "Preview", ""),
     ]
-    # The master switch being off is the difference between "the bot is broken"
-    # and "nobody turned it on", and the checkbox alone was too quiet to carry
-    # that. Everything below it is still editable, so it says what is inert.
-    offline_banner = "" if config.get("enabled") else (
-        '<p class="offline">Trial ranking is <b>off</b>. Nothing is recalculated and no '
-        'roles are changed, however this page is set up. Tick <b>enabled</b> above to '
-        'start.</p>')
-
     presets = bot.trial_ranks.presets(guild.id)
     preset_options = ('<option value="" data-author="">— pick a preset —</option>' + "".join(
         f'<option value="{html.escape(p["name"])}" '
@@ -1756,11 +1748,8 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
   <script type="application/json" id="trial-slots">{_json_dumps(list(trial_ranks.SLOTS))}</script>
   <h1>Trial ranking</h1>
   <p class="muted">Clears and achievements are worth points, ranks are assigned automatically
-  upon reaching a threshold.</p>
-  {offline_banner}
+  upon reaching a threshold. Only the people under <b>Users</b> are affected.</p>
   <div class="trialbar">
-    <label class="switch"><input type="checkbox" id="trialsenabled"
-      {"checked" if config.get("enabled") else ""}> enabled</label>
     <label class="switch"><input type="checkbox" id="trialsexclusive"
       {"checked" if config.get("exclusive", True) else ""}> only hold the highest rank</label>
     <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
