@@ -1027,17 +1027,18 @@ class TrialRankManager:
         # Presets written before authorship existed have nobody on them.
         # Whoever saves one next takes it over, rather than leaving a preset
         # that shows an owner's controls to everyone forever.
-        if existing is not None and not int(existing.get("author_id") or 0):
+        claiming = existing is not None and not int(existing.get("author_id") or 0)
+        if claiming:
             fields["author_id"] = int(author_id or 0)
             fields["author_name"] = str(author_name or "")[:100]
-        self._presets.update_one(
-            query,
-            {"$set": fields,
-             "$setOnInsert": {"author_id": int(author_id or 0),
-                              "author_name": str(author_name or "")[:100],
-                              "created_at": now}},
-            upsert=True,
-        )
+        # Mongo refuses an update that names the same path in both $set and
+        # $setOnInsert, so the author is written by exactly one of them.
+        on_insert = {"created_at": now}
+        if not claiming:
+            on_insert["author_id"] = int(author_id or 0)
+            on_insert["author_name"] = str(author_name or "")[:100]
+        self._presets.update_one(query, {"$set": fields, "$setOnInsert": on_insert},
+                                 upsert=True)
 
     def presets(self, guild_id: int) -> list[dict]:
         if self._presets is None:
