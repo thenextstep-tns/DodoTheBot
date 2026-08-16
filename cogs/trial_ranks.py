@@ -225,6 +225,20 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             + "\n".join(f"• {problem}" for problem in fresh),
             title="Trial ranks: needs attention")
 
+    def why_not_running(self, guild) -> str:
+        """Why the automation is inert here, or "" if it isn't.
+
+        Kept apart from :meth:`runs_here` so the listener can *say* what stopped
+        it. A master switch that silently swallows every role change is
+        indistinguishable from a broken bot, which is exactly how this was found.
+        """
+        if not self.bot.trial_ranks.get(guild.id).get("enabled"):
+            return ("trial ranking is switched **off** for this server "
+                    "(turn on **enabled** at the top of the Trial ranks page)")
+        if not self.bot.visibility.cog_enabled(guild.id, "trial_ranks"):
+            return "the **trial_ranks** cog is disabled for this server"
+        return ""
+
     def runs_here(self, guild) -> bool:
         """Whether the automation should act in this guild at all.
 
@@ -802,8 +816,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     async def on_member_update(self, before, after) -> None:
         if before.roles == after.roles or after.bot:
             return
-        if not self.runs_here(after.guild):
-            return
         config = self.bot.trial_ranks.get(after.guild.id)
         changed = {r.id for r in before.roles} ^ {r.id for r in after.roles}
         scoring = {int(role_id) for role_id in (config.get("points") or {})}
@@ -815,6 +827,18 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         touched = ", ".join(
             role.name for role in (after.guild.get_role(r) for r in changed & scoring)
             if role is not None) or "a scoring role"
+        # The master switch is checked here rather than at the top, so that a
+        # scoring role changing while the feature is off produces an explanation
+        # instead of nothing at all.
+        stopped = self.why_not_running(after.guild)
+        if stopped:
+            await self.report_problems(
+                after.guild,
+                [f"{after.mention} changed **{touched}**, but {stopped}. "
+                 "Nothing was recalculated."],
+                context="not running")
+            return
+
         # A scoring role moved on somebody the automation won't touch. Silence
         # here reads as "the bot is broken" rather than "that person opted out",
         # so it says which, once an hour per person rather than per role edit.
