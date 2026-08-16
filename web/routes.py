@@ -353,7 +353,7 @@ def _status_board(bot) -> str:
     state = health.classify(latency_ms, connected)
 
     banner = {health.STATUS_OK: ("ok", "All Systems Operational"),
-              health.STATUS_DEGRADED: ("warn", "Degraded — the gateway is slow"),
+              health.STATUS_DEGRADED: ("warn", "Degraded, the gateway is slow"),
               health.STATUS_DOWN: ("down", "Not connected to Discord")}[state]
 
     bars, measured = "", None
@@ -386,7 +386,7 @@ def _status_board(bot) -> str:
 
     uptime_line = (f"{measured:.2f}% uptime over the past 90 days"
                    if measured is not None
-                   else "no history recorded yet — the board fills in from here")
+                   else "no history recorded yet, the board fills in from here")
     tiles = [
         ("Servers", f"{len(guilds)}", "installations"),
         ("Members", f"{members:,}", "reachable"),
@@ -444,7 +444,7 @@ def _dashboard_html(bot, entries: list, scope: str) -> str:
 {_status_board(bot)}
 <h1>Guilds</h1>
 <div class="guildgrid">{cards}</div>
-<h1>Cogs <span class="muted">(process-wide — affects every guild)</span></h1>
+<h1>Cogs <span class="muted">(process-wide, affects every guild)</span></h1>
 <table class="cogs"><thead><tr><th>Cog</th><th>State</th><th>Actions</th></tr></thead>
 <tbody>{cog_rows}</tbody></table>
 <p id="status" class="status"></p>
@@ -600,7 +600,7 @@ def _cog_block(detail: dict, guild, *, toggleable: bool, scope: str = panel_acce
     per-server parameters, and its per-command visibility cards."""
     body = _command_cards(detail["commands"], scope)
     if not detail["commands"] and not detail["features"] and not detail["params"]:
-        body = '<p class="muted small">No slash commands — passive/listener cog.</p>'
+        body = '<p class="muted small">No slash commands. Passive listener cog.</p>'
     toggle = (
         f'<label class="switch"><input type="checkbox" class="cogtoggle" {"checked" if detail["enabled"] else ""}> enabled</label>'
         if toggleable else '<span class="muted small">always on</span>'
@@ -871,7 +871,7 @@ def _settings_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     # The audit logger keeps its own store (guilds.json), so it gets its own block.
     audit_rows = ""
     for key, label, description in (
-        ("channel_id", "Audit log channel", "Joins, leaves, role changes, edits — the full audit feed."),
+        ("channel_id", "Audit log channel", "Joins, leaves, role changes, edits. The full audit feed."),
         ("delete_channel_id", "Deleted/edited messages", "Separate destination for deletions and edits. "
                                                         "Falls back to the audit channel when unset."),
     ):
@@ -1010,9 +1010,9 @@ def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
       <h1>Event rules <span class="muted">· {len(rules)} rule(s)</span></h1></div>
 
   </div>
-  <p class="muted">When something happens on this server, post a message — optionally pinging
+  <p class="muted">When something happens on this server, post a message, optionally pinging
   people. All {len(catalog)} events this discord.py build dispatches are available.
-  {"" if active else "<b>The event rules feature is currently off for this server</b> — turn it on under the event_actions cog on the "}
+  {"" if active else "<b>The event rules feature is currently off for this server</b>. Turn it on under the event_actions cog on the "}
   {"" if active or not panel_access.at_least(scope, panel_access.SCOPE_FULL) else f'<a href="/guild/{guild.id}">main page</a>.'}</p>
   <p class="muted small">Rules ignore anything the bot itself caused, and each rule is capped at
   {event_actions_limit()} messages per minute so a busy event can't flood a channel.
@@ -1084,7 +1084,7 @@ def _tribe_card(tribe: dict, guild) -> str:
     elif condition.get("children"):
         summary = html.escape(tribe_rules.describe(condition, guild))
     else:
-        summary = '<span class="muted">no conditions yet — matches nobody</span>'
+        summary = '<span class="muted">no conditions yet, matches nobody</span>'
     return f"""
 <div class="tribecard{"" if tribe.get("enabled", True) else " off"}" data-tribe="{tribe_id}">
   <div class="rulehead">
@@ -1158,7 +1158,7 @@ def _tribes_html(bot, guild, scope: str) -> str:
   </div>
   <p class="muted">Build a rule from roles, tenure and activity; everyone who matches gets the
   role(s). Rules are re-evaluated <b>hourly</b>, and you can run one now.
-  {"" if active else "<b>The tribes feature is off for this server</b> — turn it on under the tribes cog."}</p>
+  {"" if active else "<b>The tribes feature is off for this server</b>. Turn it on under the tribes cog."}</p>
   <p class="muted small">{html.escape(last_line)}</p>
   <div class="tribeactions">
     <button id="addtribe">+ New tribe</button>
@@ -1237,7 +1237,7 @@ def _rank_rows(bot, guild, config: dict) -> str:
         <button type="button" class="ghost rankdel" title="Remove this rank">×</button>
       </div>
       <textarea class="rankdesc" rows="2" maxlength="{trial_ranks.MAX_DESCRIPTION}"
-        placeholder="Optional — shown on the /rank card for this rank"
+        placeholder="Optional. Shown on the /rank card for this rank"
         >{html.escape(rank["description"])}</textarea>
     </div>"""
     return rows
@@ -1354,7 +1354,7 @@ def _trial_map_html(guild, config: dict) -> str:
     suggestion_count = 0 if trials else len(trial_ranks.suggest_trials(guild))
     hint = (
         f'<p class="muted small">Nothing mapped yet. <b>Suggest from role names</b> will '
-        f'propose {suggestion_count} trial(s) from your clear roles for you to check — '
+        f'propose {suggestion_count} trial(s) from your clear roles for you to check. '
         f'trifectas can\'t be guessed, so add those yourself.</p>'
         if not trials else ""
     )
@@ -1366,7 +1366,7 @@ def _trial_map_html(guild, config: dict) -> str:
       ones are already implied, so the bot keeps <b>one role per person per trial</b> and takes the
       rest off.</p>
       <p><b>Extra achievement</b> is the exception: it adds its points on top and removes nothing.
-      Pointing it at the same role as the trifecta is fine — that role still scores once.</p>
+      Pointing it at the same role as the trifecta is fine, that role still scores once.</p>
       <p>Leave a slot empty if the trial doesn't have it. The order above is what counts, not the
       points.</p>
     </div>
@@ -1381,7 +1381,7 @@ def _trial_map_html(guild, config: dict) -> str:
 
     <h3 class="subhead">Everything else that scores</h3>
     <p class="muted small">Achievements and one-off roles that don't belong to a trial. These
-    aren't read from any divider — whatever is listed here is what counts.</p>
+    aren't read from any divider. Whatever is listed here is what counts.</p>
     <div id="extrascores">{_extra_score_rows(guild, config)}</div>
     <div class="trialactions"><button class="ghost" id="addextra">+ Add a role</button></div>"""
 
@@ -1437,7 +1437,7 @@ def _unreachable_member(guild, member) -> str:
     if me is None or member is None:
         return ""
     if member.id == getattr(guild, "owner_id", None):
-        return "server owner — Discord never lets a bot change their roles"
+        return "server owner, so Discord never lets a bot change their roles"
     if member.top_role >= me.top_role:
         return f"their top role ({member.top_role.name}) is above mine"
     return ""
@@ -1487,7 +1487,7 @@ def _rank_role_warnings(guild, config: dict) -> list[str]:
         problems.append(
             "Anyone whose highest role is "
             + ", ".join(f"<b>{html.escape(name)}</b>" for name in stuck[:8])
-            + " is out of my reach entirely — Discord won't let me change <i>any</i> of "
+            + " is out of my reach entirely. Discord won't let me change <i>any</i> of "
             "their roles, even ones below me. Drag my role above those in "
             "<b>Server Settings → Roles</b>.")
     return problems
@@ -1510,7 +1510,7 @@ def _pilot_html(bot, guild, config: dict) -> str:
         blocked = _unreachable_member(guild, member)
         # An enrolled member the bot can't touch is the failure mode that looks
         # like success: their card shows a rank they were never given.
-        flag = (f'<div class="warnline small">⚠️ Roles can\'t be changed — '
+        flag = (f'<div class="warnline small">⚠️ Roles can\'t be changed, '
                 f'{html.escape(blocked)}</div>' if blocked and state ==
                 trial_ranks.STATE_ENROLLED else "")
         rows += (
@@ -1569,9 +1569,9 @@ def _pilot_html(bot, guild, config: dict) -> str:
       <span class="muted small">of {stats["candidates"]} member(s) holding a scoring role</span>
     </div>
     <div class="pilotadd">
-      <input id="pilottag" placeholder="Discord user tag — e.g. nikladushkin" autocomplete="off">
+      <input id="pilottag" placeholder="Discord user tag, e.g. nikladushkin" autocomplete="off">
       <button id="pilotenrol">Turn trial ranks on for this user</button>
-      <span class="muted small">Exact tag only, not a nickname — this edits their roles.</span>
+      <span class="muted small">Exact tag only, not a nickname. This edits their roles.</span>
     </div>
     <table class="stats"><thead><tr><th>Who</th><th>Stage</th><th>How</th><th>When</th><th></th></tr></thead>
       <tbody id="pilotrows">{rows}</tbody></table>
@@ -1587,7 +1587,7 @@ def _pilot_html(bot, guild, config: dict) -> str:
     <div class="announcebar">
       <div><b>Log channel</b>
         <div class="muted small">Enrolments, recalculations, rank checks and consent all get
-        reported here — {html.escape(log_source)}.</div></div>
+        reported here, {html.escape(log_source)}.</div></div>
       <select id="triallogchannel">{_channel_options(guild, log_id)}</select>
     </div>"""
 
@@ -1667,6 +1667,14 @@ def _interest_html(bot, guild, config: dict) -> str:
     <div class="proggrid">{cards}</div>"""
 
 
+def _suggested_note(guild, config: dict) -> str:
+    """Say when slot boxes are showing a built-in suggestion, not a decision."""
+    pending = [row for row in trial_ranks.unpriced_slots(guild, config) if row["suggested"]]
+    if not pending:
+        return ""
+    return '<p class="muted small">Roles pre-filled with suggested values</p>'
+
+
 def _unpriced_warning(guild, config: dict) -> str:
     """Slots you've mapped but never priced — they score nothing.
 
@@ -1697,7 +1705,7 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
         f"Last run: {last.get('ranked', 0)} ranked of {last.get('members', 0)} enrolled "
         f"member(s), {last.get('granted', 0)} rank(s) granted, "
         f"{last.get('removed', 0)} replaced"
-        + (f" — skipped ({last['skipped']})" if last.get("skipped") else "")
+        + (f", skipped ({last['skipped']})" if last.get("skipped") else "")
         if last else "Not run yet this session."
     )
     total_possible = sum(int(v) for v in points.values()) if points else 0
@@ -1762,10 +1770,9 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     <button id="presetsave" class="ghost" hidden>Save</button>
     <button id="presetsavenew" class="ghost">Save as new</button>
     <button id="presetdel" class="ghost" hidden>Delete</button>
-    <span class="muted small">A named copy of the weights, ranks and trials — load one to
-    play with the numbers without losing what you had.</span>
   </div>
   {_unpriced_warning(guild, config)}
+  {_suggested_note(guild, config)}
 
   <div class="triallayout">
     <aside class="sidebar trialnav">{nav}
@@ -1884,7 +1891,7 @@ def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str 
   <div class="statshead">
     <div><h1>Change log <span class="muted">· {data["total"]:,} entr(ies)</span></h1></div>
   </div>
-  <p class="muted">Every change made from this panel, newest first — including your own.
+  <p class="muted">Every change made from this panel, newest first, including your own.
   Old and new values are kept so anything can be put back.</p>
   <form class="logfilters" method="get" action="/guild/{guild.id}/log">
     <select name="kind">{kind_options}</select>
@@ -2540,8 +2547,8 @@ async def api_guild_trials(request: web.Request):
             # UI hides the overwrite button, so this is the backstop.
             if existing is not None and int(existing.get("author_id") or 0) not in (0, uid):
                 return _bad(f"'{name}' belongs to "
-                            f"{existing.get('author_name') or 'someone else'} — "
-                            "save it under a different name.")
+                            f"{existing.get('author_name') or 'someone else'}. "
+                            "Save it under a different name.")
             actor = guild.get_member(uid) if uid else None
             bot.trial_ranks.save_preset(
                 guild.id, name, clean, author_id=uid,

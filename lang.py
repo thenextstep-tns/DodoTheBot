@@ -946,7 +946,7 @@ TRIAL_BUTTON_LABEL = "✨ CHECK MY RANK ✨"
 
 TRIAL_HOW_IT_WORKS = (
     "## ✨ How it works\n"
-    "• Every clear is worth points — **the newer and harder it is, the more it's worth.**\n"
+    "• Every clear is worth points. **The newer and harder it is, the more it's worth.**\n"
     "• Only your **best clear per trial** counts, so a trifecta doesn't pay twice.\n"
     "• **More points, higher rank.** Hit the number, get the role.\n"
     "• New clear role? Your rank moves within seconds.\n\n"
@@ -963,10 +963,10 @@ TRIAL_CONSENT_ASK = (
 TRIAL_CONSENT_YES = "Sure!"
 TRIAL_CONSENT_EXPLAIN = "How exactly does it work?"
 TRIAL_CONSENT_TIMEOUT = (
-    "Hey, no biggie — thank you for getting this far. Your rank stays exactly as it is, "
+    "Hey, no biggie. Thank you for getting this far. Your rank stays exactly as it is, "
     "and you can press the button again whenever you like."
 )
-TRIAL_CONSENT_DONE = "You're on the automatic system now — here's where you stand."
+TRIAL_CONSENT_DONE = "You're on the automatic system now. Here's where you stand."
 TRIAL_CONSENT_NOT_YOURS = "That question wasn't for you."
 
 # The /rank card. {points} {needed} {next} {score} {target} are filled in by the cog.
@@ -975,10 +975,10 @@ TRIAL_CARD_PROGRESS = "**{needed}** more to reach {next}"
 TRIAL_CARD_POINTS = "{points} points"
 TRIAL_CARD_STEPS_TITLE = "Next steps:"
 TRIAL_CARD_STEPS_EMPTY = (
-    "Nothing on the board is priced for you yet — ask an officer what's worth points."
+    "Nothing on the board is priced for you yet. Ask an officer what's worth points."
 )
 TRIAL_CARD_OUTRO = (
-    "You can use `/rank` anywhere on the server, any time — and I'll always be here too. ✨\n"
+    "You can use `/rank` anywhere on the server, any time, and I'll always be here too. ✨\n"
     "If you have a minute, let the mods know how well this matches your actual skill."
 )
 # The rank line at the top of the card. {rank} is a role mention, so it renders
@@ -994,7 +994,7 @@ TRIAL_INTEREST_THANKS = (
     "Once we have enough people with the same answers, one of the RLs will poke you. "
     "Thank you, and have a great day!"
 )
-TRIAL_INTEREST_TITLE = "Prog interest — {trial}"
+TRIAL_INTEREST_TITLE = "Prog interest: {trial}"
 TRIAL_INTEREST_NONE = "Nobody has put their hand up for **{trial}** yet."
 TRIAL_INTEREST_SUMMARY = "**{count}** of {group} interested"
 TRIAL_INTEREST_UNKNOWN = "I don't know a trial called **{trial}**."
@@ -1010,9 +1010,9 @@ TRIAL_CARD_NO_RANK = "No rank yet"
 TRIAL_NO_LADDER_TITLE = "No ranks set up yet"
 TRIAL_NO_LADDER_BODY = (
     "This server hasn't set its rank ladder up, so there's nothing to measure you "
-    "against. Your clears still count — ask an officer."
+    "against. Your clears still count, ask an officer."
 )
 TRIAL_NO_LADDER_POINTS = "from the clears you hold"
 
-TRIAL_ERROR_UNAVAILABLE = "Ranking is not available right now — try again in a minute."
+TRIAL_ERROR_UNAVAILABLE = "Ranking is not available right now, try again in a minute."
 TRIAL_ERROR_GUILD_ONLY = "This only works inside the server."

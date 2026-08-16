@@ -22,10 +22,19 @@ async function post(url, body) {
     body: JSON.stringify(body),
   });
   let data = {};
-  try { data = await resp.json(); } catch (_) { /* ignore */ }
+  let raw = "";
+  try { raw = await resp.text(); data = JSON.parse(raw); } catch (_) { /* not JSON */ }
+  const ok = resp.ok && data.ok;
+  // A non-JSON reply (a 500 page, a 404 from the scope check, a proxy error)
+  // used to surface as a bare "Failed" with the cause thrown away, which made
+  // every such bug unreportable. Say what actually came back.
+  let error = data.error;
+  if (!ok && !error) {
+    error = "HTTP " + resp.status + (raw ? ": " + raw.slice(0, 200).trim() : "");
+  }
   // Pass the whole payload through: endpoints also return `value`, `rows`,
   // `summary`, … and dropping them silently turns a full answer into a blank one.
-  return { ...data, ok: resp.ok && data.ok, error: data.error };
+  return { ...data, ok: ok, error: error };
 }
 
 // Searchable chip multi-select (list_role / list_channel). `save` receives the

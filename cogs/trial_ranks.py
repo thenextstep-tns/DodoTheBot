@@ -223,7 +223,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             guild,
             f"⚠️ **Ranks could not be applied** ({context}):\n"
             + "\n".join(f"• {problem}" for problem in fresh),
-            title="Trial ranks — needs attention")
+            title="Trial ranks: needs attention")
 
     def runs_here(self, guild) -> bool:
         """Whether the automation should act in this guild at all.
@@ -321,7 +321,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 out["errors"].append(
                     f"**{member.display_name}**'s highest role "
                     f"(**{member.top_role.name}**) is above mine, so Discord won't let me "
-                    f"change *any* of their roles — including ones below me. "
+                    f"change *any* of their roles, including ones below me. "
                     f"Drag my role above **{member.top_role.name}** in "
                     f"Server Settings → Roles.")
                 edit = False
@@ -417,7 +417,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         if outcome["errors"]:
             lines.append("⚠️ **The roles were not changed:**")
             lines.extend(f"• {problem}" for problem in outcome["errors"])
-        await self.log_event(member.guild, "\n".join(lines), title="Trial ranks — enrolled")
+        await self.log_event(member.guild, "\n".join(lines), title="Trial ranks: enrolled")
         return outcome
 
     async def run_for_guild(self, guild, *, edit: bool = True) -> dict:
@@ -528,7 +528,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                                                          next=next_name)),
                 inline=False)
             if state["steps"]:
-                lines = [f"• **+{step['gain']}** — {step['name']}" for step in state["steps"]]
+                lines = [f"• **+{step['gain']}** · {step['name']}" for step in state["steps"]]
                 value = "\n".join(lines)[:1024]
             else:
                 value = lang.TRIAL_CARD_STEPS_EMPTY
@@ -641,7 +641,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             # dict.fromkeys keeps first-seen order while dropping the repeats a
             # hardmode and its trifecta produce for the same raid.
             + ", ".join(list(dict.fromkeys(wanted))[:20]),
-            title="Trial ranks — prog interest")
+            title="Trial ranks: prog interest")
 
     # ------------------------------------------------------------------ #
     #  Commands
@@ -685,7 +685,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         query = (current or "").lower()
         return [
             discord.app_commands.Choice(
-                name=f"{bucket['name']} — {bucket['count']}/{trial_ranks.GROUP_SIZE}",
+                name=f"{bucket['name']} · {bucket['count']}/{trial_ranks.GROUP_SIZE}",
                 value=bucket["name"])
             for bucket in buckets if query in bucket["name"].lower()
         ][:25]
@@ -694,7 +694,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         name="interest",
         description="Who would join a prog, and which clears they still need.")
     @commands.guild_only()
-    @discord.app_commands.describe(trial="Which trial, e.g. vRG — leave empty for all of them")
+    @discord.app_commands.describe(trial="Which trial, e.g. vRG. Leave empty for all of them")
     @discord.app_commands.autocomplete(trial=trial_autocomplete)
     async def interest(self, context: commands.Context, *, trial: str = "") -> None:
         config = self.bot.trial_ranks.get(context.guild.id)
@@ -725,7 +725,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         embed = discord.Embed(title=lang.TRIAL_INTEREST_OVERVIEW,
                               colour=discord.Colour.blurple())
         lines = [f"{INTEREST_MARKS[b['level']]} **{b['count']}**/{trial_ranks.GROUP_SIZE}"
-                 f" — {b['name']}" for b in buckets[:25]]
+                 f" · {b['name']}" for b in buckets[:25]]
         embed.description = "\n".join(lines)
         embed.set_footer(text="/interest <trial> for who, and what they still need.")
         return embed
@@ -745,7 +745,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # three people are short of, not just that three people want vRG.
         breakdown = [
             f"{INTEREST_MARKS[entry['level']]} **{entry['count']}**/{trial_ranks.GROUP_SIZE}"
-            f" — {entry['name']}"
+            f" · {entry['name']}"
             for entry in bucket["by_role"]
         ]
         if breakdown:
@@ -759,7 +759,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             needs = ", ".join(role["name"] for role in entry.get("roles") or ())
             when = entry.get("at")
             stamp = f" · {when:%Y-%m-%d}" if hasattr(when, "strftime") else ""
-            lines.append(f"• {who} — {needs}{stamp}" if needs else f"• {who}{stamp}")
+            lines.append(f"• {who} · {needs}{stamp}" if needs else f"• {who}{stamp}")
         embed.add_field(name=lang.TRIAL_INTEREST_WHO,
                         value="\n".join(lines)[:1024] or "—", inline=False)
         return embed
