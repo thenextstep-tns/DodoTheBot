@@ -2080,43 +2080,96 @@ def _stats_html(guild, data: dict, users: dict, channels: dict) -> str:
 """
 
 
+def _lang_group(key: str) -> str:
+    """Which cog a string belongs to — the prefix it already carries."""
+    return key.split("_")[0]
+
+
 def _lang_html(bot) -> str:
+    """The strings editor: a cog at a time, searched server-side.
+
+    Rendering all 597 as live textareas made the page unusable — there was no
+    way to *find* anything, only to scroll. One group is rendered at a time and
+    search filters the index rather than the DOM.
+    """
     entries = bot.lang.all_entries()
     groups: dict[str, list[dict]] = {}
     for entry in entries:
         groups.setdefault(entry["group"], []).append(entry)
-
     overridden = sum(1 for e in entries if e["overridden"])
-    sections = ""
-    for group in sorted(groups):
+
+    nav = "".join(
+        f'<a class="langnavitem{" active" if i == 0 else ""}" href="#{html.escape(g)}" '
+        f'data-group="{html.escape(g)}">'
+        f'<span class="navlabel">{html.escape(g.title())}</span>'
+        f'<span class="navhint">{len(groups[g])} · '
+        f'{sum(1 for e in groups[g] if e["overridden"])} edited</span></a>'
+        for i, g in enumerate(sorted(groups))
+    )
+
+    panels = ""
+    for index, group in enumerate(sorted(groups)):
         rows = ""
-        for e in groups[group]:
-            value = "\n".join(e["current"]) if e["is_list"] else e["current"]
-            default = "\n".join(e["default"]) if e["is_list"] else e["default"]
-            rows_n = min(10, max(1, value.count("\n") + 1))
-            fields = (
-                '<span class="fields">' + " ".join(f"<code>{{{html.escape(f)}}}</code>" for f in e["fields"]) + "</span>"
-                if e["fields"] else ""
+        for e in sorted(groups[group], key=lambda x: x["key"]):
+            joiner = chr(10)
+            value = joiner.join(e["current"]) if e["is_list"] else e["current"]
+            default = joiner.join(e["default"]) if e["is_list"] else e["default"]
+            fields = "".join(f'<code class="ph">{{{html.escape(f)}}}</code>'
+                             for f in e["fields"])
+            marks = fields
+            if e["is_list"]:
+                marks += '<span class="langtag">list</span>'
+            if e["overridden"]:
+                marks += '<span class="langtag edited">edited</span>'
+            preview = value if len(value) <= 110 else value[:110] + "…"
+            rows += (
+                f'<div class="langrow" data-key="{html.escape(e["key"])}" '
+                f'data-list="{1 if e["is_list"] else 0}" '
+                f'data-search="{html.escape((e["key"] + " " + value + " " + default).lower())}" '
+                f'data-edited="{1 if e["overridden"] else 0}">'
+                f'<div class="langmain"><code class="k">{html.escape(e["key"])}</code>'
+                f'<div class="langpreview">{html.escape(preview) or "&nbsp;"}</div></div>'
+                f'<div class="langmarks">{marks}</div>'
+                f'<textarea class="langvalue" hidden>{html.escape(value)}</textarea>'
+                f'<pre class="langdefault" hidden>{html.escape(default)}</pre>'
+                f'</div>'
             )
-            list_note = '<span class="muted"> · list (one item per line)</span>' if e["is_list"] else ""
-            badge = '<span class="on">overridden</span>' if e["overridden"] else ""
-            rows += f"""
-<div class="langrow" data-key="{html.escape(e["key"])}" data-list="{1 if e["is_list"] else 0}"
-     data-search="{html.escape((e["key"] + " " + default).lower())}">
-  <div class="langhead"><code class="k">{html.escape(e["key"])}</code>{fields}{list_note} {badge}</div>
-  <textarea rows="{rows_n}" spellcheck="false">{html.escape(value)}</textarea>
-  <details class="def"><summary>default</summary><pre>{html.escape(default)}</pre></details>
-  <div class="langbtns"><button data-do="save">Save</button><button data-do="reset" class="ghost">Reset</button></div>
-</div>"""
-        sections += f'<details class="group"><summary>{html.escape(group)} <span class="muted">({len(groups[group])})</span></summary>{rows}</details>'
+        panels += (f'<section class="langpanel" data-group="{html.escape(group)}"'
+                   f'{"" if index == 0 else " hidden"}>{rows}</section>')
 
     return f"""
-<h1>User-facing strings <span class="muted">({len(entries)} strings · {overridden} overridden)</span></h1>
-<p class="muted">Edits apply to the live bot immediately and persist across restarts. Keep any
-<code>{{placeholder}}</code> shown next to a string — removing one is fine, but adding a new one
-the command doesn't provide is rejected. These strings are global (shared by all guilds).</p>
-<input id="langsearch" type="search" placeholder="Filter by key or text…" autocomplete="off">
-<div id="langlist">{sections}</div>
+<div class="langpage">
+  <h1>Strings <span class="muted">({len(entries)} · {overridden} edited)</span></h1>
+  <p class="muted">Edits apply to the live bot immediately and persist across restarts.
+  These are the <b>global</b> values — the wording every server gets unless it overrides it.</p>
+  <div class="langbar">
+    <input id="langsearch" type="search" autocomplete="off"
+      placeholder="Search every string — key or text…">
+    <label class="switch"><input type="checkbox" id="langedited"> edited only</label>
+    <span class="muted small" id="langcount"></span>
+  </div>
+  <div class="langlayout">
+    <aside class="sidebar langnav">{nav}</aside>
+    <main class="content langlist">{panels}</main>
+  </div>
+</div>
+<div class="langdrawer" id="langdrawer" hidden>
+  <div class="drawerhead">
+    <code class="k" id="drawerkey"></code>
+    <button class="ghost" id="drawerclose">×</button>
+  </div>
+  <div class="drawerbody">
+    <div id="drawerph" class="drawerph"></div>
+    <textarea id="drawervalue" rows="8" spellcheck="false"></textarea>
+    <div id="drawerwarn" class="drawerwarn" hidden></div>
+    <details class="def"><summary>default</summary><pre id="drawerdefault"></pre></details>
+  </div>
+  <div class="drawerfoot">
+    <button id="drawersave">Save</button>
+    <button id="drawerreset" class="ghost">Reset to default</button>
+    <span class="muted small" id="drawerlen"></span>
+  </div>
+</div>
 <p id="status" class="status"></p>
 """
 
@@ -3208,7 +3261,9 @@ async def api_lang(request: web.Request):
     error = bot.lang.set(key, value)
     if error:
         return web.json_response({"ok": False, "error": error}, status=200)
-    return web.json_response({"ok": True})
+    # Advice travels with the success: refusing an edit over style would just
+    # teach people to route around the editor.
+    return web.json_response({"ok": True, "warnings": bot.lang.warnings(key, value)})
 
 
 # --------------------------------------------------------------------------- #

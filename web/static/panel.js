@@ -1839,3 +1839,164 @@ if (_trialMap) {
   strip.addEventListener("mouseleave", hide);
   strip.addEventListener("focusout", hide);
 })();
+
+
+// --- Strings page: a cog at a time, one editor, search over the index --------
+// 597 live textareas gave no way to *find* anything, only to scroll. The list is
+// an index; editing happens in one drawer, so there is a single place a change
+// can be made and a single place it can be validated.
+(function langPage() {
+  const page = document.querySelector(".langpage");
+  const drawer = document.getElementById("langdrawer");
+  if (!page || !drawer) return;
+
+  const navItems = Array.from(page.querySelectorAll(".langnavitem"));
+  const panels = Array.from(page.querySelectorAll(".langpanel"));
+  const search = document.getElementById("langsearch");
+  const editedOnly = document.getElementById("langedited");
+  const counter = document.getElementById("langcount");
+  const rows = Array.from(page.querySelectorAll(".langrow"));
+
+  const show = (group) => {
+    panels.forEach((p) => { p.hidden = p.dataset.group !== group; });
+    navItems.forEach((a) => a.classList.toggle("active", a.dataset.group === group));
+  };
+  navItems.forEach((item) => item.addEventListener("click", (e) => {
+    e.preventDefault();
+    search.value = "";
+    editedOnly.checked = false;
+    filter();
+    show(item.dataset.group);
+  }));
+
+  // Search spans every group at once: hunting for wording you only half
+  // remember is the whole reason this page exists.
+  function filter() {
+    const q = (search.value || "").trim().toLowerCase();
+    const onlyEdited = editedOnly.checked;
+    let shown = 0;
+    rows.forEach((row) => {
+      const hit = (!q || (row.dataset.search || "").includes(q))
+        && (!onlyEdited || row.dataset.edited === "1");
+      row.hidden = !hit;
+      if (hit) shown += 1;
+    });
+    if (q || onlyEdited) {
+      panels.forEach((p) => {
+        p.hidden = !Array.from(p.querySelectorAll(".langrow")).some((r) => !r.hidden);
+      });
+      navItems.forEach((a) => a.classList.remove("active"));
+      counter.textContent = shown + (shown === 1 ? " match" : " matches");
+    } else {
+      counter.textContent = "";
+      if (navItems.length) show(navItems[0].dataset.group);
+    }
+  }
+  search.addEventListener("input", filter);
+  editedOnly.addEventListener("change", filter);
+
+  // --- the editor ---
+  const kEl = document.getElementById("drawerkey");
+  const vEl = document.getElementById("drawervalue");
+  const dEl = document.getElementById("drawerdefault");
+  const phEl = document.getElementById("drawerph");
+  const warnEl = document.getElementById("drawerwarn");
+  const lenEl = document.getElementById("drawerlen");
+  let current = null;
+
+  const close = () => { drawer.hidden = true; current = null; };
+  document.getElementById("drawerclose").addEventListener("click", close);
+
+  const measure = () => {
+    const n = vEl.value.length;
+    lenEl.textContent = n + (n === 1 ? " character" : " characters");
+    lenEl.className = "muted small" + (n > 2000 ? " overlimit" : "");
+  };
+  vEl.addEventListener("input", measure);
+
+  const open = (row) => {
+    current = row;
+    kEl.textContent = row.dataset.key;
+    vEl.value = row.querySelector(".langvalue").value;
+    dEl.textContent = row.querySelector(".langdefault").textContent;
+    phEl.innerHTML = "";
+    // Placeholders are click-to-insert: retyping {mention} by hand is how a
+    // brace gets dropped and a command starts throwing.
+    row.querySelectorAll(".ph").forEach((chip) => {
+      const c = document.createElement("code");
+      c.className = "ph";
+      c.textContent = chip.textContent;
+      c.title = "Click to insert";
+      c.addEventListener("click", () => {
+        const at = vEl.selectionStart || vEl.value.length;
+        vEl.value = vEl.value.slice(0, at) + chip.textContent + vEl.value.slice(at);
+        vEl.focus();
+        measure();
+      });
+      phEl.appendChild(c);
+    });
+    warnEl.hidden = true;
+    drawer.hidden = false;
+    measure();
+    vEl.focus();
+  };
+
+  page.addEventListener("click", (e) => {
+    const row = e.target.closest(".langrow");
+    if (row) open(row);
+  });
+
+  // "/" focuses search, Escape closes the drawer.
+  document.addEventListener("keydown", (e) => {
+    const tag = (document.activeElement || {}).tagName;
+    if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") {
+      e.preventDefault();
+      search.focus();
+    }
+    if (e.key === "Escape" && !drawer.hidden) close();
+  });
+
+  const showWarnings = (list) => {
+    warnEl.innerHTML = "";
+    if (!list || !list.length) { warnEl.hidden = true; return; }
+    list.forEach((w) => {
+      const line = document.createElement("div");
+      line.textContent = "⚠ " + w;
+      warnEl.appendChild(line);
+    });
+    warnEl.hidden = false;
+  };
+
+  document.getElementById("drawersave").addEventListener("click", async () => {
+    if (!current) return;
+    const res = await post("/api/lang", {
+      key: current.dataset.key,
+      value: vEl.value,
+      is_list: current.dataset.list === "1",
+    });
+    if (!res.ok) { flash(res.error || "Failed", false); showWarnings([]); return; }
+    current.querySelector(".langvalue").value = vEl.value;
+    current.querySelector(".langpreview").textContent =
+      vEl.value.length > 110 ? vEl.value.slice(0, 110) + "…" : vEl.value;
+    current.dataset.edited = "1";
+    current.dataset.search = (current.dataset.key + " " + vEl.value).toLowerCase();
+    if (!current.querySelector(".langtag.edited")) {
+      const tag = document.createElement("span");
+      tag.className = "langtag edited";
+      tag.textContent = "edited";
+      current.querySelector(".langmarks").appendChild(tag);
+    }
+    showWarnings(res.warnings);
+    flash(res.warnings && res.warnings.length
+      ? "saved, " + res.warnings.length + " warning(s)" : "saved ✓", true);
+  });
+
+  document.getElementById("drawerreset").addEventListener("click", async () => {
+    if (!current) return;
+    if (!confirm("Reset " + current.dataset.key + " to its default?")) return;
+    const res = await post("/api/lang", { key: current.dataset.key, action: "reset" });
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    flash("reset ✓", true);
+    setTimeout(() => location.reload(), 600);
+  });
+})();

@@ -814,3 +814,68 @@ main:has(.trialspage) { max-width: none; }
 .navtool { margin-left: 10px; padding-left: 14px; border-left: 1px solid var(--line);
   color: var(--muted); text-decoration: none; font-size: 13px; }
 .navtool:hover { color: var(--text); }
+
+
+/* Strings page: an index plus one editor, instead of 597 live textareas. */
+main:has(.langpage) { max-width: none; }
+.langbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+#langsearch { flex: 1 1 320px; min-width: 0; padding: 9px 12px; font: inherit; font-size: 14px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.langlayout { display: flex; align-items: flex-start; gap: 20px; }
+.langnav { width: 220px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+  max-height: calc(100vh - 110px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px; }
+.langnavitem { display: flex; flex-direction: column; padding: 7px 10px; text-decoration: none;
+  border-radius: var(--radius-sm); border: 1px solid transparent; }
+.langnavitem:hover { background: var(--color-surface-soft); }
+.langnavitem.active { background: rgba(255, 56, 92, .07); border-color: rgba(255, 56, 92, .3); }
+.langnavitem .navlabel { font-size: 13px; font-weight: var(--weight-semibold);
+  color: var(--color-ink); }
+.langnavitem.active .navlabel { color: var(--color-primary); }
+.langnavitem .navhint { font-size: 11px; color: var(--color-muted); }
+.langlist { flex: 1 1 auto; min-width: 0; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); overflow: hidden; }
+.langpanel[hidden] { display: none; }
+.langrow { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 14px;
+  border-bottom: 1px solid var(--color-hairline-soft); cursor: pointer; align-items: center; }
+.langrow:hover { background: var(--color-surface-soft); }
+.langrow[hidden] { display: none; }
+.langmain { min-width: 0; }
+.langrow .k { font-size: 12px; font-weight: var(--weight-semibold); color: var(--color-ink); }
+.langpreview { font-size: 13px; color: var(--color-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.langmarks { display: flex; align-items: center; gap: 4px; flex: none; }
+.langtag { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-full);
+  border: 1px solid var(--color-hairline); color: var(--color-muted); }
+.langtag.edited { border-color: var(--color-primary); color: var(--color-primary); }
+code.ph { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--color-body); }
+
+/* One drawer: a single place an edit is made, and a single place it's checked. */
+.langdrawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(560px, 100%);
+  z-index: 60; display: flex; flex-direction: column; background: var(--color-canvas);
+  border-left: 1px solid var(--color-hairline); box-shadow: var(--shadow-float); }
+.langdrawer[hidden] { display: none; }
+.drawerhead { display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid var(--color-hairline); }
+.drawerhead .k { font-size: 13px; font-weight: var(--weight-semibold); }
+.drawerbody { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px; }
+.drawerph { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.drawerph code.ph { cursor: pointer; }
+.drawerph code.ph:hover { background: var(--color-primary); color: var(--color-on-primary); }
+#drawervalue { width: 100%; padding: 10px 12px; font: inherit; font-size: 14px;
+  background: var(--color-canvas); color: var(--color-ink); resize: vertical;
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.drawerwarn { margin-top: 10px; padding: 10px 12px; font-size: 12px;
+  background: rgba(179, 83, 9, .08); color: var(--color-warning);
+  border-radius: var(--radius-sm); }
+.drawerwarn > div + div { margin-top: 4px; }
+.drawerfoot { display: flex; align-items: center; gap: 8px; padding: 14px 18px;
+  border-top: 1px solid var(--color-hairline); }
+.drawerfoot .overlimit { color: var(--color-warning); font-weight: var(--weight-semibold); }
+@media (max-width: 900px) {
+  .langlayout { flex-direction: column; }
+  .langnav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+  .langnavitem { flex: 1 1 auto; }
+}
