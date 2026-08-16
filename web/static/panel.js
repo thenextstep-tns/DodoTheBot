@@ -846,15 +846,42 @@ if (_trialsPage) {
       trials: window.readTrialMap ? window.readTrialMap() : [],
     });
 
-    document.getElementById("presetsave").addEventListener("click", async () => {
-      const suggested = presetPick.value || "";
-      const name = prompt("Name this preset:", suggested);
-      if (!name || !name.trim()) return;
+    const saveBtn = document.getElementById("presetsave");
+    const saveNewBtn = document.getElementById("presetsavenew");
+    const delBtn = document.getElementById("presetdel");
+    const viewer = _trialsPage.dataset.uid || "0";
+
+    // Overwrite is only offered on your own presets; everyone else gets "Save
+    // as new". The server enforces the same rule — this just stops you finding
+    // out by being refused.
+    const syncOwnership = () => {
+      const opt = presetPick.options[presetPick.selectedIndex];
+      const author = (opt && opt.dataset.author) || "";
+      const mine = presetPick.value !== "" && author !== "" && author === viewer;
+      saveBtn.hidden = !mine;
+      delBtn.hidden = !mine;
+    };
+    presetPick.addEventListener("change", syncOwnership);
+    syncOwnership();
+
+    const save = async (name) => {
       const res = await post(`/api/guild/${guildId}/trials`,
-                             { action: "preset_save", name: name.trim(), ...currentRuleset() });
+                             { action: "preset_save", name: name, ...currentRuleset() });
       if (!res.ok) { flash(res.error || "Failed", false); return; }
       flash(`preset “${res.name}” saved ✓`, true);
       setTimeout(() => location.reload(), 900);
+    };
+
+    saveBtn.addEventListener("click", () => {
+      const name = presetPick.value;
+      if (!name) return;
+      if (confirm(`Overwrite “${name}” with what's on screen?`)) save(name);
+    });
+
+    saveNewBtn.addEventListener("click", () => {
+      const name = prompt("Name for the new preset:", "");
+      if (!name || !name.trim()) return;
+      save(name.trim());
     });
 
     document.getElementById("presetload").addEventListener("click", async () => {
@@ -865,14 +892,11 @@ if (_trialsPage) {
       const res = await post(`/api/guild/${guildId}/trials`,
                              { action: "preset_load", name: name });
       if (!res.ok) { flash(res.error || "Failed", false); return; }
-      // Applying a preset means re-rendering the whole editor, which the server
-      // already knows how to do — so store it and reload rather than rebuilding
-      // three widgets by hand and getting one of them subtly wrong.
       flash(`loaded “${name}” — review, then Save draft to keep it`, true);
       applyPreset(res.preset);
     });
 
-    document.getElementById("presetdel").addEventListener("click", async () => {
+    delBtn.addEventListener("click", async () => {
       const name = presetPick.value;
       if (!name) { flash("Pick a preset first", false); return; }
       if (!confirm(`Delete the preset “${name}”? The live setup is untouched.`)) return;
@@ -889,13 +913,23 @@ if (_trialsPage) {
   // doesn't mention is cleared rather than left behind from the old ruleset.
   function applyPreset(preset) {
     const points = preset.points || {};
+    const trials = preset.trials || [];
+    // Rebuild the editors *first*. Filling the boxes before this ran meant
+    // setTrialMap immediately replaced every one of them with a fresh empty
+    // input — which is why a loaded preset showed "pts" everywhere.
+    if (window.setTrialMap) {
+      // Slot boxes are built with their value, so the map needs the prices.
+      window.setTrialMap(trials.map((t) => ({ ...t, points: points })));
+    }
+    if (window.setRanks) window.setRanks(preset.ranks || []);
+    if (window.setExtras) window.setExtras(points, trials);
+    // Then set every remaining box from the preset, and clear anything it
+    // doesn't mention rather than leaving the old ruleset's number behind.
     _trialsPage.querySelectorAll(".rolepoints").forEach((input) => {
       const id = input.dataset.role;
-      input.value = (id && points[id] !== undefined) ? points[id] : "";
+      input.value = (id && id !== "0" && points[id] !== undefined) ? points[id] : "";
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    if (window.setRanks) window.setRanks(preset.ranks || []);
-    if (window.setTrialMap) window.setTrialMap(preset.trials || []);
   }
 
   // --- the rollout: turning it on for one person at a time ---
@@ -1532,6 +1566,9 @@ if (_trialMap) {
       pts.placeholder = "pts";
       pts.dataset.role = chosen || "0";
       pts.hidden = !chosen;
+      if (chosen && (trial.points || {})[chosen] !== undefined) {
+        pts.value = trial.points[chosen];
+      }
       cell.append(label, pick, pts);
       grid.appendChild(cell);
     });
@@ -1605,46 +1642,62 @@ if (_trialMap) {
       const id = (row.querySelector(".rolepick-id") || {}).value || "0";
       row.querySelector(".rolepoints").dataset.role = id;
     });
+    const buildExtraRow = (roleId, value) => {
+      const row = document.createElement("div");
+      row.className = "extrarow";
+      const pick = document.createElement("div");
+      pick.className = "rolepick";
+      pick.dataset.key = "extra";
+      const text = document.createElement("input");
+      text.className = "rolepick-text";
+      text.placeholder = "Type a role name…";
+      text.autocomplete = "off";
+      text.spellcheck = false;
+      text.value = roleId ? (roles.find((r) => String(r.id) === String(roleId)) || {}).name || "" : "";
+      const hid = document.createElement("input");
+      hid.type = "hidden";
+      hid.className = "rolepick-id";
+      hid.value = roleId || "0";
+      const clr = document.createElement("button");
+      clr.type = "button";
+      clr.className = "rolepick-clear";
+      clr.textContent = "×";
+      const lst = document.createElement("div");
+      lst.className = "rolepick-list";
+      lst.hidden = true;
+      pick.append(text, hid, clr, lst);
+      const pts = document.createElement("input");
+      pts.type = "number";
+      pts.className = "rolepoints";
+      pts.placeholder = "pts";
+      pts.dataset.role = roleId || "0";
+      if (value !== undefined) pts.value = value;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "ghost extradel";
+      del.textContent = "×";
+      row.append(pick, pts, del);
+      extras.appendChild(row);
+      bindRolePickers(row, roles);
+      return { row, text };
+    };
+
     const addExtra = document.getElementById("addextra");
     if (addExtra) {
-      addExtra.addEventListener("click", () => {
-        const row = document.createElement("div");
-        row.className = "extrarow";
-        const pick = document.createElement("div");
-        pick.className = "rolepick";
-        pick.dataset.key = "extra";
-        const text = document.createElement("input");
-        text.className = "rolepick-text";
-        text.placeholder = "Type a role name…";
-        text.autocomplete = "off";
-        text.spellcheck = false;
-        const hid = document.createElement("input");
-        hid.type = "hidden";
-        hid.className = "rolepick-id";
-        hid.value = "0";
-        const clr = document.createElement("button");
-        clr.type = "button";
-        clr.className = "rolepick-clear";
-        clr.textContent = "×";
-        const lst = document.createElement("div");
-        lst.className = "rolepick-list";
-        lst.hidden = true;
-        pick.append(text, hid, clr, lst);
-        const pts = document.createElement("input");
-        pts.type = "number";
-        pts.className = "rolepoints";
-        pts.placeholder = "pts";
-        pts.dataset.role = "0";
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "ghost extradel";
-        del.textContent = "×";
-        row.append(pick, pts, del);
-        extras.appendChild(row);
-        bindRolePickers(row, roles);
-        text.focus();
-      });
+      addExtra.addEventListener("click", () => buildExtraRow(null).text.focus());
     }
+
+    // Rebuild the standalone list from a preset: everything it prices that
+    // isn't mapped to one of its trials.
+    window.setExtras = (points, trials) => {
+      const mapped = new Set();
+      (trials || []).forEach((t) => Object.values(t.slots || {}).forEach(
+        (id) => mapped.add(String(id))));
+      extras.innerHTML = "";
+      Object.entries(points || {}).forEach(([roleId, value]) => {
+        if (!mapped.has(String(roleId))) buildExtraRow(roleId, value);
+      });
+    };
   }
 
   // Read the mapping back out for save/preview.

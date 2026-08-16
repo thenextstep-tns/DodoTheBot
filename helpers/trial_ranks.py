@@ -1017,20 +1017,29 @@ class TrialRankManager:
     # ------------------------------------------------------------------ #
     #  Presets — named snapshots of a whole ruleset
     # ------------------------------------------------------------------ #
-    def save_preset(self, guild_id: int, name: str, data: dict) -> None:
-        """Store weights, ranks and trials under a name, overwriting that name.
+    def save_preset(self, guild_id: int, name: str, data: dict, *,
+                    author_id: int = 0, author_name: str = "") -> None:
+        """Store weights, ranks and trials under a name.
 
         A rebalance is a guess until you see it against real members, and the
         only way to guess freely is to be able to put the old numbers back.
+
+        The author is recorded on first write and never reassigned: whoever made
+        a preset keeps it, so somebody else saving over their work has to make
+        their own copy instead.
         """
         if self._presets is None:
             return
+        now = datetime.datetime.now(datetime.timezone.utc)
         self._presets.update_one(
             {"guild_id": int(guild_id), "name": str(name)[:60]},
             {"$set": {"points": data.get("points") or {},
                       "ranks": data.get("ranks") or [],
                       "trials": data.get("trials") or [],
-                      "at": datetime.datetime.now(datetime.timezone.utc)}},
+                      "at": now},
+             "$setOnInsert": {"author_id": int(author_id or 0),
+                              "author_name": str(author_name or "")[:100],
+                              "created_at": now}},
             upsert=True,
         )
 

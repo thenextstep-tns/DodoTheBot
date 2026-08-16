@@ -1640,7 +1640,7 @@ def _orphan_warning(guild, points: dict) -> str:
     )
 
 
-def _trials_html(bot, guild, scope: str) -> str:
+def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     config = bot.trial_ranks.get(guild.id)
     grouped = trial_ranks.sections(guild)
     points = config.get("points") or {}
@@ -1673,9 +1673,12 @@ def _trials_html(bot, guild, scope: str) -> str:
         ("sandbox", "🧪", "Preview", ""),
     ]
     presets = bot.trial_ranks.presets(guild.id)
-    preset_options = ('<option value="">— pick a preset —</option>' + "".join(
-        f'<option value="{html.escape(p["name"])}">{html.escape(p["name"])}'
-        f' ({len(p.get("points") or {})} priced)</option>' for p in presets))
+    preset_options = ('<option value="" data-author="">— pick a preset —</option>' + "".join(
+        f'<option value="{html.escape(p["name"])}" '
+        f'data-author="{int(p.get("author_id") or 0)}">{html.escape(p["name"])}'
+        f' ({len(p.get("points") or {})} priced'
+        + (f' · {html.escape(p["author_name"])}' if p.get("author_name") else "")
+        + ')</option>' for p in presets))
 
     nav = "".join(
         f'<a class="trialnavitem{" active" if key == "ranks" else ""}" '
@@ -1687,7 +1690,7 @@ def _trials_html(bot, guild, scope: str) -> str:
     )
 
     return f"""
-<div class="trialspage" data-guild="{guild.id}">
+<div class="trialspage" data-guild="{guild.id}" data-uid="{viewer_id}">
   <script type="application/json" id="all-roles">{_json_options(_sorted_roles(guild), "@")}</script>
   <script type="application/json" id="trial-suggestions">{_json_dumps(trial_ranks.suggest_trials(guild))}</script>
   <script type="application/json" id="trial-slots">{_json_dumps(list(trial_ranks.SLOTS))}</script>
@@ -1712,8 +1715,9 @@ def _trials_html(bot, guild, scope: str) -> str:
     <span class="muted small">Presets</span>
     <select id="presetpick">{preset_options}</select>
     <button id="presetload" class="ghost">Load</button>
-    <button id="presetsave" class="ghost">Save my preset</button>
-    <button id="presetdel" class="ghost">Delete</button>
+    <button id="presetsave" class="ghost" hidden>Save</button>
+    <button id="presetsavenew" class="ghost">Save as new</button>
+    <button id="presetdel" class="ghost" hidden>Delete</button>
     <span class="muted small">A named copy of the weights, ranks and trials — load one to
     play with the numbers without losing what you had.</span>
   </div>
@@ -2149,7 +2153,8 @@ async def guild_events_page(request: web.Request):
 @require_scope(panel_access.SCOPE_CONFIG)
 async def guild_trials_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
-    return _page(f"{guild.name} · trial ranks", _trials_html(bot, guild, scope),
+    return _page(f"{guild.name} · trial ranks",
+                 _trials_html(bot, guild, scope, request.get("uid") or 0),
                  scope=scope, guild=guild, current="trials")
 
 
@@ -2433,12 +2438,30 @@ async def api_guild_trials(request: web.Request):
                 }
             except (trial_ranks.TrialError, validate.ValidationError) as error:
                 return _bad(error)
-            bot.trial_ranks.save_preset(guild.id, name, clean)
+            uid = int(request.get("uid") or 0)
+            existing = bot.trial_ranks.preset(guild.id, name)
+            # Whoever made a preset keeps it. Someone else has to save their own
+            # copy rather than quietly replacing another person's work — and the
+            # UI hides the overwrite button, so this is the backstop.
+            if existing is not None and int(existing.get("author_id") or 0) not in (0, uid):
+                return _bad(f"'{name}' belongs to "
+                            f"{existing.get('author_name') or 'someone else'} — "
+                            "save it under a different name.")
+            actor = guild.get_member(uid) if uid else None
+            bot.trial_ranks.save_preset(
+                guild.id, name, clean, author_id=uid,
+                author_name=getattr(actor, "display_name", "") or str(uid))
             await _record_change(request, audit_log.KIND_TRIAL, f"preset {name}", None,
                                  f"{len(clean['points'])} priced, {len(clean['ranks'])} ranks",
                                  f"Trial preset **{name}** saved")
             return web.json_response({"ok": True, "name": name})
         if action == "preset_delete":
+            uid = int(request.get("uid") or 0)
+            existing = bot.trial_ranks.preset(guild.id, name)
+            if (existing is not None and request["scope"] != panel_access.SCOPE_OWNER
+                    and int(existing.get("author_id") or 0) not in (0, uid)):
+                return _bad(f"'{name}' belongs to "
+                            f"{existing.get('author_name') or 'someone else'}.")
             bot.trial_ranks.delete_preset(guild.id, name)
             await _record_change(request, audit_log.KIND_TRIAL, f"preset {name}",
                                  "saved", None, f"Trial preset **{name}** deleted")
