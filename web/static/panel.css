@@ -808,3 +808,9 @@ main:has(.trialspage) { max-width: none; }
 .hpop-what { flex: 1 1 auto; color: var(--color-ink); }
 .hpop-dur { font-variant-numeric: tabular-nums; color: var(--color-ink); }
 .hpop-meta { margin-top: 8px; font-size: 11px; color: var(--color-muted); }
+
+/* Bot-wide tooling in the top bar: separated from the per-guild links so it
+   doesn't read as one of them, and doesn't float alone on the dashboard. */
+.navtool { margin-left: 10px; padding-left: 14px; border-left: 1px solid var(--line);
+  color: var(--muted); text-decoration: none; font-size: 13px; }
+.navtool:hover { color: var(--text); }

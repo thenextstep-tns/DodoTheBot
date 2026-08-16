@@ -290,7 +290,7 @@ def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER,
 <header>
 <a href="/" class="brand">🦤 Dodo Control Panel</a>
 <nav>{_guild_nav(guild, scope, current)}
-{'<a href="/lang">Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
+{'<a href="/lang" class="navtool">🔤 Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
 </header>
 <main>{body}</main>
 <script src="/static/panel.js?v={_ASSET_VER}"></script>
