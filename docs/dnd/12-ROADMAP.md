@@ -77,17 +77,21 @@ the tick stays under 25 ms for 200 active NPCs.
 ## P4 — Voice
 *Playable as: NPCs that talk, and a world that phrases itself.*
 
-- Backend interface; `null` first, then `openai_compat`, then `ollama`
-- The five tasks with schemas, retries and fallbacks
-- Response cache, budget accounting, degrade-on-exceed
+- Backend interface; `null` first, then `ollama`. **No hosted-API backend, ever.**
+- The non-AI paths first: verb parser, templated episode gists, name tables — most
+  of `08-LLM-LAYER.md` §5 lands before a model is installed at all
+- The two AI tasks (`render_scene`, `render_dialogue`) with schemas, retries and
+  template fallbacks
+- Laptop setup and the §12 measurement checklist, results recorded in `08`
+- Tailscale tunnel; verify the unreachable-host path degrades to `null` cleanly
+- Priority queue, response cache, load accounting
 - Streaming, mechanics-first posting
 - Canon queue fed by LLM output; soft canon
 - Safety filtering (`11-SAFETY.md`)
-- The `08-LLM-LAYER.md` §3 benchmark, run and recorded
 
 **Acceptance:** the null-backend suite passes the entire turn loop; an NPC never
-speaks a fact it does not believe; exceeding budget degrades without interrupting
-play.
+speaks a fact it does not believe; **closing the laptop mid-scene degrades to
+templates without interrupting play**; measured tok/s recorded in `08` §3.
 
 ## P5 — Narrative
 *Playable as: a co-GM, then an autonomous one.*
@@ -131,7 +135,8 @@ needing its own phase.
 | **Scope.** This is a large system. | Every phase ships playable; the module is useful from P0 and can stop at any phase boundary without being a half-thing. |
 | **Fun is unproven.** The simulation could be technically excellent and dull. | P2's inspector and P3's continuity are testable for fun *before* any LLM work. If the world isn't interesting without prose, prose won't save it. |
 | **1 vCPU.** | Tiers, budgets and bounded costs are designed in from P0, and the perf numbers in `06` are acceptance criteria, not aspirations. |
-| **Local LLM may stay impossible.** | `08-LLM-LAYER.md` §2 — pluggable backends mean this never blocks anything. |
+| **Inference host is one laptop.** Must be awake; live sessions burst. | Async play needs a few renders a *day*, so the duty cycle is tiny (`08` §8). Bursts fall back to templates rather than queueing anyone. If it outgrows this, the answer is a machine we own — not a hosted API. |
+| **A 4B model may write dull prose.** | Measure at P4 before deciding; an 8B is a config change costing ~half the speed. And the sim, not the prose, is what makes it interesting — testable at P2/P3 with no model at all. |
 | **`web/routes.py` is 3281 lines.** | `web/dnd/` is a separate module from the first commit. |
 | **Legal.** | SRD 5.1 only, CC-BY-4.0, attributed. No published statblocks or adventures. |
 | **The old cog has live data.** | `13-MIGRATION.md`; the legacy cog stays loadable for one release. |

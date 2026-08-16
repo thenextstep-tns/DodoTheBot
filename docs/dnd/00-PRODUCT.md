@@ -269,24 +269,34 @@ pass:
 
 ## 6. The LLM layer
 
-One interface, three backends: **OpenAI-compatible** (proxyapi — works today, the
-path for tenant servers), **local Ollama** (dev and the owner's server; see the
-hardware note in `08-LLM-LAYER.md`), and **`none`** (deterministic templates).
+Two standing rules, set by the owner:
 
-Five narrow, typed tasks — never one big "be a DM" prompt:
+> **1. No inference leaves hardware we control.** No hosted APIs, no third-party
+> providers, in any tier, for any tenant. Local only — Ollama on the owner's
+> laptop today (Ryzen 7 8845H, 28 GB LPDDR5X-7500 ≈ 120 GB/s, ~20–28 tok/s on a
+> 4B), a machine we own later if the product outgrows it.
+>
+> **2. Deterministic first.** If it can be computed in Python, it is. A model is
+> called only where *prose quality is itself the product*.
 
-```
-parse_intent(player_text, affordances) -> action | clarify
-render_scene(state_delta)              -> prose
-render_dialogue(npc_view, intent)      -> line
-summarize_episode(events)              -> gist
-propose_canon(gap)                     -> fact
-```
+Rule 2 is not a slogan — applying it cut the AI surface from five tasks to two:
 
-Small tasks mean small prompts, low latency, low cost, and viability on a 4B
-model. **Every one has a deterministic fallback**, and the `none` backend must
-stay a supported, tested configuration — that is the test that the simulation
-really does own the truth.
+| Task | |
+| --- | --- |
+| `summarize_episode` | **Non-AI.** Templated gist; only the engine reads it. |
+| `propose_canon` | **Non-AI**, except one bootstrap batch per campaign. |
+| `parse_intent` | **Non-AI first**; a model only on genuine ambiguity. |
+| `render_scene` | **AI.** Prose quality is the product here. |
+| `render_dialogue` | **AI.** Same, plus voice and mood. |
+
+Adding a sixth call site requires justifying it against its deterministic
+alternative in writing. The drift from "simulation with a renderer" to "LLM with
+extra steps" happens one convenient call site at a time.
+
+Small tasks mean small prompts, low latency, and viability on a 4B model. **Every
+one has a deterministic fallback**, and `backend=null` stays a supported, tested
+configuration — which is both the proof that the simulation owns the truth and
+the reason a sleeping laptop is a non-event rather than an outage.
 
 Detail: `08-LLM-LAYER.md`.
 
@@ -334,6 +344,7 @@ Confirmed by the owner at planning time:
 | Audience | **Product for many servers** | Multi-tenant data model from day one; entitlements, safety and cost caps are in scope, not deferred. |
 | Ruleset | **Both in parallel** | The abstraction is built against two implementations (freeform + SRD 5.1) so it can't quietly hardcode one. Freeform reaches playable first; SRD data fills in behind it. |
 | Play mode | **Both, async-first** | Async is the default surface; live sessions are a mode that tightens pacing and enables combat rounds. |
-| LLM host | **Local Ollama, no VPS upgrade** | Not possible on the current box (`08-LLM-LAYER.md` §2 has the arithmetic and a measured benchmark plan). Resolved as: Ollama on the owner's laptop over a tunnel for dev and the owner's server, hosted API for tenant servers, one interface for both. |
+| LLM host | **Local only — Ollama on the owner's laptop** | The VPS is closed as an option (`08-LLM-LAYER.md` §2). No hosted API in any tier: the laptop serves over a Tailscale tunnel, and if the product outgrows it the answer is a machine we own, or tenants pointing at their own Ollama. |
+| AI surface | **Deterministic first** | Two tasks call a model, one calls it as a fallback, two never do. New call sites need written justification (`08-LLM-LAYER.md` §5). |
 
 Open questions that do **not** block the build are tracked in `12-ROADMAP.md` §6.

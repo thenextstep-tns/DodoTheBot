@@ -72,13 +72,15 @@ score = (
 Then: sort, take until the budget is spent, drop anything `secret` when rendering
 for a player, and always force-include the campaign `tone` and `gm_style` facts.
 
-**No embeddings at v1.** Tag + keyword + recency scoring runs in microseconds on
-one core and is debuggable. If retrieval quality demands it later, a 384-dim
-MiniLM is ~90 MB and *would* fit on the VPS — unlike an LLM (`08-LLM-LAYER.md`
-§2). Design the retriever behind an interface so that swap is additive.
+**No embeddings at v1** — the deterministic-first rule applied to retrieval. Tag +
+keyword + recency scoring runs in microseconds on one core and, unlike a vector
+score, you can read why it ranked something first. If quality later demands it, a
+384-dim MiniLM is ~90 MB and *would* run on the VPS (it is an encoder, not a
+generator — nothing like the arithmetic in `08-LLM-LAYER.md` §2, and still local,
+so Rule 1 holds). Keep the retriever behind an interface so that swap is additive.
 
 Typical budgets: `render_scene` 1200 tokens, `render_dialogue` 800,
-`parse_intent` 400, `propose_canon` 1500.
+`parse_intent` 400 (fallback path only), `propose_canon` 1500 (bootstrap only).
 
 ## 4. Beliefs vs. facts
 
@@ -157,7 +159,7 @@ A campaign KB must not require four hours of typing, or the product goes unused.
 
 Also supported: **import** a bundle (`10-MONETIZATION.md` §5), or start empty and
 write facts by hand. Bootstrap is a convenience, never a requirement — with
-`backend=none` it degrades to a blank campaign plus templates.
+`backend=null` it degrades to a blank campaign plus templates.
 
 ## 7. Global KB seeding
 

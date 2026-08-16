@@ -70,6 +70,15 @@ Breaking any of these is a review failure, not a style preference.
 6. **`backend=null` always works.** Every LLM task has a deterministic fallback,
    and the null suite is part of the test run.
 7. **Mechanics before prose.** Post the outcome, then stream narration.
+8. **No inference leaves hardware we own.** Ollama only. No hosted API, no
+   third-party provider, no "just for the free tier", no API-key field. If you
+   find yourself adding an HTTP client for a model vendor, stop.
+9. **Deterministic first.** If it can be computed in Python, it is computed in
+   Python. A model is called only where prose quality is itself the product.
+   Adding a call site means adding a row to the table in `08-LLM-LAYER.md` §5
+   naming the deterministic alternative and why it is insufficient. "It would be
+   nicer" is not a reason. This is the invariant that keeps the product from
+   decaying into an LLM wrapper one convenient shortcut at a time.
 
 ## 5. Tests that must exist
 
@@ -110,8 +119,10 @@ Every feature added to this module should ask:
   route around it quietly.
 - **Don't infer pronouns from names**, in code or in generation. Entities carry an
   explicit field; the default is `they/them`.
-- **Don't run the `08-LLM-LAYER.md` §3 benchmark on production without asking.**
-  The VPS has 468 MB free and the bot lives there.
+- **Don't install Ollama on the VPS.** Settled and closed — 468 MB free, and the
+  bot lives there. Inference happens on the laptop.
+- **Don't add a hosted-API backend**, even as a convenience for testing. See
+  invariant 8.
 - **Don't build ahead of the roadmap phase.**
 
 ## 8. Decisions already made — do not re-open without new information
@@ -122,7 +133,9 @@ Every feature added to this module should ask:
 | Multi-tenant from the first commit | `01-ARCHITECTURE.md` §7 |
 | Both rulesets built in parallel, freeform playable first | `04-ENTITIES.md` §2 |
 | Async-first, live sessions as a tightening of the same loop | `12-ROADMAP.md` |
-| Ollama on the owner's laptop; hosted API for tenants | `08-LLM-LAYER.md` §2 |
+| Local inference only; Ollama on the owner's laptop; **no hosted API ever** | `08-LLM-LAYER.md` §2 |
+| Qwen3 4B Q4_K_M as the starting model, `num_ctx=4096` | `08-LLM-LAYER.md` §3–4 |
+| Two AI tasks, one AI fallback, two non-AI | `08-LLM-LAYER.md` §5 |
 | Utility AI, not behaviour trees or GOAP | `06-DECISION-ENGINE.md` §1 |
 | Memory decays field-wise and confabulates | `05-MEMORY.md` §4 |
 | Canon queue with soft canon | `03-KNOWLEDGE-BASE.md` §5 |

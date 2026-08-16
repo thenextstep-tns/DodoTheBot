@@ -222,9 +222,11 @@ entities on the world tick so no single tick is expensive.
   both.
 - Anything crossing `IMPRINT_THRESHOLD` is promoted, not consolidated.
 
-The LLM may be used for `summarize_episode` to phrase a gist nicely — but the
-grouping, scoring and selection are deterministic, and with `backend=none` the
-gist is a template. Consolidation must never depend on a model being reachable.
+**Consolidation calls no model at all** (`08-LLM-LAYER.md` §5). The grouping,
+scoring and selection were always deterministic; the gist is a template built from
+event kinds and participants. Only the engine reads these — no player ever sees a
+raw gist — so prose quality buys nothing here, and paying a model for it would be
+exactly the drift the deterministic-first rule exists to prevent.
 
 ## 9. What the GM sees
 

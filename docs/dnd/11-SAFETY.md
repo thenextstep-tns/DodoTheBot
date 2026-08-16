@@ -51,9 +51,10 @@ Three layers, in order:
 
 1. **Prompt constraints** — lines and veils are injected into every render task's
    system prompt. Cheap and catches most of it.
-2. **Output filter** — every rendered output is checked before posting. Layered:
-   a term list from lines/veils first (free, deterministic), then an optional
-   moderation endpoint when the backend has one.
+2. **Output filter** — every rendered output is checked before posting, against a
+   deterministic term list built from the campaign's lines and veils. There is no
+   hosted moderation endpoint to call (`08-LLM-LAYER.md` §1) and we do not want
+   one: the term list is free, auditable, and does not send player text anywhere.
 3. **Simulation constraints** — some things never enter the event stream at all.
    Actions matching a line are not proposable by the decision engine, so an NPC
    cannot *decide* to do them.
@@ -80,9 +81,10 @@ RP is a social surface, so the usual protections apply:
 - Campaign content is **per guild** and never leaks across tenants — enforced by
   the scope filter in `store/repo.py` (`01-ARCHITECTURE.md` §7) and covered by the
   tenant-isolation test.
-- Player-written text is sent to whichever LLM backend the server has configured.
-  **This must be stated plainly** in the campaign settings page, including which
-  provider, since a server on BYO-key has chosen their own processor.
+- **No player text ever reaches a third party.** Inference is local-only
+  (`08-LLM-LAYER.md` §2): either our own host or, if the server configures one,
+  their own Ollama. There is no hosted-API path to leak through. The campaign
+  settings page states which host is in use.
 - A campaign can be exported and deleted by its GM; deletion is real, not a flag.
 - With `backend=null`, no player text leaves the host at all. Worth advertising —
   for some groups it is the deciding feature.

@@ -105,7 +105,7 @@ beat: complication
 ```
 
 That binding is the proposal. Only *then* is the LLM asked to render prose for it
-— and with `backend=none`, a template renders the same binding, and the game
+— and with `backend=null`, a template renders the same binding, and the game
 continues.
 
 This ordering is the difference between "the AI made something up" and "the world

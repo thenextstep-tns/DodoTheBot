@@ -39,7 +39,7 @@ problems.
 | 13 | [MIGRATION](13-MIGRATION.md) | Carrying the existing `dodo_dnd` data across |
 | 14 | [CONVENTIONS](14-CONVENTIONS.md) | **Instructions for Claude** — house style, invariants, what not to do |
 
-## The five ideas that matter
+## The six ideas that matter
 
 1. **The simulation owns truth.** (`00` §1) Everything else follows from this.
 2. **Belief, not truth.** (`03` §4) Entities act on what they believe, with a
@@ -54,6 +54,10 @@ problems.
 5. **The world runs on clocks.** (`06` §10) Faction agendas advance whether or not
    players engage — which is what "continuous world" actually means, and the
    headline feature for async play.
+6. **Deterministic first, local always.** (`08` §5) Only two tasks call a model,
+   and it runs on hardware we own. Async play and local inference turn out to be
+   complementary: a play-by-post campaign needs a few renders a *day*, so the
+   duty cycle on one laptop is tiny.
 
 ## Decisions taken at planning time
 
@@ -62,7 +66,8 @@ problems.
 | Audience | Product for many servers — multi-tenant from the first commit |
 | Rulesets | Freeform **and** SRD 5.1 in parallel; freeform playable first |
 | Play mode | Both, async-first |
-| LLM host | Ollama on the owner's laptop for dev + owner's server; hosted API for tenants. **It will not run on the VPS** — see `08` §2 for the arithmetic and the benchmark that would disprove it |
+| LLM host | **Local only.** Ollama on the owner's laptop (Ryzen 7 8845H, 28 GB LPDDR5X-7500 ≈ 120 GB/s → ~20–28 tok/s on a 4B), reached over Tailscale. No hosted API in any tier. The VPS is closed as an option — see `08` §2 |
+| AI surface | **Deterministic first.** Two tasks call a model, one calls it as a fallback, two never do — `08` §5 |
 
 ## Current state of the thing being replaced
 

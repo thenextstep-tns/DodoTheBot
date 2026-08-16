@@ -4,200 +4,294 @@ A leaf service (`01-ARCHITECTURE.md` §1, Invariant 1). It phrases things. It ne
 decides anything, never holds state, and can be switched off entirely without the
 game stopping.
 
+**Two standing rules, set by the owner:**
+
+> **1. No inference leaves hardware we control.** No hosted APIs, no third-party
+> model providers, in any tier, for any tenant. Local only.
+>
+> **2. Deterministic first.** If a computation can be done in Python, it is done
+> in Python. A model is called only where *prose quality is itself the product*.
+> See §5 — this cut the AI surface from five tasks to two.
+
 ---
 
 ## 1. Backends
-
-One interface, four implementations:
 
 ```python
 class Backend(Protocol):
     key: str
     async def complete(self, task: Task, *, stream: bool = False) -> Response: ...
     def healthy(self) -> bool: ...
-    def cost_per_1k(self) -> tuple[float, float]: ...   # (prompt, completion)
 ```
 
-| Backend | Use | Notes |
+| Backend | Use |
+| --- | --- |
+| `ollama` | The only inference backend. Points at a host URL. |
+| `null` | Deterministic templates. Always available, always tested, and the **automatic fallback whenever the Ollama host is unreachable**. |
+| `cached` | Wrapper adding the response cache (§9). |
+
+The `openai_compat` backend from the earlier draft is **removed**. Rule 1 makes it
+dead code, and dead code with an API key field in it is a liability.
+
+`null` is not a degraded mode to be ashamed of — it is the reason a laptop being
+asleep is a non-event rather than an outage.
+
+## 2. The inference host
+
+### Rejected: the VPS
+
+Measured: 1 vCPU, 898 MB RAM, ~468 MB available with the bot running. The smallest
+usable model plus the Ollama runtime needs ~800 MB–1.1 GB, and one shared core
+yields ~5–10 tok/s. It would swap-thrash into an OOM kill of the bot. **Closed —
+do not revisit, and do not install Ollama there.**
+
+### Chosen: the owner's laptop
+
+Measured 2026-08-16:
+
+```
+CPU   AMD Ryzen 7 8845H — 8 cores / 16 threads, Zen 4, 3.8 GHz base
+RAM   28 GB LPDDR5X-7500, 4 × 32-bit sub-channels (128-bit bus)
+GPU   AMD Radeon 780M (gfx1103, RDNA3, 12 CU), ~4 GB UMA carve-out
+Disk  133 GB free (C:), 126 GB free (G:)
+OS    Windows 11
+```
+
+**Memory bandwidth is the binding constraint on token generation**, not the CPU:
+
+```
+7500 MT/s × 128 bit ÷ 8 = 120 GB/s theoretical
+                        ≈ 75–85 GB/s achievable in practice (llama.cpp streaming reads)
+```
+
+That is roughly 35% better than the DDR5-5600 SODIMMs in a typical laptop, and it
+converts almost linearly into tokens per second.
+
+**Caveat: the RAM is soldered LPDDR5X.** 28 GB is the ceiling on this machine — no
+upgrade path. Size the model choice accordingly.
+
+## 3. What this hardware runs
+
+Generation speed ≈ `effective_bandwidth ÷ model_bytes`, at ~75 GB/s effective:
+
+| Model (Q4_K_M) | On disk | Theoretical | **Realistic** | Verdict |
+| --- | --- | --- | --- | --- |
+| Qwen3 1.7B | 1.1 GB | 68 tok/s | 40–55 | Fast; prose is thin |
+| Llama 3.2 3B | 2.0 GB | 37 tok/s | 25–35 | Good utility model |
+| **Qwen3 4B** | **2.5 GB** | **30 tok/s** | **20–28** | **Start here** |
+| Qwen2.5 7B / Llama 3.1 8B | 4.7 GB | 16 tok/s | 12–16 | Best prose/speed trade |
+| Mistral Nemo 12B | 7.1 GB | 10.5 tok/s | 8–12 | Noticeably slower |
+| Qwen3 14B | 9.0 GB | 8.3 tok/s | 6–9 | Only if quality demands it |
+| 24B+ | 15 GB+ | 5 tok/s | 3–5 | Too slow, too heavy |
+
+**Recommendation: Qwen3 4B Q4_K_M to start** — ~2.5 GB resident, 20–28 tok/s,
+strong instruction-following and reliable JSON for its size. Our tasks need style
+and obedience, not knowledge or reasoning, because the prompt carries everything
+(§6). Move to an 8B only if prose quality measurably disappoints; that costs
+roughly half the speed.
+
+### The RAM situation
+
+28 GB total, but at the time of measurement only **5.74 GB was free** — Chrome,
+Discord, Telegram and Claude were holding the rest. So budget against *free* RAM,
+not total:
+
+| Model | Resident (weights + 4k KV + runtime) | Fits in 5.7 GB free? |
 | --- | --- | --- |
-| `openai_compat` | **Tenant servers** | proxyapi.ru today, per-guild key — the pattern `cogs/chat.py` already established with the `chat_api_key` param. |
-| `ollama` | **Dev + owner's server** | Points at a host URL. See §2 and §3. |
-| `null` | Fallback, tests, free tier | Deterministic templates. Always available, always tested. |
-| `cached` | Wrapper | Wraps any backend with the response cache (§6). |
+| Qwen3 4B Q4 | ~3.3 GB | Yes, comfortably |
+| Llama 3.1 8B Q4 | ~5.8 GB | Only after closing things |
 
-Selected per guild via a `dnd_llm_backend` parameter, so a server can be moved
-between them without a deploy.
+Another argument for the 4B: it coexists with a working laptop. "Lightweight" was
+a stated requirement, and a model that forces you to close your browser is not
+lightweight.
 
-## 2. The hardware reality
+### The iGPU: try it, don't depend on it
 
-Measured on the production VPS (`45.141.76.118`) at planning time:
+The 780M shares the same memory bus, so **generation speed barely improves** — it
+is bandwidth-bound either way. What the iGPU *does* help is **prompt processing
+(prefill)**, which is compute-bound: roughly 100 tok/s on CPU versus 500–800 tok/s
+on the 780M. For our 400–1500 token prompts that is 12 s → 2 s.
+
+But `gfx1103` is **not officially supported by ROCm**. Options, in order of
+reliability:
+
+1. **CPU-only** — guaranteed to work. This is the baseline and it is already fine.
+2. **Vulkan backend (llama.cpp)** — works well on 780M; the more dependable
+   acceleration path.
+3. **ROCm with `HSA_OVERRIDE_GFX_VERSION=11.0.2`** — sometimes works, sometimes
+   crashes.
+
+Treat acceleration as a bonus measured after the fact, never as a number the
+design depends on.
+
+## 4. Deployment
 
 ```
-1 vCPU (shared Xeon Gold 6336Y) · 898 MB RAM · 1 GB swap · 15 GB disk
-Bot process ≈ 271 MB · available ≈ 468 MB
+┌──────────────┐   Tailscale    ┌─────────────────────┐
+│  VPS (bot)   │ ─────────────► │  Laptop: Ollama     │
+│  45.141.…    │   :11434       │  127.0.0.1:11434    │
+└──────────────┘                └─────────────────────┘
+        │
+        └── host unreachable ──► backend = null ──► templates ──► game continues
 ```
 
-**Ollama cannot run usefully on this box.** The arithmetic:
+Tailscale over `cloudflared`: no public hostname, no exposed port, WireGuard
+encryption, and the laptop keeps a stable address across networks.
 
-| Component | Resident |
-| --- | --- |
-| Ollama runtime, no model | ~200–300 MB |
-| `gemma3:270m` Q4 + KV cache | ~600–800 MB |
-| `qwen3:0.6b` Q4 + KV cache | ~1.0–1.2 GB |
-| `llama3.2:1b` Q4 + KV cache | ~1.5–2.0 GB |
+Recommended environment on the laptop:
 
-The smallest option needs ~800 MB–1.1 GB against ~468 MB available. It would
-swap-thrash into an OOM kill of the bot. And on one shared core a 1B model
-generates roughly 5–10 tok/s, so a 200-token narration takes 20–40 seconds —
-before prompt processing.
-
-**These are estimates, not measurements.** Before treating them as final, run §3.
-
-### Resolution (owner's decision)
-
-- **Dev + the owner's own server** → Ollama on the owner's laptop, reached over a
-  tunnel (Tailscale, or `cloudflared` if a public hostname is wanted). The VPS
-  holds no model; it makes an HTTP call like any other backend.
-- **Tenant servers** → `openai_compat` with a per-guild key. A laptop cannot serve
-  N customer guilds, and "product for many servers" was the chosen audience.
-- **If local inference is later wanted for tenants** → a separate inference host,
-  sized from §3's numbers. The backend interface means that is a config change.
-
-The pluggable design means none of this blocks a single line of the build.
-
-## 3. Benchmark before believing §2
-
-A measured test, to be run **with the owner's approval** and never casually on
-production:
-
-```bash
-# On the VPS, memory-capped so it cannot OOM the bot.
-systemd-run --scope -p MemoryMax=400M -p MemorySwapMax=0 \
-  ollama serve
+```
+OLLAMA_KEEP_ALIVE=5m          # release RAM when idle
+OLLAMA_MAX_LOADED_MODELS=1    # one model, never a surprise second
+OLLAMA_NUM_PARALLEL=1         # one request at a time; we queue (§8)
+OLLAMA_HOST=0.0.0.0:11434     # bind for the tunnel; Tailscale ACL is the gate
 ```
 
-Then, for `gemma3:270m` and `qwen3:0.6b`: record peak RSS, time-to-first-token,
-tokens/sec at 512-token prompts, and whether the `dodo` service survives. Record
-results in this file. If a model fits and clears ~15 tok/s, revisit §2 — I would
-rather be wrong on the record than right by assertion.
+And in the model options: **`num_ctx=4096`.** Our largest prompt budget is 1500
+tokens, so a bigger context buys nothing and costs real memory — KV cache scales
+linearly with context, and on an 8B a 32k window is ~4 GB of pure waste. This one
+setting is the difference between a polite background service and a laptop-eater.
 
-Safeguards, non-negotiable: run it at a quiet hour, `MemoryMax` set, and
-`systemctl status dodo` checked immediately after.
+**Laptop asleep is a supported state.** The health check fails, the backend
+switches to `null`, the game keeps running on templates, and the GM sees a notice.
+Nothing breaks, nothing queues forever.
 
-## 4. The five tasks
+## 5. The AI budget
 
-Narrow, typed, small. **Never one big "you are a Dungeon Master" prompt** — that
-is the design error that makes every competitor's product drift.
+Rule 2 applied. The earlier draft had five LLM tasks; four of them turned out not
+to need a model.
 
-```python
-parse_intent(text, affordances)   -> Action | Clarify      # ~400 tok budget
-render_scene(delta, kb)           -> prose                 # ~1200
-render_dialogue(npc_view, intent) -> line                  # ~800
-summarize_episode(events)         -> gist                  # ~600
-propose_canon(gap, kb)            -> fact[]                # ~1500
-```
+| Task | Verdict | How |
+| --- | --- | --- |
+| `summarize_episode` | **Non-AI.** | Structured gist from event kinds and participants. The consolidation grouping and scoring were always deterministic (`05-MEMORY.md` §8); only the phrasing was AI, and a template phrases it fine because nobody reads these — the *engine* does. |
+| `propose_canon` | **Non-AI by default.** | Name/culture tables from the global KB cover generation. AI is used **once per campaign**, for the session-zero bootstrap batch (`03-KNOWLEDGE-BASE.md` §6), where richness genuinely matters and the cost is paid a single time. |
+| `parse_intent` | **Non-AI first, AI on failure.** | A verb+affordance parser resolves the great majority of input, because the affordance list is small and known. AI is the fallback for genuinely ambiguous input — and even then, asking the player to disambiguate is often better than guessing. |
+| `render_scene` | **AI.** | Prose quality *is* the product here. |
+| `render_dialogue` | **AI.** | Same, plus voice and mood. |
 
-Properties that follow from keeping them small:
+So: **two tasks always call a model, one calls it as a fallback, two never do.**
 
-- **A 4B model is enough.** None of these requires reasoning or recall — the
-  prompt carries everything needed.
-- **Latency is low** because prompts are short.
-- **Output is structured** — JSON, validated against a schema, retried once on
-  parse failure, then dropped to the fallback.
-- **Each is independently cacheable** (§6).
-- **Each has a deterministic fallback** (§5).
+### Adding a call site
 
-`render_dialogue` receives an `npc_view` (`04-ENTITIES.md` §6) — the NPC's
-beliefs, mood, relationship to the listener, relevant memories, voice quirk. It
-does *not* receive world truth, so the model **cannot leak what the NPC does not
-know.** Fog of war is enforced by what is in the prompt, not by asking the model
-to keep a secret.
+Any new place that wants to call a model must add a row to the table above stating
+(a) the deterministic alternative, and (b) why it is insufficient. "It would be
+nicer" is not a reason. This is a review gate, not a suggestion — the drift from
+"simulation with a renderer" to "LLM with extra steps" happens one convenient call
+site at a time.
 
-## 5. Fallbacks
-
-Every task degrades. `backend=null` is a **supported, tested configuration**, not
-a broken state:
-
-| Task | Fallback |
-| --- | --- |
-| `parse_intent` | Verb-table keyword parser over affordances; asks the player to disambiguate rather than guessing. |
-| `render_scene` | Template: `"{actor} {verb}s {target}. {outcome_clause}"` filled from the state delta. |
-| `render_dialogue` | Archetype line bank, selected by mood + relationship + intent. |
-| `summarize_episode` | Structured gist from event kinds and participants — no prose. |
-| `propose_canon` | Name/culture tables from the global KB. |
-
-The **null-backend test suite** (`01-ARCHITECTURE.md` §10) runs the whole turn
-loop this way. If it fails, the LLM has become load-bearing somewhere and
-Invariant 1 has been broken.
-
-## 6. Caching
-
-Content-addressed on `(task, model, normalized_prompt_hash)`, stored in Mongo with
-a TTL.
-
-High-value hits: `render_dialogue` for repeated greetings, `summarize_episode` on
-replay, `propose_canon` for name generation, and **every retry after a transient
-failure**. Realistic hit rate ~20–35% in play, higher in dev where the same scene
-is replayed constantly.
-
-Cache reads never block the loop and a miss is never an error.
-
-## 7. Budgets & cost control
-
-Without caps, one enthusiastic server bankrupts the operator. Enforced in
-`llm/budget.py`, per guild **and** per campaign:
-
-```jsonc
-{
-  "guild_id": …, "campaign_id": …,
-  "period": "2026-08",
-  "prompt_tokens": 184320, "completion_tokens": 42110,
-  "cost_usd": 0.94,
-  "cap_usd": 5.00,
-  "on_exceed": "degrade"        // degrade | block | notify
-}
-```
-
-- `degrade` (default) — silently fall back to `null`. **The game keeps running.**
-  This is only possible because of §5, and it is the whole argument for it.
-- `block` — refuse LLM tasks, tell the GM.
-- `notify` — keep going, warn the owner.
-
-Per-guild BYO-key servers bill themselves and are capped only by their provider.
-Caps by tier live in `10-MONETIZATION.md`.
-
-## 8. Streaming & perceived latency
-
-The single most important UX decision in the module:
-
-1. Resolve mechanics and **post the outcome immediately** (< 50 ms):
-   *"You hit for 7. The guard staggers back into the lantern."*
-2. Stream the narration into a follow-up message, editing as tokens arrive.
-3. If the model is slow or dies, step 1 already told the table what happened.
-
-The game never waits on a model. On a 20-second local generation the table still
-sees instant feedback — which is what makes "lightweight" true regardless of the
-inference host.
-
-## 9. Prompt construction
+## 6. Task construction
 
 Assembled by `llm/tasks.py`, never by cogs:
 
 ```
 [system]  task instruction + output schema + tone/gm_style (forced from KB)
 [context] retrieved knowledge, budgeted (03-KNOWLEDGE-BASE.md §3)
-[state]   the state delta or npc_view — structured, terse, not prose
+[state]   the state delta or npc_view — structured and terse, not prose
 [input]   the player text or the bound beat
 ```
 
-Rules: no conversation history is ever replayed (state carries it — this is the
-fix for the current cog's unbounded `history` string); system text is stable so
-prompt caching works upstream; all player-facing strings still route through
-`bot.lang`.
+Budgets: `render_scene` 1200 tokens, `render_dialogue` 800, `parse_intent` 400.
 
-## 10. Safety integration
+Rules: **no conversation history is ever replayed** — state carries it, which is
+the fix for the current cog's unbounded `history` string; system text stays byte-
+stable so Ollama's prompt cache hits; output is JSON, schema-validated, retried
+once, then dropped to the template.
 
-Every rendered output passes the content filter (`11-SAFETY.md`) **before** it is
-posted. On a block: retry once with tightened constraints, then fall back to the
-template. A filtered output is never posted raw and never silently dropped — the
-GM is told.
+`render_dialogue` receives an `npc_view` (`04-ENTITIES.md` §6) — beliefs, mood,
+relationship, relevant memories, voice quirk. It does **not** receive world truth,
+so the model *cannot* leak what the NPC does not know. Fog of war is enforced by
+what is in the prompt, not by asking a 4B model to keep a secret.
+
+## 7. Fallbacks
+
+`backend=null` is a supported, tested configuration:
+
+| Task | Fallback |
+| --- | --- |
+| `parse_intent` | The verb-table parser that already runs first; ambiguity becomes a disambiguation prompt to the player. |
+| `render_scene` | Template from the state delta: `"{actor} {verb}s {target}. {outcome_clause}"` |
+| `render_dialogue` | Archetype line bank selected by mood + relationship + intent. |
+
+The **null-backend suite** (`01-ARCHITECTURE.md` §10) runs the whole turn loop this
+way. If it fails, a model has become load-bearing and Invariant 1 is broken.
+
+## 8. Queueing & capacity
+
+`OLLAMA_NUM_PARALLEL=1` means requests serialize, so the bot maintains a small
+priority queue:
+
+1. `parse_intent` fallback — a player is waiting
+2. `render_dialogue` — a player is waiting
+3. `render_scene` — a player is waiting, but mechanics already posted
+4. bootstrap batches — nobody is waiting
+
+Queue depth is capped; over the cap, the task drops to its template rather than
+making anyone wait. **A player never waits on a queue.**
+
+### Does one laptop serve many servers?
+
+Better than expected, because **async play and local inference are complementary**.
+At ~20 tok/s a 200-token render takes ~10 s, so the host produces roughly 5 renders
+per minute sustained. A play-by-post campaign generates 1–3 beats *per day*. The
+duty cycle is tiny — one laptop can back a large number of campaigns as long as
+they do not burst simultaneously, which the queue and the template fallback
+already handle.
+
+The honest limits, stated because they will arrive eventually:
+
+- **Live sessions burst.** A 4-hour live table wants many renders in an hour. A
+  handful of concurrent live sessions will saturate the host and fall back to
+  templates.
+- **The laptop must be awake.** Fine for the owner's server, not a service level
+  anyone can promise a stranger.
+
+If the product grows past this, the answer consistent with Rule 1 is **a dedicated
+inference box we own** — not a hosted API. The backend interface makes that a URL
+change. A second option, also compliant: tenant servers point at *their own*
+Ollama, which is a genuinely attractive selling point for privacy-minded groups.
+
+## 9. Caching
+
+Content-addressed on `(task, model, normalized_prompt_hash)`, in Mongo with a TTL.
+Hits are highest on `render_dialogue` greetings and on replay during development.
+A cache hit costs nothing and skips the queue, so it is worth more here than it
+would be against a hosted API.
+
+## 10. Resource accounting
+
+There is no per-token bill, so `dnd_budgets` stops being about money and becomes
+about **load**:
+
+```jsonc
+{
+  "guild_id": …, "campaign_id": …, "period": "2026-08",
+  "requests": 412, "generated_tokens": 61840,
+  "queue_wait_ms_p95": 2200, "fallback_rate": 0.06
+}
+```
+
+`fallback_rate` is the health metric to watch — a rising number means the host is
+saturated, asleep, or the queue cap is too low. Surfaced through
+`helpers/health.py` alongside the existing samples.
+
+Tier limits (`10-MONETIZATION.md`) shift accordingly: they cap **requests per day
+and queue priority**, not dollars.
+
+## 11. Safety integration
+
+Every rendered output passes the content filter (`11-SAFETY.md`) before posting.
+On a block: retry once with tightened constraints, then fall back to the template.
+Filtered output is never posted raw and never silently dropped — the GM is told.
+
+## 12. Setup checklist
+
+For when P4 starts:
+
+- [ ] Install Ollama on the laptop; `ollama pull qwen3:4b`
+- [ ] Set the environment from §4, especially `num_ctx=4096`
+- [ ] Measure: peak RSS, time-to-first-token, tok/s at a 1200-token prompt.
+      **Record the results in this file** — §3 is estimates until then
+- [ ] Try the Vulkan backend; record whether prefill improves. Do not block on it
+- [ ] Tailscale on both hosts; verify the VPS reaches `:11434`
+- [ ] Verify the unreachable-host path falls back to `null` cleanly
+- [ ] Confirm `dnd_llm_backend` switches without a redeploy

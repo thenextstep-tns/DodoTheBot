@@ -217,7 +217,7 @@ version (`09-SURFACES.md`).
    fresh NPC feel like they have a past on first contact.
 6. Set `importance` from role, which sets the memory budget (`05-MEMORY.md` §5).
 7. Optionally, one `propose_canon` call for name, appearance and a voice quirk;
-   with `backend=none`, name tables and templates cover it.
+   with `backend=null`, name tables and templates cover it.
 
 Step 5 is what separates this from every generator that produces a statblock with
 a name attached.

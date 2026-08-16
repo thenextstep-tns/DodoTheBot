@@ -2,8 +2,10 @@
 
 "Completely tweakable and monetizeable" was a stated requirement. The enforcement
 machinery mostly exists already — `helpers/visibility.py` notes that features are
-individually toggleable "for monetization flexibility," and `chat_api_key`
-established BYO-key per server.
+individually toggleable "for monetization flexibility."
+
+Note that inference is **local-only** (`08-LLM-LAYER.md` §2), so there is no
+per-token cost to pass on. What is scarce here is *host capacity*, not money.
 
 ---
 
@@ -13,7 +15,7 @@ Price the things that cost money or that a serious GM feels the lack of:
 
 | Scarce | Why | Cheap to meter |
 | --- | --- | --- |
-| **LLM tokens** | Real marginal cost | Yes — `llm/budget.py` |
+| **Model calls** | One inference host, serialized (`08-LLM-LAYER.md` §8) | Yes — `llm/budget.py` |
 | **Simulation depth** | CPU on one core | Yes — tier caps |
 | **Memory depth** | Storage + tick cost | Yes — budget multiplier |
 | **Campaign count** | Storage (~7 MB each) | Yes |
@@ -30,7 +32,9 @@ word of mouth this product depends on.
 | --- | --- | --- | --- |
 | Campaigns | 1 | 3 | 12 |
 | Ruleset | freeform | both | both + custom |
-| LLM | BYO key or `null` | Included, $2/mo of tokens | Included, $10/mo |
+| Narration | Templates (`null`) | Model-rendered, 200 calls/day | Model-rendered, 1000/day |
+| Queue priority | lowest | normal | high |
+| Own Ollama host | ✅ (unmetered) | ✅ | ✅ |
 | World tick | Off | On | On |
 | Focus NPCs | 3 | 8 | 16 |
 | Active NPCs | 20 | 200 | 1000 |
@@ -45,8 +49,11 @@ real dice, memory, relationships, NPC decisions. What is missing is the world
 *continuing* — which is exactly the thing worth paying for and the thing you can
 only appreciate after you have played without it.
 
-BYO-key on free is important. It costs the operator nothing and it is how the
-technically-inclined GMs who become evangelists get in.
+**Bring-your-own-Ollama is unmetered at every tier**, free included. It costs the
+operator literally nothing — the inference happens on their machine — and it is
+how the technically-inclined GMs who become evangelists get in. It is also a real
+privacy claim no hosted competitor can make: with your own host, no player text
+ever leaves your hardware.
 
 ## 3. Enforcement
 

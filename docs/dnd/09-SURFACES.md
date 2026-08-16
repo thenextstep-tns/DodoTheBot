@@ -94,7 +94,7 @@ Pages, per campaign:
 | **Clocks** | Faction agendas, drag to adjust, see what blocks them |
 | **Narrative** | Drama state, threads, spotlight balance, beat history, live suggestions |
 | **Settings** | Tone, GM style, ruleset, tick rate, autonomous mode, safety |
-| **Budget** | Token spend, cost, cap, backend health |
+| **Load** | Render calls used vs. cap, queue wait p95, fallback rate, inference-host reachability |
 | **Import/Export** | Campaign bundle in and out |
 
 ## 4. Access control — the gap in the current system
@@ -162,14 +162,15 @@ inputs (`helpers/parameters.py` docstring):
 
 | Key | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `dnd_llm_backend` | choice | `openai_compat` | `openai_compat` / `ollama` / `null` |
-| `dnd_ollama_url` | str | `""` | Tunnel URL for a local model |
-| `dnd_api_key` | secret | `""` | Per-server key, mirroring `chat_api_key` |
+| `dnd_llm_backend` | choice | `null` | `ollama` / `null`. There is no hosted-API option by design (`08-LLM-LAYER.md` §1) |
+| `dnd_ollama_url` | str | `""` | Tailscale URL of the inference host. A server may point at its own Ollama |
+| `dnd_ollama_model` | str | `qwen3:4b` | Model tag on that host |
+| `dnd_llm_queue_cap` | int | `12` | Queue depth before tasks drop to templates |
 | `dnd_tick_seconds` | int | `900` | Real seconds per world tick |
 | `dnd_tick_minutes` | int | `10` | World minutes per tick |
 | `dnd_focus_cap` | int | `8` | Max focus-tier NPCs per scene |
 | `dnd_active_cap` | int | `200` | Max active-tier NPCs per campaign |
-| `dnd_monthly_cap_usd` | float | `5.0` | Spend cap before degrade |
+| `dnd_daily_render_cap` | int | `200` | Model calls per day before degrading to templates |
 | `dnd_canon_auto_accept` | float | `0.0` | Auto-promote confidence threshold |
 | `dnd_default_ruleset` | choice | `freeform` | `freeform` / `srd5e` |
 

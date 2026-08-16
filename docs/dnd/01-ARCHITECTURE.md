@@ -103,12 +103,12 @@ helpers/dnd/
 │   └── suggest.py        # GM-assist proposals
 ├── llm/
 │   ├── backend.py        # Backend protocol
-│   ├── openai_compat.py  # proxyapi / any OpenAI-compatible
-│   ├── ollama.py
-│   ├── null.py           # template-only, always available
-│   ├── tasks.py          # the five typed tasks
+│   ├── ollama.py         # the ONLY inference backend (08 §1)
+│   ├── null.py           # template-only; always available, always tested
+│   ├── tasks.py          # render_scene, render_dialogue, parse_intent fallback
+│   ├── queue.py          # priority queue; one host, serialized (08 §8)
 │   ├── cache.py
-│   └── budget.py         # per-guild/campaign token accounting
+│   └── budget.py         # per-guild/campaign call accounting
 ├── session.py            # scene lifecycle, PersistentFlow subclass
 ├── turn.py               # the turn loop (§4)
 ├── tick.py               # the world tick (§5)
@@ -167,9 +167,10 @@ What happens when a player types an action. Timings are budgets, not guesses.
 ```
 player input
    │
-   ├─ 1. parse_intent            LLM (or keyword parser)      ~300-2000 ms
-   │      → Action | Clarify     Fallback: verb table. Never blocks step 2
-   │                              on failure — asks the player instead.
+   ├─ 1. parse_intent            verb parser FIRST             <1 ms
+   │      → Action | Clarify     Model only on genuine ambiguity (08 §5),
+   │                              and even then, asking the player often beats
+   │                              guessing. Never blocks step 2 on failure.
    ├─ 2. validate                 pure                          <1 ms
    │      affordances, reach, resources, entitlements
    ├─ 3. resolve                  pure, seeded                  <1 ms
@@ -263,7 +264,7 @@ codebase uses. Therefore:
 
 | Existing system | How DnD uses it |
 | --- | --- |
-| `bot.params` | Per-guild tunables: tick interval, LLM backend, token budget, default ruleset, NPC simulation cap. Adding specs gives free panel inputs. |
+| `bot.params` | Per-guild tunables: tick interval, inference host URL and model, daily render cap, default ruleset, NPC simulation cap. Adding specs gives free panel inputs. |
 | `bot.visibility` | Cog gate `dnd`; features `dnd_world_tick`, `dnd_autonomous_gm`, `dnd_npc_chatter` toggle independently per guild. |
 | `bot.panel_access` | Server-level scopes as today, **plus** a new per-campaign GM grant — see `09-SURFACES.md` §4. |
 | `bot.state` | `session.py` subclasses `PersistentFlow` (`kind = "dnd_scene"`) so live scenes survive restarts. |
@@ -281,7 +282,7 @@ The determinism is what makes this cheap:
   reinforcement; utility scores are finite; decay never resurrects a field.
 - **Import-boundary test** — `llm/` is not imported by `world/`, `rules/`,
   `mind/` or `store/`.
-- **Null-backend suite** — the full turn loop, end to end, with `backend=none`.
+- **Null-backend suite** — the full turn loop, end to end, with `backend=null`.
   If this suite fails, Invariant 1 has been violated somewhere.
 - **Tenant isolation test** — two campaigns, identical entity names; every
   repository method is checked for leakage.
