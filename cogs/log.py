@@ -210,7 +210,7 @@ class Log(commands.Cog, name="log"):
             updates = self.pending_role_updates.copy()
             self.pending_role_updates.clear()
             
-            for (guild_id, member_id), data in updates.items():
+            for (guild_id, member_id, _actor), data in updates.items():
                 member = data["member"]
                 guild = member.guild
                 channel = self.get_log_channel(guild)
@@ -433,14 +433,20 @@ class Log(commands.Cog, name="log"):
                 entry = await self._get_audit_entry(after.guild, discord.AuditLogAction.member_role_update, after.id)
                 actor = entry.user.mention if entry and entry.user else "Unknown"
 
-                key = (after.guild.id, after.id)
+                # Keyed by actor as well as member. Debouncing on the member
+                # alone merged unrelated people's edits into one entry and let
+                # the last actor overwrite the first: a moderator adding a role
+                # and the bot re-ranking a second later became a single line
+                # credited to the bot, with the moderator's change cancelled out
+                # against the bot's. Two people did two things; that is two
+                # entries.
+                key = (after.guild.id, after.id, actor)
                 if key not in self.pending_role_updates:
-                    self.pending_role_updates[key] = {"added": set(), "removed": set(), "actor": actor, "member": after}
-                
+                    self.pending_role_updates[key] = {"added": set(), "removed": set(),
+                                                      "actor": actor, "member": after}
+
                 self.pending_role_updates[key]["added"].update(added)
                 self.pending_role_updates[key]["removed"].update(removed)
-                if actor != "Unknown":
-                    self.pending_role_updates[key]["actor"] = actor
 
         # Nickname changes
         if before.nick != after.nick:
