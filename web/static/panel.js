@@ -1764,3 +1764,78 @@ if (_trialMap) {
     page.querySelectorAll(".wasvalue").forEach((tag) => tag.remove());
   });
 })();
+
+
+// --- Dashboard status board: a card on hover, like a real status page --------
+// Everything shown is already on the bar as data-attributes, so this is pure
+// presentation — no request, and no second source of truth to drift.
+(function statusBars() {
+  const strip = document.getElementById("hbars");
+  const pop = document.getElementById("hpop");
+  if (!strip || !pop) return;
+
+  const LABEL = {
+    ok: ["ok", "No downtime recorded on this day."],
+    degraded: ["warn", "Degraded performance"],
+    down: ["down", "Partial outage"],
+    none: ["none", "No data recorded on this day."],
+  };
+
+  const show = (bar) => {
+    const state = bar.dataset.state || "none";
+    const [kind, headline] = LABEL[state] || LABEL.none;
+    pop.innerHTML = "";
+
+    const day = document.createElement("div");
+    day.className = "hpop-day";
+    day.textContent = bar.dataset.day;
+    pop.appendChild(day);
+
+    if (state === "ok" || state === "none") {
+      const line = document.createElement("div");
+      line.className = "hpop-none";
+      line.textContent = headline;
+      pop.appendChild(line);
+    } else {
+      const row = document.createElement("div");
+      row.className = "hpop-row " + kind;
+      const icon = document.createElement("span");
+      icon.textContent = state === "down" ? "⚠" : "◐";
+      const what = document.createElement("span");
+      what.className = "hpop-what";
+      what.textContent = headline;
+      const dur = document.createElement("span");
+      dur.className = "hpop-dur";
+      dur.textContent = state === "down" ? bar.dataset.down : bar.dataset.degraded;
+      row.append(icon, what, dur);
+      pop.appendChild(row);
+    }
+
+    if (bar.dataset.samples && bar.dataset.samples !== "0") {
+      const meta = document.createElement("div");
+      meta.className = "hpop-meta";
+      meta.textContent = `${bar.dataset.uptime}% uptime · ${bar.dataset.samples} checks`;
+      pop.appendChild(meta);
+    }
+
+    // Positioned against the strip so it can't fall off either end.
+    pop.hidden = false;
+    const stripBox = strip.getBoundingClientRect();
+    const barBox = bar.getBoundingClientRect();
+    const width = pop.offsetWidth;
+    let left = barBox.left - stripBox.left + barBox.width / 2 - width / 2;
+    left = Math.max(0, Math.min(left, stripBox.width - width));
+    pop.style.left = `${left}px`;
+  };
+
+  const hide = () => { pop.hidden = true; };
+
+  strip.addEventListener("mouseover", (e) => {
+    if (e.target.classList.contains("hbar")) show(e.target);
+  });
+  strip.addEventListener("focusin", (e) => {
+    if (e.target.classList.contains("hbar")) show(e.target);
+  });
+  strip.addEventListener("mouseleave", hide);
+  strip.addEventListener("focusout", hide);
+})();

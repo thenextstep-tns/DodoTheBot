@@ -95,4 +95,6 @@ trial_rank_images = db["TrialRankImages"]     # {guild_id, role_id, data, conten
 trial_interest = db["TrialInterest"]          # {guild_id, user_id, name, role_ids, at}
 # Named snapshots of a whole ruleset, so a rebalance can be tried and put back.
 trial_presets = db["TrialPresets"]            # {guild_id, name, points, ranks, trials}
+# Periodic health samples behind the dashboard status board (helpers/health.py).
+bot_health = db["BotHealth"]                  # {at, status, latency_ms, guilds, members}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

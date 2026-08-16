@@ -38,6 +38,7 @@ from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
 from helpers.tribes import TribeManager
 from helpers.trial_ranks import TrialRankManager
+from helpers.health import HealthMonitor, SAMPLE_MINUTES
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -127,6 +128,9 @@ class DodoBot(commands.Bot):
             interest_collection=config_py.trial_interest,
             preset_collection=config_py.trial_presets,
         )
+        # Samples the gateway every few minutes so the dashboard can show what
+        # was true, not just what is true right now.
+        self.health = HealthMonitor(config_py.bot_health)
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
         )
@@ -231,6 +235,26 @@ async def api_import() -> None:
     bot.logger.info("Guide tag list updated successfully.")
 
 
+@tasks.loop(minutes=SAMPLE_MINUTES)
+async def health_sample() -> None:
+    """One health sample: is the gateway up, how far behind, and how big is the bot."""
+    latency = bot.latency
+    # discord.py reports nan before the first heartbeat; that's "not measured
+    # yet", not "instant".
+    latency_ms = None if latency != latency else latency * 1000
+    bot.health.record(
+        latency_ms=latency_ms,
+        connected=not bot.is_closed() and latency_ms is not None,
+        guilds=len(bot.guilds),
+        members=sum(g.member_count or 0 for g in bot.guilds),
+    )
+
+
+@health_sample.before_loop
+async def before_health_sample() -> None:
+    await bot.wait_until_ready()
+
+
 @tasks.loop(hours=24)
 async def check_reactions() -> None:
     """Ensure the configured reaction-role messages still carry the bot's reactions."""
@@ -282,6 +306,8 @@ async def on_ready() -> None:
         api_import.start()
     if not check_reactions.is_running():
         check_reactions.start()
+    if not health_sample.is_running():
+        health_sample.start()
     # Apply per-guild command visibility to Discord's pickers. Guarded + hash-gated
     # so gateway reconnects and unchanged guilds don't trigger needless re-syncs.
     if not bot._synced:

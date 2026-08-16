@@ -29,7 +29,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import audit_log, cog_categories, events, names, panel_access, parameters, stats, validate
+from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, stats, validate
 from helpers import tribes as tribe_rules
 from helpers import trial_ranks, trial_image
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
@@ -253,7 +253,8 @@ def _cog_detail(bot, guild_id: int, cog_name: str, *, scope: str = panel_access.
 #  HTML rendering
 # --------------------------------------------------------------------------- #
 def _guild_nav(guild, scope: str, current: str) -> str:
-    """The per-guild links, rendered in the top bar next to Dashboard."""
+    """The per-guild links in the top bar. The brand is the way back to the
+    dashboard, so there is no separate link for it."""
     if guild is None:
         return ""
     links = [("settings", "⚙️ Settings", panel_access.SCOPE_CONFIG),
@@ -288,7 +289,7 @@ def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER,
 </head><body>
 <header>
 <a href="/" class="brand">🦤 Dodo Control Panel</a>
-<nav><a href="/">Dashboard</a>{_guild_nav(guild, scope, current)}
+<nav>{_guild_nav(guild, scope, current)}
 {'<a href="/lang">Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
 </header>
 <main>{body}</main>
@@ -337,6 +338,81 @@ def _landing_for(guild_id: int, scope: str) -> str:
     return f"/guild/{guild_id}/stats"
 
 
+def _status_board(bot) -> str:
+    """Bot-wide health: what's true now, and what was true over the last 90 days.
+
+    Days with no samples are drawn as blanks rather than green — the bot being
+    off is precisely when nothing gets recorded, so colouring a gap "fine" would
+    make the board lie about the only thing it exists to report.
+    """
+    monitor = getattr(bot, "health", None)
+    latency = getattr(bot, "latency", None)
+    # discord.py yields nan before the first heartbeat: not measured, not zero.
+    latency_ms = None if latency is None or latency != latency else latency * 1000
+    connected = bool(getattr(bot, "is_ready", lambda: False)()) and latency_ms is not None
+    state = health.classify(latency_ms, connected)
+
+    banner = {health.STATUS_OK: ("ok", "All Systems Operational"),
+              health.STATUS_DEGRADED: ("warn", "Degraded — the gateway is slow"),
+              health.STATUS_DOWN: ("down", "Not connected to Discord")}[state]
+
+    bars, measured = "", None
+    if monitor is not None:
+        rows = health.day_bars(monitor.samples())
+        measured = health.uptime_percent(rows)
+        for bar in rows:
+            # Everything the popover needs travels on the bar, so hovering costs
+            # no request and the markup stays the single source of truth.
+            state = bar["state"] or "none"
+            bars += (
+                f'<span class="hbar {state}" tabindex="0"'
+                f' data-day="{bar["day"].strftime("%d %b %Y").lstrip("0")}"'
+                f' data-state="{state}"'
+                f' data-uptime="{"" if bar["uptime"] is None else format(bar["uptime"], ".2f")}"'
+                f' data-samples="{bar["samples"]}"'
+                f' data-down="{health.human_minutes(bar.get("down_minutes") or 0)}"'
+                f' data-downmins="{bar.get("down_minutes") or 0}"'
+                f' data-degraded="{health.human_minutes(bar.get("degraded_minutes") or 0)}"'
+                f' data-degradedmins="{bar.get("degraded_minutes") or 0}"'
+                f'></span>'
+            )
+
+    uptime = health.human_duration(monitor.uptime_seconds()) if monitor else "—"
+    guilds = list(getattr(bot, "guilds", []))
+    members = sum(g.member_count or 0 for g in guilds)
+    loaded = sum(1 for c in _cog_inventory(bot) if c["loaded"])
+    total_cogs = len(_cog_inventory(bot))
+    commands_count = len({c.qualified_name for c in getattr(bot, "commands", [])})
+
+    uptime_line = (f"{measured:.2f}% uptime over the past 90 days"
+                   if measured is not None
+                   else "no history recorded yet — the board fills in from here")
+    tiles = [
+        ("Servers", f"{len(guilds)}", "installations"),
+        ("Members", f"{members:,}", "reachable"),
+        ("Uptime", uptime, "since last restart"),
+        ("Latency", f"{latency_ms:.0f} ms" if latency_ms is not None else "—", "to Discord"),
+        ("Cogs", f"{loaded}/{total_cogs}", "loaded"),
+        ("Commands", f"{commands_count}", "registered"),
+    ]
+    tile_html = "".join(
+        f'<div class="statustile"><span class="tilevalue">{html.escape(value)}</span>'
+        f'<span class="tilelabel">{html.escape(label)}</span>'
+        f'<span class="tilehint">{html.escape(hint)}</span></div>'
+        for label, value, hint in tiles
+    )
+
+    return f"""
+<div class="statusbanner {banner[0]}">{html.escape(banner[1])}</div>
+<div class="statustiles">{tile_html}</div>
+<div class="statuscard">
+  <div class="statushead"><b>Dodo</b><span class="muted small">{html.escape(uptime_line)}</span></div>
+  <div class="hbars" id="hbars">{bars}</div>
+  <div class="hpop" id="hpop" hidden></div>
+  <div class="hscale"><span>90 days ago</span><span>Today</span></div>
+</div>"""
+
+
 def _dashboard_html(bot, entries: list, scope: str) -> str:
     """``entries`` is the ``(guild, scope)`` list the caller is allowed to see."""
     cards = "".join(
@@ -364,6 +440,8 @@ def _dashboard_html(bot, entries: list, scope: str) -> str:
         cog_rows += f'<tr><td>{html.escape(cog["name"])}</td><td>{badge}</td><td class="cogbtns">{buttons}</td></tr>'
 
     return f"""
+<h1>Status</h1>
+{_status_board(bot)}
 <h1>Guilds</h1>
 <div class="guildgrid">{cards}</div>
 <h1>Cogs <span class="muted">(process-wide — affects every guild)</span></h1>
@@ -1933,7 +2011,7 @@ def _tiles(summary: dict, guild) -> str:
     return f'<div class="tiles">{cards}</div>'
 
 
-def _stats_html(guild, data: dict, users: dict, channels: dict, scope: str = panel_access.SCOPE_OWNER) -> str:
+def _stats_html(guild, data: dict, users: dict, channels: dict) -> str:
     """``users`` / ``channels`` map the ids on this page to display names."""
     period = data["period"]
     base = f"/guild/{guild.id}/stats?period={period}"
@@ -2664,12 +2742,15 @@ async def guild_stats_page(request: web.Request):
         except ValueError:
             return 1
 
-    scope = stats.Scope(guild)
+    # Named apart from the panel scope on purpose: reusing `scope` here handed a
+    # stats.Scope to the nav builder, which reads it as a permission level, got
+    # nothing, and silently dropped every link in the top bar.
+    query_scope = stats.Scope(guild)
     data = await bot.loop.run_in_executor(
         None,
         functools.partial(
             stats.collect,
-            scope,
+            query_scope,
             stats.normalise_period(request.query.get("period")),
             user_page=_page_number("up"),
             channel_page=_page_number("cp"),
@@ -2680,7 +2761,8 @@ async def guild_stats_page(request: web.Request):
     user_ids = [row["id"] for row in data["users"]["rows"]] + [row["user_id"] for row in data["commands"]["rows"]]
     users = await names.resolve_users(bot, guild, user_ids)
     channels = await names.resolve_channels(bot, guild, [row["id"] for row in data["channels"]["rows"]])
-    return _page(f"{guild.name} · stats", _stats_html(guild, data, users, channels, scope),
+    return _page(f"{guild.name} · stats",
+                 _stats_html(guild, data, users, channels),
                  scope=scope, guild=guild, current="stats")
 
 
