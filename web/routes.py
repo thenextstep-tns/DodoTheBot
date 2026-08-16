@@ -1701,13 +1701,16 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     points = config.get("points") or {}
     cog = bot.get_cog("trial_ranks")
     last = (cog.last_run.get(guild.id) if cog else None) or {}
-    last_line = (
-        f"Last run: {last.get('ranked', 0)} ranked of {last.get('members', 0)} enrolled "
-        f"member(s), {last.get('granted', 0)} rank(s) granted, "
-        f"{last.get('removed', 0)} replaced"
-        + (f", skipped ({last['skipped']})" if last.get("skipped") else "")
-        if last else "Not run yet this session."
-    )
+    # Only says anything when there is something to say. "Not run yet this
+    # session" was reporting in-memory state that resets on restart, which told
+    # you nothing about whether the system works.
+    last_line = ""
+    if last and last.get("members"):
+        last_line = (f"Last recalculation: {last['members']} member(s), "
+                     f"{last.get('granted', 0)} rank(s) granted, "
+                     f"{last.get('removed', 0)} replaced.")
+    elif last and last.get("skipped"):
+        last_line = f"Last recalculation did nothing: {last['skipped']}."
     total_possible = sum(int(v) for v in points.values()) if points else 0
 
     # One panel at a time, picked from the sidebar. Six stacked accordions meant
@@ -1774,7 +1777,7 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
 
   <div class="triallayout">
     <aside class="sidebar trialnav">{nav}
-      <p class="muted small navfoot">{html.escape(last_line)}</p>
+      {f'<p class="muted small navfoot">{html.escape(last_line)}</p>' if last_line else ''}
     </aside>
     <main class="content">
 
