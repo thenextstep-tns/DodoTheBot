@@ -805,15 +805,25 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         if not self.runs_here(after.guild):
             return
         config = self.bot.trial_ranks.get(after.guild.id)
-        # Opting in is what turns the listener on for a person.
-        if not self.bot.trial_ranks.is_enrolled(after.guild.id, after.id):
-            return
         changed = {r.id for r in before.roles} ^ {r.id for r in after.roles}
         scoring = {int(role_id) for role_id in (config.get("points") or {})}
         scoring |= set(trial_ranks.slot_of(config.get("trials") or []))
         rank_roles = {rank["role_id"] for rank in config.get("ranks") or []}
         # Only react to scoring roles, and never to our own rank changes.
         if not (changed & scoring) or changed <= rank_roles:
+            return
+        touched = ", ".join(
+            role.name for role in (after.guild.get_role(r) for r in changed & scoring)
+            if role is not None) or "a scoring role"
+        # A scoring role moved on somebody the automation won't touch. Silence
+        # here reads as "the bot is broken" rather than "that person opted out",
+        # so it says which, once an hour per person rather than per role edit.
+        if not self.bot.trial_ranks.is_enrolled(after.guild.id, after.id):
+            await self.report_problems(
+                after.guild,
+                [f"{after.mention} changed **{touched}**, but they are not on "
+                 "automatic ranking, so nothing was recalculated."],
+                context="skipped")
             return
         try:
             was = trial_ranks.rank_for(
@@ -825,15 +835,22 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 None, self.bot.trial_ranks.save_standing, after.guild.id, after.id,
                 after.display_name, outcome["score"], outcome["rank_name"],
             )
-            if outcome["granted"] or outcome["removed"] or outcome["cleared"]:
-                previous = trial_ranks.rank_name(was, after.guild) if was else "none"
-                await self.log_event(
-                    after.guild,
-                    f"{after.mention} recalculated after a clear-role change.\n"
-                    f"Score: **{outcome['score']}** points · "
-                    f"Rank: **{previous}** → **{outcome['rank_name'] or 'none'}**"
-                    + (f"\nRemoved superseded: {', '.join(outcome['cleared_names'][:20])}"
-                       if outcome["cleared_names"] else ""))
+            # Logged every time, not only when a role moved. A recalculation
+            # that lands on the same rank is still the system working, and
+            # without a line for it there is no way to tell that apart from the
+            # listener never having fired at all.
+            previous = trial_ranks.rank_name(was, after.guild) if was else "none"
+            now_named = outcome["rank_name"] or "none"
+            moved = previous != now_named
+            lines_out = [f"{after.mention} · **{touched}**",
+                         f"Score: **{outcome['score']}** · Rank: "
+                         + (f"**{previous}** to **{now_named}**" if moved
+                            else f"**{now_named}** (unchanged)")]
+            if outcome["cleared_names"]:
+                lines_out.append("Removed superseded: "
+                                 + ", ".join(outcome["cleared_names"][:20]))
+            await self.log_event(after.guild, chr(10).join(lines_out),
+                                 title="Trial ranks: recalculated")
             # A recalculation that changed nothing *because it was refused* is
             # not a quiet success, and this is the path that runs unattended.
             await self.report_problems(after.guild, outcome["errors"],
