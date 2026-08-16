@@ -753,3 +753,13 @@ main:has(.trialspage) { max-width: none; }
 .pvchip { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-full);
   background: var(--color-canvas); border: 1px solid var(--color-hairline); }
 .pvchip.superseded { color: var(--color-muted-soft); text-decoration: line-through; }
+
+/* The whole preview row is the hit target, not just the username. */
+.previewtable tbody tr:not(.pvdetail) { cursor: pointer; }
+.previewtable tbody tr:not(.pvdetail):hover { background: var(--color-surface-strong); }
+.previewtable tr.promoted:hover { background: rgba(0, 138, 5, .16); }
+.previewtable tr.demoted:hover { background: rgba(193, 53, 21, .16); }
+.previewtable .pvchev { width: 20px; text-align: center; color: var(--color-muted-soft);
+  font-size: 10px; }
+.previewtable tr.open .pvchev { color: var(--color-ink); }
+.pvtag { display: block; margin: 2px 0 0; color: var(--color-muted); font-size: 11px; }

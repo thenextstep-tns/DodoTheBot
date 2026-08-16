@@ -1000,7 +1000,7 @@ if (_sandbox) {
     const tr = document.createElement("tr");
     tr.className = "pvdetail";
     const td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 7;
     if (!row.breakdown || !row.breakdown.length) {
       td.className = "muted";
       td.textContent = "No scoring roles.";
@@ -1033,7 +1033,7 @@ if (_sandbox) {
     const table = document.createElement("table");
     table.className = "stats previewtable";
     table.innerHTML = "<thead><tr><th>#</th><th>Player</th><th class='num'>Points</th>"
-      + "<th>Rank now</th><th>Would be</th><th></th></tr></thead>";
+      + "<th>Rank now</th><th>Would be</th><th></th><th></th></tr></thead>";
     const body = document.createElement("tbody");
     rows.forEach((row, index) => {
       const tr = document.createElement("tr");
@@ -1048,11 +1048,9 @@ if (_sandbox) {
       const who = document.createElement("td");
       const disp = document.createElement("div");
       disp.textContent = row.name;
-      const tag = document.createElement("button");
-      tag.type = "button";
+      const tag = document.createElement("span");
       tag.className = "pvtag";
       tag.textContent = "@" + (row.tag || "");
-      tag.title = "Show which clears made this score";
       who.append(disp, tag);
 
       const pts = document.createElement("td");
@@ -1066,14 +1064,29 @@ if (_sandbox) {
       arrow.className = "pvmove";
       arrow.textContent = row.direction === "up" ? "▲" : (row.direction === "down" ? "▼" : "");
 
-      tr.append(num, who, pts, now, next, arrow);
+      // Anywhere on the row opens the breakdown. Hanging it off the username
+      // alone meant the one obvious thing to click — the row — did nothing.
+      const chev = document.createElement("td");
+      chev.className = "pvchev";
+      chev.textContent = "▸";
+
+      tr.append(num, who, pts, now, next, arrow, chev);
+      tr.title = "Click for the clears behind this score";
       body.appendChild(tr);
 
-      let open = false;
-      tag.addEventListener("click", () => {
-        if (open) { tr.nextSibling && tr.nextSibling.remove(); open = false; return; }
+      // Named `after`, not `next`: `next` is already the "would be" cell just
+      // above, and two meanings of one word in ten lines is how bugs get in.
+      tr.addEventListener("click", () => {
+        const after = tr.nextElementSibling;
+        if (after && after.classList.contains("pvdetail")) {
+          after.remove();
+          tr.classList.remove("open");
+          chev.textContent = "▸";
+          return;
+        }
         tr.after(breakdownRow(row));
-        open = true;
+        tr.classList.add("open");
+        chev.textContent = "▾";
       });
     });
     table.appendChild(body);
