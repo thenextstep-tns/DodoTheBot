@@ -831,13 +831,14 @@ class TrialRankManager:
 
     def __init__(self, collection, standings_collection, *,
                  enrollment_collection=None, image_collection=None,
-                 interest_collection=None) -> None:
+                 interest_collection=None, preset_collection=None) -> None:
         self._col = collection
         self._standings = standings_collection
         self._enrollment = enrollment_collection
         self._images = image_collection
         self._interest = interest_collection
         self._interest_indexed = False
+        self._presets = preset_collection
         self._cache: dict[int, dict] = {}
         self._enrolled_cache: dict[int, set[int]] = {}
 
@@ -1012,6 +1013,41 @@ class TrialRankManager:
                   - datetime.timedelta(days=INTEREST_TTL_DAYS))
         return list(self._interest.find({"guild_id": int(guild_id), "at": {"$gte": cutoff}})
                     .sort("at", -1).limit(limit))
+
+    # ------------------------------------------------------------------ #
+    #  Presets — named snapshots of a whole ruleset
+    # ------------------------------------------------------------------ #
+    def save_preset(self, guild_id: int, name: str, data: dict) -> None:
+        """Store weights, ranks and trials under a name, overwriting that name.
+
+        A rebalance is a guess until you see it against real members, and the
+        only way to guess freely is to be able to put the old numbers back.
+        """
+        if self._presets is None:
+            return
+        self._presets.update_one(
+            {"guild_id": int(guild_id), "name": str(name)[:60]},
+            {"$set": {"points": data.get("points") or {},
+                      "ranks": data.get("ranks") or [],
+                      "trials": data.get("trials") or [],
+                      "at": datetime.datetime.now(datetime.timezone.utc)}},
+            upsert=True,
+        )
+
+    def presets(self, guild_id: int) -> list[dict]:
+        if self._presets is None:
+            return []
+        return list(self._presets.find({"guild_id": int(guild_id)}).sort("name", 1))
+
+    def preset(self, guild_id: int, name: str) -> Optional[dict]:
+        if self._presets is None:
+            return None
+        return self._presets.find_one({"guild_id": int(guild_id), "name": str(name)})
+
+    def delete_preset(self, guild_id: int, name: str) -> None:
+        if self._presets is None:
+            return
+        self._presets.delete_one({"guild_id": int(guild_id), "name": str(name)})
 
     def clear_interest(self, guild_id: int, user_id: int) -> None:
         if self._interest is None:

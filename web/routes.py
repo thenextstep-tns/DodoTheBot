@@ -1145,7 +1145,7 @@ def _role_picker(guild, *, key: str, selected_id: int = 0, placeholder: str = "T
 
 
 def _rank_image_cell(guild_id: int, role_id: int, *, has_image: bool) -> str:
-    """Upload / preview / remove for one rung's badge.
+    """Upload / preview / remove for one rank's badge.
 
     The picture is optional everywhere it's used: no upload simply means the
     /rank card carries no image, not a broken one.
@@ -1167,31 +1167,44 @@ def _rank_image_cell(guild_id: int, role_id: int, *, has_image: bool) -> str:
 
 
 def _rank_rows(bot, guild, config: dict) -> str:
-    """One row per rung: a role, a threshold, a description and a badge.
+    """One row per rank: a role, a threshold, a description and a badge.
 
-    There is no fixed ladder — a server adds as many rungs as it wants and calls
+    There is no fixed ladder — a server adds as many ranks as it wants and calls
     them whatever its roles are called. Rows render cheapest-first because that
     is the only ordering the ranks have.
     """
     with_images = bot.trial_ranks.image_role_ids(guild.id)
     rows = ""
-    for index, rung in enumerate(trial_ranks.rank_rows(config, guild)):
+    for index, rank in enumerate(trial_ranks.rank_rows(config, guild)):
         rows += f"""
     <div class="rankrow mapped" data-index="{index}">
       <div class="rankmain">
-        <span class="rungindex">{index + 1}</span>
-        {_role_picker(guild, key="rank", selected_id=rung["role_id"])}
-        <span class="rungmid">at</span>
-        <input type="number" class="rankmin" value="{rung["min_points"]}" placeholder="0">
-        <span class="rungmid">points</span>
-        {_rank_image_cell(guild.id, rung["role_id"], has_image=rung["role_id"] in with_images)}
+        <span class="rankindex">{index + 1}</span>
+        {_role_picker(guild, key="rank", selected_id=rank["role_id"])}
+        <span class="rankmid">at</span>
+        <input type="number" class="rankmin" value="{rank["min_points"]}" placeholder="0">
+        <span class="rankmid">points</span>
+        {_rank_image_cell(guild.id, rank["role_id"], has_image=rank["role_id"] in with_images)}
         <button type="button" class="ghost rankdel" title="Remove this rank">×</button>
       </div>
       <textarea class="rankdesc" rows="2" maxlength="{trial_ranks.MAX_DESCRIPTION}"
         placeholder="Optional — shown on the /rank card for this rank"
-        >{html.escape(rung["description"])}</textarea>
+        >{html.escape(rank["description"])}</textarea>
     </div>"""
     return rows
+
+
+def _json_loads_safe(value):
+    """Stringify ids on the way out, the same way ``_json_dumps`` does.
+
+    A Discord id doesn't survive JavaScript's number type, so anything the
+    browser will read back and send again travels as a string.
+    """
+    if isinstance(value, dict):
+        return {k: _json_loads_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_loads_safe(v) for v in value]
+    return str(value) if isinstance(value, int) and value > 2**53 else value
 
 
 def _json_dumps(value) -> str:
@@ -1209,26 +1222,79 @@ def _json_dumps(value) -> str:
     return _json.dumps(_stringify(value))
 
 
-def _trial_map_rows(guild, trials: list[dict]) -> str:
-    """One row per trial: a name plus a role picker for each slot."""
+def _slot_cell(guild, slot: str, role_id: int, points: dict) -> str:
+    """One slot: the role it maps to, and — once mapped — what it's worth.
+
+    Score and mapping used to live on different pages, which meant pricing a
+    clear and saying which trial it belonged to were two unrelated chores. A
+    slot with no role has nothing to price, so the box only appears once there
+    is something to put a number on.
+    """
+    value = (points or {}).get(str(int(role_id))) if role_id else None
+    if not value and role_id:
+        role = guild.get_role(int(role_id))
+        value = trial_ranks.default_points_for(role) if role is not None else 0
+    return (
+        f'<label class="slotcell"><span class="slotlabel">'
+        f'{html.escape(trial_ranks.SLOT_LABELS[slot])}</span>'
+        f'{_role_picker(guild, key=slot, selected_id=role_id or 0, placeholder="—")}'
+        f'<input type="number" class="rolepoints slotpoints" data-role="{int(role_id or 0)}" '
+        f'value="{value or ""}" placeholder="pts"{"" if role_id else " hidden"}>'
+        f"</label>"
+    )
+
+
+def _trial_map_rows(guild, trials: list[dict], points: dict) -> str:
+    """One row per trial: a name, and for each slot a role plus its score."""
     rows = ""
     for index, trial in enumerate(trials):
         slots = trial.get("slots") or {}
-        pickers = ""
-        for slot in trial_ranks.SLOTS:
-            pickers += (
-                f'<label class="slotcell"><span class="slotlabel">'
-                f'{html.escape(trial_ranks.SLOT_LABELS[slot])}</span>'
-                f'{_role_picker(guild, key=slot, selected_id=slots.get(slot) or 0, placeholder="—")}'
-                f"</label>"
-            )
+        pickers = "".join(
+            _slot_cell(guild, slot, slots.get(slot) or 0, points)
+            for slot in trial_ranks.SLOTS
+        )
+        name = trial.get("name") or ""
+        # Searchable on the trial's name and every role it maps, so "Bahsei"
+        # finds Rockgrove without anyone remembering which trial that is.
+        haystack = " ".join(
+            [name] + [(guild.get_role(int(rid)).name if guild.get_role(int(rid)) else "")
+                      for rid in slots.values()]
+        ).lower()
         rows += (
-            f'<div class="trialrow" data-index="{index}">'
+            f'<div class="trialrow" data-index="{index}" '
+            f'data-search="{html.escape(haystack)}">'
             f'<div class="trialhead">'
-            f'<input class="trialname" value="{html.escape(trial.get("name") or "")}" '
+            f'<input class="trialname" value="{html.escape(name)}" '
             f'placeholder="Trial name (e.g. Kyne\'s Aegis)">'
             f'<button class="ghost trialdel" title="Remove this trial">×</button></div>'
             f'<div class="slotgrid">{pickers}</div></div>'
+        )
+    return rows
+
+
+def _extra_score_rows(guild, config: dict) -> str:
+    """Scoring roles that belong to no trial — standalone achievements.
+
+    Sourced from what is actually priced rather than from a divider, so this
+    survives the role list being reorganised. Anything with points that isn't
+    mapped to a trial slot lands here and stays editable.
+    """
+    points = config.get("points") or {}
+    mapped = set(trial_ranks.slot_of(config.get("trials") or []))
+    rows = ""
+    for role_id, value in sorted(points.items(), key=lambda kv: -int(kv[1])):
+        role_id = int(role_id)
+        if role_id in mapped:
+            continue
+        role = guild.get_role(role_id)
+        if role is None:
+            continue
+        rows += (
+            f'<div class="extrarow" data-search="{html.escape(role.name.lower())}">'
+            f'{_role_picker(guild, key="extra", selected_id=role_id)}'
+            f'<input type="number" class="rolepoints" data-role="{role_id}" '
+            f'value="{int(value)}" placeholder="pts">'
+            f'<button type="button" class="ghost extradel" title="Remove">×</button></div>'
         )
     return rows
 
@@ -1243,6 +1309,7 @@ def _trial_map_html(guild, config: dict) -> str:
         f'trifectas can\'t be guessed, so add those yourself.</p>'
         if not trials else ""
     )
+    points = config.get("points") or {}
     return f"""
     <div class="explain">
       <p>Within one trial the roles are a progression: <b>veteran clear → partial hardmode 1 →
@@ -1255,11 +1322,19 @@ def _trial_map_html(guild, config: dict) -> str:
       points.</p>
     </div>
     {hint}
+    <input class="rolefilter" id="trialsearch"
+      placeholder="Type to find a trial, a boss or a title…">
     <div class="trialactions">
       <button class="ghost" id="addtrial">+ Add a trial</button>
       <button class="ghost" id="suggesttrials">Suggest from role names</button>
     </div>
-    <div id="trialmap">{_trial_map_rows(guild, trials)}</div>"""
+    <div id="trialmap">{_trial_map_rows(guild, trials, points)}</div>
+
+    <h3 class="subhead">Everything else that scores</h3>
+    <p class="muted small">Achievements and one-off roles that don't belong to a trial. These
+    aren't read from any divider — whatever is listed here is what counts.</p>
+    <div id="extrascores">{_extra_score_rows(guild, config)}</div>
+    <div class="trialactions"><button class="ghost" id="addextra">+ Add a role</button></div>"""
 
 
 _STATE_LABELS = {
@@ -1432,13 +1507,8 @@ def _pilot_html(bot, guild, config: dict) -> str:
 
     return f"""
     <div class="explain">
-      <p><b>Nobody is ranked automatically until they opt in.</b> Turning the feature on
-      above changes nothing by itself: the hourly sweep and the live listener both skip
-      anyone who isn't on this list. Add a few people here to try it safely.</p>
-      <p>Enrolling someone does the whole switch-over at once — it takes off the clear roles
-      a better clear has replaced, adds up their points, gives them the rank those points
-      earn, and starts watching their roles from then on. Everything is logged to your log
-      channel.</p>
+      <p>Right now, people need to opt in to switch to the new system. We can add people
+      here manually.</p>
     </div>
     {warning_html}
     <div class="pilotstats">
@@ -1537,14 +1607,8 @@ def _interest_html(bot, guild, config: dict) -> str:
     return f"""
     <div class="explain">
       <p>One press of <b>"I'd join a prog for one of those"</b> on a <code>/rank</code> card
-      registers everything that card was recommending. Wanting a raid's hardmode and its
-      trifecta counts once — as wanting that raid.</p>
-      <p>A group is {trial_ranks.GROUP_SIZE}. Rows turn <b class="lvl-warm-ink">yellow at 6</b>
-      and <b class="lvl-ready-ink">green at 10</b>. Open a row for the exact bosses and
-      titles people are short of, or run <code>/interest &lt;trial&gt;</code> in Discord.</p>
-      <p class="muted small">Interest lapses after {trial_ranks.INTEREST_TTL_DAYS} days —
-      it's a statement about right now, and a list nobody trusts is worse than a short one.
-      Pressing the button again restarts the clock.</p>
+      registers everything that card was recommending. Interest lasts for
+      {trial_ranks.INTEREST_TTL_DAYS} days, pressing the button again restarts the duration.</p>
     </div>
     <div class="pilotstats">
       <span class="pilotstat"><b>{ready}</b> ready to run</span>
@@ -1600,15 +1664,19 @@ def _trials_html(bot, guild, scope: str) -> str:
     # second navigation idiom. Hidden panels stay in the DOM — Save and Push read
     # every input on the page, so unmounting one would quietly drop its values.
     enrolled = len(bot.trial_ranks.enrolled_ids(guild.id))
+    candidates = _conversion_stats(bot, guild, config)["candidates"]
     panels = [
-        ("ranks", "🏆", "Ranks", f'{len(config.get("ranks") or [])} rung(s)'),
-        ("pilot", "👥", "Who it's turned on for", f"{enrolled} enrolled"),
-        ("interest", "🔥", "Prog interest", "who'd sign up"),
-        ("clears", "⚔️", "Clears", f'{len(grouped["clears"])} roles'),
-        ("trialmap", "🗺️", "Trial clear roles", "one per person"),
-        ("achievements", "🏅", "Achievements", f'{len(grouped["achievements"])} roles'),
-        ("sandbox", "🧪", "Try it out", "dry runs"),
+        ("ranks", "🏆", "Ranks", f'{len(config.get("ranks") or [])} ranks'),
+        ("pilot", "👥", "Users", f"{enrolled}/{candidates}"),
+        ("interest", "🔥", "Prog interest", ""),
+        ("trialmap", "🗺️", "Trials Setup", f"{len(config.get('trials') or [])} trials"),
+        ("sandbox", "🧪", "Preview", ""),
     ]
+    presets = bot.trial_ranks.presets(guild.id)
+    preset_options = ('<option value="">— pick a preset —</option>' + "".join(
+        f'<option value="{html.escape(p["name"])}">{html.escape(p["name"])}'
+        f' ({len(p.get("points") or {})} priced)</option>' for p in presets))
+
     nav = "".join(
         f'<a class="trialnavitem{" active" if key == "ranks" else ""}" '
         f'href="#{key}" data-panel="{key}">'
@@ -1624,23 +1692,30 @@ def _trials_html(bot, guild, scope: str) -> str:
   <script type="application/json" id="trial-suggestions">{_json_dumps(trial_ranks.suggest_trials(guild))}</script>
   <script type="application/json" id="trial-slots">{_json_dumps(list(trial_ranks.SLOTS))}</script>
   <h1>Trial ranking</h1>
-  <p class="muted">Clears and achievements are worth points; reaching a threshold grants the rank
-  role. Sections are read from your divider roles, so a new trial role shows up here by itself.
-  Ranks update the moment someone gets a clear role, and are re-checked hourly — but only for the
-  people who have opted in, listed under <b>Who it's turned on for</b>.</p>
+  <p class="muted">Clears and achievements are worth points, ranks are assigned automatically
+  upon reaching a threshold.</p>
   <div class="trialbar">
     <label class="switch"><input type="checkbox" id="trialsenabled"
       {"checked" if config.get("enabled") else ""}> enabled</label>
     <label class="switch"><input type="checkbox" id="trialsexclusive"
       {"checked" if config.get("exclusive", True) else ""}> only hold the highest rank</label>
     <span class="muted small">{len(points)} priced role(s) · {total_possible} points on the board</span>
-    <button id="trialpush">Push to live</button>
+    {'<button id="trialpush">Push to live</button>' if scope == panel_access.SCOPE_OWNER else ''}
     <button id="trialsave" class="ghost">Save draft</button>
     <button id="trialrun" class="ghost"
       title="Re-apply the saved setup to everyone enrolled, without saving what's on screen"
       >Recalculate now</button>
     <a class="chip" href="/guild/{guild.id}/trials.png" target="_blank" rel="noopener"
        title="A shareable chart of the current values">🖼 Chart</a>
+  </div>
+  <div class="presetbar">
+    <span class="muted small">Presets</span>
+    <select id="presetpick">{preset_options}</select>
+    <button id="presetload" class="ghost">Load</button>
+    <button id="presetsave" class="ghost">Save my preset</button>
+    <button id="presetdel" class="ghost">Delete</button>
+    <span class="muted small">A named copy of the weights, ranks and trials — load one to
+    play with the numbers without losing what you had.</span>
   </div>
   {_orphan_warning(guild, points)}
   {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below in Clears and Achievements.</p>' if missing else ''}
@@ -1653,62 +1728,49 @@ def _trials_html(bot, guild, scope: str) -> str:
     <main class="content">
 
       <section class="trialpanel" data-panel="ranks">
-        <h2 class="panelhead">Ranks <span class="muted">· your roles, in the order they cost</span></h2>
+        <h2 class="panelhead">Ranks</h2>
         <div class="explain">
-          <p>Points come from <b>Clears</b> and <b>Achievements</b>. When someone's total reaches a
-          rank's requirement, the bot gives them that rank's role and takes away the previous one,
-          so everyone shows only their highest rank.</p>
-          <p><b>A rank is just a role and a number.</b> Add as many as you want, name them by naming
-          the roles — rename the role and the rank is renamed everywhere, including the /rank card and
-          the chart. They sort themselves by the points they need, so the cheapest is the lowest rank.</p>
-          <p>The description and the picture are optional and only show up on the <code>/rank</code>
-          card. No picture simply means no picture — nothing breaks.</p>
+          <p>Points come from Clears and Achievements. When someone reaches a rank's requirement,
+          the bot gives them that rank's role and takes away the previous one.</p>
         </div>
         <div class="ladder" id="rankrows">{_rank_rows(bot, guild, config)}</div>
         <div class="trialactions"><button class="ghost" id="addrank">+ Add a rank</button></div>
       </section>
 
       <section class="trialpanel" data-panel="pilot" hidden>
-        <h2 class="panelhead">Who it's turned on for
-          <span class="muted">· the rollout, one person at a time</span></h2>
+        <h2 class="panelhead">Users</h2>
         {_pilot_html(bot, guild, config)}
       </section>
 
       <section class="trialpanel" data-panel="interest" hidden>
-        <h2 class="panelhead">Prog interest <span class="muted">· who'd sign up for what</span></h2>
+        <h2 class="panelhead">Prog interest</h2>
         {_interest_html(bot, guild, config)}
       </section>
 
-      <section class="trialpanel" data-panel="clears" hidden>
-        <h2 class="panelhead">Clears <span class="muted">({len(grouped["clears"])} roles)</span></h2>
-        <input class="rolefilter" placeholder="Type to find a clear…" data-target="clearrows">
-        <div class="scorerows" id="clearrows">{_score_rows(grouped["clears"], points, section="clears")}</div>
-      </section>
-
       <section class="trialpanel" data-panel="trialmap" hidden>
-        <h2 class="panelhead">Trial clear roles
-          <span class="muted">· one role per person per trial</span></h2>
+        <h2 class="panelhead">Trials Setup</h2>
         {_trial_map_html(guild, config)}
       </section>
 
-      <section class="trialpanel" data-panel="achievements" hidden>
-        <h2 class="panelhead">Achievements
-          <span class="muted">({len(grouped["achievements"])} roles)</span></h2>
-        <input class="rolefilter" placeholder="Type to find an achievement…" data-target="achrows">
-        <div class="scorerows" id="achrows">{_score_rows(grouped["achievements"], points, section="achievements")}</div>
-      </section>
-
       <section class="trialpanel" data-panel="sandbox" hidden>
-        <h2 class="panelhead">Try it out
-          <span class="muted">· nothing is saved or applied</span></h2>
+        <h2 class="panelhead">Preview</h2>
         <div class="sandbox">
-          <div class="explain"><p>Scores people against the weights currently <b>on this screen</b>,
-          including edits you haven't saved — so you can see what a change would do before
-          committing to it.</p></div>
+          <div class="explain"><p>Simulates ranks for the server with the selected ruleset,
+          including edits you haven't saved.</p></div>
           <div class="sandboxrow">
-            <input id="trialnames" placeholder="Up to 10 names, comma separated — e.g. Nik, Fox, Mido">
-            <button id="trialpreview" class="ghost">Preview these</button>
-            <button id="trialpreviewall" class="ghost">Preview everyone</button>
+            <button id="trialpreviewall">Recalculate ranks</button>
+          </div>
+          <div class="previewfilters" hidden>
+            <input id="pvname" placeholder="Filter by name or username…" autocomplete="off">
+            <select id="pvrank"><option value="">Any rank</option></select>
+            <select id="pvrole"><option value="">Any clear role</option></select>
+            <select id="pvmove">
+              <option value="">Everyone</option>
+              <option value="up">Promoted only</option>
+              <option value="down">Demoted only</option>
+              <option value="any">Changed only</option>
+            </select>
+            <span class="muted small" id="pvcount"></span>
           </div>
           <div id="previewout"></div>
         </div>
@@ -2220,14 +2282,30 @@ async def api_guild_trials(request: web.Request):
             projected = trial_ranks.rank_for(score, ranks)
             # What they hold now, so a re-balance shows movement rather than
             # just a number.
-            current = next((rank["name"] for rank in ranks if rank["role_id"] in held), None)
+            current_rank = next((rank for rank in ranks if rank["role_id"] in held), None)
+            current = (current_rank or {}).get("name")
+            # Promotion or demotion, by what the rank costs — the only ordering
+            # ranks have. Without this the table can say "changed" but not which
+            # way, which is the thing you actually want to see after a rebalance.
+            was_at = int((current_rank or {}).get("min_points") or 0)
+            now_at = int((projected or {}).get("min_points") or 0)
+            if current_rank is None and projected is None:
+                direction = ""
+            elif current_rank is None:
+                direction = "up"
+            elif projected is None:
+                direction = "down"
+            else:
+                direction = "up" if now_at > was_at else ("down" if now_at < was_at else "")
             return {
                 "id": str(member.id),
                 "name": member.display_name,
+                "tag": member.name,
                 "score": score,
                 "rank": (projected or {}).get("name"),
                 "current": current,
                 "changed": (projected or {}).get("name") != current,
+                "direction": direction,
                 "breakdown": trial_ranks.breakdown_for(guild, held, points, trials),
                 "cleanup": len(dropped),
             }
@@ -2342,10 +2420,48 @@ async def api_guild_trials(request: web.Request):
         return web.json_response({"ok": True, "message_id": str(message.id),
                                   "channel": channel.name})
 
+    if action in ("preset_save", "preset_load", "preset_delete"):
+        name = str(data.get("name") or "").strip()[:60]
+        if not name:
+            return _bad("Give the preset a name.")
+        if action == "preset_save":
+            try:
+                clean = {
+                    "points": trial_ranks.validate_points(data.get("points"), guild=guild),
+                    "ranks": trial_ranks.validate_ranks(data.get("ranks"), guild=guild),
+                    "trials": trial_ranks.validate_trials(data.get("trials"), guild=guild),
+                }
+            except (trial_ranks.TrialError, validate.ValidationError) as error:
+                return _bad(error)
+            bot.trial_ranks.save_preset(guild.id, name, clean)
+            await _record_change(request, audit_log.KIND_TRIAL, f"preset {name}", None,
+                                 f"{len(clean['points'])} priced, {len(clean['ranks'])} ranks",
+                                 f"Trial preset **{name}** saved")
+            return web.json_response({"ok": True, "name": name})
+        if action == "preset_delete":
+            bot.trial_ranks.delete_preset(guild.id, name)
+            await _record_change(request, audit_log.KIND_TRIAL, f"preset {name}",
+                                 "saved", None, f"Trial preset **{name}** deleted")
+            return web.json_response({"ok": True})
+        preset = bot.trial_ranks.preset(guild.id, name)
+        if preset is None:
+            return _bad(f"No preset called '{name}'.")
+        # Loading only fills the page in. Nothing is stored until Save or Push,
+        # so trying a preset can't cost anyone their current setup.
+        return web.json_response({"ok": True, "preset": _json_loads_safe({
+            "points": preset.get("points") or {},
+            "ranks": preset.get("ranks") or [],
+            "trials": preset.get("trials") or [],
+        })})
+
     if action in ("run", "push"):
         cog = bot.get_cog("trial_ranks")
         if cog is None:
             return _bad("The trial_ranks cog isn't loaded.")
+        # Push writes the weights *and* applies them to everyone at once; that
+        # stays with the bot owner.
+        if action == "push" and request["scope"] != panel_access.SCOPE_OWNER:
+            return _bad("Only the bot owner can push a ruleset live.")
         # "push" saves the weights being previewed, then applies them.
         if action == "push":
             try:

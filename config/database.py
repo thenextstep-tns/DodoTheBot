@@ -93,4 +93,6 @@ trial_enrollment = db["TrialEnrollment"]      # {guild_id, user_id, state, name,
 trial_rank_images = db["TrialRankImages"]     # {guild_id, role_id, data, content_type}
 # "I'd join a prog for one of those" — one row per person, latest press wins.
 trial_interest = db["TrialInterest"]          # {guild_id, user_id, name, role_ids, at}
+# Named snapshots of a whole ruleset, so a rebalance can be tried and put back.
+trial_presets = db["TrialPresets"]            # {guild_id, name, points, ranks, trials}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables

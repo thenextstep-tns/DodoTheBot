@@ -830,6 +830,74 @@ if (_trialsPage) {
     });
   }
 
+  // --- presets: a named copy of the whole ruleset ---
+  const presetPick = document.getElementById("presetpick");
+  if (presetPick) {
+    const currentRuleset = () => ({
+      points: (() => {
+        const out = {};
+        _trialsPage.querySelectorAll(".rolepoints").forEach((i) => {
+          const v = Number(i.value);
+          if (i.value !== "" && v !== 0 && i.dataset.role !== "0") out[i.dataset.role] = v;
+        });
+        return out;
+      })(),
+      ranks: window.readRanks(),
+      trials: window.readTrialMap ? window.readTrialMap() : [],
+    });
+
+    document.getElementById("presetsave").addEventListener("click", async () => {
+      const suggested = presetPick.value || "";
+      const name = prompt("Name this preset:", suggested);
+      if (!name || !name.trim()) return;
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "preset_save", name: name.trim(), ...currentRuleset() });
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      flash(`preset “${res.name}” saved ✓`, true);
+      setTimeout(() => location.reload(), 900);
+    });
+
+    document.getElementById("presetload").addEventListener("click", async () => {
+      const name = presetPick.value;
+      if (!name) { flash("Pick a preset first", false); return; }
+      if (!confirm(`Load “${name}”? This replaces what's on screen — nothing is saved `
+                   + "until you press Save draft or Push to live.")) return;
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "preset_load", name: name });
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      // Applying a preset means re-rendering the whole editor, which the server
+      // already knows how to do — so store it and reload rather than rebuilding
+      // three widgets by hand and getting one of them subtly wrong.
+      flash(`loaded “${name}” — review, then Save draft to keep it`, true);
+      applyPreset(res.preset);
+    });
+
+    document.getElementById("presetdel").addEventListener("click", async () => {
+      const name = presetPick.value;
+      if (!name) { flash("Pick a preset first", false); return; }
+      if (!confirm(`Delete the preset “${name}”? The live setup is untouched.`)) return;
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "preset_delete", name: name });
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      flash("preset deleted ✓", true);
+      setTimeout(() => location.reload(), 700);
+    });
+  }
+
+  // Fill the on-screen editor from a preset. Points are keyed by role id, so
+  // every box that names a role it prices gets its value; anything the preset
+  // doesn't mention is cleared rather than left behind from the old ruleset.
+  function applyPreset(preset) {
+    const points = preset.points || {};
+    _trialsPage.querySelectorAll(".rolepoints").forEach((input) => {
+      const id = input.dataset.role;
+      input.value = (id && points[id] !== undefined) ? points[id] : "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    if (window.setRanks) window.setRanks(preset.ranks || []);
+    if (window.setTrialMap) window.setTrialMap(preset.trials || []);
+  }
+
   // --- the rollout: turning it on for one person at a time ---
   const enrol = document.getElementById("pilotenrol");
   if (enrol) {
@@ -923,76 +991,137 @@ if (_sandbox) {
              exclusive: document.getElementById("trialsexclusive").checked };
   };
 
-  const tip = (row) => {
-    if (!row.breakdown || !row.breakdown.length) return "no scoring roles";
-    // A superseded role is shown, not hidden: seeing why a total is lower
-    // than the roles held is the whole point of the hover.
-    return row.breakdown
-      .map((b) => b.counted === false
-        ? `${b.name}: ${b.points} (superseded — same trial)`
-        : `${b.name}: ${b.points}`)
-      .join("\n") + `\n— total ${row.score}`;
+  // The preview table. Filters live above it; the breakdown opens on click
+  // rather than on hover, because a tooltip you have to discover isn't an
+  // answer to "why is my score that".
+  let allRows = [];
+
+  const breakdownRow = (row) => {
+    const tr = document.createElement("tr");
+    tr.className = "pvdetail";
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    if (!row.breakdown || !row.breakdown.length) {
+      td.className = "muted";
+      td.textContent = "No scoring roles.";
+    } else {
+      const list = document.createElement("div");
+      list.className = "pvbreak";
+      row.breakdown.forEach((b) => {
+        const item = document.createElement("span");
+        item.className = "pvchip" + (b.counted === false ? " superseded" : "");
+        item.textContent = b.counted === false
+          ? `${b.name} · ${b.points} (superseded)` : `${b.name} · ${b.points}`;
+        list.appendChild(item);
+      });
+      const total = document.createElement("div");
+      total.className = "muted small";
+      total.textContent = `Total ${row.score}`
+        + (row.cleanup ? ` · ${row.cleanup} superseded role(s) would come off` : "");
+      td.append(list, total);
+    }
+    tr.appendChild(td);
+    return tr;
   };
 
   const render = (rows, meta) => {
     out.innerHTML = "";
     if (!rows.length) {
-      out.innerHTML = meta
-        ? '<p class="muted">Nobody scored any points with these weights.</p>'
-        : '<p class="muted">No names to look up.</p>';
+      out.innerHTML = '<p class="muted">Nobody matches.</p>';
       return;
-    }
-    if (meta) {
-      const head = document.createElement("p");
-      head.className = "muted small";
-      head.textContent = `${meta.total} member(s) with points`
-        + (meta.moving ? ` · ${meta.moving} would change rank` : " · nobody changes rank")
-        + (rows.length < meta.total ? ` · showing the top ${rows.length}` : "");
-      out.appendChild(head);
     }
     const table = document.createElement("table");
     table.className = "stats previewtable";
     table.innerHTML = "<thead><tr><th>#</th><th>Player</th><th class='num'>Points</th>"
-      + "<th>Rank now</th><th>Would be</th></tr></thead>";
+      + "<th>Rank now</th><th>Would be</th><th></th></tr></thead>";
     const body = document.createElement("tbody");
     rows.forEach((row, index) => {
       const tr = document.createElement("tr");
-      if (row.missing) {
-        // The query is whatever was typed; build the cells so it can never be
-        // parsed as markup.
-        const dash = document.createElement("td");
-        dash.className = "muted";
-        dash.textContent = "—";
-        const msg = document.createElement("td");
-        msg.className = "muted";
-        msg.colSpan = 4;
-        msg.textContent = `no member matched “${row.query}”`;
-        tr.append(dash, msg);
-        body.appendChild(tr);
-        return;
-      }
-      if (row.changed) tr.className = "moved";
-      // Hover shows where the points came from — on demand, not on screen.
-      tr.title = tip(row) + (row.cleanup ? `
-(${row.cleanup} superseded role(s) would come off)` : "");
-      const cells = [
-        String(index + 1),
-        row.name,
-        String(row.score),
-        row.current || "—",
-        row.rank || "—",
-      ];
-      cells.forEach((text, i) => {
-        const td = document.createElement("td");
-        if (i === 2) td.className = "num";
-        td.textContent = text;
-        tr.appendChild(td);
-      });
+      if (row.direction === "up") tr.className = "promoted";
+      else if (row.direction === "down") tr.className = "demoted";
+
+      const num = document.createElement("td");
+      num.textContent = String(index + 1);
+
+      // Display name on top, the account tag under it — the tag is what you
+      // search for and the display name is what you recognise.
+      const who = document.createElement("td");
+      const disp = document.createElement("div");
+      disp.textContent = row.name;
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = "pvtag";
+      tag.textContent = "@" + (row.tag || "");
+      tag.title = "Show which clears made this score";
+      who.append(disp, tag);
+
+      const pts = document.createElement("td");
+      pts.className = "num";
+      pts.textContent = String(row.score);
+      const now = document.createElement("td");
+      now.textContent = row.current || "—";
+      const next = document.createElement("td");
+      next.textContent = row.rank || "—";
+      const arrow = document.createElement("td");
+      arrow.className = "pvmove";
+      arrow.textContent = row.direction === "up" ? "▲" : (row.direction === "down" ? "▼" : "");
+
+      tr.append(num, who, pts, now, next, arrow);
       body.appendChild(tr);
+
+      let open = false;
+      tag.addEventListener("click", () => {
+        if (open) { tr.nextSibling && tr.nextSibling.remove(); open = false; return; }
+        tr.after(breakdownRow(row));
+        open = true;
+      });
     });
     table.appendChild(body);
     out.appendChild(table);
   };
+
+  // --- filters ---
+  const filters = document.querySelector(".previewfilters");
+  const fName = document.getElementById("pvname");
+  const fRank = document.getElementById("pvrank");
+  const fRole = document.getElementById("pvrole");
+  const fMove = document.getElementById("pvmove");
+  const counter = document.getElementById("pvcount");
+
+  const fillOptions = (select, values, keep) => {
+    select.innerHTML = "";
+    const any = document.createElement("option");
+    any.value = "";
+    any.textContent = keep;
+    select.appendChild(any);
+    values.forEach((v) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v;
+      select.appendChild(o);
+    });
+  };
+
+  const applyFilters = () => {
+    const q = (fName.value || "").trim().toLowerCase();
+    const rank = fRank.value, role = fRole.value, move = fMove.value;
+    const shown = allRows.filter((row) => {
+      if (q && !(`${row.name} ${row.tag || ""}`.toLowerCase().includes(q))) return false;
+      if (rank && row.rank !== rank && row.current !== rank) return false;
+      if (role && !(row.breakdown || []).some((b) => b.name === role)) return false;
+      if (move === "up" && row.direction !== "up") return false;
+      if (move === "down" && row.direction !== "down") return false;
+      if (move === "any" && !row.changed) return false;
+      return true;
+    });
+    counter.textContent = `${shown.length} of ${allRows.length}`;
+    render(shown, null);
+  };
+
+  [fName, fRank, fRole, fMove].forEach((el) => {
+    el.addEventListener("input", applyFilters);
+    el.addEventListener("change", applyFilters);
+  });
 
   const ask = async (body, button) => {
     button.disabled = true;
@@ -1002,21 +1131,27 @@ if (_sandbox) {
     return res;
   };
 
-  document.getElementById("trialpreview").addEventListener("click", async (e) => {
-    const names = document.getElementById("trialnames").value
-      .split(/[,\n]/).map((n) => n.trim()).filter(Boolean).slice(0, 10);
-    if (!names.length) { flash("Type a name or two first", false); return; }
-    const res = await ask({ action: "preview", names: names, ...draft() }, e.target);
-    if (res) render(res.rows || [], null);
-  });
-
   document.getElementById("trialpreviewall").addEventListener("click", async (e) => {
     flash("scoring everyone…", true);
     const res = await ask({ action: "preview_all", ...draft() }, e.target);
-    if (res) render(res.rows || [], { total: res.total, moving: res.moving });
+    if (!res) return;
+    allRows = res.rows || [];
+    // Offer only the ranks and roles that actually occur, so the filters can't
+    // point at something with no rows behind it.
+    const ranks = [...new Set(allRows.flatMap((r) => [r.current, r.rank]).filter(Boolean))].sort();
+    const roles = [...new Set(allRows.flatMap(
+      (r) => (r.breakdown || []).map((b) => b.name)))].sort();
+    fillOptions(fRank, ranks, "Any rank");
+    fillOptions(fRole, roles, "Any clear role");
+    filters.hidden = false;
+    flash(`${res.total} scored · ${res.moving} would change rank`, true);
+    applyFilters();
   });
 
-  document.getElementById("trialpush").addEventListener("click", async (e) => {
+  // Owner-only, so it isn't on the page for everyone — an unguarded lookup here
+  // would throw and take every later handler on the page down with it.
+  const pushBtn = document.getElementById("trialpush");
+  if (pushBtn) pushBtn.addEventListener("click", async (e) => {
     if (!confirm("Save these weights and apply the ranks to everyone now?")) return;
     flash("pushing live…", true);
     const res = await ask({ action: "push", ...draft() }, e.target);
@@ -1124,7 +1259,7 @@ if (_trialRoles) {
 
   const renumber = () => {
     rankRows.querySelectorAll(".rankrow").forEach((row, index) => {
-      row.querySelector(".rungindex").textContent = String(index + 1);
+      row.querySelector(".rankindex").textContent = String(index + 1);
     });
   };
 
@@ -1193,14 +1328,15 @@ if (_trialRoles) {
     else flash(res.error || "Failed", false);
   });
 
-  const addRank = () => {
+  const addRank = (rank) => {
+    rank = rank || {};
     const row = document.createElement("div");
     row.className = "rankrow";
     const main = document.createElement("div");
     main.className = "rankmain";
 
     const index = document.createElement("span");
-    index.className = "rungindex";
+    index.className = "rankindex";
 
     // Built with DOM calls rather than markup: role names are arbitrary text.
     const pick = document.createElement("div");
@@ -1214,7 +1350,9 @@ if (_trialRoles) {
     const hiddenId = document.createElement("input");
     hiddenId.type = "hidden";
     hiddenId.className = "rolepick-id";
-    hiddenId.value = "0";
+    hiddenId.value = rank.role_id || "0";
+    text.value = rank.role_id ? (roles.find(
+      (r) => String(r.id) === String(rank.role_id)) || {}).name || "" : "";
     const clearBtn = document.createElement("button");
     clearBtn.type = "button";
     clearBtn.className = "rolepick-clear";
@@ -1226,14 +1364,15 @@ if (_trialRoles) {
     pick.append(text, hiddenId, clearBtn, list);
 
     const at = document.createElement("span");
-    at.className = "rungmid";
+    at.className = "rankmid";
     at.textContent = "at";
     const min = document.createElement("input");
     min.type = "number";
     min.className = "rankmin";
     min.placeholder = "0";
+    if (rank.min_points !== undefined) min.value = rank.min_points;
     const pts = document.createElement("span");
-    pts.className = "rungmid";
+    pts.className = "rankmid";
     pts.textContent = "points";
 
     const cell = document.createElement("div");
@@ -1270,14 +1409,23 @@ if (_trialRoles) {
     desc.rows = 2;
     desc.maxLength = 400;
     desc.placeholder = "Optional — shown on the /rank card for this rank";
+    desc.value = rank.description || "";
     row.append(main, desc);
+    row.classList.toggle("mapped", String(rank.role_id || "0") !== "0");
     rankRows.appendChild(row);
     bindRolePickers(row, roles);
     renumber();
   };
 
   const addButton = document.getElementById("addrank");
-  if (addButton) addButton.addEventListener("click", addRank);
+  if (addButton) addButton.addEventListener("click", () => addRank(null));
+
+  // Replace the whole ladder — used when a preset is loaded.
+  window.setRanks = (ranks) => {
+    rankRows.innerHTML = "";
+    (ranks || []).forEach((rank) => addRank(rank));
+    renumber();
+  };
 
   page.addEventListener("rolechange", (e) => {
     const row = e.target.closest(".rankrow");
@@ -1365,7 +1513,13 @@ if (_trialMap) {
       list.className = "rolepick-list";
       list.hidden = true;
       pick.append(text, hiddenId, clear, list);
-      cell.append(label, pick);
+      const pts = document.createElement("input");
+      pts.type = "number";
+      pts.className = "rolepoints slotpoints";
+      pts.placeholder = "pts";
+      pts.dataset.role = chosen || "0";
+      pts.hidden = !chosen;
+      cell.append(label, pick, pts);
       grid.appendChild(cell);
     });
 
@@ -1376,6 +1530,12 @@ if (_trialMap) {
   };
 
   document.getElementById("addtrial").addEventListener("click", () => addRow(null));
+
+  // Replace the whole mapping — used when a preset is loaded.
+  window.setTrialMap = (trials) => {
+    _trialMap.innerHTML = "";
+    (trials || []).forEach((trial) => addRow(trial));
+  };
 
   document.getElementById("suggesttrials").addEventListener("click", () => {
     if (_trialMap.children.length &&
@@ -1391,6 +1551,88 @@ if (_trialMap) {
     });
     flash(added ? `${added} trial(s) suggested — check them, then Push to live` : "nothing new to suggest", true);
   });
+
+  // A slot's score belongs to the role in that slot, so the box has to follow
+  // the picker — otherwise editing a mapping would silently reprice whatever
+  // role used to be there.
+  _trialMap.addEventListener("rolechange", (e) => {
+    const cell = e.target.closest(".slotcell");
+    if (!cell) return;
+    const id = (cell.querySelector(".rolepick-id") || {}).value || "0";
+    const pts = cell.querySelector(".slotpoints");
+    if (!pts) return;
+    pts.dataset.role = id;
+    pts.hidden = id === "0";
+    if (id === "0") pts.value = "";
+  });
+
+  // Type-to-find across trial names and every role they map.
+  const search = document.getElementById("trialsearch");
+  if (search) {
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      _trialMap.querySelectorAll(".trialrow").forEach((row) => {
+        row.style.display = !q || (row.dataset.search || "").includes(q) ? "" : "none";
+      });
+      document.querySelectorAll("#extrascores .extrarow").forEach((row) => {
+        row.style.display = !q || (row.dataset.search || "").includes(q) ? "" : "none";
+      });
+    });
+  }
+
+  // --- standalone scoring roles (achievements that belong to no trial) ---
+  const extras = document.getElementById("extrascores");
+  if (extras) {
+    extras.addEventListener("click", (e) => {
+      if (e.target.classList.contains("extradel")) e.target.closest(".extrarow").remove();
+    });
+    extras.addEventListener("rolechange", (e) => {
+      const row = e.target.closest(".extrarow");
+      if (!row) return;
+      const id = (row.querySelector(".rolepick-id") || {}).value || "0";
+      row.querySelector(".rolepoints").dataset.role = id;
+    });
+    const addExtra = document.getElementById("addextra");
+    if (addExtra) {
+      addExtra.addEventListener("click", () => {
+        const row = document.createElement("div");
+        row.className = "extrarow";
+        const pick = document.createElement("div");
+        pick.className = "rolepick";
+        pick.dataset.key = "extra";
+        const text = document.createElement("input");
+        text.className = "rolepick-text";
+        text.placeholder = "Type a role name…";
+        text.autocomplete = "off";
+        text.spellcheck = false;
+        const hid = document.createElement("input");
+        hid.type = "hidden";
+        hid.className = "rolepick-id";
+        hid.value = "0";
+        const clr = document.createElement("button");
+        clr.type = "button";
+        clr.className = "rolepick-clear";
+        clr.textContent = "×";
+        const lst = document.createElement("div");
+        lst.className = "rolepick-list";
+        lst.hidden = true;
+        pick.append(text, hid, clr, lst);
+        const pts = document.createElement("input");
+        pts.type = "number";
+        pts.className = "rolepoints";
+        pts.placeholder = "pts";
+        pts.dataset.role = "0";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "ghost extradel";
+        del.textContent = "×";
+        row.append(pick, pts, del);
+        extras.appendChild(row);
+        bindRolePickers(row, roles);
+        text.focus();
+      });
+    }
+  }
 
   // Read the mapping back out for save/preview.
   window.readTrialMap = () => Array.from(_trialMap.querySelectorAll(".trialrow")).map((row) => {

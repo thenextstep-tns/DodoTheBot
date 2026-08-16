@@ -1,13 +1,14 @@
 """
 Trial ranking runtime — clears/achievements into points, points into a rank role.
 
-Recalculated the moment a scoring role changes, so getting a clear role hands
-you the rank immediately, and swept hourly so nothing drifts if an event is
-missed.
+Recalculated at the two moments that matter: the instant a scoring role changes,
+and whenever someone asks where they stand. There is no periodic sweep — an
+hourly pass over the whole guild spent nearly all its effort confirming nothing
+had changed, and left an answer up to an hour stale when it hadn't.
 
 **Nobody is automated until they opt in.** The feature being enabled is not
-consent: the sweep and the role listener both skip anyone who isn't enrolled, so
-switching this on cannot rewrite a single role by itself. People arrive on the
+consent: every path skips anyone who isn't enrolled, so switching this on cannot
+rewrite a single role by itself. People arrive on the
 list one of two ways — an admin enrols a specific user tag from the panel, or
 the person presses the button on the announcement and says yes. Both are
 recorded, and every action the automation takes is logged to the server's log
@@ -21,12 +22,13 @@ import io
 import math
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 import lang
 from helpers import trial_ranks, trial_image
 
-# Role edits per guild per sweep, paced — a first run can re-rank everyone.
+# Role edits per guild per manual recalculation, paced — the first run after a
+# rebalance can re-rank everyone at once.
 MAX_EDITS = 200
 EDIT_PAUSE = 0.35
 # How long the "may I switch you over?" ask waits before letting it go.
@@ -35,7 +37,7 @@ CONSENT_TIMEOUT = 120.0
 # at any size; the block characters (█/░) turn into visual static instead.
 BAR_FULL, BAR_EMPTY = "▰", "▱"
 BAR_WIDTH = 12
-# Past this many rungs a star row stops being readable and becomes a wall.
+# Past this many ranks a star row stops being readable and becomes a wall.
 MAX_STARS = 12
 # Both halves of the row have to be emoji. Mixing ⭐ with the text glyph ☆ put
 # two different rendering systems side by side — different size, weight and
@@ -200,7 +202,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # paths run constantly — without this the log channel would get the same
         # complaint every time anybody touched a role.
         self._reported: dict[int, dict[str, float]] = {}
-        self.sweep.start()
 
     async def report_problems(self, guild, problems: list[str], *, context: str) -> None:
         """Log role-edit failures from the automatic paths, at most hourly each.
@@ -238,9 +239,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     async def cog_load(self) -> None:
         # Re-attach the pinned message's button to this process.
         self.bot.add_view(RankBoardView(self.bot))
-
-    def cog_unload(self) -> None:
-        self.sweep.cancel()
 
     # ------------------------------------------------------------------ #
     #  Logging to Discord
@@ -571,6 +569,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             # thinking=True makes a fresh ephemeral message the "original
             # response", so editing it can't touch the pinned announcement.
             await interaction.response.defer(ephemeral=True, thinking=True)
+            await self.refresh(member)
             embed, files, view = await self.rank_embed(member)
             await interaction.edit_original_response(embed=embed, attachments=files,
                                                      view=view)
@@ -668,6 +667,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await self.log_event(context.guild,
                                  f"{member.mention} was asked to switch to automatic ranking.")
             return
+        await self.refresh(member)
         embed, files, view = await self.rank_embed(member)
         await context.send(embed=embed, files=files, view=view or discord.utils.MISSING,
                            ephemeral=True)
@@ -841,28 +841,35 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         except Exception as error:  # noqa: BLE001 - never break the gateway
             self.bot.logger.error(f"Trial rank update failed for {after.id}: {error}")
 
-    @tasks.loop(hours=1)
-    async def sweep(self) -> None:
-        """The safety net: whatever the listener missed, this catches within the hour.
+    async def refresh(self, member) -> None:
+        """Bring one person up to date, quietly.
 
-        It exists because gateway events can be missed — a restart, a dropped
-        connection, a role changed while the bot was down — and a ranking system
-        that drifts silently is worse than one that isn't automatic at all.
+        Replaces the hourly sweep: a whole-guild pass every hour spent almost
+        all of its work confirming that nothing had changed. The two moments
+        that actually matter are a scoring role changing (the listener) and the
+        person asking where they stand — so checking then covers the same ground
+        without the churn, and is current at the moment it's read rather than up
+        to an hour stale.
         """
-        for guild in list(self.bot.guilds):
-            try:
-                if not self.runs_here(guild):
-                    continue
-                summary = await self.run_for_guild(guild)
-                await self.report_problems(guild, summary.get("errors") or [],
-                                           context="hourly re-check")
-            except Exception as error:  # noqa: BLE001
-                self.bot.logger.error(f"Trial rank sweep failed for {guild.id}: {error}")
-
-    @sweep.before_loop
-    async def before_sweep(self) -> None:
-        await self.bot.wait_until_ready()
-        await asyncio.sleep(45)
+        if not self.runs_here(member.guild):
+            return
+        if not self.bot.trial_ranks.is_enrolled(member.guild.id, member.id):
+            return
+        try:
+            config = self.bot.trial_ranks.get(member.guild.id)
+            outcome = await self.apply(member, config)
+            await self.bot.loop.run_in_executor(
+                None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
+                member.display_name, outcome["score"], outcome["rank_name"])
+            if outcome["granted"] or outcome["removed"] or outcome["cleared"]:
+                await self.log_event(
+                    member.guild,
+                    f"{member.mention} brought up to date when they checked their rank.\n"
+                    f"Score: **{outcome['score']}** · Rank: **{outcome['rank_name'] or 'none'}**")
+            await self.report_problems(member.guild, outcome["errors"],
+                                       context=f"{member.display_name} checked their rank")
+        except Exception as error:  # noqa: BLE001 - showing the card matters more
+            self.bot.logger.error(f"Trial rank refresh failed for {member.id}: {error}")
 
 
 async def setup(bot):
