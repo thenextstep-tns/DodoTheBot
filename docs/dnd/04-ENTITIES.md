@@ -1,0 +1,223 @@
+# Entities, Sheets & Rulesets
+
+One model for PCs, NPCs, creatures and factions. The differences are which
+components are attached — not which class was instantiated.
+
+---
+
+## 1. Why one model
+
+An NPC has to be as real as a PC, or the "intricate roleplay" requirement is
+cosmetic. Two models guarantees drift: the PC path grows features the NPC path
+never gets, and NPCs stay puppets.
+
+So: `Entity` + optional components. A faction is an entity with `traits`,
+`relationships` and an agenda but no `stats`, `needs` or `position`. A goblin is
+an entity with `stats` and thin everything else. A questgiver has all of it.
+
+```python
+@dataclass
+class Entity:
+    id: ObjectId
+    kind: Literal["pc", "npc", "creature", "faction"]
+    tier: Literal["focus", "active", "dormant"]
+    identity: Identity
+    stats: dict | None            # shape owned by the ruleset
+    traits: Traits | None
+    inheritance: Inheritance | None
+    needs: Needs | None
+    conditions: list[str]
+    inventory: list[Item]
+    position: Position | None
+    importance: float             # 0..1 — drives memory budget and tier promotion
+```
+
+`relationships`, `beliefs` and `memory` live in their own collections
+(`02-DATA-MODEL.md` §1) and are loaded on demand — entities stay small and hot.
+
+## 2. Rulesets as data
+
+**Never hardcode 5e.** The current cog hardcodes one stat array for every
+character ever created; that is the mistake.
+
+A ruleset is a declaration plus a small resolver:
+
+```python
+class Ruleset(Protocol):
+    key: str
+    def stat_schema(self) -> dict: ...                  # validates entity.stats
+    def blank_sheet(self, concept: dict) -> dict: ...   # new character
+    def resolve(self, action: Action, actor: Entity,
+                target: Entity | None, rng: Random) -> Outcome: ...
+    def derive(self, stats: dict) -> dict: ...          # modifiers, DCs, saves
+    def affordances(self, actor: Entity, scene: Scene) -> list[ActionSpec]: ...
+```
+
+Two implementations, built in parallel so the abstraction cannot quietly collapse
+into one (this was the owner's explicit choice):
+
+### `freeform`
+Narrative resolution. Stats are 4–6 free-text-named approaches rated −1…+3.
+Resolution is a single d6 ladder: fail / cost / success / triumph, modified by
+approach, position and effect. **Reaches playable first** — it exists to get the
+minds on screen without a rules-engine dependency.
+
+### `srd5e`
+SRD 5.1 (CC-BY-4.0). Six abilities, proficiency, AC, HP, saves, skills,
+advantage/disadvantage, conditions, the standard action economy. Data-driven from
+the global KB. **Fills in behind freeform**; it exists to prove the abstraction is
+real.
+
+The pair is the test: if adding a third ruleset requires touching anything outside
+`rules/`, the abstraction failed.
+
+## 3. Traits — personal qualities
+
+Numeric axes, not tags, because the decision engine multiplies them
+(`06-DECISION-ENGINE.md` §4). Range −1…1 unless noted.
+
+```python
+@dataclass
+class Traits:
+    # Temperament — stable, changes only through imprints
+    warmth: float        # cruel ↔ kind
+    volatility: float    # steady ↔ explosive
+    boldness: float      # timid ↔ reckless
+    diligence: float     # feckless ↔ dogged
+    openness: float      # rigid ↔ curious
+
+    # Drives — 0..1, what they *want*; shift slowly with experience
+    greed: float
+    honour: float
+    curiosity: float
+    fear_of_death: float
+    belonging: float
+
+    flaws: list[str]     # narrative; can be triggered by cues
+    bonds: list[Bond]    # entity + text; strong utility weights
+    ideals: list[str]
+```
+
+Five temperament axes and five drives is a deliberate ceiling: enough for
+distinct-feeling NPCs, few enough that a GM can read a sheet and predict
+behaviour. More axes make the utility weights unreadable and the NPCs mushier,
+not richer.
+
+**Traits change rarely.** Temperament shifts only when an imprint forms; drives
+drift slowly with reinforced experience. An NPC whose personality moves every
+session has no personality.
+
+## 4. Inheritance — inherited qualities
+
+Traits are partly derived from lineage plus culture, with variance. This makes
+generated NPCs *coherent* rather than random, and hands you family and dynasty
+stories at no extra cost.
+
+```python
+def derive_traits(parents, culture, rng) -> Traits:
+    # 1. Culture supplies the prior (from the global KB culture table)
+    base = culture.trait_prior                    # e.g. tidewater: +diligence, −openness
+    # 2. Parents pull toward their midpoint
+    if parents:
+        base = lerp(base, mean(p.traits for p in parents), HERITABILITY)  # ~0.4
+    # 3. Variance so siblings differ
+    return jitter(base, sigma=0.25, rng=rng)
+```
+
+Heritability at ~0.4 is the number to tune: high enough that "she has her
+mother's temper" reads as true, low enough that children are not clones. Recorded
+in `inheritance.derived` so a GM can tell which NPCs were generated.
+
+Also carried: culture (→ naming tables, default beliefs, faction priors) and
+optional bloodline (→ mechanical traits per ruleset).
+
+## 5. Needs — physiological
+
+Only for `kind in (pc, npc, creature)`, only ticked for `focus`/`active` tiers,
+extrapolated in closed form for `dormant` (`01-ARCHITECTURE.md` §6).
+
+`hunger · thirst · fatigue · pain · warmth · safety · belonging`, each 0…1 where
+1 is desperate.
+
+```python
+need += rate * elapsed_minutes            # rate from species/condition
+need = clamp(need, 0, 1)
+```
+
+Needs feed the decision engine through **non-linear urgency**:
+
+```python
+urgency = need ** 3        # ignorable until it isn't
+```
+
+The cube is the whole trick. Linear needs produce NPCs who constantly fidget
+about being slightly peckish; cubed, hunger is invisible at 0.4 and dominates at
+0.9. That is how needs feel real without being annoying.
+
+Unmet needs above threshold also generate **impulses** (`05-MEMORY.md` §6) and
+apply ruleset conditions (exhaustion, etc.).
+
+## 6. Beliefs — what this entity thinks is true
+
+Stored per entity in `dnd_beliefs` (`02-DATA-MODEL.md` §5), covered in
+`03-KNOWLEDGE-BASE.md` §4. The rule that matters here:
+
+> **NPC decisions read beliefs. Never world truth.**
+
+Enforced by the decision engine receiving an `EntityView` — a projection built
+from that entity's beliefs, memories and perception — rather than the world state.
+`decide()` cannot see the world even if it wanted to, because it is never passed
+it. Type-level enforcement of the fun.
+
+## 7. Relationships
+
+Directed and multi-axis (`02-DATA-MODEL.md` §6): `affinity`, `trust`, `fear`,
+`respect`, `debt`, `familiarity`. `A→B ≠ B→A`, which is most of the drama.
+
+Updated **only** from events, never by an LLM:
+
+```python
+DELTAS = {
+    "helped":     {"affinity": +0.15, "trust": +0.10, "debt": -1},
+    "betrayed":   {"affinity": -0.50, "trust": -0.70, "fear": +0.20},
+    "threatened": {"fear": +0.30, "respect": +0.10, "affinity": -0.20},
+    "gifted":     {"affinity": +0.10, "debt": -1},
+    ...
+}
+```
+
+Magnitude scales with the witness's `arousal` at encoding and their traits (a
+high-`honour` NPC weights `debt` far more heavily).
+
+**Faction standing propagates as a prior**, not as a fact: a member of a hostile
+faction *starts* at that standing, and their own traits and memories move them
+off it. That is how you get the sympathetic enemy soldier without scripting one.
+
+## 8. Sheets
+
+The sheet is a **render of the entity**, per ruleset, per audience:
+
+| Audience | Sees |
+| --- | --- |
+| Player (own PC) | Stats, inventory, conditions, **their character's beliefs**, their own memories, known relationships |
+| Player (other PC) | Public identity only |
+| GM | Everything, plus truth-vs-belief diff, memory inspector, decision trace |
+| Sim | The `EntityView` (§6) |
+
+Discord surfaces it as an ephemeral embed with buttons; the panel renders the full
+version (`09-SURFACES.md`).
+
+## 9. NPC generation
+
+1. Pick culture and role (from campaign KB, or GM-specified).
+2. Derive traits from culture + optional parents (§4).
+3. Roll stats via `ruleset.blank_sheet(concept)`.
+4. Seed beliefs from culture defaults + faction membership + local knowledge.
+5. Seed 1–3 memories, one of which may be an **imprint** — this is what makes a
+   fresh NPC feel like they have a past on first contact.
+6. Set `importance` from role, which sets the memory budget (`05-MEMORY.md` §5).
+7. Optionally, one `propose_canon` call for name, appearance and a voice quirk;
+   with `backend=none`, name tables and templates cover it.
+
+Step 5 is what separates this from every generator that produces a statblock with
+a name attached.
