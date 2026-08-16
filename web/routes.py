@@ -1174,35 +1174,6 @@ def _tribes_html(bot, guild, scope: str) -> str:
 # --------------------------------------------------------------------------- #
 #  Trial ranking page
 # --------------------------------------------------------------------------- #
-def _score_rows(roles: list, points: dict, *, section: str) -> str:
-    """One row per scoring role.
-
-    A role with no stored value is pre-filled from the built-in defaults and
-    marked as a suggestion, so a fresh server starts with a sensible board and
-    you can still tell which numbers you actually decided. Roles we have no
-    default for stay empty and are flagged.
-    """
-    rows = ""
-    for role in roles:
-        stored = points.get(str(role.id))
-        suggested = 0 if stored else trial_ranks.default_points_for(role)
-        value = stored or suggested
-        if stored:
-            flag, css = "", ""
-        elif suggested:
-            flag, css = ' <span class="suggested">suggested</span>', " suggestedrow"
-        else:
-            flag, css = ' <span class="nopoints">no points set</span>', " unpriced"
-        rows += (
-            f'<div class="scorerow{css}" data-role="{role.id}" '
-            f'data-search="{html.escape(role.name.lower())}">'
-            f'<span class="rolename">{html.escape(role.name)}</span>{flag}'
-            f'<input type="number" class="rolepoints" data-role="{role.id}" '
-            f'value="{html.escape(str(value)) if value else ""}" placeholder="0"></div>'
-        )
-    return rows or f'<p class="muted">No roles found under the {section} divider.</p>'
-
-
 def _role_picker(guild, *, key: str, selected_id: int = 0, placeholder: str = "Type a role name…") -> str:
     """A text box that filters roles as you type, backed by a hidden id.
 
@@ -1696,35 +1667,30 @@ def _interest_html(bot, guild, config: dict) -> str:
     <div class="proggrid">{cards}</div>"""
 
 
-def _orphan_warning(guild, points: dict) -> str:
-    """Flag roles that still score but have fallen out of a scoring section.
+def _unpriced_warning(guild, config: dict) -> str:
+    """Slots you've mapped but never priced — they score nothing.
 
-    Deleting or moving a divider re-files every role beneath it. Points are
-    keyed by role id, so they keep counting — the role just stops being listed
-    here, and the page quietly stops telling the truth about what scores.
+    Replaces two checks that both asked the divider sections what *should* have
+    points. Now that nothing is read from dividers, the only unanswered question
+    left is the one you created yourself by mapping a role to a trial.
     """
-    orphans = trial_ranks.orphaned_points(guild, points)
-    if not orphans:
+    missing = trial_ranks.unpriced_slots(guild, config)
+    if not missing:
         return ""
     listed = ", ".join(
-        f'<b>{html.escape(row["name"])}</b> ({row["points"]})' for row in orphans[:12])
-    more = f" and {len(orphans) - 12} more" if len(orphans) > 12 else ""
-    return (
-        f'<p class="warnline">⚠️ {len(orphans)} role(s) still count towards everyone\'s '
-        f'score but no longer sit under a <b>Clears</b> or <b>Achievements</b> divider, '
-        f'so they aren\'t listed below and can\'t be edited here: {listed}{more}. '
-        f'Move them under a scoring divider to get them back, or set them to 0 to stop '
-        f'them counting.</p>'
-    )
+        f'<b>{html.escape(row["name"])}</b>'
+        + (f' <span class="muted">(suggest {row["suggested"]})</span>'
+           if row["suggested"] else "")
+        for row in missing[:10])
+    more = f" and {len(missing) - 10} more" if len(missing) > 10 else ""
+    return (f'<p class="warnline">⚠️ {len(missing)} mapped clear(s) are worth 0 points, '
+            f'so they score nothing: {listed}{more}. Price them under '
+            f'<b>Trials Setup</b>.</p>')
 
 
 def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     config = bot.trial_ranks.get(guild.id)
-    grouped = trial_ranks.sections(guild)
     points = config.get("points") or {}
-    unset = trial_ranks.unpriced(guild, points)
-    missing = [role for role in unset if not trial_ranks.default_points_for(role)]
-    suggested = [role for role in unset if trial_ranks.default_points_for(role)]
     cog = bot.get_cog("trial_ranks")
     last = (cog.last_run.get(guild.id) if cog else None) or {}
     last_line = (
@@ -1799,9 +1765,7 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     <span class="muted small">A named copy of the weights, ranks and trials — load one to
     play with the numbers without losing what you had.</span>
   </div>
-  {_orphan_warning(guild, points)}
-  {'<p class="warnline">' + str(len(missing)) + ' role(s) have no points and no default — highlighted below in Clears and Achievements.</p>' if missing else ''}
-  {'<p class="muted small">' + str(len(suggested)) + ' role(s) pre-filled with suggested values — review, then Push to live to store them.</p>' if suggested else ''}
+  {_unpriced_warning(guild, config)}
 
   <div class="triallayout">
     <aside class="sidebar trialnav">{nav}

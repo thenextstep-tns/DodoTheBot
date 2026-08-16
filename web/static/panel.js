@@ -856,8 +856,11 @@ if (_trialsPage) {
     // out by being refused.
     const syncOwnership = () => {
       const opt = presetPick.options[presetPick.selectedIndex];
-      const author = (opt && opt.dataset.author) || "";
-      const mine = presetPick.value !== "" && author !== "" && author === viewer;
+      const author = (opt && opt.dataset.author) || "0";
+      // "0" is a preset saved before authorship existed — nobody owns it, and
+      // the server lets anyone claim it, so hiding Save here contradicted what
+      // saving would actually do.
+      const mine = presetPick.value !== "" && (author === viewer || author === "0");
       saveBtn.hidden = !mine;
       delBtn.hidden = !mine;
     };

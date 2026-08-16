@@ -85,13 +85,15 @@ def build(guild, config: dict) -> bytes:
     points = config.get("points") or {}
     ranks = sorted(config.get("ranks") or [], key=lambda r: r["min_points"])
 
-    # Effective value per role: what's stored, else the built-in suggestion —
-    # the same thing the panel shows, so the picture matches the page.
+    # Driven by what is actually priced. Reading the divider sections instead
+    # meant a role scoring points could be missing from the chart entirely, just
+    # because somebody reorganised the role list.
     bands: dict[int, list[str]] = {}
-    for role in trial_ranks.scoring_roles(guild):
-        value = points.get(str(role.id)) or trial_ranks.default_points_for(role)
-        if value:
-            bands.setdefault(int(value), []).append(_display_name(role.name))
+    for role_id, value in points.items():
+        role = guild.get_role(int(role_id))
+        if role is None or not int(value):
+            continue
+        bands.setdefault(int(value), []).append(_display_name(role.name))
     for names in bands.values():
         names.sort(key=str.lower)
 

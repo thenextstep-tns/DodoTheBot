@@ -101,7 +101,12 @@ def sections(guild) -> dict[str, list]:
 
 
 def scoring_roles(guild) -> list:
-    """Every role that may carry points — clears and achievements."""
+    """Every role sitting under a scoring divider.
+
+    No longer what decides anything: points are keyed by role id and the editor
+    is built from the trials mapping. This is left for ``suggest_trials``, which
+    uses the clears divider as a starting guess when a server first sets up.
+    """
     grouped = sections(guild)
     return [role for key in SCORING_SECTIONS for role in grouped[key]]
 
@@ -155,24 +160,6 @@ DEFAULT_POINTS: dict[str, int] = {
 def default_points_for(role) -> int:
     """The suggested value for a role, or 0 if we have no opinion about it."""
     return DEFAULT_POINTS.get(normalise_role_name(getattr(role, "name", "")), 0)
-
-
-def with_defaults(guild, points: dict) -> dict:
-    """Stored points, with suggestions filled in for roles that have none.
-
-    Returns ``{role_id: (value, is_default)}`` so the panel can show a
-    suggestion differently from a decision.
-    """
-    out = {}
-    for role in scoring_roles(guild):
-        stored = (points or {}).get(str(role.id))
-        if stored:
-            out[role.id] = (int(stored), False)
-        else:
-            suggested = default_points_for(role)
-            if suggested:
-                out[role.id] = (suggested, True)
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -677,27 +664,27 @@ def find_by_tag(guild, tag: str):
     return None
 
 
-def unpriced(guild, points: dict) -> list:
-    """Scoring roles with no points set yet — surfaced so nothing is forgotten."""
-    priced = {int(role_id) for role_id, value in (points or {}).items()}
-    return [role for role in scoring_roles(guild) if role.id not in priced]
+def unpriced_slots(guild, config: dict) -> list[dict]:
+    """Trial slots pointing at a role that scores nothing.
 
-
-def orphaned_points(guild, points: dict) -> list:
-    """Roles that still score but no longer sit under a scoring divider.
-
-    Sections decide what the panel *shows*; the stored points decide what
-    actually *counts*. Move a divider and those two can part company without a
-    word: the role vanishes from the editor and the chart while quietly carrying
-    on adding to everyone's total. This is how you find out.
+    The old version asked the divider sections which roles *ought* to have
+    points, which stopped meaning anything once the setup was unhooked from
+    them. The question that survives is narrower and more useful: you said this
+    role belongs to this trial, so what is it worth?
     """
-    visible = {role.id for role in scoring_roles(guild)}
+    points = config.get("points") or {}
     out = []
-    for role_id, value in (points or {}).items():
-        role = guild.get_role(int(role_id))
-        if role is not None and role.id not in visible:
-            out.append({"role_id": role.id, "name": role.name, "points": int(value)})
-    out.sort(key=lambda row: (-row["points"], row["name"].lower()))
+    for trial in config.get("trials") or []:
+        for slot, role_id in (trial.get("slots") or {}).items():
+            role_id = int(role_id)
+            if int(points.get(str(role_id)) or 0):
+                continue
+            role = guild.get_role(role_id) if guild else None
+            if role is None:
+                continue
+            out.append({"role_id": role_id, "name": role.name,
+                        "trial": trial.get("name") or "", "slot": slot,
+                        "suggested": default_points_for(role)})
     return out
 
 
@@ -1031,12 +1018,21 @@ class TrialRankManager:
         if self._presets is None:
             return
         now = datetime.datetime.now(datetime.timezone.utc)
+        query = {"guild_id": int(guild_id), "name": str(name)[:60]}
+        fields = {"points": data.get("points") or {},
+                  "ranks": data.get("ranks") or [],
+                  "trials": data.get("trials") or [],
+                  "at": now}
+        existing = self._presets.find_one(query)
+        # Presets written before authorship existed have nobody on them.
+        # Whoever saves one next takes it over, rather than leaving a preset
+        # that shows an owner's controls to everyone forever.
+        if existing is not None and not int(existing.get("author_id") or 0):
+            fields["author_id"] = int(author_id or 0)
+            fields["author_name"] = str(author_name or "")[:100]
         self._presets.update_one(
-            {"guild_id": int(guild_id), "name": str(name)[:60]},
-            {"$set": {"points": data.get("points") or {},
-                      "ranks": data.get("ranks") or [],
-                      "trials": data.get("trials") or [],
-                      "at": now},
+            query,
+            {"$set": fields,
              "$setOnInsert": {"author_id": int(author_id or 0),
                               "author_name": str(author_name or "")[:100],
                               "created_at": now}},
