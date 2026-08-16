@@ -98,6 +98,11 @@ class Racing(commands.Cog, name="racing"):
         if not mouse_users:
             await context.send(lang.RACING_NO_JOIN)
             return
+        # A lone sign-up has nobody to race and would be waved home on move one, so
+        # Dodo takes a mouse itself to make a race of it. It drives, but it doesn't
+        # play the reaction games — see ``grabbers`` in run_race.
+        if len(mouse_users) == 1:
+            mouse_users.append(self.bot.user)
 
         mice = self.assign_mice_classes(mouse_users)
         left_out = [user for user in mouse_users if user.id not in mice]
@@ -275,17 +280,23 @@ class Racing(commands.Cog, name="racing"):
             # Events only concern mice still on the track, and a grab lasts exactly
             # one move — nobody carries a bonus into a later event.
             racing_users = [u for u in mouse_users if u.id not in completed_mice]
+            # Dodo drives a mouse when a race would otherwise be a solo lap, but it
+            # can't click anything — so it moves and takes blasts like any racer
+            # while the events belong to the humans.
+            grabbers = [u for u in racing_users if not u.bot]
             cheese_user = wine_user = bomb_user = None
             # Resolved before the event phase, so a Lucky Mouse wearing Navigator
             # this move can both summon a map and read it.
             move_classes = {u.id: effective_class(u.id, plan) for u in racing_users}
-            navigator_racing = any(cls and cls["name"] == "Navigator" for cls in move_classes.values())
+            navigator_racing = any(
+                move_classes[u.id] and move_classes[u.id]["name"] == "Navigator" for u in grabbers
+            )
 
             # --- POSSIBLE EVENTS ---
             if navigator_racing and event_roll == 95:
                 event_text = lang.RACING_EVENT_MAP
                 await race_message.edit(content=event_text)
-                map_reader = await self._grab_event(race_message, racing_users, MAP, grab_window)
+                map_reader = await self._grab_event(race_message, grabbers, MAP, grab_window)
                 if map_reader is not None:
                     reader_class = move_classes[map_reader.id]
                     if reader_class and reader_class["name"] == "Navigator":
@@ -299,7 +310,7 @@ class Racing(commands.Cog, name="racing"):
                         )
 
             elif 81 <= event_roll <= 82 and (
-                star_eligible := [u for u in racing_users if u.id in adopted_owners]
+                star_eligible := [u for u in grabbers if u.id in adopted_owners]
             ):
                 event_text = lang.RACING_EVENT_STARRY
                 await race_message.edit(content=event_text)
@@ -310,17 +321,17 @@ class Racing(commands.Cog, name="racing"):
             elif 86 <= event_roll <= 88:
                 event_text = lang.RACING_EVENT_CHEESE
                 await race_message.edit(content=event_text)
-                cheese_user = await self._grab_event(race_message, racing_users, CHEESE, grab_window)
+                cheese_user = await self._grab_event(race_message, grabbers, CHEESE, grab_window)
 
             elif 89 <= event_roll <= 92:
                 event_text = lang.RACING_EVENT_WINE
                 await race_message.edit(content=event_text)
-                wine_user = await self._grab_event(race_message, racing_users, WINE, grab_window)
+                wine_user = await self._grab_event(race_message, grabbers, WINE, grab_window)
 
             elif 93 <= event_roll <= 94:
                 event_text = lang.RACING_EVENT_BOMB
                 await race_message.edit(content=event_text)
-                bomb_user = await self._grab_event(race_message, racing_users, BOMB, grab_window)
+                bomb_user = await self._grab_event(race_message, grabbers, BOMB, grab_window)
             else:
                 await asyncio.sleep(1)
 
