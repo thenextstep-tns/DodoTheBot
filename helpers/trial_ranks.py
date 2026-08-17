@@ -268,6 +268,36 @@ def trial_of_role(role_id: int, trials: list[dict]) -> Optional[str]:
         return None
 
 
+def stale_interest(role_ids: Iterable[int], held: Iterable[int],
+                   trials: list[dict]) -> set[int]:
+    """Interests this member has since satisfied.
+
+    Two ways to satisfy one: hold the role, or hold something stronger in the
+    same trial that implies it. Someone who wanted the hardmode and came back
+    with the trifecta is not still waiting to prog the hardmode, and leaving
+    them on that list puts a name in front of a raid lead that is no longer
+    true.
+    """
+    held = {int(r) for r in held or ()}
+    mapping = slot_of(trials or [])
+    extra_index = SLOT_INDEX["extra"]
+    best: dict[int, int] = {}
+    for role_id in held:
+        found = mapping.get(role_id)
+        if found and found[1] != extra_index:
+            best[found[0]] = max(best.get(found[0], -1), found[1])
+    out = set()
+    for role_id in role_ids or ():
+        role_id = int(role_id)
+        if role_id in held:
+            out.add(role_id)
+            continue
+        found = mapping.get(role_id)
+        if found and found[1] != extra_index and best.get(found[0], -1) >= found[1]:
+            out.add(role_id)
+    return out
+
+
 def interest_buckets(guild, config: dict, rows: list[dict]) -> list[dict]:
     """Interest counted per raid, busiest first.
 
@@ -1135,6 +1165,30 @@ class TrialRankManager:
         if self._presets is None:
             return
         self._presets.delete_one({"guild_id": int(guild_id), "name": str(name)})
+
+    def drop_interest_roles(self, guild_id: int, user_id: int,
+                            role_ids: Iterable[int]) -> int:
+        """Take satisfied wants off someone's interest, and the row with the last."""
+        if self._interest is None:
+            return 0
+        drop = {int(r) for r in role_ids or ()}
+        if not drop:
+            return 0
+        query = {"guild_id": int(guild_id), "user_id": int(user_id)}
+        row = self._interest.find_one(query)
+        if row is None:
+            return 0
+        remaining = [int(r) for r in (row.get("role_ids") or []) if int(r) not in drop]
+        removed = len(row.get("role_ids") or []) - len(remaining)
+        if not removed:
+            return 0
+        if remaining:
+            self._interest.update_one(query, {"$set": {"role_ids": remaining}})
+        else:
+            # Nothing left to want; the row would otherwise sit there as a
+            # holder of an empty list.
+            self._interest.delete_one(query)
+        return removed
 
     def clear_interest(self, guild_id: int, user_id: int) -> None:
         if self._interest is None:

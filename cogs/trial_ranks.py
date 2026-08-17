@@ -304,7 +304,8 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # scoring below sees the same tidy set the member will end up with.
         stale = trial_ranks.superseded(held, trials)
         out = {"score": 0, "rank": None, "granted": 0, "removed": 0, "cleared": 0,
-               "cleared_names": [], "rank_name": None, "errors": []}
+               "cleared_names": [], "rank_name": None, "errors": [],
+               "interest_dropped": 0}
 
         # Refusals used to be swallowed, which produced the worst possible
         # outcome: a card confidently showing a rank the member had not been
@@ -375,6 +376,18 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                  + trial_ranks.wr_points(
                      self.bot.trial_ranks.wr_for(member.guild.id, member.id)))
         rank = trial_ranks.rank_for(score, ranks)
+
+        # A want they have since satisfied is not a want. Every real
+        # recalculation passes through here, so this is the one place it needs
+        # to happen; a preview (edit=False) must not quietly edit anything.
+        if edit:
+            row = self.bot.trial_ranks.interest_rows(member.guild.id)
+            mine = next((r for r in row if int(r["user_id"]) == member.id), None)
+            if mine:
+                done = trial_ranks.stale_interest(mine.get("role_ids") or [], held, trials)
+                if done:
+                    out["interest_dropped"] = self.bot.trial_ranks.drop_interest_roles(
+                        member.guild.id, member.id, done)
         out["score"], out["rank"] = score, rank
         out["rank_name"] = trial_ranks.rank_name(rank, member.guild) if rank else None
         if not ranks or not edit:
@@ -882,6 +895,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             if outcome["cleared_names"]:
                 lines_out.append("Removed superseded: "
                                  + ", ".join(outcome["cleared_names"][:20]))
+            if outcome.get("interest_dropped"):
+                lines_out.append(f"Prog interest: {outcome['interest_dropped']} "
+                                 "entry(s) cleared, now earned.")
             await self.log_event(after.guild, chr(10).join(lines_out),
                                  title="Trial ranks: recalculated")
             # A recalculation that changed nothing *because it was refused* is
