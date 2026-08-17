@@ -29,7 +29,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, stats, validate
+from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, share_tokens, stats, validate
 from helpers import tribes as tribe_rules
 from helpers import trial_ranks, trial_image
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
@@ -1793,6 +1793,13 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
          f"{len(bot.trial_ranks.wr_all(guild.id))} holders"),
         ("sandbox", "🧪", "Preview", ""),
     ]
+    # Only whether a link exists, never the link itself: it is stored hashed,
+    # so the panel can show it once at creation and never again.
+    share_live = bot.share_tokens.active(guild.id) is not None
+    share_label = "Rotate link" if share_live else "Create link"
+    share_state = ("A link is active. Rotating replaces it and kills the old one."
+                   if share_live else "No link yet.")
+
     presets = bot.trial_ranks.presets(guild.id)
     preset_options = ('<option value="" data-author="">— pick a preset —</option>' + "".join(
         f'<option value="{html.escape(p["name"])}" '
@@ -1883,6 +1890,14 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
 
       <section class="trialpanel" data-panel="sandbox" hidden>
         <h2 class="panelhead">Preview</h2>
+        <div class="announcebar">
+          <div><b>Public leaderboard</b>
+            <div class="muted small">An unlisted link showing the
+            <b>enrolled</b> players only. {share_state}</div></div>
+          <button id="sharemake" class="ghost">{share_label}</button>
+          {'<button id="sharekill" class="ghost">Revoke</button>' if share_live else ''}
+        </div>
+        <div id="sharelink" class="sharelink" hidden></div>
         <div class="sandbox">
           <div class="explain"><p>Simulates ranks for the server with the selected ruleset,
           including edits you haven't saved.</p></div>
@@ -2328,6 +2343,84 @@ async def guild_events_page(request: web.Request):
                  scope=scope, guild=guild, current="events")
 
 
+async def public_leaderboard(request: web.Request):
+    """The enrolled-only standings, behind a capability link.
+
+    No session, no login: the URL *is* the credential, so it is treated like
+    one. The token never reaches a log, the page is unindexable, and no referrer
+    is sent, which is how a token in a path leaks in practice.
+    """
+    bot = request.app["bot"]
+    try:
+        gid = int(request.match_info["gid"])
+    except (TypeError, ValueError):
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+    token = request.match_info.get("token") or ""
+    if bot.share_tokens.resolve(gid, token, kind=share_tokens.KIND_PUBLIC) is None:
+        # Same answer for a wrong token and a guild that isn't here: a public
+        # endpoint shouldn't confirm which servers exist.
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+    guild = bot.get_guild(gid)
+    if guild is None:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+
+    config = bot.trial_ranks.get(gid)
+    points = config.get("points") or {}
+    trials = config.get("trials") or []
+    ranks = config.get("ranks") or []
+    holders = bot.trial_ranks.wr_all(gid)
+    enrolled = bot.trial_ranks.enrolled_ids(gid)
+
+    rows = []
+    for member in guild.members:
+        if member.bot or member.id not in enrolled:
+            continue
+        held = {role.id for role in member.roles}
+        record = holders.get(member.id)
+        score = trial_ranks.score_for(held, points, trials=trials) + trial_ranks.wr_points(record)
+        rank = trial_ranks.rank_for(score, ranks)
+        rows.append({"name": member.display_name, "score": score,
+                     "rank": trial_ranks.rank_name(rank, guild) if rank else "—",
+                     "medals": trial_ranks.wr_medals(record)})
+    rows.sort(key=lambda r: (-r["score"], r["name"].lower()))
+
+    body = "".join(
+        f'<tr><td class="pos">{index + 1}</td>'
+        f'<td class="who">{html.escape(row["name"])} '
+        f'<span class="med">{row["medals"]}</span></td>'
+        f'<td class="pts">{row["score"]}</td>'
+        f'<td class="rk">{html.escape(row["rank"])}</td></tr>'
+        for index, row in enumerate(rows)
+    ) or '<tr><td colspan="4" class="none">Nobody is on the automatic system yet.</td></tr>'
+
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%d %b %Y %H:%M UTC")
+    doc = f"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<title>{html.escape(guild.name)} · trial ranks</title>
+<link rel="stylesheet" href="/static/panel.css?v={_ASSET_VER}">
+</head><body class="board">
+<main class="boardmain">
+  <h1>{html.escape(guild.name)}</h1>
+  <p class="muted">Trial rankings, worked out from clears and world records.
+  {len(rows)} player(s) on the automatic system.</p>
+  <table class="boardtable">
+    <thead><tr><th>#</th><th>Player</th><th class="pts">Points</th><th>Rank</th></tr></thead>
+    <tbody>{body}</tbody>
+  </table>
+  <p class="muted small">Updated {stamp}. This page is unlisted; anyone with the link can read it.</p>
+</main>
+</body></html>"""
+    return web.Response(
+        text=doc, content_type="text/html",
+        headers={"Referrer-Policy": "no-referrer",
+                 "X-Robots-Tag": "noindex, nofollow",
+                 "Cache-Control": "no-store"},
+    )
+
+
 @require_scope(panel_access.SCOPE_CONFIG)
 async def guild_trials_page(request: web.Request):
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
@@ -2609,6 +2702,19 @@ async def api_guild_trials(request: web.Request):
             f"Trial ranks announcement posted in **#{channel.name}**")
         return web.json_response({"ok": True, "message_id": str(message.id),
                                   "channel": channel.name})
+
+    if action in ("share_make", "share_kill"):
+        if action == "share_kill":
+            bot.share_tokens.revoke_all(guild.id, kind=share_tokens.KIND_PUBLIC)
+            await _record_change(request, audit_log.KIND_TRIAL, "public link",
+                                 "active", None, "Public leaderboard link revoked")
+            return web.json_response({"ok": True})
+        token = bot.share_tokens.issue(guild.id, kind=share_tokens.KIND_PUBLIC)
+        await _record_change(request, audit_log.KIND_TRIAL, "public link", None, "issued",
+                             "Public leaderboard link issued (previous one revoked)")
+        # The one and only time this value exists outside the reader's browser.
+        return web.json_response({"ok": True,
+                                  "url": f"{WEB_PUBLIC_URL.rstrip('/')}/r/{guild.id}/{token}"})
 
     if action == "wr_set":
         tag = str(data.get("tag") or "").strip()
@@ -3367,6 +3473,7 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/log", guild_log_page),
             web.get("/guild/{gid}/tribes", guild_tribes_page),
             web.get("/guild/{gid}/trials", guild_trials_page),
+            web.get("/r/{gid}/{token}", public_leaderboard),
             web.post("/api/guild/{gid}/trials", api_guild_trials),
             web.get("/guild/{gid}/trials.png", guild_trials_image),
             web.get("/guild/{gid}/trials/image/{role_id}.png", guild_rank_image),

@@ -99,6 +99,8 @@ trial_presets = db["TrialPresets"]            # {guild_id, name, points, ranks, 
 bot_health = db["BotHealth"]                  # {at, status, latency_ms, guilds, members}
 # World-record holders: a per-person bonus on top of the role-derived score.
 trial_wr = db["TrialWorldRecords"]           # {guild_id, user_id, name, current, former}
+# Capability links (public leaderboard, later per-recipient). Hash only.
+share_tokens = db["ShareTokens"]              # {guild_id, kind, token_hash, expires_at}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables
 
 # --------------------------------------------------------------------------- #

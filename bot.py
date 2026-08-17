@@ -39,6 +39,7 @@ from helpers.audit_log import AuditLog
 from helpers.tribes import TribeManager
 from helpers.trial_ranks import TrialRankManager
 from helpers.health import HealthMonitor, SAMPLE_MINUTES
+from helpers.share_tokens import ShareTokenStore
 
 # --------------------------------------------------------------------------- #
 #  Configuration & logging
@@ -132,6 +133,8 @@ class DodoBot(commands.Bot):
         # Samples the gateway every few minutes so the dashboard can show what
         # was true, not just what is true right now.
         self.health = HealthMonitor(config_py.bot_health)
+        # Capability links for the public leaderboard; hashes only.
+        self.share_tokens = ShareTokenStore(config_py.share_tokens)
         self.audit_notify = OwnerNotifier(
             self, config.get("owners", []), panel_url=config_py.WEB_PUBLIC_URL
         )

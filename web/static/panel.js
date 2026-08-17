@@ -2186,3 +2186,44 @@ function bindMemberPicker(pick, members) {
     if (e.key === "Escape") reset();
   }));
 })();
+
+
+// --- Public leaderboard link -------------------------------------------------
+// Shown once, at the moment it is issued: the server keeps only a hash, so
+// there is no later opportunity to display it. Losing it means rotating.
+(function shareLink() {
+  const make = document.getElementById("sharemake");
+  const out = document.getElementById("sharelink");
+  const page = document.querySelector(".trialspage");
+  if (!make || !out || !page) return;
+  const guildId = page.dataset.guild;
+
+  make.addEventListener("click", async () => {
+    if (!confirm("Create a new public link?\n\nAnyone who has it can read the "
+                 + "enrolled players' standings. Any previous link stops working.")) return;
+    const res = await post(`/api/guild/${guildId}/trials`, { action: "share_make" });
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    out.innerHTML = "";
+    const head = document.createElement("b");
+    head.textContent = "Copy this now, it is not shown again";
+    const box = document.createElement("input");
+    box.readOnly = true;
+    box.value = res.url;
+    box.addEventListener("focus", () => box.select());
+    out.append(head, box);
+    out.hidden = false;
+    box.focus();
+    flash("link created, copy it now", true);
+  });
+
+  const kill = document.getElementById("sharekill");
+  if (kill) {
+    kill.addEventListener("click", async () => {
+      if (!confirm("Revoke the public link? Anyone holding it loses access.")) return;
+      const res = await post(`/api/guild/${guildId}/trials`, { action: "share_kill" });
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      flash("link revoked ✓", true);
+      setTimeout(() => location.reload(), 700);
+    });
+  }
+})();

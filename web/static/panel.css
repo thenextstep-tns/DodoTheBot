@@ -907,3 +907,31 @@ code.ph { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-full);
 .mpick-item:hover, .mpick-item.active { background: var(--color-surface-soft); }
 .mpick-tag { color: var(--color-muted); font-size: 12px; }
 .mpick-empty { padding: 7px 10px; font-size: 13px; color: var(--color-muted); }
+
+/* The link is shown once, so it has to be obvious and easy to copy. */
+.sharelink { margin: 10px 0; padding: 12px 14px; background: rgba(0, 138, 5, .07);
+  border: 1px solid rgba(0, 138, 5, .35); border-radius: var(--radius-sm); }
+.sharelink[hidden] { display: none; }
+.sharelink input { width: 100%; margin-top: 8px; padding: 8px 10px; font: inherit;
+  font-size: 13px; font-family: var(--font-mono); background: var(--color-canvas);
+  color: var(--color-ink); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); }
+
+/* The public board: its own page, no panel chrome. */
+body.board { background: var(--color-surface-soft); }
+.boardmain { max-width: 720px; margin: 0 auto; padding: 40px 20px 60px; }
+.boardtable { width: 100%; border-collapse: collapse; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); overflow: hidden; }
+.boardtable th { text-align: left; padding: 10px 14px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px; color: var(--color-muted);
+  border-bottom: 1px solid var(--color-hairline); }
+.boardtable td { padding: 11px 14px; border-bottom: 1px solid var(--color-hairline-soft); }
+.boardtable tr:last-child td { border-bottom: 0; }
+.boardtable .pos { width: 42px; color: var(--color-muted);
+  font-variant-numeric: tabular-nums; }
+.boardtable .who { font-weight: var(--weight-semibold); }
+.boardtable .med { font-weight: 400; }
+.boardtable .pts { text-align: right; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.boardtable .rk { color: var(--color-body); }
+.boardtable .none { color: var(--color-muted); text-align: center; padding: 24px; }
