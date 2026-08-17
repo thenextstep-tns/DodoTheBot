@@ -40,17 +40,18 @@ CATEGORIES: list[dict] = [
         "key": "eso",
         "label": "ESO Raiding & Info",
         "emoji": "⚔️",
-        "description": "Raid setups & schedule, parses, the parse tournament and PAT decoder.",
+        "description": "Raid setups & schedule, parses, the parse tournament, PAT decoder and trial ranks.",
         "toggleable": True,
-        "cogs": ["raid_setups", "scheduler", "parsing", "parse_tournament", "pat"],
+        "cogs": ["raid_setups", "scheduler", "parsing", "parse_tournament", "pat", "trial_ranks"],
     },
     {
         "key": "moderation",
         "label": "Moderation & Server Mgmt",
         "emoji": "🛡️",
-        "description": "Moderation, anti-spam, audit log, event tracking, seasonal & server config.",
+        "description": "Moderation, anti-spam, audit log, event tracking & rules, tribe roles, seasonal & server config.",
         "toggleable": True,
-        "cogs": ["moderation", "spam", "log", "event_tracker", "server_config", "seasonal"],
+        "cogs": ["moderation", "spam", "log", "event_tracker", "event_actions", "tribes",
+                 "server_config", "seasonal"],
     },
     {
         "key": "ai",
@@ -61,10 +62,10 @@ CATEGORIES: list[dict] = [
         "cogs": ["chat", "talkengine"],
     },
     {
-        "key": "tabletop",
-        "label": "Dodo Tabletop",
+        "key": "dnd",
+        "label": "DnD",
         "emoji": "🎲",
-        "description": "The living-world tabletop engine: campaigns, characters, scenes and dice.",
+        "description": "Campaigns, characters, scenes and dice — the tabletop engine.",
         "toggleable": True,
         # dnd_legacy is the old session manager, kept loadable for one release
         # while campaigns migrate across (docs/dnd/13-MIGRATION.md).
