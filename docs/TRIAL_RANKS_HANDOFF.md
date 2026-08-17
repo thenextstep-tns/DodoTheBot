@@ -135,11 +135,12 @@ issued.
 
 ## Testing
 
-Development used ~27 throwaway scripts under the session scratchpad covering
-scoring, ranks, the ladder migration, dividers, the PNG, interest, presets,
-tokens, the public board, health, strings and the consent paths. **They live in
-a temp directory and will not survive.** If this system is going to keep
-changing, the highest-value thing to do next is port the important ones into a
-real `tests/` directory — particularly the divider-independence test, the
-role-hierarchy failures, the preset write paths, and the token security
-properties.
+```bash
+py -3 tests/run_tests.py        # 29 cases, no dependencies
+py -3 tests/run_tests.py -v     # with what each one checked
+```
+
+See `tests/README.md`. The cases came out of this build and each one protects
+something that actually broke: divider independence, the role-hierarchy
+refusals, the preset write paths, the capability-token properties, and the
+string resolver fallback chain.
