@@ -2379,19 +2379,29 @@ async def public_leaderboard(request: web.Request):
         record = holders.get(member.id)
         score = trial_ranks.score_for(held, points, trials=trials) + trial_ranks.wr_points(record)
         rank = trial_ranks.rank_for(score, ranks)
-        rows.append({"name": member.display_name, "score": score,
-                     "rank": trial_ranks.rank_name(rank, guild) if rank else "—",
-                     "medals": trial_ranks.wr_medals(record)})
+        role = guild.get_role(int((rank or {}).get("role_id") or 0)) if rank else None
+        breakdown = trial_ranks.breakdown_for(guild, held, points, trials)
+        rows.append({
+            "name": member.display_name,
+            "score": score,
+            "bonus": trial_ranks.wr_points(record),
+            "medals": trial_ranks.wr_medals(record),
+            "rank": trial_ranks.rank_name(rank, guild) if rank else "—",
+            "colour": f"#{role.colour.value:06x}" if role is not None and role.colour.value else "",
+            # What they hold, and what it was worth after superseding.
+            "has": [b["name"] for b in breakdown if b.get("counted")],
+            "held": [b["name"] for b in breakdown],
+        })
     rows.sort(key=lambda r: (-r["score"], r["name"].lower()))
 
-    body = "".join(
-        f'<tr><td class="pos">{index + 1}</td>'
-        f'<td class="who">{html.escape(row["name"])} '
-        f'<span class="med">{row["medals"]}</span></td>'
-        f'<td class="pts">{row["score"]}</td>'
-        f'<td class="rk">{html.escape(row["rank"])}</td></tr>'
-        for index, row in enumerate(rows)
-    ) or '<tr><td colspan="4" class="none">Nobody is on the automatic system yet.</td></tr>'
+    # Everything that can be earned, so a comparison can show what is missing
+    # and not only what is held.
+    board_roles = []
+    for role_id, value in points.items():
+        role = guild.get_role(int(role_id))
+        if role is not None and int(value):
+            board_roles.append({"name": role.name, "points": int(value)})
+    board_roles.sort(key=lambda r: (-r["points"], r["name"].lower()))
 
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%d %b %Y %H:%M UTC")
     doc = f"""<!doctype html>
@@ -2402,16 +2412,25 @@ async def public_leaderboard(request: web.Request):
 <title>{html.escape(guild.name)} · trial ranks</title>
 <link rel="stylesheet" href="/static/panel.css?v={_ASSET_VER}">
 </head><body class="board">
+<script type="application/json" id="board-data">{_json_dumps(
+    {"players": rows, "roles": board_roles})}</script>
 <main class="boardmain">
   <h1>{html.escape(guild.name)}</h1>
   <p class="muted">Trial rankings, worked out from clears and world records.
   {len(rows)} player(s) on the automatic system.</p>
+  <div class="boardbar">
+    <input id="bsearch" type="search" placeholder="Filter by name" autocomplete="off">
+    <button id="bcompare" class="ghost">Compare two players</button>
+    <span class="muted small" id="bcount"></span>
+  </div>
+  <div id="bcompareui" hidden></div>
   <table class="boardtable">
-    <thead><tr><th>#</th><th>Player</th><th class="pts">Points</th><th>Rank</th></tr></thead>
-    <tbody>{body}</tbody>
+    <thead><tr><th>#</th><th>Player</th><th class="pts">Points</th><th>Rank</th><th></th></tr></thead>
+    <tbody id="brows"></tbody>
   </table>
   <p class="muted small">Updated {stamp}. This page is unlisted; anyone with the link can read it.</p>
 </main>
+<script src="/static/board.js?v={_ASSET_VER}"></script>
 </body></html>"""
     return web.Response(
         text=doc, content_type="text/html",
