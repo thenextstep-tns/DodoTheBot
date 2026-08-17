@@ -1699,6 +1699,61 @@ def _unpriced_warning(guild, config: dict) -> str:
             f'<b>Trials Setup</b>.</p>')
 
 
+def _wr_html(bot, guild) -> str:
+    """Who holds records, who has held them, and what that is worth.
+
+    A record is a person's achievement rather than a role's, so it can't live on
+    the points board with the clears. It's a flat bonus on top, permanent in both
+    directions: losing a record doesn't erase having set it.
+    """
+    holders = bot.trial_ranks.wr_all(guild.id)
+    rows = ""
+    for user_id, entry in sorted(
+            holders.items(),
+            key=lambda kv: (-trial_ranks.wr_points(kv[1]), (kv[1].get("name") or "").lower())):
+        member = guild.get_member(user_id)
+        name = member.display_name if member else (entry.get("name") or str(user_id))
+        tag = f"@{member.name}" if member else "left the server"
+        current, former = int(entry.get("current") or 0), int(entry.get("former") or 0)
+        rows += (
+            f'<tr data-user="{user_id}" data-current="{current}" data-former="{former}">'
+            f'<td>{html.escape(name)}<div class="muted small">{html.escape(tag)}</div></td>'
+            f'<td class="wrmedals">{trial_ranks.wr_medals(entry)}</td>'
+            f'<td class="num">{current}</td><td class="num">{former}</td>'
+            f'<td class="num"><b>+{trial_ranks.wr_points(entry)}</b></td>'
+            f'<td><button class="ghost wredit" data-user="{user_id}" '
+            f'data-name="{html.escape(name)}">Edit</button></td></tr>'
+        )
+    rows = rows or '<tr><td colspan="6" class="muted">No record holders yet.</td></tr>'
+    total = sum(trial_ranks.wr_points(e) for e in holders.values())
+
+    return f"""
+    <div class="explain">
+      <p>A world record is worth <b>{trial_ranks.WR_POINTS} points</b> while it stands and
+      <b>{trial_ranks.FORMER_WR_POINTS} points</b> once it has been beaten. Both are
+      permanent: losing a record doesn't erase having set it. The bonus is added on top of
+      the score from clears, and counts towards ranks like any other points.</p>
+      <p class="muted small">Set both counts to 0 to remove somebody from the list.</p>
+    </div>
+    <div class="pilotstats">
+      <span class="pilotstat"><b>{len(holders)}</b> holder(s)</span>
+      <span class="pilotstat"><b>{sum(int(e.get("current") or 0) for e in holders.values())}</b>
+        current {trial_ranks.WR_MEDAL}</span>
+      <span class="pilotstat"><b>{sum(int(e.get("former") or 0) for e in holders.values())}</b>
+        former {trial_ranks.FORMER_WR_MEDAL}</span>
+      <span class="pilotstat"><b>{total}</b> bonus points awarded</span>
+    </div>
+    <div class="pilotadd">
+      <input id="wrtag" placeholder="Discord user tag, e.g. mobitor" autocomplete="off">
+      <input id="wrcurrent" type="number" min="0" placeholder="current" title="Records held now">
+      <input id="wrformer" type="number" min="0" placeholder="former" title="Records since beaten">
+      <button id="wrsave">Save</button>
+    </div>
+    <table class="stats"><thead><tr><th>Who</th><th></th><th class="num">Current</th>
+      <th class="num">Former</th><th class="num">Bonus</th><th></th></tr></thead>
+      <tbody id="wrrows">{rows}</tbody></table>"""
+
+
 def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
     config = bot.trial_ranks.get(guild.id)
     points = config.get("points") or {}
@@ -1728,6 +1783,8 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
         ("pilot", "👥", "Users", f"{enrolled}/{candidates}"),
         ("interest", "🔥", "Prog interest", ""),
         ("trialmap", "🗺️", "Trials Setup", f"{len(config.get('trials') or [])} trials"),
+        ("records", "🥇", "World records",
+         f"{len(bot.trial_ranks.wr_all(guild.id))} holders"),
         ("sandbox", "🧪", "Preview", ""),
     ]
     presets = bot.trial_ranks.presets(guild.id)
@@ -1807,6 +1864,11 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
       <section class="trialpanel" data-panel="trialmap" hidden>
         <h2 class="panelhead">Trials Setup</h2>
         {_trial_map_html(guild, config)}
+      </section>
+
+      <section class="trialpanel" data-panel="records" hidden>
+        <h2 class="panelhead">World records</h2>
+        {_wr_html(bot, guild)}
       </section>
 
       <section class="trialpanel" data-panel="sandbox" hidden>
@@ -2383,13 +2445,18 @@ async def api_guild_trials(request: web.Request):
         except (trial_ranks.TrialError, validate.ValidationError) as error:
             return _bad(error)
 
+        # Read once for the whole preview rather than per member.
+        holders = bot.trial_ranks.wr_all(guild.id)
+
         def row_for(member):
             held = {role.id for role in member.roles}
             # Preview the tidied state: what they'd have after the weaker clears
             # come off, so nobody has to clean up the server before the numbers
             # make sense.
             dropped = trial_ranks.superseded(held, trials)
-            score = trial_ranks.score_for(held, points, trials=trials)
+            record = holders.get(member.id)
+            bonus = trial_ranks.wr_points(record)
+            score = trial_ranks.score_for(held, points, trials=trials) + bonus
             projected = trial_ranks.rank_for(score, ranks)
             # What they hold now, so a re-balance shows movement rather than
             # just a number.
@@ -2413,6 +2480,8 @@ async def api_guild_trials(request: web.Request):
                 "name": member.display_name,
                 "tag": member.name,
                 "score": score,
+                "bonus": bonus,
+                "medals": trial_ranks.wr_medals(record),
                 "rank": (projected or {}).get("name"),
                 "current": current,
                 "changed": (projected or {}).get("name") != current,
@@ -2530,6 +2599,34 @@ async def api_guild_trials(request: web.Request):
             f"Trial ranks announcement posted in **#{channel.name}**")
         return web.json_response({"ok": True, "message_id": str(message.id),
                                   "channel": channel.name})
+
+    if action == "wr_set":
+        tag = str(data.get("tag") or "").strip()
+        try:
+            current = max(0, int(data.get("current") or 0))
+            former = max(0, int(data.get("former") or 0))
+        except (TypeError, ValueError):
+            return _bad("Records have to be whole numbers.")
+        # An id comes from the Edit button, a tag from the add box.
+        member = None
+        if str(data.get("user_id") or "").isdigit():
+            member = guild.get_member(int(data["user_id"]))
+        if member is None and tag:
+            member = trial_ranks.find_by_tag(guild, tag)
+        if member is None:
+            return _bad(f"No member with the tag '{tag}'." if tag else "Which member?")
+        was = bot.trial_ranks.wr_for(guild.id, member.id) or {}
+        bot.trial_ranks.set_wr(guild.id, member.id, member.display_name, current, former)
+        await _record_change(
+            request, audit_log.KIND_TRIAL, f"records {member.name}",
+            f"{int(was.get('current') or 0)} current, {int(was.get('former') or 0)} former",
+            f"{current} current, {former} former",
+            f"World records for **{member.display_name}** set to "
+            f"{current} current, {former} former")
+        return web.json_response({
+            "ok": True, "name": member.display_name,
+            "bonus": trial_ranks.wr_points({"current": current, "former": former}),
+        })
 
     if action in ("preset_save", "preset_load", "preset_delete"):
         name = str(data.get("name") or "").strip()[:60]

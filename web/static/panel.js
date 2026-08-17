@@ -1058,6 +1058,12 @@ if (_sandbox) {
           ? `${b.name} · ${b.points} (superseded)` : `${b.name} · ${b.points}`;
         list.appendChild(item);
       });
+      if (row.bonus) {
+        const rec = document.createElement("span");
+        rec.className = "pvchip record";
+        rec.textContent = `World records · ${row.bonus}`;
+        list.appendChild(rec);
+      }
       const total = document.createElement("div");
       total.className = "muted small";
       total.textContent = `Total ${row.score}`
@@ -1091,7 +1097,7 @@ if (_sandbox) {
       // search for and the display name is what you recognise.
       const who = document.createElement("td");
       const disp = document.createElement("div");
-      disp.textContent = row.name;
+      disp.textContent = row.medals ? row.name + " " + row.medals : row.name;
       const tag = document.createElement("span");
       tag.className = "pvtag";
       tag.textContent = "@" + (row.tag || "");
@@ -1100,6 +1106,8 @@ if (_sandbox) {
       const pts = document.createElement("td");
       pts.className = "num";
       pts.textContent = String(row.score);
+      // Where the total came from, so a record holder's score isn't a mystery.
+      if (row.bonus) pts.title = `${row.score - row.bonus} from clears + ${row.bonus} from records`;
       const now = document.createElement("td");
       now.textContent = row.current || "—";
       const next = document.createElement("td");
@@ -2009,4 +2017,70 @@ if (_trialMap) {
     flash("reset ✓", true);
     setTimeout(() => location.reload(), 600);
   });
+})();
+
+
+// --- Trial ranks: world-record holders ---------------------------------------
+// A record belongs to a person, not a role, so it is edited here rather than on
+// the points board. Edit fills the add row instead of opening a second form:
+// one place to type, whether the person is already listed or not.
+(function worldRecords() {
+  const page = document.querySelector(".trialspage");
+  const rows = document.getElementById("wrrows");
+  if (!page || !rows) return;
+
+  const guildId = page.dataset.guild;
+  const tag = document.getElementById("wrtag");
+  const current = document.getElementById("wrcurrent");
+  const former = document.getElementById("wrformer");
+  const saveBtn = document.getElementById("wrsave");
+  let editingId = null;
+
+  rows.addEventListener("click", (e) => {
+    if (!e.target.classList.contains("wredit")) return;
+    const row = e.target.closest("tr");
+    editingId = e.target.dataset.user;
+    tag.value = e.target.dataset.name;
+    tag.disabled = true;
+    current.value = row.dataset.current;
+    former.value = row.dataset.former;
+    saveBtn.textContent = "Update";
+    current.focus();
+  });
+
+  const reset = () => {
+    editingId = null;
+    tag.value = "";
+    tag.disabled = false;
+    current.value = "";
+    former.value = "";
+    saveBtn.textContent = "Save";
+  };
+
+  tag.addEventListener("input", () => { if (!tag.disabled) editingId = null; });
+
+  saveBtn.addEventListener("click", async () => {
+    const body = {
+      action: "wr_set",
+      tag: tag.value.trim(),
+      user_id: editingId || "",
+      current: Number(current.value || 0),
+      former: Number(former.value || 0),
+    };
+    if (!body.user_id && !body.tag) { flash("Type a user tag first", false); return; }
+    saveBtn.disabled = true;
+    const res = await post(`/api/guild/${guildId}/trials`, body);
+    saveBtn.disabled = false;
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    flash(`${res.name}: +${res.bonus} points`, true);
+    reset();
+    // The table, the counters and the menu badge all move together, so the
+    // page is redrawn rather than one row patched and the rest left stale.
+    setTimeout(() => location.reload(), 700);
+  });
+
+  [current, former].forEach((el) => el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveBtn.click();
+    if (e.key === "Escape") reset();
+  }));
 })();

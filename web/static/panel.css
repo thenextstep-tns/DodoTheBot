@@ -884,3 +884,8 @@ code.ph { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-full);
 .offline { padding: 12px 16px; margin: 12px 0; font-size: 14px;
   background: rgba(193, 53, 21, .08); color: var(--color-error);
   border: 1px solid rgba(193, 53, 21, .35); border-radius: var(--radius-sm); }
+
+/* World records: a per-person bonus, shown with the person. */
+.wrmedals { white-space: nowrap; font-size: 15px; }
+.pilotadd input[type="number"] { flex: 0 0 110px; }
+.pvchip.record { border-color: var(--color-primary); color: var(--color-primary); }

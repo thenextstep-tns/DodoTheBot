@@ -198,6 +198,41 @@ def step_priority(slot: Optional[str]) -> int:
     return _STEP_PRIORITY.get(slot or "", STEP_OTHER)
 
 
+# A world record is a person's achievement, not a role, so it can't be priced on
+# the board with everything else. Holding one now is worth more than having held
+# one, and both are permanent: losing a record doesn't erase having set it.
+WR_POINTS = 15
+FORMER_WR_POINTS = 5
+WR_MEDAL = "🥇"          # current
+FORMER_WR_MEDAL = "🎖️"  # former
+# Past this many, a row of medals stops being readable and becomes a wall.
+MAX_MEDALS = 8
+
+
+def wr_points(entry: Optional[dict]) -> int:
+    """What someone's records add to their score."""
+    if not entry:
+        return 0
+    return (int(entry.get("current") or 0) * WR_POINTS
+            + int(entry.get("former") or 0) * FORMER_WR_POINTS)
+
+
+def wr_medals(entry: Optional[dict]) -> str:
+    """The medal row, collapsed to a count once it would run off the line."""
+    if not entry:
+        return ""
+    current = int(entry.get("current") or 0)
+    former = int(entry.get("former") or 0)
+    parts = []
+    if current:
+        parts.append(WR_MEDAL * current if current <= MAX_MEDALS
+                     else f"{WR_MEDAL}x{current}")
+    if former:
+        parts.append(FORMER_WR_MEDAL * former if former <= MAX_MEDALS
+                     else f"{FORMER_WR_MEDAL}x{former}")
+    return " ".join(parts)
+
+
 # A prog group is twelve. Interest is measured against that, because "9 people
 # want this" only means something next to how many it takes to run it.
 GROUP_SIZE = 12
@@ -513,7 +548,7 @@ def _held_slot_state(role_ids: Iterable[int], points: dict, trials: list[dict]) 
 
 
 def missing_for_next(guild, role_ids: Iterable[int], points: dict, ranks: list[dict],
-                     *, trials: list[dict] = None, limit: int = 12) -> dict:
+                     *, trials: list[dict] = None, limit: int = 12, bonus: int = 0) -> dict:
     """What this member could still earn, cheapest first, to reach the next rung.
 
     Marginal, not nominal: a full hardmode when you already hold the veteran
@@ -522,7 +557,10 @@ def missing_for_next(guild, role_ids: Iterable[int], points: dict, ranks: list[d
     go and get a clear they've outgrown is worse than saying nothing.
     """
     held = {int(role_id) for role_id in role_ids or ()}
-    score = score_for(held, points, trials=trials)
+    # The bonus is part of the total, so it counts towards the next rank like
+    # anything else — otherwise the card would recommend clears somebody has
+    # already covered with records.
+    score = score_for(held, points, trials=trials) + int(bonus or 0)
     state = progress_for(score, ranks)
     steps: list[dict] = []
     if state["next"] is not None:
@@ -818,7 +856,8 @@ class TrialRankManager:
 
     def __init__(self, collection, standings_collection, *,
                  enrollment_collection=None, image_collection=None,
-                 interest_collection=None, preset_collection=None) -> None:
+                 interest_collection=None, preset_collection=None,
+                 wr_collection=None) -> None:
         self._col = collection
         self._standings = standings_collection
         self._enrollment = enrollment_collection
@@ -826,6 +865,7 @@ class TrialRankManager:
         self._interest = interest_collection
         self._interest_indexed = False
         self._presets = preset_collection
+        self._wr = wr_collection
         self._cache: dict[int, dict] = {}
         self._enrolled_cache: dict[int, set[int]] = {}
 
@@ -1000,6 +1040,43 @@ class TrialRankManager:
                   - datetime.timedelta(days=INTEREST_TTL_DAYS))
         return list(self._interest.find({"guild_id": int(guild_id), "at": {"$gte": cutoff}})
                     .sort("at", -1).limit(limit))
+
+    # ------------------------------------------------------------------ #
+    #  World records
+    # ------------------------------------------------------------------ #
+    def wr_all(self, guild_id: int) -> dict[int, dict]:
+        """Every record holder in this guild, keyed by user id."""
+        if self._wr is None:
+            return {}
+        return {int(d["user_id"]): d
+                for d in self._wr.find({"guild_id": int(guild_id)})
+                if int(d.get("current") or 0) or int(d.get("former") or 0)}
+
+    def wr_for(self, guild_id: int, user_id: int) -> Optional[dict]:
+        if self._wr is None:
+            return None
+        return self._wr.find_one({"guild_id": int(guild_id), "user_id": int(user_id)})
+
+    def set_wr(self, guild_id: int, user_id: int, name: str,
+               current: int, former: int) -> None:
+        """Record how many world records somebody holds and has held.
+
+        Zeroing both deletes the row rather than storing a holder of nothing,
+        so the list stays a list of holders.
+        """
+        if self._wr is None:
+            return
+        query = {"guild_id": int(guild_id), "user_id": int(user_id)}
+        current, former = max(0, int(current)), max(0, int(former))
+        if not current and not former:
+            self._wr.delete_one(query)
+            return
+        self._wr.update_one(
+            query,
+            {"$set": {"name": str(name)[:100], "current": current, "former": former,
+                      "at": datetime.datetime.now(datetime.timezone.utc)}},
+            upsert=True,
+        )
 
     # ------------------------------------------------------------------ #
     #  Presets — named snapshots of a whole ruleset

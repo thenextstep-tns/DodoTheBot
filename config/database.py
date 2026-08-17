@@ -97,6 +97,8 @@ trial_interest = db["TrialInterest"]          # {guild_id, user_id, name, role_i
 trial_presets = db["TrialPresets"]            # {guild_id, name, points, ranks, trials}
 # Periodic health samples behind the dashboard status board (helpers/health.py).
 bot_health = db["BotHealth"]                  # {at, status, latency_ms, guilds, members}
+# World-record holders: a per-person bonus on top of the role-derived score.
+trial_wr = db["TrialWorldRecords"]           # {guild_id, user_id, name, current, former}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables
 
 # --------------------------------------------------------------------------- #

@@ -127,6 +127,7 @@ class DodoBot(commands.Bot):
             image_collection=config_py.trial_rank_images,
             interest_collection=config_py.trial_interest,
             preset_collection=config_py.trial_presets,
+            wr_collection=config_py.trial_wr,
         )
         # Samples the gateway every few minutes so the dashboard can show what
         # was true, not just what is true right now.

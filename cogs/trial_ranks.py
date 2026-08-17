@@ -369,7 +369,11 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                     out["cleared_names"] = [role.name for role in removed]
                     held -= {role.id for role in removed}
 
-        score = trial_ranks.score_for(held, points, trials=trials)
+        # World records are a person's, not a role's, so they're added here
+        # rather than priced on the board with the clears.
+        score = (trial_ranks.score_for(held, points, trials=trials)
+                 + trial_ranks.wr_points(
+                     self.bot.trial_ranks.wr_for(member.guild.id, member.id)))
         rank = trial_ranks.rank_for(score, ranks)
         out["score"], out["rank"] = score, rank
         out["rank_name"] = trial_ranks.rank_name(rank, member.guild) if rank else None
@@ -474,7 +478,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         held = {role.id for role in member.roles}
         return trial_ranks.missing_for_next(
             member.guild, held, config.get("points") or {}, config.get("ranks") or [],
-            trials=config.get("trials") or [])
+            trials=config.get("trials") or [],
+            bonus=trial_ranks.wr_points(
+                self.bot.trial_ranks.wr_for(member.guild.id, member.id)))
 
     async def rank_embed(self, member) -> tuple[discord.Embed, list, discord.ui.View | None]:
         """The pretty card: where they are, how far along, and what's next.
@@ -515,7 +521,12 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             colour=role.colour if role is not None and role.colour.value
             else (member.colour if member.colour.value else discord.Colour.blurple()),
         )
-        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        # Records are the person's, so they sit with their name rather than
+        # with the rank they helped earn.
+        medals = trial_ranks.wr_medals(
+            self.bot.trial_ranks.wr_for(member.guild.id, member.id))
+        embed.set_author(name=f"{member.display_name} {medals}".strip(),
+                         icon_url=member.display_avatar.url)
 
         points_label = lang.TRIAL_CARD_POINTS.format(points=state["score"])
         if upcoming is None:
