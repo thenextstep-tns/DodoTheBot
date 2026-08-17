@@ -432,9 +432,12 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Dice
     # ------------------------------------------------------------------ #
-    @app_commands.command(name="roll", description="Roll dice: 2d6+3, 4d6kh3, 1d20adv.")
+    # Named "dice", not "roll": the deathroll minigame has owned /roll since long
+    # before this existed, and breaking a command people already use to give a new
+    # subsystem the prettier name is not a trade worth making.
+    @app_commands.command(name="dice", description="Roll dice: 2d6+3, 4d6kh3, 1d20adv.")
     @app_commands.describe(expression="What to roll.", private="Only you see the result.")
-    async def roll(
+    async def dice_roll(
         self, interaction: discord.Interaction, expression: str, private: bool = False
     ) -> None:
         max_dice = self.bot.params.get(interaction.guild_id, "dnd_max_dice")

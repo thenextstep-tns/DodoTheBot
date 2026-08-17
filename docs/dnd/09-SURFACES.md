@@ -52,7 +52,7 @@ Pinned to the scene card, always available:
 /dnd character create|sheet|retire
 /dnd scene open|close|recap
 /dnd act <text>          # for people who prefer typing
-/dnd roll <expr>
+/dice <expr>             # not /roll — the deathroll minigame owns that name
 /gm suggest              # narrative proposals (07-NARRATIVE-ENGINE.md §6)
 /gm npc spawn|inspect|tier
 /gm canon                # pending canon queue, inline approve

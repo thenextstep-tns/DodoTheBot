@@ -16,7 +16,11 @@ Shipped: `helpers/dnd/{rules,world,store}`, `cogs/dnd/`, `web/dnd/`,
 `helpers/dnd/migrate.py`, and `tests/test_dnd_p0.py` (95 checks, no pytest or
 mongomock dependency — the collections are swapped for an in-memory fake).
 Commands: `/campaign create|list|info|join|leave`, `/character create|sheet|retire`,
-`/scene open|close`, `/roll`, `/check`, plus owner-only `dndmigrate`.
+`/scene open|close`, `/dice`, `/check`, plus owner-only `dndmigrate`.
+
+Top-level command names must be unique across all cogs or the whole cog fails to
+load — `tests/test_command_names.py` guards that, added after `/roll` collided
+with the deathroll minigame in production.
 
 - `store/` — repositories, scope enforcement, indices
 - `rules/` — ruleset protocol, dice grammar, resolution; **both** `freeform` and

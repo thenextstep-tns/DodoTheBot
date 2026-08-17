@@ -84,6 +84,11 @@ Breaking any of these is a review failure, not a style preference.
 
 - **Import-boundary test** — greps imports to enforce invariant 1. Cheap, catches
   the failure that would otherwise be invisible until it matters.
+- **Command-name collision test** (`tests/test_command_names.py`) — top-level
+  command names must be unique across *all* cogs. Discord raises
+  `CommandAlreadyRegistered` at load time, so one duplicate takes a whole cog
+  offline, and a cog loaded in isolation will never show it. Run it before any
+  push that adds a command.
 - **Null-backend suite** — the full turn loop with no model. Enforces invariant 6.
 - **Golden replay** — a recorded event log replays to an identical state hash.
 - **Tenant isolation** — two campaigns, same entity names, every repository method
