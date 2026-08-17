@@ -569,8 +569,10 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         embed.set_footer(text=lang.TRIAL_CARD_FOOTER)
         # The button refers to "one of those", so it only makes sense when the
         # card actually listed something.
-        view = (InterestView(self, member, [step["role_id"] for step in state["steps"]])
-                if state["steps"] else None)
+        # Only trial roles can be progged for, so the button offers only those,
+        # and doesn't appear at all when the advice is achievements alone.
+        proggable = [step["role_id"] for step in state["steps"] if step["trial"] is not None]
+        view = InterestView(self, member, proggable) if proggable else None
         return embed, files, view
 
     # ------------------------------------------------------------------ #
@@ -641,6 +643,9 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     async def record_interest(self, interaction: discord.Interaction, member,
                               role_ids: list[int]) -> None:
         """Bank the "I'd prog for one of those" press and thank them for it."""
+        config = self.bot.trial_ranks.get(member.guild.id)
+        mapped = set(trial_ranks.slot_of(config.get("trials") or []))
+        role_ids = [r for r in role_ids if int(r) in mapped]
         await self.bot.loop.run_in_executor(
             None, self.bot.trial_ranks.record_interest, member.guild.id, member.id,
             member.display_name, role_ids)
@@ -648,7 +653,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         # the whole interaction is one press and one thank-you.
         await interaction.response.edit_message(content=lang.TRIAL_INTEREST_THANKS, view=None)
 
-        config = self.bot.trial_ranks.get(member.guild.id)
         wanted = []
         for role_id in role_ids:
             role = member.guild.get_role(int(role_id))

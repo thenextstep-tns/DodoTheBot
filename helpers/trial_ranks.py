@@ -286,10 +286,14 @@ def interest_buckets(guild, config: dict, rows: list[dict]) -> list[dict]:
         wanted: dict[str, list[dict]] = {}
         for role_id in row.get("role_ids") or ():
             role_id = int(role_id)
-            role = guild.get_role(role_id) if guild else None
-            label = trial_of_role(role_id, trials) or (role.name if role else None)
+            # Only roles mapped to a trial in Trials Setup. A standalone
+            # achievement is something you go and earn, not something a group
+            # forms around, so counting one as prog interest would put a raid
+            # on the board that nobody can be scheduled for.
+            label = trial_of_role(role_id, trials)
             if not label:
                 continue
+            role = guild.get_role(role_id) if guild else None
             entry = {"role_id": role_id, "name": role.name if role else str(role_id)}
             if entry not in wanted.setdefault(label, []):
                 wanted[label].append(entry)
