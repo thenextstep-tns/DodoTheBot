@@ -954,13 +954,10 @@ if (_trialsPage) {
       const res = await post(`/api/guild/${guildId}/trials`, { action: "enrol", tag: value });
       enrol.disabled = false;
       if (res.ok && res.errors && res.errors.length) {
-        // Enrolled, rank worked out, roles refused. Saying "done ✓" over that
-        // is exactly how it went unnoticed the first time.
+        // Enrolled, rank worked out, roles refused. Saying "done" over that is
+        // exactly how it went unnoticed the first time.
         tag.value = "";
-        alert(`${res.member.name} is enrolled and scores ${res.score} `
-              + `(${res.rank || "no rank"}), but their roles were NOT changed:\n\n`
-              + res.errors.map((e) => `• ${e.replace(/\*\*/g, "")}`).join("\n")
-              + "\n\nFix that, then press Recalculate to apply it.");
+        alert(refusal(res));
         setTimeout(() => window.location.reload(), 500);
       } else if (res.ok) {
         tag.value = "";
@@ -975,15 +972,42 @@ if (_trialsPage) {
     tag.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
   }
 
+  // A rank worked out but not applied is a failure, and "done" over the top of
+  // it is how it goes unnoticed. Shared by enrolling and by recalculating.
+  function refusal(res) {
+    const lines = res.errors.map((x) => "• " + x.split("**").join(""));
+    return (res.name || (res.member || {}).name) + " scores " + res.score
+      + " (" + (res.rank || "no rank") + "), but their roles were NOT changed:\n\n"
+      + lines.join("\n");
+  }
+
   const rosterBody = document.getElementById("pilotrows");
   if (rosterBody) {
     rosterBody.addEventListener("click", async (e) => {
+      // Force one person through the same path the listener uses, for when a
+      // role was changed while the bot was down or the setup has since moved.
+      if (e.target.classList.contains("pilotrecalc")) {
+        const btn = e.target;
+        const was = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "…";
+        const res = await post(`/api/guild/${guildId}/trials`,
+                               { action: "recalc_one", user_id: btn.dataset.user });
+        btn.disabled = false;
+        btn.textContent = was;
+        if (!res.ok) { flash(res.error || "Failed", false); return; }
+        if (res.errors && res.errors.length) { alert(refusal(res)); return; }
+        const moved = res.granted || res.removed || res.cleared;
+        flash(`${res.name}: ${res.score} pts → ${res.rank || "no rank"}`
+              + (moved ? ", roles updated" : ", already correct"), true);
+        return;
+      }
       if (!e.target.classList.contains("pilotdel")) return;
       const userId = e.target.dataset.user;
       if (!confirm("Take this person off automatic ranking? Their roles stay as they are.")) return;
       const res = await post(`/api/guild/${guildId}/trials`,
                              { action: "unenrol", user_id: userId });
-      if (res.ok) { e.target.closest("tr").remove(); flash("taken off ✓", true); }
+      if (res.ok) { e.target.closest("tr").remove(); flash("taken off", true); }
       else flash(res.error || "Failed", false);
     });
   }

@@ -1522,7 +1522,11 @@ def _pilot_html(bot, guild, config: dict) -> str:
             f'<td>{html.escape(_STATE_LABELS.get(state, state))}</td>'
             f'<td class="muted small">{html.escape(entry.get("source") or "—")}</td>'
             f'<td class="muted small">{stamp}</td>'
-            f'<td><button class="ghost pilotdel" data-user="{int(entry["user_id"])}">'
+            f'<td class="rosteract">'
+            + (f'<button class="ghost pilotrecalc" data-user="{int(entry["user_id"])}">'
+               f'Recalculate</button>'
+               if state == trial_ranks.STATE_ENROLLED and member is not None else "")
+            + f'<button class="ghost pilotdel" data-user="{int(entry["user_id"])}">'
             f'Take off</button></td></tr>'
         )
     rows = rows or '<tr><td colspan="5" class="muted">Nobody yet.</td></tr>'
@@ -2685,7 +2689,7 @@ async def api_guild_trials(request: web.Request):
                                   "channel": channel.name if channel else ""})
 
     # ---- the rollout: who the automation is allowed to touch ----
-    if action in ("enrol", "unenrol", "announce"):
+    if action in ("enrol", "unenrol", "announce", "recalc_one"):
         cog = bot.get_cog("trial_ranks")
         if cog is None:
             return _bad("The trial_ranks cog isn't loaded.")
@@ -2714,6 +2718,24 @@ async def api_guild_trials(request: web.Request):
                 # A rank that was worked out but couldn't be applied is a
                 # failure, and saying "done ✓" over it is how it went unnoticed.
                 "errors": outcome.get("errors") or [],
+            })
+
+        if action == "recalc_one":
+            try:
+                user_id = int(data.get("user_id") or 0)
+            except (TypeError, ValueError):
+                return _bad("That isn't a user id.")
+            member = guild.get_member(user_id)
+            if member is None:
+                return _bad("That member isn't in this server any more.")
+            if not bot.trial_ranks.is_enrolled(guild.id, member.id):
+                return _bad(f"{member.display_name} is not on the automatic system.")
+            outcome = await cog.recalculate(member, why="recalculated from the panel")
+            return web.json_response({
+                "ok": True, "name": member.display_name,
+                "score": outcome["score"], "rank": outcome["rank_name"],
+                "granted": outcome["granted"], "removed": outcome["removed"],
+                "cleared": outcome["cleared"], "errors": outcome.get("errors") or [],
             })
 
         if action == "unenrol":

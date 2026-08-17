@@ -170,5 +170,8 @@ assert {m["name"] for m in _members} == {"nikladushkin", "someone"}, _members
 assert all("display" in m and "id" in m for m in _members)
 assert isinstance(_members[0]["id"], str), "ids stay strings for JS"
 assert 'class="mpick"' in html and 'id="wruser"' in html
+# Enrolled members get a per-person recalculate button; nobody else does.
+assert html.count('pilotrecalc') == 1, 'only the enrolled member has one'
+assert html.count('pilotdel') == 2, 'but everyone can be taken off'
 print("world records tab OK, member picker carries", len(_members), "people")
 print("PASS")
