@@ -11,6 +11,7 @@
   const data = JSON.parse(raw.textContent || "{}");
   const players = data.players || [];
   const roles = data.roles || [];
+  const thresholds = data.ranks || [];
   const search = document.getElementById("bsearch");
   const rankSel = document.getElementById("brank");
   const achSel = document.getElementById("bach");
@@ -86,7 +87,33 @@
       body.appendChild(tr);
       return;
     }
+    // Requirement lines, drawn as the standings pass each threshold. Absolute
+    // numbers, so they stay truthful under a filter even when the rows between
+    // two of them are hidden.
+    let nextMark = 0;
+    const markUpTo = (score) => {
+      while (nextMark < thresholds.length && score < thresholds[nextMark].points) {
+        const mark = thresholds[nextMark];
+        const tr = document.createElement("tr");
+        tr.className = "bmark";
+        const td = document.createElement("td");
+        td.colSpan = 5;
+        const rule = document.createElement("span");
+        rule.className = "bmarkline";
+        rule.textContent = mark.name + " · " + mark.points + " points";
+        if (mark.colour) {
+          rule.style.color = mark.colour;
+          rule.style.borderColor = mark.colour + "59";
+        }
+        td.appendChild(rule);
+        tr.appendChild(td);
+        body.appendChild(tr);
+        nextMark += 1;
+      }
+    };
+
     shown.forEach((player) => {
+      markUpTo(player.score);
       const tr = document.createElement("tr");
       tr.className = "brow" + (player.place < 3
         ? " " + ["gold", "silver", "bronze"][player.place] : "");
@@ -98,13 +125,19 @@
 
       const who = document.createElement("td");
       who.className = "who";
-      who.textContent = player.name;
+      const line = document.createElement("div");
+      line.className = "whoname";
+      line.textContent = player.name;
       if (player.medals) {
         const med = document.createElement("span");
         med.className = "med";
         med.textContent = " " + player.medals;
-        who.appendChild(med);
+        line.appendChild(med);
       }
+      const handle = document.createElement("div");
+      handle.className = "whotag";
+      handle.textContent = "@" + (player.tag || "");
+      who.append(line, handle);
 
       const pts = document.createElement("td");
       pts.className = "pts";
@@ -143,6 +176,7 @@
         chev.textContent = "▾";
       });
     });
+    markUpTo(-1);   // requirements nobody on the board has fallen below yet
   };
 
   [search, rankSel, achSel, wrOnly].forEach((el) => {

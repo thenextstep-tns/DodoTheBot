@@ -1006,3 +1006,30 @@ body.board { background: var(--color-surface-soft); }
 .bcmprow.same .cmpname { color: var(--color-muted); }
 .bnote { margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--color-hairline-soft);
   font-size: 13px; color: var(--color-muted); text-align: center; }
+
+/* Fixed columns: expanding a row must not let the browser re-measure the table
+   and shift every column under the reader's cursor. */
+.boardtable { table-layout: fixed; }
+.boardtable .c-pos  { width: 52px; }
+.boardtable .c-pts  { width: 86px; }
+.boardtable .c-rank { width: 150px; }
+.boardtable .c-chev { width: 26px; }
+.boardtable td, .boardtable th { overflow: hidden; }
+.boardtable .who { vertical-align: middle; }
+.whoname { font-weight: var(--weight-semibold); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.whotag { font-size: 11px; color: var(--color-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.boardtable .rk { overflow: visible; }
+.rankpill { max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: middle; }
+
+/* A rank requirement, drawn across the standings without breaking the table. */
+.bmark > td { padding: 0; border-bottom: 0; }
+.bmarkline { display: flex; align-items: center; gap: 10px; margin: 2px 14px;
+  padding: 3px 0; font-size: 11px; font-weight: var(--weight-semibold);
+  letter-spacing: .3px; text-transform: uppercase; color: var(--color-muted);
+  border-color: var(--color-hairline); white-space: nowrap; }
+.bmarkline::before, .bmarkline::after { content: ""; flex: 1 1 auto;
+  border-top: 1px dashed currentColor; opacity: .45; }
+.bmarkline::before { flex: 0 0 8px; }

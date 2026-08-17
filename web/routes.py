@@ -2383,6 +2383,7 @@ async def public_leaderboard(request: web.Request):
         breakdown = trial_ranks.breakdown_for(guild, held, points, trials)
         rows.append({
             "name": member.display_name,
+            "tag": member.name,
             "score": score,
             "bonus": trial_ranks.wr_points(record),
             "medals": trial_ranks.wr_medals(record),
@@ -2410,6 +2411,21 @@ async def public_leaderboard(request: web.Request):
                                      or "Achievements"})
     board_roles.sort(key=lambda r: (-r["points"], r["name"].lower()))
 
+    # The thresholds, so the board can show where each requirement falls rather
+    # than leaving the reader to work it out from the rank column.
+    board_ranks = []
+    for rank in trial_ranks.ordered_ranks(ranks):
+        threshold = int(rank.get("min_points") or 0)
+        if threshold <= 0:
+            continue          # the bottom rung is not a line anyone crosses
+        role = guild.get_role(int(rank.get("role_id") or 0))
+        board_ranks.append({
+            "name": trial_ranks.rank_name(rank, guild),
+            "points": threshold,
+            "colour": f"#{role.colour.value:06x}" if role is not None and role.colour.value else "",
+        })
+    board_ranks.sort(key=lambda r: -r["points"])
+
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%d %b %Y %H:%M UTC")
     doc = f"""<!doctype html>
 <html lang="en"><head>
@@ -2420,7 +2436,7 @@ async def public_leaderboard(request: web.Request):
 <link rel="stylesheet" href="/static/panel.css?v={_ASSET_VER}">
 </head><body class="board">
 <script type="application/json" id="board-data">{_json_dumps(
-    {"players": rows, "roles": board_roles})}</script>
+    {"players": rows, "roles": board_roles, "ranks": board_ranks})}</script>
 <main class="boardmain">
   <h1>{html.escape(guild.name)}</h1>
   <p class="muted">Trial rankings, worked out from clears and world records.
@@ -2435,6 +2451,7 @@ async def public_leaderboard(request: web.Request):
   </div>
   <div id="bcompareui" hidden></div>
   <table class="boardtable">
+    <colgroup><col class="c-pos"><col><col class="c-pts"><col class="c-rank"><col class="c-chev"></colgroup>
     <thead><tr><th>#</th><th>Player</th><th class="pts">Points</th><th>Rank</th><th></th></tr></thead>
     <tbody id="brows"></tbody>
   </table>

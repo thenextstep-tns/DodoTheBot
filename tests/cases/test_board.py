@@ -93,6 +93,13 @@ assert mobi["wr"] is True, "the record-holder filter needs this flag"
 for control in ('id="brank"', 'id="bach"', 'id="bwr"', 'id="bcompare"'):
     assert control in body, control
 assert "board.js" in body and 'id="bsearch"' in body and 'id="bcompare"' in body
+# The username travels for the second line under the display name.
+assert mobi["tag"] == "Mobi", mobi
+# Rank requirements, so the board can draw where each threshold falls. The
+# bottom rung is excluded: nobody crosses a line at zero.
+assert [(r["name"], r["points"]) for r in payload["ranks"]] == [("Legend", 20)], payload["ranks"]
+# Columns are fixed so expanding a row cannot re-measure the table.
+assert "<colgroup>" in body and "c-rank" in body
 # Not indexable, and no referrer to leak the token out of the URL.
 assert 'content="noindex, nofollow, noarchive"' in body
 assert ok.headers["Referrer-Policy"] == "no-referrer"
