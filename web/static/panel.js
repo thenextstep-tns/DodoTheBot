@@ -2020,6 +2020,100 @@ if (_trialMap) {
 })();
 
 
+
+// --- Type-to-find member picker ----------------------------------------------
+// Same shape as the role picker, over people. Matches the username *and* the
+// server nickname, because a guild of several hundred is full of people you
+// know by one and not the other, and typing an exact tag from memory is not a
+// realistic ask. The visible box never carries the value: the hidden field does,
+// so a half-typed name can't be mistaken for a choice.
+function bindMemberPicker(pick, members) {
+  if (!pick) return;
+  const text = pick.querySelector(".mpick-text");
+  const hidden = pick.querySelector(".mpick-id");
+  const list = pick.querySelector(".mpick-list");
+  const clear = pick.querySelector(".mpick-clear");
+  let active = -1;
+
+  const close = () => { list.hidden = true; active = -1; };
+
+  const choose = (member) => {
+    hidden.value = member.id;
+    text.value = member.display + " (@" + member.name + ")";
+    close();
+    pick.dispatchEvent(new CustomEvent("memberchange", { bubbles: true }));
+  };
+
+  const render = () => {
+    const q = text.value.trim().toLowerCase();
+    list.innerHTML = "";
+    // An empty box offers the first few rather than nothing, so the control
+    // shows what it is before you have typed anything.
+    const hits = (q
+      ? members.filter((m) => m.name.toLowerCase().includes(q)
+                           || m.display.toLowerCase().includes(q))
+      : members).slice(0, 40);
+    if (!hits.length) {
+      const empty = document.createElement("div");
+      empty.className = "mpick-empty";
+      empty.textContent = "nobody matches";
+      list.appendChild(empty);
+    }
+    hits.forEach((m, index) => {
+      const item = document.createElement("div");
+      item.className = "mpick-item" + (index === active ? " active" : "");
+      const who = document.createElement("span");
+      who.textContent = m.display;
+      const tag = document.createElement("span");
+      tag.className = "mpick-tag";
+      tag.textContent = "@" + m.name;
+      item.append(who, tag);
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(m); });
+      list.appendChild(item);
+    });
+    list.hidden = false;
+  };
+
+  text.addEventListener("focus", render);
+  text.addEventListener("input", () => { hidden.value = "0"; active = -1; render(); });
+  text.addEventListener("blur", () => setTimeout(close, 120));
+  text.addEventListener("keydown", (e) => {
+    const items = Array.from(list.querySelectorAll(".mpick-item"));
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (list.hidden) render();
+      active += e.key === "ArrowDown" ? 1 : -1;
+      active = Math.max(0, Math.min(active, items.length - 1));
+      items.forEach((el, i) => el.classList.toggle("active", i === active));
+      if (items[active]) items[active].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      if (!list.hidden && items[active]) {
+        e.preventDefault();
+        items[active].dispatchEvent(new MouseEvent("mousedown"));
+      }
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+
+  if (clear) {
+    clear.addEventListener("click", () => {
+      hidden.value = "0";
+      text.value = "";
+      close();
+      text.focus();
+      pick.dispatchEvent(new CustomEvent("memberchange", { bubbles: true }));
+    });
+  }
+}
+
+(function bindTrialMemberPickers() {
+  const raw = document.getElementById("all-members");
+  if (!raw) return;
+  const members = JSON.parse(raw.textContent || "[]");
+  document.querySelectorAll(".mpick").forEach((pick) => bindMemberPicker(pick, members));
+})();
+
 // --- Trial ranks: world-record holders ---------------------------------------
 // A record belongs to a person, not a role, so it is edited here rather than on
 // the points board. Edit fills the add row instead of opening a second form:
@@ -2031,6 +2125,7 @@ if (_trialMap) {
 
   const guildId = page.dataset.guild;
   const tag = document.getElementById("wrtag");
+  const picked = document.getElementById("wruser");
   const current = document.getElementById("wrcurrent");
   const former = document.getElementById("wrformer");
   const saveBtn = document.getElementById("wrsave");
@@ -2040,6 +2135,7 @@ if (_trialMap) {
     if (!e.target.classList.contains("wredit")) return;
     const row = e.target.closest("tr");
     editingId = e.target.dataset.user;
+    picked.value = editingId;
     tag.value = e.target.dataset.name;
     tag.disabled = true;
     current.value = row.dataset.current;
@@ -2050,6 +2146,7 @@ if (_trialMap) {
 
   const reset = () => {
     editingId = null;
+    picked.value = "0";
     tag.value = "";
     tag.disabled = false;
     current.value = "";
@@ -2057,13 +2154,18 @@ if (_trialMap) {
     saveBtn.textContent = "Save";
   };
 
+  // Picking from the list is what selects somebody; the typed text is only a
+  // fallback for an exact tag, so the id always wins when there is one.
+  document.getElementById("wrpick").addEventListener("memberchange", () => {
+    editingId = picked.value !== "0" ? picked.value : null;
+  });
   tag.addEventListener("input", () => { if (!tag.disabled) editingId = null; });
 
   saveBtn.addEventListener("click", async () => {
     const body = {
       action: "wr_set",
       tag: tag.value.trim(),
-      user_id: editingId || "",
+      user_id: editingId || picked.value.replace("0", "") || "",
       current: Number(current.value || 0),
       former: Number(former.value || 0),
     };

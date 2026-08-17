@@ -1744,7 +1744,13 @@ def _wr_html(bot, guild) -> str:
       <span class="pilotstat"><b>{total}</b> bonus points awarded</span>
     </div>
     <div class="pilotadd">
-      <input id="wrtag" placeholder="Discord user tag, e.g. mobitor" autocomplete="off">
+      <div class="mpick" id="wrpick">
+        <input class="mpick-text" id="wrtag" autocomplete="off" spellcheck="false"
+          placeholder="Type a name or tag to search">
+        <input type="hidden" class="mpick-id" id="wruser" value="0">
+        <button type="button" class="mpick-clear" title="Clear">&times;</button>
+        <div class="mpick-list" hidden></div>
+      </div>
       <input id="wrcurrent" type="number" min="0" placeholder="current" title="Records held now">
       <input id="wrformer" type="number" min="0" placeholder="former" title="Records since beaten">
       <button id="wrsave">Save</button>
@@ -1806,6 +1812,10 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
 
     return f"""
 <div class="trialspage" data-guild="{guild.id}" data-uid="{viewer_id}">
+  <script type="application/json" id="all-members">{_json_dumps([
+      {"id": str(m.id), "name": m.name, "display": m.display_name}
+      for m in sorted(guild.members, key=lambda x: x.display_name.lower())
+      if not m.bot])}</script>
   <script type="application/json" id="all-roles">{_json_options(_sorted_roles(guild), "@")}</script>
   <script type="application/json" id="trial-suggestions">{_json_dumps(trial_ranks.suggest_trials(guild))}</script>
   <script type="application/json" id="trial-slots">{_json_dumps(list(trial_ranks.SLOTS))}</script>
