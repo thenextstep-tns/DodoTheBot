@@ -260,6 +260,9 @@ def _guild_nav(guild, scope: str, current: str) -> str:
     links = [("settings", "⚙️ Settings", panel_access.SCOPE_CONFIG),
              ("events", "⚡ Events", panel_access.SCOPE_CONFIG),
              ("trials", "🏆 Trial ranks", panel_access.SCOPE_CONFIG),
+             # Tabletop is stats-scoped because players (not just admins) need it;
+             # which campaigns they actually see is decided per campaign.
+             ("tabletop", "🎲 Tabletop", panel_access.SCOPE_STATS),
              ("stats", "📊 Stats", panel_access.SCOPE_STATS),
              ("log", "📝 Change log", panel_access.SCOPE_CONFIG),
              # Tribes is bot-owner tooling: the rule engine can hand out any role.
@@ -3278,4 +3281,10 @@ def create_app(bot) -> web.Application:
             web.static("/static", os.path.join(os.path.dirname(__file__), "static")),
         ]
     )
+    # Tabletop lives in its own module (this file is long enough). Imported here
+    # rather than at module level so its pages can import the shared chrome above
+    # without closing an import cycle.
+    from web.dnd import dnd_routes
+
+    app.add_routes(dnd_routes())
     return app

@@ -486,7 +486,10 @@ PARSEFEST_FINAL_TITLE = "Dodos Parse Championship - Final Results"
 PARSEFEST_FINAL_DESCRIPTION = "Here are the final results of the parse competition."
 
 # --------------------------------------------------------------------------- #
-#  DnD cog
+#  DnD cog (legacy — cogs/dnd_legacy.py)
+#
+#  Superseded by the TABLETOP_* block below. Kept only while the legacy session
+#  manager is still loadable; both go when it is deleted (docs/dnd/13-MIGRATION.md).
 # --------------------------------------------------------------------------- #
 DND_SESSION_CREATED = "Session **{title}** created and posted in {channel}."
 DND_NO_SESSION_CHANNEL = "Error: Session channel not found."
@@ -509,6 +512,46 @@ DND_SESSION_ENDED = "Session {session_id} has ended."
 DND_NO_ACTIONS = "No actions recorded for this session."
 DND_STATS_HEADER = "Session Stats:\n"
 DND_STATS_LINE = "- {name}: {count} actions\n"
+
+# --------------------------------------------------------------------------- #
+#  Dodo Tabletop (cogs/dnd/) — the living-world engine
+# --------------------------------------------------------------------------- #
+TT_NO_CAMPAIGN = "No campaign here yet. A GM can start one with `/campaign create`."
+TT_CAMPAIGN_CREATED = "Campaign **{name}** created on the **{ruleset}** ruleset. You're its GM — players join with `/campaign join {name}`."
+TT_CAMPAIGN_EXISTS = "This server already has a campaign called **{name}**."
+TT_CAMPAIGN_NOT_FOUND = "No campaign called **{name}** on this server."
+TT_CAMPAIGN_NEEDS_NAME = "Give the campaign a name."
+TT_CAMPAIGN_LIST_TITLE = "Campaigns on this server"
+TT_CAMPAIGN_LIST_LINE = "**{name}** — {ruleset}, {players} player(s), {status}"
+TT_CAMPAIGN_LIST_EMPTY = "No campaigns yet. A GM can start one with `/campaign create`."
+TT_CAMPAIGN_JOINED = "You've joined **{name}**. Make a character with `/character create`."
+TT_CAMPAIGN_ALREADY_IN = "You're already in **{name}**."
+TT_CAMPAIGN_LEFT = "You've left **{name}**. Your character is kept."
+TT_CAMPAIGN_NOT_IN = "You're not in **{name}**."
+TT_NOT_GM = "Only a GM of **{name}** can do that."
+TT_GM_CANNOT_LEAVE = "You're the last GM of **{name}** — hand it over before leaving."
+
+TT_CHARACTER_CREATED = "**{name}** joins **{campaign}**. `/character sheet` to see them."
+TT_CHARACTER_EXISTS = "You already play **{name}** in **{campaign}**."
+TT_NO_CHARACTER = "You have no character in **{campaign}** yet — `/character create`."
+TT_CHARACTER_RETIRED = "**{name}** has been retired."
+TT_SHEET_FOOTER = "{ruleset} · {campaign}"
+
+TT_ROLL_INVALID = "I can't read `{expr}`. Try `1d20`, `2d6+3`, `4d6kh3`, or `1d20adv`."
+TT_ROLL_TOO_BIG = "That's more dice than this server allows ({max_dice}d{max_sides} at most)."
+TT_ROLL_RESULT = "🎲 `{expr}` → **{total}**"
+TT_ROLL_BREAKDOWN = "{rolls}{modifier}"
+TT_CHECK_RESULT = "🎲 **{name}** rolls {approach}: `{expr}` → **{total}** vs DC {dc} — **{outcome}**"
+
+TT_MIGRATE_HEADER = "**Legacy import** — source has {sessions} session(s), {characters} character(s), {actions} action(s).\n"
+TT_MIGRATE_CONFIRM = "\nNothing was written. Re-run with `confirm: True` to import for real."
+TT_MIGRATE_NO_GUILD = "Run this in the server you want the campaigns imported into."
+
+TT_SCENE_OPENED = "Scene **{title}** is open."
+TT_SCENE_CLOSED = "Scene **{title}** is closed."
+TT_SCENE_NONE = "No open scene here."
+TT_SCENE_EXISTS = "There's already an open scene in this channel."
+TT_NEEDS_GUILD = "Tabletop commands only work in a server, not in DMs."
 
 # --------------------------------------------------------------------------- #
 #  Fishing cog

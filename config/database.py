@@ -98,3 +98,22 @@ trial_presets = db["TrialPresets"]            # {guild_id, name, points, ranks, 
 # Periodic health samples behind the dashboard status board (helpers/health.py).
 bot_health = db["BotHealth"]                  # {at, status, latency_ms, guilds, members}
 command_params = db["CommandParams"]          # {guild_id, key, value} — per-server tunables
+
+# --------------------------------------------------------------------------- #
+#  Dodo Tabletop — the living-world DnD engine (see docs/dnd/)
+# --------------------------------------------------------------------------- #
+# Every document here carries BOTH guild_id and campaign_id (except the global
+# knowledge tier, which is unscoped and read-only at runtime). Reads go through
+# helpers/dnd/store/repo.py, which requires a scope and injects the filter —
+# raw access to these handles outside store/ is a review failure.
+dnd_campaigns = db["DndCampaigns"]            # {guild_id, name, ruleset, settings, gm_ids}
+dnd_entities = db["DndEntities"]              # PCs, NPCs, factions, creatures — one model
+dnd_scenes = db["DndScenes"]                  # what is on screen right now
+dnd_events = db["DndEvents"]                  # append-only log; the spine of the sim
+dnd_knowledge = db["DndKnowledge"]            # KB facts, all four tiers (P1)
+dnd_memories = db["DndMemories"]              # per-entity memory entries (P2)
+dnd_beliefs = db["DndBeliefs"]                # who believes what, from whom, how surely (P2)
+dnd_relations = db["DndRelations"]            # directed pair state (P2)
+dnd_clocks = db["DndClocks"]                  # faction agendas / fronts (P3)
+dnd_canon_queue = db["DndCanonQueue"]         # LLM inventions awaiting GM promotion (P4)
+dnd_snapshots = db["DndSnapshots"]            # event-log compaction checkpoints

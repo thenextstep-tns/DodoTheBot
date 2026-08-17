@@ -119,6 +119,16 @@ PARAMETERS: list[dict] = [
      "default": ('You are Dodo, a bird from "ESO for Dodos". You give out concise wise and profound '
                  "things, but also sometimes randomly unhinged and stupid."),
      "label": "Bot personality", "description": "The base persona injected into the chat system prompt for this server."},
+    # --- dnd (Dodo Tabletop — see docs/dnd/) ---
+    # Only parameters something actually reads today live here; the rest arrive
+    # with the phase that needs them, so the panel never shows a dead setting.
+    {"key": "dnd_default_ruleset", "cog": "dnd", "type": "choice", "default": "freeform",
+     "choices": ["freeform", "srd5e"],
+     "label": "Default ruleset", "description": "Ruleset a new campaign starts with. Freeform is narrative; srd5e is D&D 5e SRD 5.1."},
+    {"key": "dnd_max_dice", "cog": "dnd", "type": "int", "default": 100,
+     "label": "Max dice per roll", "description": "Largest number of dice a single roll expression may throw."},
+    {"key": "dnd_max_sides", "cog": "dnd", "type": "int", "default": 1000,
+     "label": "Max die size", "description": "Largest die a roll expression may use."},
     # --- general (server-wide) ---
     {"key": "command_prefix", "cog": "general", "type": "str", "default": "",
      "label": "Command prefix", "description": "Text prefix for commands on this server. Blank = the bot default."},

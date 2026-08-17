@@ -65,11 +65,12 @@ their own module and are mounted from `create_app`, never appended to it.
 helpers/dnd/
 ├── __init__.py
 ├── store/
-│   ├── repo.py           # base repository: guild+campaign scoping, projections
+│   ├── repo.py           # Scope + ScopedRepo: an unscoped query is unexpressible
+│   ├── campaigns.py      # campaigns; also allocates event sequence numbers
 │   ├── entities.py       # entity CRUD, component loading
-│   ├── campaigns.py
-│   ├── knowledge.py      # KB facts, retrieval scoring
+│   ├── scenes.py
 │   ├── events.py         # append-only event log
+│   ├── knowledge.py      # KB facts, retrieval scoring          (P1)
 │   └── indices.py        # index definitions, applied at startup
 ├── rules/
 │   ├── ruleset.py        # Ruleset protocol + registry
@@ -78,12 +79,13 @@ helpers/dnd/
 │   ├── freeform.py       # ruleset impl: narrative
 │   └── srd5e.py          # ruleset impl: SRD 5.1 (CC-BY-4.0)
 ├── world/
+│   ├── campaign.py       # the unit of tenancy; owns its RNG root and event seq
 │   ├── entity.py         # Entity + component dataclasses
 │   ├── scene.py          # scene state, presence, affordances
-│   ├── event.py          # WorldEvent, the one way state changes
-│   ├── faction.py
-│   ├── clock.py          # fronts/clocks, agenda advancement
-│   └── time.py           # world time, tick scheduling, tiers
+│   ├── event.py          # WorldEvent + event_seed, the one way state changes
+│   ├── faction.py        # (P3)
+│   ├── clock.py          # fronts/clocks, agenda advancement    (P3)
+│   └── time.py           # world time, tick scheduling, tiers   (P3)
 ├── mind/
 │   ├── needs.py
 │   ├── traits.py         # traits, inheritance, derivation
@@ -109,22 +111,38 @@ helpers/dnd/
 │   ├── queue.py          # priority queue; one host, serialized (08 §8)
 │   ├── cache.py
 │   └── budget.py         # per-guild/campaign call accounting
-├── session.py            # scene lifecycle, PersistentFlow subclass
-├── turn.py               # the turn loop (§4)
-├── tick.py               # the world tick (§5)
-└── entitlements.py       # tier gating (10-MONETIZATION.md)
+├── migrate.py            # legacy dodo_dnd importer (13-MIGRATION.md)
+├── session.py            # scene lifecycle, PersistentFlow subclass  (P3)
+├── turn.py               # the turn loop (§4)                       (P3)
+├── tick.py               # the world tick (§5)                      (P3)
+└── entitlements.py       # tier gating (10-MONETIZATION.md)         (P6)
 
 cogs/dnd/
-├── __init__.py           # the Cog; setup() registers everything
-├── play.py               # player commands & views
-├── gm.py                 # GM commands
-└── sheet.py              # character sheet views
+├── __init__.py           # package docstring only — see below
+├── cog.py                # the Cog; setup() lives here
+├── context.py            # resolving which campaign a command means
+└── embeds.py             # sheet / scene / result rendering
+
+cogs/dnd_legacy.py        # the old session manager, one release only
 
 web/dnd/
 ├── __init__.py           # route table, mounted from web/routes.py:create_app
+├── access.py             # per-campaign scope (gm / player / none)
 ├── pages.py              # HTML rendering
-└── api.py                # JSON endpoints
+└── api.py                # JSON endpoints                           (P1)
 ```
+
+Two layout constraints imposed by the existing bot, not by preference:
+
+* **The cog entry point cannot be `cogs/dnd/__init__.py`.** `load_all_cogs` in
+  `bot.py` walks `cogs/` and skips any filename starting with `__`, so a `setup`
+  there would never load. It goes in `cog.py`; `context.py` and `embeds.py` have
+  no `setup` and are skipped quietly, which is that loader's documented behaviour.
+* **Command groups are class attributes of the Cog**, not instances built in
+  `__init__` and added to the tree by hand. Only the class-attribute form binds
+  subcommands to the cog, and `bot._app_visibility_check` reads that binding to
+  decide whether the cog is enabled for a guild — hand-added groups report no cog
+  and slip the per-guild switch entirely.
 
 ---
 

@@ -158,7 +158,12 @@ and tier administration, cross-guild budget and health, and the
 ## 7. Parameters
 
 Added to `helpers/parameters.py` under `cog: "dnd"` — typed specs give free panel
-inputs (`helpers/parameters.py` docstring):
+inputs (`helpers/parameters.py` docstring).
+
+**Only parameters something actually reads are registered.** P0 ships three
+(`dnd_default_ruleset`, `dnd_max_dice`, `dnd_max_sides`); the rest arrive with the
+phase that consumes them, so the panel never shows a setting that does nothing.
+The full intended set:
 
 | Key | Type | Default | Purpose |
 | --- | --- | --- | --- |

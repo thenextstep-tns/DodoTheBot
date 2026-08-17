@@ -9,8 +9,14 @@ elaborate mind with nothing to think about.
 
 ---
 
-## P0 — Foundations
+## P0 — Foundations ✅ **done**
 *Playable as: a competent sheet-and-dice bot with real, per-campaign data.*
+
+Shipped: `helpers/dnd/{rules,world,store}`, `cogs/dnd/`, `web/dnd/`,
+`helpers/dnd/migrate.py`, and `tests/test_dnd_p0.py` (95 checks, no pytest or
+mongomock dependency — the collections are swapped for an in-memory fake).
+Commands: `/campaign create|list|info|join|leave`, `/character create|sheet|retire`,
+`/scene open|close`, `/roll`, `/check`, plus owner-only `dndmigrate`.
 
 - `store/` — repositories, scope enforcement, indices
 - `rules/` — ruleset protocol, dice grammar, resolution; **both** `freeform` and
@@ -22,9 +28,14 @@ elaborate mind with nothing to think about.
 - Panel: campaign overview, entities list
 - Migration of legacy data (`13-MIGRATION.md`)
 
-**Acceptance:** two campaigns on two servers, no data leakage; a character sheet
-whose stats came from a ruleset rather than a hardcoded array; a roll that changes
-an outcome; a restart that loses nothing.
+**Acceptance — all four verified in `tests/test_dnd_p0.py`:**
+
+| Criterion | How it is proved |
+| --- | --- |
+| Two campaigns on two servers, no data leakage | Identically-named campaigns and characters in two guilds; a foreign `_id` does not resolve, and a scoped delete spares the other server |
+| Sheet stats come from a ruleset | A wizard and a barbarian get different ability arrays — the direct regression test for the old cog's identical block |
+| A roll changes the outcome | Sweeping seeds at a fixed DC produces all four degrees; raising the DC lowers the success rate; a better ability raises it |
+| A restart loses nothing | State reloads from a fresh store, and `save()` cannot reparent a record into another tenant |
 
 **No LLM in this phase at all.**
 

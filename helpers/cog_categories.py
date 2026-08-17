@@ -56,9 +56,19 @@ CATEGORIES: list[dict] = [
         "key": "ai",
         "label": "AI & Conversation",
         "emoji": "🤖",
-        "description": "LLM chat, Markov imitation and the DnD session manager.",
+        "description": "LLM chat and Markov imitation.",
         "toggleable": True,
-        "cogs": ["chat", "talkengine", "dnd"],
+        "cogs": ["chat", "talkengine"],
+    },
+    {
+        "key": "tabletop",
+        "label": "Dodo Tabletop",
+        "emoji": "🎲",
+        "description": "The living-world tabletop engine: campaigns, characters, scenes and dice.",
+        "toggleable": True,
+        # dnd_legacy is the old session manager, kept loadable for one release
+        # while campaigns migrate across (docs/dnd/13-MIGRATION.md).
+        "cogs": ["dnd", "dnd_legacy"],
     },
     {
         "key": "core",

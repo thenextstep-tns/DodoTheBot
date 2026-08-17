@@ -1,10 +1,21 @@
 """
-Dungeons & Dragons cog — a lightweight, LLM-driven DnD session manager. GMs
-create sessions (posted as forum messages with join buttons); players make
-characters and take actions that the LLM narrates, with per-session and
-per-character history. Combat tracks initiative order.
+Legacy DnD cog — **superseded by Dodo Tabletop** (``cogs/dnd/``).
 
-All commands are slash-only because the flow is built on modals and buttons.
+Kept loadable for one release so a group mid-campaign isn't interrupted, then
+deleted along with the ``DND_*`` strings in ``lang.py``. Do not add features
+here; see ``docs/dnd/13-MIGRATION.md`` for how its data moves across and
+``docs/dnd/00-PRODUCT.md`` §2 for why it is being replaced rather than repaired.
+
+The short version of that: character sheets were a hardcoded stat array
+identical for every character ever made, the dice button fed into nothing,
+``history`` was an unbounded string that grew until it blew the context window,
+and no document carried a ``guild_id`` — so it could not serve two servers.
+
+A lightweight, LLM-driven session manager. GMs create sessions (posted as forum
+messages with join buttons); players make characters and take actions that the
+LLM narrates, with per-session and per-character history. Combat tracks
+initiative order. All commands are slash-only because the flow is built on
+modals and buttons.
 """
 
 import random
@@ -314,8 +325,8 @@ class SessionControlView(discord.ui.View):
 # --------------------------------------------------------------------------- #
 #  Cog
 # --------------------------------------------------------------------------- #
-class DodoDnD(commands.Cog, name="dnd"):
-    """LLM-driven DnD session management."""
+class DodoDnD(commands.Cog, name="dnd_legacy"):
+    """LLM-driven DnD session management. Superseded — see the module docstring."""
 
     def __init__(self, bot):
         self.bot = bot

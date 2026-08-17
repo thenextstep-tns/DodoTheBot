@@ -45,22 +45,41 @@ A ruleset is a declaration plus a small resolver:
 ```python
 class Ruleset(Protocol):
     key: str
-    def stat_schema(self) -> dict: ...                  # validates entity.stats
-    def blank_sheet(self, concept: dict) -> dict: ...   # new character
-    def resolve(self, action: Action, actor: Entity,
-                target: Entity | None, rng: Random) -> Outcome: ...
-    def derive(self, stats: dict) -> dict: ...          # modifiers, DCs, saves
-    def affordances(self, actor: Entity, scene: Scene) -> list[ActionSpec]: ...
+    label: str
+    def stat_schema(self) -> dict: ...                          # validates entity.stats
+    def blank_sheet(self, concept: dict, rng: Random) -> dict: ...
+    def derive(self, stats: dict) -> dict: ...                  # modifiers, DCs, saves
+    def approaches(self, stats: dict) -> list[str]: ...         # for command choices
+    def resolve(self, action: Action, actor_stats: dict,
+                target_stats: dict | None, rng: Random) -> Outcome: ...
+    def sheet_fields(self, stats: dict) -> list[tuple[str, str]]: ...
 ```
+
+**Rulesets take stat dictionaries, not entities.** `rules/` sits *below* `world/`
+in the layering (`01-ARCHITECTURE.md` §1), so importing the entity model here
+would invert it and make a third ruleset impossible to add without touching the
+world. `blank_sheet` also takes the RNG explicitly, because character generation
+is part of what a replay has to reproduce.
+
+`affordances` — what a scene physically permits — arrives with the scene model in
+P1; it needs a `Scene` to be worth defining.
 
 Two implementations, built in parallel so the abstraction cannot quietly collapse
 into one (this was the owner's explicit choice):
 
 ### `freeform`
-Narrative resolution. Stats are 4–6 free-text-named approaches rated −1…+3.
-Resolution is a single d6 ladder: fail / cost / success / triumph, modified by
-approach, position and effect. **Reaches playable first** — it exists to get the
-minds on screen without a rules-engine dependency.
+Narrative resolution. Stats are four approaches — force, finesse, wits, presence
+— rated −1…+3 from a one-strong/one-weak spread, assigned by keyword-matching the
+character concept so a "sly archivist" and a "stubborn dockhand" differ.
+
+Resolution is a 2d6 ladder against a default DC of 7: `≤6` fail, `7–9` cost,
+`10–11` success, `12+` triumph. 2d6 rather than a single die because the bell
+curve puts most rolls in the middle bands, which is where the interesting result
+lives — **cost**, the *yes, but* that generates story on its own and gives the
+simulation something to react to.
+
+**Reaches playable first** — it exists to get the minds on screen without a
+rules-engine dependency.
 
 ### `srd5e`
 SRD 5.1 (CC-BY-4.0). Six abilities, proficiency, AC, HP, saves, skills,
