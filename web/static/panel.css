@@ -983,3 +983,26 @@ body.board { background: var(--color-surface-soft); }
 .cmpname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmppts { text-align: right; color: var(--color-muted); font-size: 12px;
   font-variant-numeric: tabular-nums; }
+
+/* Compare: type-to-find, grouped by trial, matching rows stated as equal. */
+.boardbar select, .boardbar .bwr { font-size: 13px; }
+.boardbar select { padding: 8px 10px; font: inherit; background: var(--color-canvas);
+  color: var(--color-ink); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); max-width: 220px; }
+.bwr { display: flex; align-items: center; gap: 6px; color: var(--color-body); }
+.bpickone { flex: 1 1 0; min-width: 0; display: flex; }
+.bpickone input { width: 100%; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.bpick .vs { color: var(--color-muted); font-size: 12px; }
+.bcmpgroup { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; margin: 14px 0 4px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-hairline); font-size: 13px; }
+.gdiff { font-size: 12px; font-variant-numeric: tabular-nums; }
+.gdiff.up { color: var(--color-success); }
+.gdiff.down { color: var(--color-error); }
+.gdiff.flat { color: var(--color-muted); }
+.cmpcell.eq { color: var(--color-muted-soft); background: transparent; }
+.bcmprow.same .cmpname { color: var(--color-muted); }
+.bnote { margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--color-hairline-soft);
+  font-size: 13px; color: var(--color-muted); text-align: center; }

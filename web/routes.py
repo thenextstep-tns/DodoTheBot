@@ -2386,6 +2386,8 @@ async def public_leaderboard(request: web.Request):
             "score": score,
             "bonus": trial_ranks.wr_points(record),
             "medals": trial_ranks.wr_medals(record),
+            "wr": bool(record and (int(record.get("current") or 0)
+                                   or int(record.get("former") or 0))),
             "rank": trial_ranks.rank_name(rank, guild) if rank else "—",
             "colour": f"#{role.colour.value:06x}" if role is not None and role.colour.value else "",
             # What they hold, and what it was worth after superseding.
@@ -2399,8 +2401,13 @@ async def public_leaderboard(request: web.Request):
     board_roles = []
     for role_id, value in points.items():
         role = guild.get_role(int(role_id))
-        if role is not None and int(value):
-            board_roles.append({"name": role.name, "points": int(value)})
+        if role is None or not int(value):
+            continue
+        # Grouped by the trial it belongs to, so a comparison reads as raids
+        # rather than as one flat wall of sixty rows.
+        board_roles.append({"name": role.name, "points": int(value),
+                            "group": trial_ranks.trial_of_role(int(role_id), trials)
+                                     or "Achievements"})
     board_roles.sort(key=lambda r: (-r["points"], r["name"].lower()))
 
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%d %b %Y %H:%M UTC")
@@ -2420,6 +2427,9 @@ async def public_leaderboard(request: web.Request):
   {len(rows)} player(s) on the automatic system.</p>
   <div class="boardbar">
     <input id="bsearch" type="search" placeholder="Filter by name" autocomplete="off">
+    <select id="brank"><option value="">Any rank</option></select>
+    <select id="bach"><option value="">Any clear or achievement</option></select>
+    <label class="bwr"><input type="checkbox" id="bwr"> record holders only</label>
     <button id="bcompare" class="ghost">Compare two players</button>
     <span class="muted small" id="bcount"></span>
   </div>
@@ -2604,6 +2614,8 @@ async def api_guild_trials(request: web.Request):
                 "score": score,
                 "bonus": bonus,
                 "medals": trial_ranks.wr_medals(record),
+            "wr": bool(record and (int(record.get("current") or 0)
+                                   or int(record.get("former") or 0))),
                 "rank": (projected or {}).get("name"),
                 "current": current,
                 "changed": (projected or {}).get("name") != current,
