@@ -703,6 +703,13 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await self.log_event(context.guild,
                                  f"{member.mention} was asked to switch to automatic ranking.")
             return
+        # Acknowledge before doing anything slow. From here the command reads
+        # Mongo and can edit roles, which does not fit inside Discord's three
+        # second budget, and blowing it shows "the application did not respond"
+        # even though the work went through. Deferred only on this branch: the
+        # consent reply below is one cached read, and deferring it would change
+        # which message the timeout has to edit.
+        await context.defer(ephemeral=True)
         await self.refresh(member)
         embed, files, view = await self.rank_embed(member)
         await context.send(embed=embed, files=files, view=view or discord.utils.MISSING,
@@ -1173,6 +1180,13 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await self.log_event(context.guild,
                                  f"{member.mention} was asked to switch to automatic ranking.")
             return
+        # Acknowledge before doing anything slow. From here the command reads
+        # Mongo and can edit roles, which does not fit inside Discord's three
+        # second budget, and blowing it shows "the application did not respond"
+        # even though the work went through. Deferred only on this branch: the
+        # consent reply below is one cached read, and deferring it would change
+        # which message the timeout has to edit.
+        await context.defer(ephemeral=True)
         await self.refresh(member)
         embed, files, view = await self.rank_embed(member)
         await context.send(embed=embed, files=files, view=view or discord.utils.MISSING,
