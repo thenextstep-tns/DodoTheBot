@@ -20,11 +20,23 @@ from aiohttp import web
 def dnd_routes() -> list:
     """Route table for the Tabletop pages."""
     from helpers import panel_access
+    from web.dnd.api import api_dnd_canon, api_dnd_cog, api_dnd_lore, api_dnd_param
     from web.dnd.pages import campaign_page, tabletop_page
     from web.routes import require_scope
 
-    gate = require_scope(panel_access.SCOPE_STATS)
+    # Pages are stats-scoped so players can see their own campaign; which
+    # campaigns they actually get is decided per campaign in web/dnd/access.py.
+    view = require_scope(panel_access.SCOPE_STATS)
+    # Engine settings change server configuration, so they need the same scope
+    # the general settings page does.
+    configure = require_scope(panel_access.SCOPE_FULL)
     return [
-        web.get("/guild/{gid}/tabletop", gate(tabletop_page)),
-        web.get("/guild/{gid}/tabletop/{cid}", gate(campaign_page)),
+        web.get("/guild/{gid}/tabletop", view(tabletop_page)),
+        web.get("/guild/{gid}/tabletop/{cid}", view(campaign_page)),
+        web.post("/api/guild/{gid}/dnd/param", configure(api_dnd_param)),
+        web.post("/api/guild/{gid}/dnd/cog", configure(api_dnd_cog)),
+        # Lore and canon are gated per campaign inside the handler, so a GM who
+        # is not a server admin can still run their own game.
+        web.post("/api/guild/{gid}/dnd/lore", view(api_dnd_lore)),
+        web.post("/api/guild/{gid}/dnd/canon", view(api_dnd_canon)),
     ]

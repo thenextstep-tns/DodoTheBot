@@ -19,10 +19,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from helpers.dnd.store.beliefs import BeliefRepo
 from helpers.dnd.store.campaigns import CampaignRepo
+from helpers.dnd.store.canon import CanonRepo
 from helpers.dnd.store.entities import EntityRepo
 from helpers.dnd.store.events import EventRepo
 from helpers.dnd.store.indices import ensure_indices  # noqa: F401  (re-exported)
+from helpers.dnd.store.knowledge import KnowledgeRepo
 from helpers.dnd.store.repo import Scope, ScopedRepo, ScopeError  # noqa: F401
 from helpers.dnd.store.scenes import SceneRepo
 
@@ -43,6 +46,11 @@ class CampaignStore:
         self.entities = EntityRepo(self.scope)
         self.scenes = SceneRepo(self.scope)
         self.events = EventRepo(self.scope, self.campaigns)
+        # P1: layered world knowledge, per-entity belief, and the review queue
+        # that keeps invented facts out of canon until a GM says otherwise.
+        self.knowledge = KnowledgeRepo(self.scope)
+        self.beliefs = BeliefRepo(self.scope)
+        self.canon = CanonRepo(self.scope)
 
     @property
     def guild_id(self) -> int:

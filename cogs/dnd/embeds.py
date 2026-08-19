@@ -16,7 +16,7 @@ from __future__ import annotations
 import discord
 
 import config_py
-import lang
+import lang_dnd
 from helpers.dnd import rules
 from helpers.dnd.rules.ruleset import COST, FAIL, SUCCESS, TRIUMPH
 from helpers.dnd.world.campaign import Campaign
@@ -69,7 +69,7 @@ def character_sheet(entity: Entity, campaign: Campaign) -> discord.Embed:
     if entity.retired:
         embed.set_footer(text=f"Retired · {ruleset.label} · {campaign.name}")
     else:
-        embed.set_footer(text=lang.TT_SHEET_FOOTER.format(ruleset=ruleset.label, campaign=campaign.name))
+        embed.set_footer(text=lang_dnd.TT_SHEET_FOOTER.format(ruleset=ruleset.label, campaign=campaign.name))
     return embed
 
 
@@ -124,7 +124,7 @@ def scene_card(scene: Scene, campaign: Campaign, present: list[Entity]) -> disco
 def roll_result(expression: str, roll, *, author: str) -> discord.Embed:
     """A bare dice roll — no resolution attached."""
     embed = discord.Embed(
-        title=lang.TT_ROLL_RESULT.format(expr=expression, total=roll.total),
+        title=lang_dnd.TT_ROLL_RESULT.format(expr=expression, total=roll.total),
         description=roll.breakdown(),
         color=config_py.main_color,
     )
@@ -155,12 +155,12 @@ def check_result(entity: Entity, outcome, campaign: Campaign) -> discord.Embed:
 
 def campaign_list(campaigns: list, counts: dict) -> discord.Embed:
     """All campaigns on a server."""
-    embed = discord.Embed(title=lang.TT_CAMPAIGN_LIST_TITLE, color=config_py.main_color)
+    embed = discord.Embed(title=lang_dnd.TT_CAMPAIGN_LIST_TITLE, color=config_py.main_color)
     if not campaigns:
-        embed.description = lang.TT_CAMPAIGN_LIST_EMPTY
+        embed.description = lang_dnd.TT_CAMPAIGN_LIST_EMPTY
         return embed
     embed.description = "\n".join(
-        lang.TT_CAMPAIGN_LIST_LINE.format(
+        lang_dnd.TT_CAMPAIGN_LIST_LINE.format(
             name=c.name,
             ruleset=rules.get(c.ruleset).label,
             players=len(c.player_ids),

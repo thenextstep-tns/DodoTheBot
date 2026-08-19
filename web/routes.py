@@ -30,6 +30,7 @@ import discord
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, share_tokens, stats, validate
+from helpers.dnd import registry as dnd_registry
 from helpers import tribes as tribe_rules
 from helpers import trial_ranks, trial_image
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
@@ -170,12 +171,26 @@ async def accessible_guilds(bot, user_id) -> list[tuple]:
 #  Inventory helpers
 # --------------------------------------------------------------------------- #
 def _cog_inventory(bot) -> list[dict]:
-    """Every discoverable extension (file) under cogs/, with loaded state."""
-    loaded = {ext.rsplit(".", 1)[-1]: ext for ext in bot.extensions}
+    """Every discoverable extension (file) under cogs/, with loaded state.
+
+    Dodo Tabletop is filtered out: it is managed from its own DnD page and must
+    not appear among the bot's ordinary cogs (``helpers/dnd/registry.py``).
+    MERGE NOTE: drop the ``dnd_registry`` checks below to fold it back in.
+    """
+    loaded = {
+        ext.rsplit(".", 1)[-1]: ext
+        for ext in bot.extensions
+        if not dnd_registry.is_dnd_extension(ext)
+    }
     names = set(loaded)
     for root_dir, _dirs, files in os.walk("cogs"):
+        # Skip the whole cogs/dnd/ package as well as cogs/dnd_legacy.py.
+        if dnd_registry.is_dnd_extension(root_dir.replace(os.sep, ".")):
+            continue
         for filename in files:
             if filename.endswith(".py") and not filename.startswith("__"):
+                if dnd_registry.is_dnd_cog(filename[:-3]):
+                    continue
                 names.add(filename[:-3])
     return sorted(
         ({"name": n, "loaded": n in loaded, "extension": loaded.get(n, f"cogs.{n}")} for n in names),

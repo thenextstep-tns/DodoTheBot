@@ -29,8 +29,8 @@ The bot has a strong, consistent voice. Match it — do not import a different o
 - Type hints throughout; `Optional[...]`/`| None` consistently within a file.
 - Comments explain non-obvious decisions, not syntax. Density matches the
   surrounding file.
-- **User-facing strings go in `lang.py`** and are read via `bot.lang` /
-  `lang.KEY`. No player-visible literal in a cog, ever.
+- **User-facing strings go in `lang_dnd.py`** (not `lang.py` — see invariant 9)
+  and are read as `lang_dnd.KEY`. No player-visible literal in a cog, ever.
 - Logging via `self.bot.logger`; internal debug text stays in the code, not
   `lang.py`.
 
@@ -73,7 +73,12 @@ Breaking any of these is a review failure, not a style preference.
 8. **No inference leaves hardware we own.** Ollama only. No hosted API, no
    third-party provider, no "just for the free tier", no API-key field. If you
    find yourself adding an HTTP client for a model vendor, stop.
-9. **Deterministic first.** If it can be computed in Python, it is computed in
+9. **Stay separate.** Tabletop has its own strings (`lang_dnd.py`), parameters
+   (`helpers/dnd/parameters.py`), storage, panel pages and dashboard section. Do
+   not add a `dnd_*` key to the shared parameter registry, a `TT_*` string to
+   `lang.py`, or a tabletop cog to `cog_categories.CATEGORIES`. The full map,
+   including what *is* deliberately shared and why, is `15-SEPARATION.md`.
+10. **Deterministic first.** If it can be computed in Python, it is computed in
    Python. A model is called only where prose quality is itself the product.
    Adding a call site means adding a row to the table in `08-LLM-LAYER.md` §5
    naming the deterministic alternative and why it is insufficient. "It would be
@@ -100,13 +105,15 @@ Breaking any of these is a review failure, not a style preference.
 
 Every feature added to this module should ask:
 
-- [ ] Does it need a per-guild tunable? → add a spec to `helpers/parameters.py`
-      (`cog: "dnd"`) and the panel input is free.
-- [ ] Is it a passive behaviour? → add a `FEATURES` entry in
-      `helpers/cog_categories.py` and gate it with `bot.visibility.feature_active`.
+- [ ] Does it need a per-guild tunable? → add a spec to
+      `helpers/dnd/parameters.py` (**not** the shared registry) and render it in
+      the Engine section of the DnD panel page.
+- [ ] Is it a passive behaviour? → gate it with `bot.visibility.feature_active`.
+      Features are shared enforcement, so they stay in `cog_categories.FEATURES`
+      even though the cogs themselves do not (`15-SEPARATION.md` §2).
 - [ ] Does it hold state across a restart? → `PersistentFlow` from
       `helpers/state_machine.py`.
-- [ ] Does it say anything to a user? → `lang.py` key.
+- [ ] Does it say anything to a user? → `lang_dnd.py` key.
 - [ ] Does it change server configuration? → audit into `config_audit`.
 - [ ] Is it tier-limited? → `entitlements.check(...)`, degrade never destroy.
 - [ ] New collection? → declare it in `config/database.py` with a comment, and add

@@ -38,6 +38,7 @@ problems.
 | 12 | [ROADMAP](12-ROADMAP.md) | Six phases, each playable; risks; open questions |
 | 13 | [MIGRATION](13-MIGRATION.md) | Carrying the existing `dodo_dnd` data across |
 | 14 | [CONVENTIONS](14-CONVENTIONS.md) | **Instructions for Claude** — house style, invariants, what not to do |
+| 15 | [SEPARATION](15-SEPARATION.md) | What is kept separate from the rest of the bot, what is shared, and every merge note |
 
 ## The six ideas that matter
 

@@ -10,11 +10,19 @@ in ``helpers/visibility.py`` and ``helpers/command_sync.py``.
 
 Core cogs are never toggleable (disabling them would break the bot or the panel).
 Any loaded cog not listed here is surfaced under "Other" so nothing is hidden.
+
+**Dodo Tabletop is deliberately absent.** Its cogs are filtered out before they
+reach this taxonomy (``helpers/dnd/registry.py``) and are managed from their own
+DnD page instead, so the tabletop engine never appears among the bot's ordinary
+features. MERGE NOTE: to fold it back in, drop the ``strip_dnd`` call in
+``group_loaded_cogs`` and add a category listing ``dnd``/``dnd_legacy``.
 """
 
 from __future__ import annotations
 
 import logging
+
+from helpers.dnd import registry as dnd_registry
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +68,6 @@ CATEGORIES: list[dict] = [
         "description": "LLM chat and Markov imitation.",
         "toggleable": True,
         "cogs": ["chat", "talkengine"],
-    },
-    {
-        "key": "dnd",
-        "label": "DnD",
-        "emoji": "🎲",
-        "description": "Campaigns, characters, scenes and dice — the tabletop engine.",
-        "toggleable": True,
-        # dnd_legacy is the old session manager, kept loadable for one release
-        # while campaigns migrate across (docs/dnd/13-MIGRATION.md).
-        "cogs": ["dnd", "dnd_legacy"],
     },
     {
         "key": "core",
@@ -156,7 +154,8 @@ def group_loaded_cogs(loaded_cog_names) -> list[dict]:
     an "Other" category so they always remain visible/manageable. Empty categories
     are omitted.
     """
-    loaded = set(loaded_cog_names)
+    # Tabletop is managed on its own page and must not appear here.
+    loaded = set(dnd_registry.strip_dnd(loaded_cog_names))
     result: list[dict] = []
     assigned: set[str] = set()
     for category in CATEGORIES:

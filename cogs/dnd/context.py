@@ -23,7 +23,7 @@ from typing import Optional
 
 import discord
 
-import lang
+import lang_dnd
 from helpers.dnd.store import CampaignStore, campaign_store, campaigns_for
 from helpers.dnd.world.campaign import Campaign
 
@@ -54,7 +54,7 @@ def _store_for(campaign: Campaign) -> CampaignStore:
 def resolve(interaction: discord.Interaction, name: str | None = None) -> Resolved:
     """Resolve the campaign a command refers to. Never raises."""
     if interaction.guild_id is None:
-        return Resolved(error=lang.TT_NEEDS_GUILD)
+        return Resolved(error=lang_dnd.TT_NEEDS_GUILD)
 
     repo = campaigns_for(interaction.guild_id)
 
@@ -62,7 +62,7 @@ def resolve(interaction: discord.Interaction, name: str | None = None) -> Resolv
     if name:
         campaign = repo.by_name(name)
         if campaign is None:
-            return Resolved(error=lang.TT_CAMPAIGN_NOT_FOUND.format(name=name))
+            return Resolved(error=lang_dnd.TT_CAMPAIGN_NOT_FOUND.format(name=name))
         return Resolved(campaign, _store_for(campaign))
 
     # 2. Bound to this channel. A scene thread's parent counts, so rolling
@@ -84,7 +84,7 @@ def resolve(interaction: discord.Interaction, name: str | None = None) -> Resolv
     if len(mine) == 1:
         return Resolved(mine[0], _store_for(mine[0]))
     if not mine:
-        return Resolved(error=lang.TT_NO_CAMPAIGN)
+        return Resolved(error=lang_dnd.TT_NO_CAMPAIGN)
 
     names = ", ".join(f"**{c.name}**" for c in mine)
     return Resolved(error=f"You're in several campaigns ({names}) — name the one you mean.")
@@ -98,7 +98,7 @@ def require_gm(campaign: Campaign, user: discord.abc.User, *, is_admin: bool = F
     """
     if is_admin or campaign.is_gm(user.id):
         return ""
-    return lang.TT_NOT_GM.format(name=campaign.name)
+    return lang_dnd.TT_NOT_GM.format(name=campaign.name)
 
 
 def is_guild_admin(interaction: discord.Interaction) -> bool:

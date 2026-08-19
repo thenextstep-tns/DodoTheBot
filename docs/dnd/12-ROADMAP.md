@@ -43,8 +43,16 @@ with the deathroll minigame in production.
 
 **No LLM in this phase at all.**
 
-## P1 — World & knowledge
+## P1 — World & knowledge ✅ **done**
 *Playable as: a GM tool with living notes and fog of war.*
+
+Shipped: `world/knowledge.py` + `world/belief.py`, `store/knowledge.py` (budgeted
+retrieval), `store/beliefs.py`, `store/canon.py`, `cogs/dnd/knowledge.py`, panel
+knowledge + canon sections, and `tests/test_dnd_p1.py` (52 checks) plus
+`tests/test_dnd_panel.py` (20). Commands: `/lore add|list|search|remove`,
+`/look`, `/knows`, `/believe`, `/canon`.
+
+P1 also **separated tabletop from the rest of the bot** — see `15-SEPARATION.md`.
 
 - `dnd_knowledge`, four tiers, `overrides` semantics
 - Retrieval scoring with token budgets
@@ -54,8 +62,14 @@ with the deathroll minigame in production.
 - Panel: knowledge editor, canon queue
 - Session-zero bootstrap, template path only
 
-**Acceptance:** `Look` shows a player *their character's* beliefs, not world
-truth; a campaign fact overriding a global rule visibly changes resolution.
+**Acceptance — verified in `tests/test_dnd_p1.py` and `tests/test_dnd_panel.py`:**
+
+| Criterion | How it is proved |
+| --- | --- |
+| A player sees their character's beliefs, not world truth | One PC and one NPC hold different beliefs about the same dock; the PC's view contains only their own |
+| An override visibly changes retrieval | A campaign rule with `overrides` set removes the global rule from both listing and retrieval |
+| Secrets never reach a player | Retrieval with `for_player=True` drops them, and the rendered player HTML is asserted not to contain the secret's text |
+| Canon needs an explicit ruling | A proposal is retrievable as low-weight soft canon but is not a fact until accepted; double-accept is refused |
 
 ## P2 — Minds
 *Playable as: NPCs that remember, feel, and can be inspected — before they act.*
