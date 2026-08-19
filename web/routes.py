@@ -189,9 +189,13 @@ def _cog_inventory(bot) -> list[dict]:
             continue
         for filename in files:
             if filename.endswith(".py") and not filename.startswith("__"):
-                if dnd_registry.is_dnd_cog(filename[:-3]):
+                stem = filename[:-3]
+                # Skip tabletop cogs and the plain modules inside cogs/dnd/,
+                # which are not cogs at all and must never be offered a Load
+                # button (see helpers/dnd/registry.py).
+                if dnd_registry.is_dnd_cog(stem) or stem in dnd_registry.DND_EXTENSIONS:
                     continue
-                names.add(filename[:-3])
+                names.add(stem)
     return sorted(
         ({"name": n, "loaded": n in loaded, "extension": loaded.get(n, f"cogs.{n}")} for n in names),
         key=lambda c: c["name"],
@@ -446,27 +450,84 @@ def _dashboard_html(bot, entries: list, scope: str) -> str:
         # Guild admins get their servers and nothing bot-wide.
         return f'<h1>Your servers</h1><div class="guildgrid">{cards}</div><p id="status" class="status"></p>'
 
-    cog_rows = ""
-    for cog in _cog_inventory(bot):
-        badge = '<span class="on">loaded</span>' if cog["loaded"] else '<span class="off">unloaded</span>'
-        buttons = (
-            f'<button data-action="reload" data-cog="{cog["name"]}">Reload</button>'
-            f'<button data-action="unload" data-cog="{cog["name"]}" class="ghost">Unload</button>'
-            if cog["loaded"]
-            else f'<button data-action="load" data-cog="{cog["name"]}">Load</button>'
-        )
-        cog_rows += f'<tr><td>{html.escape(cog["name"])}</td><td>{badge}</td><td class="cogbtns">{buttons}</td></tr>'
-
     return f"""
 <h1>Status</h1>
 {_status_board(bot)}
 <h1>Guilds</h1>
 <div class="guildgrid">{cards}</div>
 <h1>Cogs <span class="muted">(process-wide, affects every guild)</span></h1>
-<table class="cogs"><thead><tr><th>Cog</th><th>State</th><th>Actions</th></tr></thead>
-<tbody>{cog_rows}</tbody></table>
+<p class="muted small">Grouped the same way the per-server pages group them.
+Tabletop is managed on each server's 🎲 Tabletop page and is deliberately absent
+here.</p>
+{_cog_group_blocks(bot)}
 <p id="status" class="status"></p>
 """
+
+
+def _cog_row(cog: dict) -> str:
+    badge = '<span class="on">loaded</span>' if cog["loaded"] else '<span class="off">unloaded</span>'
+    buttons = (
+        f'<button data-action="reload" data-cog="{cog["name"]}">Reload</button>'
+        f'<button data-action="unload" data-cog="{cog["name"]}" class="ghost">Unload</button>'
+        if cog["loaded"]
+        else f'<button data-action="load" data-cog="{cog["name"]}">Load</button>'
+    )
+    return (
+        f'<tr><td>{html.escape(cog["name"])}</td><td>{badge}</td>'
+        f'<td class="cogbtns">{buttons}</td></tr>'
+    )
+
+
+def _cog_group_blocks(bot) -> str:
+    """The bot-wide cog list, bucketed into the same categories the per-guild
+    pages use.
+
+    A flat alphabetical list of forty rows is unreadable and gives no sense of
+    what any of them are for. The categories already exist for the per-server
+    pages; reusing them here means one taxonomy rather than two that drift.
+    """
+    inventory = _cog_inventory(bot)
+    by_name = {cog["name"]: cog for cog in inventory}
+
+    blocks = ""
+    placed: set[str] = set()
+    for category in cog_categories.CATEGORIES:
+        present = [n for n in category["cogs"] if n in by_name]
+        if not present:
+            continue
+        placed.update(present)
+        loaded = sum(1 for n in present if by_name[n]["loaded"])
+        rows = "".join(_cog_row(by_name[n]) for n in sorted(present))
+        blocks += f"""
+<div class="catcard">
+  <div class="cathead"><span class="catemoji">{category['emoji']}</span>
+    <div><span class="cattitle">{html.escape(category['label'])}</span>
+      <div class="muted small">{html.escape(category['description'])}</div></div>
+    <span class="muted small">{loaded}/{len(present)} loaded</span>
+  </div>
+  <div class="catbody">
+    <table class="cogs"><thead><tr><th>Cog</th><th>State</th><th>Actions</th></tr></thead>
+    <tbody>{rows}</tbody></table>
+  </div>
+</div>"""
+
+    leftover = sorted(n for n in by_name if n not in placed)
+    if leftover:
+        rows = "".join(_cog_row(by_name[n]) for n in leftover)
+        blocks += f"""
+<div class="catcard">
+  <div class="cathead"><span class="catemoji">📦</span>
+    <div><span class="cattitle">Unsorted</span>
+      <div class="muted small">Not yet assigned to a category in
+      helpers/cog_categories.py.</div></div>
+    <span class="muted small">{len(leftover)}</span>
+  </div>
+  <div class="catbody">
+    <table class="cogs"><thead><tr><th>Cog</th><th>State</th><th>Actions</th></tr></thead>
+    <tbody>{rows}</tbody></table>
+  </div>
+</div>"""
+    return blocks
 
 
 _LEVEL_ICON = {LEVEL_VISIBLE: "🌐", LEVEL_ADMIN: "🛡️", LEVEL_OWNER: "🔒"}

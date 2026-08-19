@@ -42,7 +42,10 @@ CATEGORIES: list[dict] = [
         "emoji": "🐾",
         "description": "Pets and creatures: cats/dogs/waifus, fishing, gym, mouse racing.",
         "toggleable": True,
-        "cogs": ["pet", "fishing", "gym", "racing", "racestats"],
+        # "gym" is the cog's qualified_name; "fighting_and_gym" is the file it
+        # lives in. The per-guild pages group by cog name and the bot-wide Cogs
+        # list groups by file, so both spellings belong here.
+        "cogs": ["pet", "fishing", "gym", "fighting_and_gym", "racing", "racestats"],
     },
     {
         "key": "eso",

@@ -29,7 +29,7 @@ The bot has a strong, consistent voice. Match it — do not import a different o
 - Type hints throughout; `Optional[...]`/`| None` consistently within a file.
 - Comments explain non-obvious decisions, not syntax. Density matches the
   surrounding file.
-- **User-facing strings go in `lang_dnd.py`** (not `lang.py` — see invariant 9)
+- **User-facing strings go in `lang_dnd.py`** (not `lang.py` — see invariant 11)
   and are read as `lang_dnd.KEY`. No player-visible literal in a cog, ever.
 - Logging via `self.bot.logger`; internal debug text stays in the code, not
   `lang.py`.
@@ -60,47 +60,56 @@ Breaking any of these is a review failure, not a style preference.
 
 1. **Nothing is baked in.** Every constant that shapes behaviour is a tunable in
    `helpers/dnd/tuning.py`, with a label, a description, a range and a group,
-   resolved **default -> server -> campaign**. If something can be softened it
-   must also be switchable off entirely (decay rate 0 = frozen memory). A magic
-   number in a simulation file is a review failure. This is a standing project
-   rule, not a tabletop one - see the `everything-tweakable` memory.
+   resolved **default → server → campaign**. If something can be softened it must
+   also be switchable off entirely (decay rate 0 = frozen memory). A magic number
+   in a simulation file is a review failure. Standing project rule, not a
+   tabletop one — see the `everything-tweakable` memory.
+2. **The panel is the configuration surface, not Discord.** Every tunable and
+   setting ships with a panel control **in the same phase as the feature**, with
+   a description, a range, the current value, where it was inherited from, and a
+   way to clear it. A slash command for configuration is a shortcut, never the
+   API — commands are for *playing*: acting, rolling, looking. Long flat lists in
+   the panel are a defect; group them. See the `webapp-first-config` memory.
 3. **`llm/` is a leaf.** `world/`, `rules/`, `mind/` and `store/` never import it.
-2. **LLM output is never world truth.** It goes to the canon queue or it is
+4. **LLM output is never world truth.** It goes to the canon queue, or it is
    display-only.
-4. **Every document is scoped.** `guild_id` *and* `campaign_id`, always, and
+5. **Every document is scoped.** `guild_id` *and* `campaign_id`, always, and
    reads go through `store/repo.py`.
-5. **Pure layers are pure.** No I/O, no `await`, no wall-clock reads, no bare
-   `random` — RNG is passed in, seeded.
-6. **Bounded memory.** Nothing grows without a cap. The old cog's `history` string
-   is the anti-pattern this module exists to correct.
-7. **`backend=null` always works.** Every LLM task has a deterministic fallback,
+6. **Pure layers are pure.** No I/O, no `await`, no wall-clock reads, no bare
+   `random` — the RNG is passed in, seeded.
+7. **Bounded memory.** Nothing grows without a cap. The old cog's `history`
+   string is the anti-pattern this module exists to correct.
+8. **`backend=null` always works.** Every LLM task has a deterministic fallback,
    and the null suite is part of the test run.
-8. **Mechanics before prose.** Post the outcome, then stream narration.
-9. **No inference leaves hardware we own.** Ollama only. No hosted API, no
-   third-party provider, no "just for the free tier", no API-key field. If you
-   find yourself adding an HTTP client for a model vendor, stop.
-10. **Stay separate.** Tabletop has its own strings (`lang_dnd.py`), parameters
-   (`helpers/dnd/parameters.py`), storage, panel pages and dashboard section. Do
-   not add a `dnd_*` key to the shared parameter registry, a `TT_*` string to
-   `lang.py`, or a tabletop cog to `cog_categories.CATEGORIES`. The full map,
-   including what *is* deliberately shared and why, is `15-SEPARATION.md`.
-11. **Deterministic first.** If it can be computed in Python, it is computed in
-   Python. A model is called only where prose quality is itself the product.
-   Adding a call site means adding a row to the table in `08-LLM-LAYER.md` §5
-   naming the deterministic alternative and why it is insufficient. "It would be
-   nicer" is not a reason. This is the invariant that keeps the product from
-   decaying into an LLM wrapper one convenient shortcut at a time.
+9. **Mechanics before prose.** Post the outcome, then stream narration.
+10. **No inference leaves hardware we own.** Ollama only. No hosted API, no
+    third-party provider, no "just for the free tier", no API-key field. If you
+    find yourself adding an HTTP client for a model vendor, stop.
+11. **Stay separate.** Tabletop has its own strings (`lang_dnd.py`), parameters
+    (`helpers/dnd/parameters.py`), tunables, storage, panel pages and dashboard
+    section. Do not add a `dnd_*` key to the shared parameter registry, a `TT_*`
+    string to `lang.py`, or a tabletop cog to `cog_categories.CATEGORIES`. The
+    full map, including what *is* deliberately shared and why, is
+    `15-SEPARATION.md`.
+12. **Deterministic first.** If it can be computed in Python, it is computed in
+    Python. A model is called only where prose quality is itself the product.
+    Adding a call site means adding a row to the table in `08-LLM-LAYER.md` §5
+    naming the deterministic alternative and why it is insufficient. "It would be
+    nicer" is not a reason. This is what keeps the product from decaying into an
+    LLM wrapper one convenient shortcut at a time.
 
 ## 5. Tests that must exist
 
-- **Import-boundary test** — greps imports to enforce invariant 1. Cheap, catches
+- **Import-boundary test** — greps imports to enforce invariant 3. Cheap, catches
   the failure that would otherwise be invisible until it matters.
-- **Command-name collision test** (`tests/test_command_names.py`) — top-level
-  command names must be unique across *all* cogs. Discord raises
-  `CommandAlreadyRegistered` at load time, so one duplicate takes a whole cog
-  offline, and a cog loaded in isolation will never show it. Run it before any
-  push that adds a command.
-- **Null-backend suite** — the full turn loop with no model. Enforces invariant 6.
+- **Command test** (`tests/test_command_names.py`) — two checks, each of which
+  has taken the whole cog offline in production once. Top-level names must be
+  unique across *all* cogs (`CommandAlreadyRegistered`), and the application must
+  stay under Discord's **100 top-level slash commands** (`CommandLimitReached`).
+  Neither shows up when a cog is loaded in isolation. Run it before any push that
+  adds a command; the fix for the cap is always to group, since a group costs one
+  slot however many subcommands it holds.
+- **Null-backend suite** — the full turn loop with no model. Enforces invariant 8.
 - **Golden replay** — a recorded event log replays to an identical state hash.
 - **Tenant isolation** — two campaigns, same entity names, every repository method
   checked for leakage.

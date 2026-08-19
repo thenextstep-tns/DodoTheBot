@@ -40,7 +40,7 @@ DND_COGS: frozenset[str] = frozenset({
 # is the loadable entry point; the siblings are plain modules the cog loader
 # skips (see cogs/dnd/__init__.py).
 DND_EXTENSIONS: frozenset[str] = frozenset({
-    "cog", "context", "embeds", "dnd_legacy", "knowledge",
+    "cog", "context", "embeds", "knowledge", "minds_ui", "dnd_legacy",
 })
 
 # Collections in config/database.py that belong to tabletop. Listed so a future
@@ -65,7 +65,12 @@ def is_dnd_extension(module_name: str) -> bool:
     them by string alone would be fragile. Callers pass the full dotted path when
     they have it.
     """
-    if module_name.startswith("cogs.dnd.") or module_name == "cogs.dnd_legacy":
+    # "cogs.dnd" matters as much as "cogs.dnd.cog": os.walk hands back the
+    # package directory itself, and missing that case leaked every module inside
+    # cogs/dnd/ into the panel as though each were its own cog.
+    if module_name in ("cogs.dnd", "cogs.dnd_legacy"):
+        return True
+    if module_name.startswith("cogs.dnd."):
         return True
     return module_name in DND_COGS
 
