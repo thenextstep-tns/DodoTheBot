@@ -430,7 +430,12 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
             member.display_name, outcome["score"], outcome["rank_name"])
 
-        by = f" (enrolled by {actor.mention})" if actor is not None else " (opted in themselves)"
+        if actor is not None:
+            by = f" (enrolled by {actor.mention})"
+        elif source == "joined":
+            by = " (joined the server)"
+        else:
+            by = " (opted in themselves)"
         lines = [f"{member.mention} is now on automatic ranking{by}.",
                  f"Score: **{outcome['score']}** points · "
                  f"Rank: **{outcome['rank_name'] or 'none yet'}**"]
@@ -842,6 +847,35 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
     #  Triggers
     # ------------------------------------------------------------------ #
     @commands.Cog.listener()
+    async def on_member_join(self, member) -> None:
+        """New arrivals join the automatic system without being asked.
+
+        The consent flow exists for people who already had a rank set by hand
+        and would notice it being taken over. Somebody joining today has no such
+        history, so being ranked automatically is simply how this server works,
+        and asking would be ceremony rather than consent.
+
+        Two things it will not do. It never overwrites an existing enrolment
+        row, so a member who left after saying no, or after letting the ask time
+        out, keeps that answer when they come back. And it stays out of guilds
+        that have no ladder configured, rather than filling their roster with
+        people the feature would do nothing for.
+        """
+        if member.bot or not self.runs_here(member.guild):
+            return
+        config = self.bot.trial_ranks.get(member.guild.id)
+        if not config.get("ranks"):
+            return
+        # Any prior row is a decision this must not undo.
+        existing = self.bot.trial_ranks.enrollment_state(member.guild.id, member.id)
+        if existing:
+            return
+        try:
+            await self.enrol(member, source="joined")
+        except Exception as error:  # noqa: BLE001 - a join must never break
+            self.bot.logger.error(f"Trial rank auto-enrol failed for {member.id}: {error}")
+
+    @commands.Cog.listener()
     async def on_member_update(self, before, after) -> None:
         if before.roles == after.roles or after.bot:
             return
@@ -1239,214 +1273,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await context.send(lang.TRIAL_INTEREST_UNKNOWN.format(trial=trial), ephemeral=True)
             return
         await context.send(embed=self._interest_detail(context.guild, bucket), ephemeral=True)
-
-    def _interest_overview(self, buckets: list[dict]) -> discord.Embed:
-        """Every raid at a glance, busiest first."""
-        embed = discord.Embed(title=lang.TRIAL_INTEREST_OVERVIEW,
-                              colour=discord.Colour.blurple())
-        lines = [f"{INTEREST_MARKS[b['level']]} **{b['count']}**/{trial_ranks.GROUP_SIZE}"
-                 f" · {b['name']}" for b in buckets[:25]]
-        embed.description = "\n".join(lines)
-        embed.set_footer(text="/interest <trial> for who, and what they still need.")
-        return embed
-
-    def _interest_detail(self, guild, bucket: dict) -> discord.Embed:
-        """One raid, down to the individual clear each person is missing."""
-        colour = {trial_ranks.LEVEL_READY: discord.Colour.green(),
-                  trial_ranks.LEVEL_WARM: discord.Colour.gold()}.get(
-                      bucket["level"], discord.Colour.dark_grey())
-        embed = discord.Embed(
-            title=lang.TRIAL_INTEREST_TITLE.format(trial=bucket["name"]),
-            description=lang.TRIAL_INTEREST_SUMMARY.format(
-                count=bucket["count"], group=trial_ranks.GROUP_SIZE),
-            colour=colour)
-
-        # The whole point: a raid lead needs to know it's the Bahsei hardmode
-        # three people are short of, not just that three people want vRG.
-        breakdown = [
-            f"{INTEREST_MARKS[entry['level']]} **{entry['count']}**/{trial_ranks.GROUP_SIZE}"
-            f" · {entry['name']}"
-            for entry in bucket["by_role"]
-        ]
-        if breakdown:
-            embed.add_field(name=lang.TRIAL_INTEREST_BREAKDOWN,
-                            value="\n".join(breakdown)[:1024], inline=False)
-
-        lines = []
-        for entry in sorted(bucket["members"], key=lambda m: m["name"].lower()):
-            member = guild.get_member(entry["user_id"])
-            who = member.mention if member else entry["name"]
-            needs = ", ".join(role["name"] for role in entry.get("roles") or ())
-            when = entry.get("at")
-            stamp = f" · {when:%Y-%m-%d}" if hasattr(when, "strftime") else ""
-            lines.append(f"• {who} · {needs}{stamp}" if needs else f"• {who}{stamp}")
-        embed.add_field(name=lang.TRIAL_INTEREST_WHO,
-                        value="\n".join(lines)[:1024] or "—", inline=False)
-        return embed
-
-    # ------------------------------------------------------------------ #
-    #  The announcement
-    # ------------------------------------------------------------------ #
-    async def post_announcement(self, guild, channel) -> discord.Message:
-        """Post (or repost) the pinned message carrying the rank button.
-
-        An existing message is edited in place so the pin, and any reactions on
-        it, survive a wording change.
-        """
-        config = self.bot.trial_ranks.get(guild.id)
-        view = RankBoardView(self.bot)
-        existing_id = int(config.get("announce_message_id") or 0)
-        message = None
-        if existing_id and int(config.get("announce_channel_id") or 0) == channel.id:
-            try:
-                message = await channel.fetch_message(existing_id)
-                await message.edit(content=lang.TRIAL_ANNOUNCEMENT, view=view)
-            except discord.HTTPException:
-                message = None
-        if message is None:
-            message = await channel.send(lang.TRIAL_ANNOUNCEMENT, view=view)
-            try:
-                await message.pin(reason="Trial ranks announcement")
-            except discord.HTTPException:
-                pass  # missing Manage Messages shouldn't lose the message itself
-        self.bot.trial_ranks.save(guild.id, {"announce_channel_id": channel.id,
-                                             "announce_message_id": message.id})
-        await self.log_event(
-            guild, f"Automatic-ranking announcement posted in {channel.mention}.")
-        return message
-
-    # ------------------------------------------------------------------ #
-    #  Triggers
-    # ------------------------------------------------------------------ #
-    @commands.Cog.listener()
-    async def on_member_update(self, before, after) -> None:
-        if before.roles == after.roles or after.bot:
-            return
-        config = self.bot.trial_ranks.get(after.guild.id)
-        changed = {r.id for r in before.roles} ^ {r.id for r in after.roles}
-        scoring = {int(role_id) for role_id in (config.get("points") or {})}
-        scoring |= set(trial_ranks.slot_of(config.get("trials") or []))
-        rank_roles = {rank["role_id"] for rank in config.get("ranks") or []}
-        # Only react to scoring roles, and never to our own rank changes.
-        if not (changed & scoring) or changed <= rank_roles:
-            return
-        touched = ", ".join(
-            role.name for role in (after.guild.get_role(r) for r in changed & scoring)
-            if role is not None) or "a scoring role"
-        # The master switch is checked here rather than at the top, so that a
-        # scoring role changing while the feature is off produces an explanation
-        # instead of nothing at all.
-        stopped = self.why_not_running(after.guild)
-        if stopped:
-            await self.report_problems(
-                after.guild,
-                [f"{after.mention} changed **{touched}**, but {stopped}. "
-                 "Nothing was recalculated."],
-                context="not running")
-            return
-
-        # A scoring role moved on somebody the automation won't touch. Silence
-        # here reads as "the bot is broken" rather than "that person opted out",
-        # so it says which, once an hour per person rather than per role edit.
-        if not self.bot.trial_ranks.is_enrolled(after.guild.id, after.id):
-            await self.report_problems(
-                after.guild,
-                [f"{after.mention} changed **{touched}**, but they are not on "
-                 "automatic ranking, so nothing was recalculated."],
-                context="skipped")
-            return
-        try:
-            was = trial_ranks.rank_for(
-                trial_ranks.score_for({r.id for r in before.roles}, config.get("points") or {},
-                                      trials=config.get("trials") or []),
-                config.get("ranks") or [])
-            outcome = await self.apply(after, config)
-            await self.bot.loop.run_in_executor(
-                None, self.bot.trial_ranks.save_standing, after.guild.id, after.id,
-                after.display_name, outcome["score"], outcome["rank_name"],
-            )
-            # Logged every time, not only when a role moved. A recalculation
-            # that lands on the same rank is still the system working, and
-            # without a line for it there is no way to tell that apart from the
-            # listener never having fired at all.
-            previous = trial_ranks.rank_name(was, after.guild) if was else "none"
-            now_named = outcome["rank_name"] or "none"
-            moved = previous != now_named
-            lines_out = [f"{after.mention} · **{touched}**",
-                         f"Score: **{outcome['score']}** · Rank: "
-                         + (f"**{previous}** to **{now_named}**" if moved
-                            else f"**{now_named}** (unchanged)")]
-            if outcome["cleared_names"]:
-                lines_out.append("Removed superseded: "
-                                 + ", ".join(outcome["cleared_names"][:20]))
-            if outcome.get("interest_dropped"):
-                lines_out.append(f"Prog interest: {outcome['interest_dropped']} "
-                                 "entry(s) cleared, now earned.")
-            await self.log_event(after.guild, chr(10).join(lines_out),
-                                 title="Trial ranks: recalculated")
-            # A recalculation that changed nothing *because it was refused* is
-            # not a quiet success, and this is the path that runs unattended.
-            await self.report_problems(after.guild, outcome["errors"],
-                                       context=f"{after.display_name} gained or lost a clear role")
-        except Exception as error:  # noqa: BLE001 - never break the gateway
-            self.bot.logger.error(f"Trial rank update failed for {after.id}: {error}")
-
-    async def recalculate(self, member, *, why: str = "checked their rank") -> dict:
-        """Re-score one person and apply it, returning what happened.
-
-        The single path for "do this member now": the card uses it, and so does
-        the panel's per-person button. Enrolment is still the gate, because a
-        forced recalculation is not consent.
-        """
-        config = self.bot.trial_ranks.get(member.guild.id)
-        outcome = await self.apply(member, config)
-        await self.bot.loop.run_in_executor(
-            None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
-            member.display_name, outcome["score"], outcome["rank_name"])
-        if outcome["granted"] or outcome["removed"] or outcome["cleared"]:
-            lines = [f"{member.mention} recalculated ({why}).",
-                     f"Score: **{outcome['score']}** · "
-                     f"Rank: **{outcome['rank_name'] or 'none'}**"]
-            if outcome["cleared_names"]:
-                lines.append("Removed superseded: "
-                             + ", ".join(outcome["cleared_names"][:20]))
-            if outcome.get("interest_dropped"):
-                lines.append(f"Prog interest: {outcome['interest_dropped']} "
-                             "entry(s) cleared, now earned.")
-            await self.log_event(member.guild, chr(10).join(lines),
-                                 title="Trial ranks: recalculated")
-        await self.report_problems(member.guild, outcome["errors"], context=why)
-        return outcome
-
-    async def refresh(self, member) -> None:
-        """Bring one person up to date, quietly.
-
-        Replaces the hourly sweep: a whole-guild pass every hour spent almost
-        all of its work confirming that nothing had changed. The two moments
-        that actually matter are a scoring role changing (the listener) and the
-        person asking where they stand — so checking then covers the same ground
-        without the churn, and is current at the moment it's read rather than up
-        to an hour stale.
-        """
-        if not self.runs_here(member.guild):
-            return
-        if not self.bot.trial_ranks.is_enrolled(member.guild.id, member.id):
-            return
-        try:
-            config = self.bot.trial_ranks.get(member.guild.id)
-            outcome = await self.apply(member, config)
-            await self.bot.loop.run_in_executor(
-                None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
-                member.display_name, outcome["score"], outcome["rank_name"])
-            if outcome["granted"] or outcome["removed"] or outcome["cleared"]:
-                await self.log_event(
-                    member.guild,
-                    f"{member.mention} brought up to date when they checked their rank.\n"
-                    f"Score: **{outcome['score']}** · Rank: **{outcome['rank_name'] or 'none'}**")
-            await self.report_problems(member.guild, outcome["errors"],
-                                       context=f"{member.display_name} checked their rank")
-        except Exception as error:  # noqa: BLE001 - showing the card matters more
-            self.bot.logger.error(f"Trial rank refresh failed for {member.id}: {error}")
 
 
 async def setup(bot):

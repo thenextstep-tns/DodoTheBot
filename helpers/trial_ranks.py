@@ -975,6 +975,18 @@ class TrialRankManager:
         )
         self._enrolled_cache.pop(int(guild_id), None)
 
+    def enrollment_state(self, guild_id: int, user_id: int) -> Optional[str]:
+        """The stage this person reached, or ``None`` if they have no row.
+
+        Distinct from :meth:`is_enrolled`: a "no" and a "never asked" are both
+        not-enrolled, and only one of them is a decision worth preserving.
+        """
+        if self._enrollment is None:
+            return None
+        row = self._enrollment.find_one(
+            {"guild_id": int(guild_id), "user_id": int(user_id)})
+        return (row or {}).get("state")
+
     def forget(self, guild_id: int, user_id: int) -> None:
         """Take someone back off the automated system entirely."""
         if self._enrollment is None:

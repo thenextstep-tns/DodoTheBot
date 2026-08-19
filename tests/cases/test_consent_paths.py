@@ -39,8 +39,9 @@ for name in ("rank", "handle_check"):
 
 # Roles are only ever touched for someone enrolled.
 refresh = ast.unparse(funcs["refresh"])
-assert refresh.index("is_enrolled") < refresh.index("apply"), \
-    "refresh applies roles before checking enrolment"
+# refresh delegates the work to recalculate(), so the gate must come first.
+assert refresh.index("is_enrolled") < refresh.index("recalculate"), \
+    "refresh does role work before checking enrolment"
 print("refresh       gated on enrolment before touching roles  OK")
 
 assert 'source="command"' in src and 'source="button"' in src

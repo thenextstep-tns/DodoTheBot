@@ -18,6 +18,12 @@ Two moments trigger a recalculation, and only two:
 1. a scoring role changes on an enrolled member (`on_member_update`);
 2. that member asks where they stand (`/rank`, or the announcement button).
 
+**New members are enrolled on join**, without being asked. The consent flow was
+written for people who already had a rank set by hand; somebody joining today
+has no such history. `on_member_join` never overwrites an existing enrolment
+row, so anyone who left after saying no keeps that answer on return, and it
+stays out of guilds with no ladder configured.
+
 There is **no periodic sweep**. An hourly pass spent nearly all its work
 confirming nothing had changed and left answers up to an hour stale when it
 hadn't. `run_for_guild` still exists for the panel's **Recalculate now**.
@@ -136,7 +142,7 @@ issued.
 ## Testing
 
 ```bash
-py -3 tests/run_tests.py        # 29 cases, no dependencies
+py -3 tests/run_tests.py        # 31 cases, no dependencies
 py -3 tests/run_tests.py -v     # with what each one checked
 ```
 
