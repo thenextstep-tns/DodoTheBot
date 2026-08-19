@@ -20,10 +20,15 @@ from aiohttp import web
 from helpers import panel_access
 from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
+from helpers.dnd import minds
 from helpers.dnd import rules
+from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
+from helpers.dnd.mind.needs import NEED_LABELS
+from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT, TRAIT_LABELS
 from helpers.dnd.world.knowledge import KINDS
+from helpers.dnd.world.memory import TIER_IMPRINT, TIER_LONG, TIER_MID, TIER_WORKING
 from web.dnd import access
 
 
@@ -123,7 +128,7 @@ def campaigns_html(bot, guild, guild_scope: str, viewer_id: int) -> str:
 _KIND_LABELS = {KIND_PC: "Character", KIND_NPC: "NPC", KIND_FACTION: "Faction"}
 
 
-def _entity_row(guild, entity, ruleset) -> str:
+def _entity_row(guild, entity, ruleset, *, campaign_id=None, is_gm: bool = False) -> str:
     owner = (
         _escape(_member_name(guild, entity.owner_id)) if entity.owner_id else '<span class="muted">—</span>'
     )
@@ -131,7 +136,7 @@ def _entity_row(guild, entity, ruleset) -> str:
     retired = ' <span class="chip">retired</span>' if entity.retired else ""
     return f"""
 <tr>
-  <td><b>{_escape(entity.identity.name)}</b>{retired}<br>
+  <td>{_name_cell(entity, campaign_id, guild, is_gm)}{retired}<br>
       <span class="muted small">{_escape(entity.identity.pronouns)}</span></td>
   <td>{_escape(_KIND_LABELS.get(entity.kind, entity.kind))}</td>
   <td>{_escape(entity.identity.role) or '<span class="muted">—</span>'}</td>
@@ -139,6 +144,16 @@ def _entity_row(guild, entity, ruleset) -> str:
   <td>{_escape(entity.tier)}</td>
   <td class="muted small">{stat_summary}</td>
 </tr>"""
+
+
+def _name_cell(entity, campaign_id, guild, is_gm: bool) -> str:
+    """A GM can click through to the inspector; a player just reads the name."""
+    name = f"<b>{_escape(entity.identity.name)}</b>"
+    if not is_gm or campaign_id is None:
+        return name
+    return (
+        f'<a href="/guild/{guild.id}/tabletop/{campaign_id}/entity/{entity.id}">{name}</a>'
+    )
 
 
 def _events_table(store, guild, limit: int = 15) -> str:
@@ -183,7 +198,10 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
     def table(rows: list, empty: str) -> str:
         if not rows:
             return f'<p class="muted">{empty}</p>'
-        body = "".join(_entity_row(guild, e, ruleset) for e in rows)
+        body = "".join(
+            _entity_row(guild, e, ruleset, campaign_id=campaign.id, is_gm=is_gm)
+            for e in rows
+        )
         return f"""
 <table class="ranktable">
   <thead><tr><th>Name</th><th>Kind</th><th>Role</th><th>Player</th><th>Tier</th><th>Stats</th></tr></thead>
@@ -224,6 +242,8 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
   {_knowledge_section(store, campaign, is_gm)}
 
   {_canon_section(store, is_gm)}
+
+  {_tuning_section(minds.tuning_for(store, campaign), campaign, is_gm)}
 
   <h2>Recent events</h2>
   <p class="muted small">Every change is an event, which is what makes replay and undo possible.</p>
@@ -441,6 +461,19 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
       if (data.ok) location.reload();
     }});
   }});
+  document.querySelectorAll(".dndtune").forEach((el) => {{
+    el.addEventListener("change", () => {{
+      post(`/api/guild/${{gid}}/dnd/tune`,
+        {{campaign_id: cid, key: el.dataset.key, value: el.value}});
+    }});
+  }});
+  document.querySelectorAll(".dndtune-clear").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/tune`,
+        {{campaign_id: cid, key: el.dataset.key, value: null}});
+      if (data.ok) location.reload();
+    }});
+  }});
   document.querySelectorAll(".canon-accept, .canon-reject").forEach((el) => {{
     el.addEventListener("click", async () => {{
       const action = el.classList.contains("canon-accept") ? "accept" : "reject";
@@ -452,6 +485,244 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
 }})();
 </script>
 <p id="status" class="status"></p>"""
+
+
+# --------------------------------------------------------------------------- #
+#  Simulation tuning
+#
+#  Nothing in the engine is baked in: every constant is a tunable resolved
+#  default -> server -> campaign. This page is the campaign layer, so a GM can
+#  retune their own game without touching anyone else's.
+# --------------------------------------------------------------------------- #
+def _tuning_section(tuning, campaign, is_gm: bool) -> str:
+    if not is_gm:
+        return ""
+
+    by_group: dict = {}
+    for entry in tuning.entries():
+        by_group.setdefault(entry["group"], []).append(entry)
+
+    blocks = ""
+    for group in tuning_registry.GROUPS:
+        items = by_group.get(group)
+        if not items:
+            continue
+        rows = ""
+        for item in items:
+            # "inherited" means this campaign has no opinion and is taking the
+            # server's value (or the built-in default). Saying so is the whole
+            # point of showing the source.
+            source = item["source"]
+            badge = (
+                '<span class="chip">yours</span>' if source == "campaign"
+                else f'<span class="muted small">from {source}</span>'
+            )
+            step = "1" if item["type"] == "int" else "any"
+            rows += f"""
+<div class="paramrow">
+  <div><b>{_escape(item['label'])}</b> {badge}
+    <div class="muted small">{_escape(item['description'])}</div>
+    <div class="muted small"><code>{item['key']}</code> · {item['min']}–{item['max']}</div>
+  </div>
+  <div>
+    <input type="number" step="{step}" class="dndtune" data-key="{item['key']}"
+           value="{item['value']}" min="{item['min']}" max="{item['max']}">
+    <button class="dndtune-clear" data-key="{item['key']}" title="Back to inherited">↺</button>
+  </div>
+</div>"""
+        blocks += f"""
+<div class="cogcard">
+  <div class="coghead"><div><h3>{_escape(group)}</h3></div></div>
+  <div class="catbody"><div class="fields">{rows}</div></div>
+</div>"""
+
+    return f"""
+<h2>Simulation settings</h2>
+<p class="muted small">These apply to <b>this campaign only</b>, and override the
+server's. The ↺ button clears yours and goes back to inheriting. Setting
+<b>Forgetting speed</b> to 0 switches forgetting off entirely.</p>
+{blocks}"""
+
+
+# --------------------------------------------------------------------------- #
+#  Entity inspector — the page that shows this is a simulation
+# --------------------------------------------------------------------------- #
+_TIER_LABELS = {
+    TIER_IMPRINT: "⚡ Imprints — never fade",
+    TIER_LONG: "Long-term",
+    TIER_MID: "This arc",
+    TIER_WORKING: "Right now",
+}
+
+
+def _meter(value: float, low: float = 0.0, high: float = 1.0) -> str:
+    """A proportional bar. Rendered with a plain div so it needs no new CSS."""
+    pct = max(0, min(100, round((value - low) / (high - low) * 100)))
+    return (
+        f'<span style="display:inline-block;width:90px;height:8px;background:#3a3a3a;'
+        f'border-radius:4px;vertical-align:middle">'
+        f'<span style="display:block;width:{pct}%;height:100%;background:currentColor;'
+        f'border-radius:4px"></span></span>'
+    )
+
+
+def _memory_card(entity, memory, explain) -> str:
+    """One memory, with its clarity per field and the reason it is sticking."""
+    fields = ""
+    for field in ("gist", "valence", "participants", "details", "when"):
+        clarity = memory.fidelity.get(field, 1.0)
+        flagged = field in memory.confabulated
+        colour = "#e74c3c" if flagged else ("#2ecc71" if clarity > 0.7 else "#e67e22")
+        label = {"gist": "what", "valence": "feeling", "participants": "who",
+                 "details": "details", "when": "when"}[field]
+        fields += (
+            f'<div style="color:{colour};font-size:0.85em">{_meter(clarity)} '
+            f'{label} {clarity:.2f}{" ⚠️ misremembered" if flagged else ""}</div>'
+        )
+
+    reason = _escape(explain(memory)) if explain else ""
+    badges = f'<span class="chip">salience {memory.salience:.2f}</span> '
+    badges += f'<span class="chip">{memory.feels}</span> '
+    if memory.recall_count:
+        badges += f'<span class="chip">recalled ×{memory.recall_count}</span> '
+    if memory.confabulated:
+        badges += '<span class="chip">⚠️ will misremember</span> '
+
+    return f"""
+<tr><td>
+  <b>{_escape(memory.describe())}</b><br>{badges}
+  <div class="muted small">{reason}</div>
+</td><td>{fields}</td></tr>"""
+
+
+def _inspector_html(bot, guild, campaign, entity, store) -> str:
+    """Everything inside one head: disposition, body, memory, beliefs, relations.
+
+    Read-only by construction — recall is *not* run here, because recalling a
+    memory rewrites it and looking at an NPC must not change them.
+    """
+    tuning = minds.tuning_for(store, campaign)
+    traits = minds.traits_of(entity)
+    world_time = campaign.world_time
+    needs = minds.needs_of(entity, world_time, tuning)
+    memories = store.memories.for_entity(entity.id)
+
+    # --- disposition ---
+    trait_rows = ""
+    for axis in TEMPERAMENT + DRIVES + FACULTIES:
+        value = traits.axis(axis)
+        low = -1.0 if axis in TEMPERAMENT else 0.0
+        trait_rows += (
+            f'<tr><td>{_escape(TRAIT_LABELS.get(axis, axis))}</td>'
+            f'<td>{_meter(value, low, 1.0)} {value:+.2f}</td></tr>'
+        )
+
+    # --- body ---
+    need_rows = ""
+    for name, label in NEED_LABELS.items():
+        value = needs.value(name)
+        urgency = needs.urgency(name, tuning.needs())
+        need_rows += (
+            f'<tr><td>{_escape(label)}</td>'
+            f'<td>{_meter(value)} {value:.2f} <span class="muted small">'
+            f'(urgency {urgency:.3f})</span></td></tr>'
+        )
+
+    impulses = minds.impulses_of(entity, world_time, tuning)
+    impulse_html = ", ".join(
+        f'<span class="chip">{_escape(i.kind)} {i.strength:.2f}</span>' for i in impulses
+    ) or '<span class="muted">No urges pulling at them.</span>'
+
+    # --- memory, by tier ---
+    by_tier: dict = {}
+    for memory in memories:
+        by_tier.setdefault(memory.tier, []).append(memory)
+
+    memory_html = ""
+    for tier, label in _TIER_LABELS.items():
+        entries = by_tier.get(tier)
+        if not entries:
+            continue
+        entries.sort(key=lambda m: -m.salience)
+        rows = "".join(
+            _memory_card(entity, m, lambda mm: minds.explain_retention(entity, mm))
+            for m in entries[:20]
+        )
+        memory_html += f"""
+<h3>{label} <span class="muted">· {len(entries)}</span></h3>
+<table class="ranktable"><tbody>{rows}</tbody></table>"""
+    if not memories:
+        memory_html = '<p class="muted">Nothing worth remembering yet.</p>'
+
+    # --- beliefs ---
+    beliefs = store.beliefs.held_by(entity.id)
+    belief_rows = "".join(
+        f'<tr><td>{_escape(b.claim)}</td><td class="muted small">{b.certainty} '
+        f'({b.confidence:.2f}) · {_escape(b.source_kind)}'
+        f'{" · <b>false</b>" if b.is_wrong() else ""}</td></tr>'
+        for b in beliefs
+    ) or '<tr><td class="muted" colspan="2">Believes nothing in particular.</td></tr>'
+
+    # --- relationships, both directions ---
+    def _rel_rows(rels, key):
+        out = ""
+        for rel in rels[:12]:
+            other = store.entities.get(getattr(rel, key))
+            name = other.identity.name if other else "someone"
+            out += (
+                f'<tr><td>{_escape(name)}</td><td class="muted small">{_escape(rel.summary())}</td>'
+                f'<td class="muted small">aff {rel.affinity:+.2f} · trust {rel.trust:+.2f} '
+                f'· fear {rel.fear:+.2f}</td></tr>'
+            )
+        return out or '<tr><td class="muted" colspan="3">Nobody yet.</td></tr>'
+
+    budget = store.memories.tier_counts(entity.id)
+    return f"""
+<div class="guildpage">
+  <div class="statshead">
+    <div><span class="muted">{_escape(guild.name)} ·
+      <a href="/guild/{guild.id}/tabletop/{campaign.id}">{_escape(campaign.name)}</a></span>
+      <h1>{_escape(entity.identity.name)}</h1>
+      <p class="muted">{_escape(entity.identity.role)} · {_escape(entity.identity.pronouns)}
+      · <i>{_escape(traits.describe())}</i></p></div>
+  </div>
+  <div class="chips">
+    <span class="chip">{_escape(entity.kind)}</span>
+    <span class="chip">tier {_escape(entity.tier)}</span>
+    <span class="chip">importance {entity.importance:.2f}</span>
+    <span class="chip">retention {traits.retention:.2f}</span>
+    <span class="chip">{sum(budget.values())} memories</span>
+  </div>
+
+  <h2>Disposition</h2>
+  <p class="muted small">Temperament is stable; drives shift slowly with experience.
+  <b>Retention</b> is a faculty, not a personality trait — it decides how long this
+  particular mind holds on to things.</p>
+  <table class="ranktable"><tbody>{trait_rows}</tbody></table>
+
+  <h2>Body</h2>
+  <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
+  <table class="ranktable"><tbody>{need_rows}</tbody></table>
+  <p>{impulse_html}</p>
+
+  <h2>Memory</h2>
+  <p class="muted small">Each memory shows how clear every part of it still is.
+  Fields in red have been <b>misremembered</b> — replaced with a plausible wrong
+  value drawn from this character's other memories. The line underneath says why
+  the memory is sticking, or why it isn't.</p>
+  {memory_html}
+
+  <h2>Beliefs</h2>
+  <p class="muted small">What they think is true. They cannot see the "false" marker.</p>
+  <table class="ranktable"><tbody>{belief_rows}</tbody></table>
+
+  <h2>Feelings toward others</h2>
+  <table class="ranktable"><tbody>{_rel_rows(store.relations.outgoing(entity.id), "to_id")}</tbody></table>
+
+  <h2>How others feel about them</h2>
+  <p class="muted small">Often the more interesting direction, and the one easy to forget to ask about.</p>
+  <table class="ranktable"><tbody>{_rel_rows(store.relations.incoming(entity.id), "from_id")}</tbody></table>
+</div>"""
 
 
 # --------------------------------------------------------------------------- #
@@ -470,17 +741,49 @@ async def tabletop_page(request: web.Request):
     )
 
 
+async def entity_page(request: web.Request):
+    """The inspector. GM-only: it shows truth flags and decision-grade internals."""
+    from web.routes import _page
+
+    guild, guild_scope, uid = request["guild"], request["scope"], request["uid"]
+    campaign = _find_campaign(guild.id, request.match_info.get("cid", ""))
+    scope = access.campaign_scope(campaign, uid, guild_scope)
+    if campaign is None or scope != access.CAMPAIGN_GM:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+
+    store = campaign_store(guild.id, campaign.id)
+    raw_id = request.match_info.get("eid", "")
+    entity = next(
+        (e for e in store.entities.list(include_retired=True, limit=500)
+         if str(e.id) == raw_id),
+        None,
+    )
+    if entity is None:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+
+    return _page(
+        f"{entity.identity.name} · {campaign.name}",
+        _inspector_html(request.app["bot"], guild, campaign, entity, store),
+        scope=guild_scope,
+        guild=guild,
+        current="tabletop",
+    )
+
+
+def _find_campaign(guild_id: int, raw_id: str):
+    for candidate in campaigns_for(guild_id).list(include_archived=True):
+        if str(candidate.id) == raw_id:
+            return candidate
+    return None
+
+
 async def campaign_page(request: web.Request):
     from web.routes import _page
 
     guild, guild_scope, uid = request["guild"], request["scope"], request["uid"]
     raw_id = request.match_info.get("cid", "")
 
-    campaign = None
-    for candidate in campaigns_for(guild.id).list(include_archived=True):
-        if str(candidate.id) == raw_id:
-            campaign = candidate
-            break
+    campaign = _find_campaign(guild.id, raw_id)
 
     campaign_scope = access.campaign_scope(campaign, uid, guild_scope)
     if campaign is None or campaign_scope == access.CAMPAIGN_NONE:

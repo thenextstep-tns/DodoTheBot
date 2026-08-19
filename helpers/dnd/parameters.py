@@ -89,3 +89,31 @@ def get(guild_id: Optional[int], key: str) -> Any:
 def entries(guild_id: Optional[int]) -> list[dict]:
     """Specs + current values, for the DnD panel page."""
     return params.entries_for_cog(guild_id, "dnd")
+
+
+# --------------------------------------------------------------------------- #
+#  Simulation tunables, server layer
+# --------------------------------------------------------------------------- #
+# The tunables in helpers/dnd/tuning.py have two override layers: the server
+# (here) and the campaign (campaign.settings["tuning"]). They are kept out of
+# DND_PARAMETERS above because there are dozens of them, they are grouped and
+# ranged differently, and the DnD panel renders them in their own section.
+TUNING_COLLECTION = db["DndTuning"]
+
+
+def tuning_overrides(guild_id: Optional[int]) -> dict:
+    """Every server-level tunable override for a guild."""
+    doc = TUNING_COLLECTION.find_one({"guild_id": guild_id})
+    return (doc or {}).get("values", {})
+
+
+def set_tuning(guild_id: Optional[int], key: str, value) -> None:
+    """Set one server-level tunable. ``None`` clears it back to the default."""
+    if value is None:
+        TUNING_COLLECTION.update_one(
+            {"guild_id": guild_id}, {"$unset": {f"values.{key}": ""}}, upsert=True
+        )
+        return
+    TUNING_COLLECTION.update_one(
+        {"guild_id": guild_id}, {"$set": {f"values.{key}": value}}, upsert=True
+    )

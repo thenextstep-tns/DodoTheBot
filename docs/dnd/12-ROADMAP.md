@@ -71,8 +71,25 @@ P1 also **separated tabletop from the rest of the bot** — see `15-SEPARATION.m
 | Secrets never reach a player | Retrieval with `for_player=True` drops them, and the rendered player HTML is asserted not to contain the secret's text |
 | Canon needs an explicit ruling | A proposal is retrievable as low-weight soft canon but is not a fact until accepted; double-accept is refused |
 
-## P2 — Minds
+## P2 — Minds ✅ **done**
 *Playable as: NPCs that remember, feel, and can be inspected — before they act.*
+
+Shipped: `mind/` (traits with inheritance, needs, memory, relationships),
+`world/memory.py` + `world/relationship.py`, `store/memories.py` +
+`store/relations.py`, `helpers/dnd/minds.py`, **`helpers/dnd/tuning.py`**, the
+panel **entity inspector** and campaign tuning page, and `tests/test_dnd_p2.py`
+(104 checks). Commands: `/npc create|list|mind`, `/remember`, `/recall`,
+`/relate`, `/advance`, `/tune show|set`.
+
+**Forgetting is a power law, not a decay timer.** Three things shape how long a
+memory holds together, and all three are tunable (including to zero):
+
+* how much it mattered at the time (salience),
+* **whose head it is in** — `retention` is a per-character faculty, so some
+  people remember nearly everything and some lose names by the next week,
+* **whether their value system is holding on to it** — a grasping NPC keeps every
+  debt and loses every kindness; a sworn one does the reverse. Values also shape
+  what they *notice* in the first place, so attention and retention compound.
 
 - Traits, inheritance, derivation from culture
 - Needs with cubed urgency
@@ -81,12 +98,20 @@ P1 also **separated tabletop from the rest of the bot** — see `15-SEPARATION.m
 - Relationships, multi-axis, event-driven
 - Panel: **the entity inspector** (`09-SURFACES.md` §5)
 
-**Acceptance:** two witnesses to one event hold measurably different memories; a
-memory degrades over simulated months and confabulates a detail; an imprint
-survives everything; memory never exceeds budget under a property test.
+**Acceptance — verified in `tests/test_dnd_p2.py` and `tests/test_dnd_panel.py`:**
 
-This phase is where the product becomes itself. Ship the inspector with it — the
-demo is what convinces you the phase worked.
+| Criterion | How it is proved |
+| --- | --- |
+| Two witnesses differ | The distant witness keeps fewer details, sees only "a fight", and scores it lower — from one event |
+| Memory degrades and confabulates | Over simulated years a faint memory loses fields in order and either blanks or is filled with a wrong value drawn from that character's *other* memories |
+| Imprints survive everything | Promoted, then aged a century at zero retention: byte-identical, half-life infinite |
+| Budgets hold | Pruning always lands inside the cap, lowest salience first, imprints exempt, and what goes leaves a summary |
+| Curve is a power law | More is lost in the first week than in the fifth year; 100 one-day steps equal one 100-day step |
+| Forgetting can be switched off | `memory_decay_rate: 0` leaves fidelity byte-identical after a century |
+| Looking doesn't change the mind | The inspector renders twice with identical recall counts and salience |
+
+This phase is where the product becomes itself, and the inspector is the demo
+that proves it worked.
 
 ## P3 — Decisions & continuity
 *Playable as: a world that keeps turning while you sleep.*

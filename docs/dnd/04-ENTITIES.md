@@ -117,6 +117,11 @@ class Traits:
     ideals: list[str]
 ```
 
+Plus one **faculty**, kept separate from both: `retention`, how well this mind
+holds on to things. It is not a disposition — it describes what the mind is
+*capable* of rather than what it wants, so it never feeds the utility scorer the
+way drives do. It multiplies memory stability directly (`05-MEMORY.md`).
+
 Five temperament axes and five drives is a deliberate ceiling: enough for
 distinct-feeling NPCs, few enough that a GM can read a sheet and predict
 behaviour. More axes make the utility weights unreadable and the NPCs mushier,

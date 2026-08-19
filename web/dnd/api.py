@@ -28,6 +28,7 @@ from helpers import parameters as shared_parameters
 from helpers import validate
 from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
+from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd.world.knowledge import KINDS, Fact
 from web.dnd import access
@@ -203,3 +204,40 @@ async def api_dnd_canon(request: web.Request):
         return web.json_response({"ok": fact is not None})
     store.canon.reject(target, actor_id=request["uid"])
     return web.json_response({"ok": True})
+
+
+async def api_dnd_tune(request: web.Request):
+    """Set or clear one campaign-level tunable: ``{campaign_id, key, value}``.
+
+    ``value: null`` clears the campaign's override so it goes back to inheriting
+    the server's setting (or the built-in default). Out-of-range values are
+    clamped rather than refused — dragging a slider past the end should give you
+    the extreme, not an error.
+    """
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    key = str(data.get("key", ""))
+    spec = tuning_registry.BY_KEY.get(key)
+    if spec is None:
+        return _bad("Unknown setting.")
+
+    settings = dict(campaign.settings or {})
+    overrides = dict(settings.get("tuning") or {})
+    raw = data.get("value")
+    if raw in (None, ""):
+        overrides.pop(key, None)
+    else:
+        try:
+            overrides[key] = tuning_registry.coerce(key, raw)
+        except (TypeError, ValueError) as error:
+            return _bad(error)
+    settings["tuning"] = overrides
+    store.campaigns.save_settings(campaign.id, settings)
+
+    resolved = tuning_registry.Tuning.for_campaign(request["guild"].id, campaign)
+    return web.json_response(
+        {"ok": True, "value": resolved.get(key), "source": resolved.source_of(key)}
+    )

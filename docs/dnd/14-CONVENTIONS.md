@@ -58,27 +58,33 @@ module" or "add feature".
 
 Breaking any of these is a review failure, not a style preference.
 
-1. **`llm/` is a leaf.** `world/`, `rules/`, `mind/` and `store/` never import it.
+1. **Nothing is baked in.** Every constant that shapes behaviour is a tunable in
+   `helpers/dnd/tuning.py`, with a label, a description, a range and a group,
+   resolved **default -> server -> campaign**. If something can be softened it
+   must also be switchable off entirely (decay rate 0 = frozen memory). A magic
+   number in a simulation file is a review failure. This is a standing project
+   rule, not a tabletop one - see the `everything-tweakable` memory.
+3. **`llm/` is a leaf.** `world/`, `rules/`, `mind/` and `store/` never import it.
 2. **LLM output is never world truth.** It goes to the canon queue or it is
    display-only.
-3. **Every document is scoped.** `guild_id` *and* `campaign_id`, always, and
+4. **Every document is scoped.** `guild_id` *and* `campaign_id`, always, and
    reads go through `store/repo.py`.
-4. **Pure layers are pure.** No I/O, no `await`, no wall-clock reads, no bare
+5. **Pure layers are pure.** No I/O, no `await`, no wall-clock reads, no bare
    `random` — RNG is passed in, seeded.
-5. **Bounded memory.** Nothing grows without a cap. The old cog's `history` string
+6. **Bounded memory.** Nothing grows without a cap. The old cog's `history` string
    is the anti-pattern this module exists to correct.
-6. **`backend=null` always works.** Every LLM task has a deterministic fallback,
+7. **`backend=null` always works.** Every LLM task has a deterministic fallback,
    and the null suite is part of the test run.
-7. **Mechanics before prose.** Post the outcome, then stream narration.
-8. **No inference leaves hardware we own.** Ollama only. No hosted API, no
+8. **Mechanics before prose.** Post the outcome, then stream narration.
+9. **No inference leaves hardware we own.** Ollama only. No hosted API, no
    third-party provider, no "just for the free tier", no API-key field. If you
    find yourself adding an HTTP client for a model vendor, stop.
-9. **Stay separate.** Tabletop has its own strings (`lang_dnd.py`), parameters
+10. **Stay separate.** Tabletop has its own strings (`lang_dnd.py`), parameters
    (`helpers/dnd/parameters.py`), storage, panel pages and dashboard section. Do
    not add a `dnd_*` key to the shared parameter registry, a `TT_*` string to
    `lang.py`, or a tabletop cog to `cog_categories.CATEGORIES`. The full map,
    including what *is* deliberately shared and why, is `15-SEPARATION.md`.
-10. **Deterministic first.** If it can be computed in Python, it is computed in
+11. **Deterministic first.** If it can be computed in Python, it is computed in
    Python. A model is called only where prose quality is itself the product.
    Adding a call site means adding a row to the table in `08-LLM-LAYER.md` §5
    naming the deterministic alternative and why it is insufficient. "It would be

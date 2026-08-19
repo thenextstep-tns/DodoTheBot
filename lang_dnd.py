@@ -137,3 +137,42 @@ TT_BELIEF_NO_TARGET = "No entity called **{name}** in this campaign."
 TT_CANON_EMPTY = "Nothing waiting for review. Invented facts land here once the narrator is switched on."
 TT_CANON_TITLE = "Proposed canon — {count} awaiting review"
 TT_CANON_LINE = "**{title}** — {text}"
+
+# --------------------------------------------------------------------------- #
+#  Minds — NPCs, memory, relationships (P2)
+# --------------------------------------------------------------------------- #
+TT_NPC_CREATED = "**{name}** exists now — {traits}. They already remember {memories} thing(s)."
+TT_NPC_EXISTS = "There's already someone called **{name}** in this campaign."
+TT_NPC_NOT_FOUND = "No one called **{name}** in this campaign."
+TT_NPC_LIST_TITLE = "{campaign} — the people"
+TT_NPC_LIST_EMPTY = "No NPCs yet. A GM can make one with `/npc create`."
+TT_NPC_LIST_LINE = "**{name}** — {role}, {traits}"
+
+TT_MIND_TITLE = "Inside {name}'s head"
+TT_MIND_TRAITS = "Disposition"
+TT_MIND_NEEDS = "Body"
+TT_MIND_MEMORY = "Memory"
+TT_MIND_IMPULSES = "Urges"
+TT_MIND_RELATIONS = "Feelings toward others"
+TT_MIND_NO_MEMORIES = "Nothing worth remembering yet."
+TT_MIND_FOOTER = "retention {retention} · {counts}"
+
+TT_REMEMBER_ADDED = "**{name}** will remember that. ({detail})"
+TT_REMEMBER_NOTHING = "**{name}** didn't take it in at all — nothing was encoded."
+TT_RECALL_TITLE = "{name} remembers…"
+TT_RECALL_EMPTY = "Nothing comes to mind."
+TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
+
+TT_RELATE_DONE = "**{a}** now: {summary} (toward **{b}**)."
+TT_RELATE_UNKNOWN = "I don't know what `{kind}` means. Try one of: {kinds}"
+TT_RELATE_TITLE = "{a} → {b}"
+
+TT_ADVANCE_DONE = "**{days} day(s)** pass. {entities} mind(s) aged: {imprints} new imprint(s), {confab} misremembering, {pruned} memory/memories let go."
+TT_ADVANCE_FROZEN = "**{days} day(s)** pass — but forgetting is switched off for this campaign, so nothing faded."
+TT_ADVANCE_TOO_FAR = "That's further than one jump should go. Keep it under {max} days."
+
+TT_TUNING_TITLE = "{campaign} — simulation settings"
+TT_TUNING_SET = "**{label}** is now `{value}` for this campaign (was {old} from {source})."
+TT_TUNING_CLEARED = "**{label}** is back to inheriting: `{value}`."
+TT_TUNING_UNKNOWN = "No setting called `{key}`. See the campaign's Tuning page on the panel."
+TT_TUNING_LINE = "`{key}` = **{value}** ({source})"

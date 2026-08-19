@@ -48,6 +48,10 @@ from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
 from helpers.dnd.world.entity import KIND_PC, Entity, Identity  # noqa: E402
 from helpers.dnd.world.knowledge import Fact  # noqa: E402
+from helpers.dnd.store import memories as memories_module  # noqa: E402
+from helpers.dnd.store import relations as relations_module  # noqa: E402
+from helpers.dnd import minds  # noqa: E402
+from helpers.dnd import parameters as dnd_parameters  # noqa: E402
 from web.dnd import access, pages  # noqa: E402
 
 for _cls, _name in (
@@ -58,8 +62,12 @@ for _cls, _name in (
     (knowledge_module.KnowledgeRepo, "dnd_knowledge"),
     (beliefs_module.BeliefRepo, "dnd_beliefs"),
     (canon_module.CanonRepo, "dnd_canon_queue"),
+    (memories_module.MemoryRepo, "dnd_memories"),
+    (relations_module.RelationRepo, "dnd_relations"),
 ):
     _cls.collection = _FAKES[_name]
+
+dnd_parameters.TUNING_COLLECTION = FakeCollection("DndTuning")
 
 PASSED: list[str] = []
 FAILED: list[str] = []
@@ -159,8 +167,65 @@ def test_pages() -> None:
     check("panel: SRD attribution is shown", "System Reference Document" in gm_page)
 
 
+def test_inspector() -> None:
+    """The entity inspector — the page that shows this is a simulation."""
+    from random import Random
+
+    guild, campaign, store = build()
+    marla = minds.spawn_npc(
+        store, name="Marla Venn", role="harbourmaster", culture="tidewater",
+        world_time=0, rng=Random(7),
+    )
+    minds.remember(
+        store, marla, "Ondry never paid what he owed at the north dock",
+        world_time=0, rng=Random(1), valence=-0.6, details=["a green lantern"],
+    )
+    minds.advance(store, campaign, 900, Random(3))
+
+    html = pages._inspector_html(FakeBot(), guild, campaign, marla, store)
+    check("inspector: renders", "Marla Venn" in html)
+    check("inspector: shows disposition", "Retention" in html and "Warmth" in html)
+    check("inspector: shows the body", "Hunger" in html and "urgency" in html)
+    check("inspector: shows memory", "Memory" in html)
+    check("inspector: explains why memories stick",
+          "holds onto" in html or "nothing in their values" in html)
+    check("inspector: shows both relationship directions",
+          "Feelings toward others" in html and "How others feel about them" in html)
+    check("inspector: shows beliefs", "Beliefs" in html)
+
+    # The inspector must be read-only — looking must not rewrite a memory.
+    before = [(m.id, m.recall_count, m.salience) for m in store.memories.for_entity(marla.id)]
+    pages._inspector_html(FakeBot(), guild, campaign, marla, store)
+    after = [(m.id, m.recall_count, m.salience) for m in store.memories.for_entity(marla.id)]
+    check("inspector: LOOKING DOES NOT CHANGE THE MIND", before == after)
+
+
+def test_tuning_section() -> None:
+    guild, campaign, store = build()
+    tuning = minds.tuning_for(store, campaign)
+
+    gm_html = pages._tuning_section(tuning, campaign, True)
+    player_html = pages._tuning_section(tuning, campaign, False)
+    check("tuning: GM sees the settings", "Forgetting speed" in gm_html)
+    check("tuning: player sees none", player_html == "")
+    check("tuning: the off switch is explained",
+          "switches forgetting off entirely" in gm_html)
+    check("tuning: each setting shows where it came from",
+          "from default" in gm_html or "yours" in gm_html)
+    check("tuning: ranges are shown", 'min="0.0"' in gm_html or "0.0–5.0" in gm_html)
+
+    # A campaign override shows as the campaign's own.
+    campaign.settings = {"tuning": {"memory_decay_rate": 0}}
+    overridden = pages._tuning_section(
+        minds.tuning_for(store, campaign), campaign, True
+    )
+    check("tuning: an override is badged as yours", "yours" in overridden)
+
+
 def main() -> int:
     test_pages()
+    test_inspector()
+    test_tuning_section()
     for line in PASSED:
         print(f"  ok   {line}")
     for line in FAILED:

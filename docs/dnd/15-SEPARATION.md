@@ -16,6 +16,7 @@ rather than hardcoding names, so adding a tabletop cog is one edit.
 | --- | --- | --- |
 | Strings | `lang_dnd.py` | `lang.py` |
 | Parameters | `helpers/dnd/parameters.py` → `DndParams` collection | `helpers/parameters.py` → `CommandParams` |
+| Simulation tunables | `helpers/dnd/tuning.py` → `DndTuning` (server) + `campaign.settings["tuning"]` | — (no equivalent) |
 | Storage | the eleven `dnd_*` collections | everything else |
 | Dashboard | its own 🎲 Tabletop page, with an **Engine** section | the cog category page |
 | Cog taxonomy | absent by design | `helpers/cog_categories.py` |

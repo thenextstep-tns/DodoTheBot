@@ -93,44 +93,85 @@ valence, different detail, sometimes different participants. Every grudge, rumou
 false accusation and misunderstanding in the game originates here — not from a
 "generate a misunderstanding" feature.
 
-## 4. Decay — degradation, not deletion
+## 4. Decay — degradation, not deletion, and never uniform
 
-Fields rot **independently and in order**. This is the mechanic that makes the
-memory model feel like memory rather than a cache with a TTL.
+The mechanic that makes this feel like memory rather than a cache with a TTL.
+Three properties, and **all of them are tunable, including to zero**
+(`helpers/dnd/tuning.py`).
 
-```python
-DECAY_RATE = {          # per world-day, scaled by (1 - salience)
-    "gist":         0.002,   # survives longest
-    "valence":      0.004,   # you remember how it felt after you forget what it was
-    "participants": 0.010,
-    "details":      0.025,
-    "when":         0.040,   # time and place go first
-}
+### It is a power law, not a line and not an exponential
 
-def decay(m: Memory, days: float) -> None:
-    if m.tier == "imprint":
-        return
-    for field, rate in DECAY_RATE.items():
-        m.fidelity[field] *= exp(-rate * days * (1 - m.salience))
+Human forgetting drops steeply in the first hours and days, then flattens into a
+very long tail. An exponential loses too little early and then wipes everything
+at once. The curve here is the Ebbinghaus form:
+
+```
+R(t) = (1 + t / S) ** -d
 ```
 
-Rendering consults fidelity:
+`S` is the memory's **stability** in days and `d` (`memory_curve_shape`) sets how
+sharply it falls. Only `S` varies per memory and per person — which is where the
+other two properties come from.
 
-| Fidelity | Rendered as |
-| --- | --- |
-| `> 0.7` | The value, plainly |
-| `0.3–0.7` | Hedged — "a woman, maybe the harbourmaster" |
-| `< 0.3` | Dropped, **or confabulated** |
+Ageing resumes from where a memory already sits on the curve, so a hundred
+one-day steps and one hundred-day step give the same answer. Forgetting must not
+depend on how often the GM happens to look.
+
+### It differs per character
+
+`retention` is a **faculty**, not a personality trait (`04-ENTITIES.md` §3): some
+people remember nearly everything, some lose names by the following week. It
+multiplies stability directly and nudges the imprint threshold. Generated NPCs
+get a wide spread of it, wider than their personality variance, because that is
+how people actually differ.
+
+### It follows the value system
+
+The part that stops decay feeling like a timer. A memory's stability is stretched
+or shortened by how much it **engages the drives that character actually has**
+(`mind/memory/values.py`):
+
+> A grasping harbourmaster still knows, ten years on, exactly who owes him four
+> marks — and has entirely lost the afternoon someone was kind to him. A sworn
+> zealot has it the other way round.
+
+Values shape **attention as well as retention**: a grasping NPC *notices* a debt
+that a generous one lets pass unregistered, so the salience is higher at encoding
+too. The two compound — what you notice more, you also keep longer.
+
+Every memory carries a one-line reason a GM can read: *"holds onto this (greed)"*,
+*"nothing in their values holds this"*.
+
+### Fields rot in order
+
+Per-field base stability, longest-lived first:
+
+| Field | Base | Meaning |
+| --- | --- | --- |
+| `gist` | 240d | *that* it happened — outlasts everything |
+| `valence` | 120d | how it felt; past this, a memory goes numb |
+| `participants` | 45d | who was there — the field most often misremembered |
+| `details` | 14d | the specifics |
+| `when` | 7d | time and place — the first thing to go |
+
+Losing `when` is a coarsening rather than a blur: "last Tuesday" becomes "a while
+back" becomes "years ago".
 
 ### Confabulation
 
-Below `CONFABULATE_THRESHOLD = 0.2`, a field may be **filled with a plausible
-wrong value** instead of dropped — drawn from the entity's other memories and
-beliefs, so it is wrong in a *characteristic* way. The field is recorded in
-`confabulated` so the GM panel can show it.
+Below `memory_confabulate_threshold` a field may be filled with a **plausible
+wrong value** rather than going blank — drawn from that entity's *other* memories,
+so the mistake is characteristically theirs. They do not invent a stranger; they
+insert someone else they know, from somewhere else they have been.
 
-An NPC who remembers the wrong person holding the knife — confidently — is worth
-more than any amount of prompt engineering.
+The gist is never confabulated: replacing it would produce a *different memory*,
+not a misremembered one, and a GM would have no way to reason about it.
+
+### Switching it off
+
+`memory_decay_rate: 0` freezes memory exactly as encoded — a supported way to run
+a campaign, not a broken state. `memory_alignment_reach: 0` gives value-blind
+forgetting; `memory_retention_reach: 1` makes every character's memory identical.
 
 ## 5. Budgets — how this stays lightweight
 

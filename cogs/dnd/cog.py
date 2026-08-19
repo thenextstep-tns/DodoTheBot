@@ -36,9 +36,10 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import lang_dnd
-from cogs.dnd import context, embeds, knowledge as kb
+from cogs.dnd import context, embeds, knowledge as kb, minds_ui
 from helpers import checks
-from helpers.dnd import migrate, rules
+from helpers.dnd import migrate, minds, rules
+from helpers.dnd import tuning as tuning_registry
 from helpers.dnd import parameters as dnd_params
 from helpers.dnd.rules import dice
 from helpers.dnd.rules.ruleset import Action
@@ -48,10 +49,14 @@ from helpers.dnd.world.campaign import Campaign
 from helpers.dnd.world.entity import KIND_PC, TIER_FOCUS, Entity, Identity, Position
 from helpers.dnd.world.belief import SOURCE_ASSUMED, adopt
 from helpers.dnd.world.event import event_seed
+from helpers.dnd.mind.relationships import kinds as relationship_kinds
 from helpers.dnd.world.knowledge import Fact
 from helpers.dnd.world.scene import Scene
 
 MAX_NAME = 60
+# One jump forward is capped so a slip of the keyboard cannot age a whole
+# campaign into dust. Repeat the command to go further.
+MAX_ADVANCE_DAYS = 3650
 
 
 def _seeded(campaign: Campaign, seq: int) -> Random:
@@ -71,6 +76,10 @@ class Tabletop(commands.Cog, name="dnd"):
     scene = app_commands.Group(name="scene", description="Open and close scenes. (GM)")
     lore = app_commands.Group(
         name="lore", description="The campaign's world knowledge."
+    )
+    npc = app_commands.Group(name="npc", description="The people who live in the world.")
+    tune = app_commands.Group(
+        name="tune", description="Simulation settings for this campaign."
     )
 
     def __init__(self, bot):
@@ -788,6 +797,415 @@ class Tabletop(commands.Cog, name="dnd"):
         await interaction.response.send_message(
             embed=kb.canon_queue(found.store.canon.pending()), ephemeral=True
         )
+
+    # ------------------------------------------------------------------ #
+    #  /npc — people with minds (P2)
+    # ------------------------------------------------------------------ #
+    @npc.command(name="create", description="Bring an NPC into the world. (GM)")
+    @app_commands.describe(
+        name="What they're called.",
+        role="Their calling — harbourmaster, guard, smuggler. Shapes disposition and stats.",
+        culture="Where they're from. Nudges disposition and naming.",
+        species="Optional.",
+        pronouns="Optional. Defaults to they/them.",
+        importance="0-1. How much they matter: drives memory capacity and simulation depth.",
+    )
+    async def npc_create(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        role: str = "",
+        culture: str = "",
+        species: str = "",
+        pronouns: str = "they/them",
+        importance: float | None = None,
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        if found.store.entities.by_name(name):
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_EXISTS.format(name=name), ephemeral=True
+            )
+            return
+
+        seq = found.store.campaigns.next_seq(found.campaign.id)
+        rng = _seeded(found.campaign, seq)
+        entity = minds.spawn_npc(
+            found.store,
+            name=name.strip()[:MAX_NAME],
+            role=role.strip(),
+            species=species.strip(),
+            culture=culture.strip(),
+            pronouns=(pronouns or "they/them").strip(),
+            importance=importance,
+            world_time=found.campaign.world_time,
+            rng=rng,
+            ruleset=rules.get(found.campaign.ruleset),
+        )
+        found.store.events.append(
+            events.NPC_SPAWNED,
+            actor_id=entity.id,
+            seq=seq,
+            seed=event_seed(found.campaign.seed, seq),
+            payload={"name": entity.name, "role": role, "culture": culture},
+        )
+        traits = minds.traits_of(entity)
+        await interaction.response.send_message(
+            lang_dnd.TT_NPC_CREATED.format(
+                name=entity.name,
+                traits=traits.describe(),
+                memories=found.store.memories.count_for(entity.id),
+            )
+        )
+
+    @npc.command(name="list", description="Everyone who lives in this campaign.")
+    async def npc_list(self, interaction: discord.Interaction) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        await interaction.response.send_message(
+            embed=minds_ui.npc_list(found.store.entities.npcs(), found.campaign.name),
+            ephemeral=True,
+        )
+
+    @npc.command(name="mind", description="Look inside someone's head. (GM)")
+    @app_commands.describe(who="Whose mind to inspect.")
+    async def npc_mind(self, interaction: discord.Interaction, who: str) -> None:
+        """The inspector: disposition, body, memory with per-field clarity, and
+        why each memory is sticking. Read-only — looking must not change what is
+        being looked at, so recall runs without reconsolidation."""
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        entity = found.store.entities.by_name(who)
+        if entity is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who), ephemeral=True
+            )
+            return
+
+        tuning = minds.tuning_for(found.store, found.campaign)
+        world_time = found.campaign.world_time
+        relations = []
+        for rel in found.store.relations.outgoing(entity.id)[:8]:
+            other = found.store.entities.get(rel.to_id)
+            relations.append((other.identity.name if other else "someone", rel))
+
+        await interaction.response.send_message(
+            embed=minds_ui.mind_view(
+                entity,
+                minds.traits_of(entity),
+                minds.needs_of(entity, world_time, tuning),
+                found.store.memories.for_entity(entity.id),
+                minds.impulses_of(entity, world_time, tuning),
+                relations,
+                tuning=tuning,
+                explain=lambda m: minds.explain_retention(entity, m),
+            ),
+            ephemeral=True,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Memory (P2)
+    # ------------------------------------------------------------------ #
+    @app_commands.command(name="remember", description="Give someone a memory. (GM)")
+    @app_commands.describe(
+        who="Who remembers it.",
+        what="What happened, in their words.",
+        feeling="-1 (awful) to 1 (wonderful), as it felt to them.",
+        detail="A concrete detail — the thing that later becomes a recall cue.",
+        clarity="0-1. How well they perceived it. Low means a hazy memory from the start.",
+    )
+    async def remember(
+        self,
+        interaction: discord.Interaction,
+        who: str,
+        what: str,
+        feeling: float = 0.0,
+        detail: str = "",
+        clarity: float = 1.0,
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        entity = found.store.entities.by_name(who)
+        if entity is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who), ephemeral=True
+            )
+            return
+
+        seq = found.store.campaigns.next_seq(found.campaign.id)
+        memory = minds.remember(
+            found.store,
+            entity,
+            what.strip(),
+            world_time=found.campaign.world_time,
+            rng=_seeded(found.campaign, seq),
+            valence=max(-1.0, min(1.0, feeling)),
+            details=[detail.strip()] if detail.strip() else None,
+            perception=max(0.0, min(1.0, clarity)),
+        )
+        if memory is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_REMEMBER_NOTHING.format(name=entity.identity.name), ephemeral=True
+            )
+            return
+
+        note = f"salience {memory.salience:.2f}"
+        if memory.is_imprint:
+            note += " — **that will mark them permanently**"
+        note += f"; {minds.explain_retention(entity, memory)}"
+        await interaction.response.send_message(
+            lang_dnd.TT_REMEMBER_ADDED.format(name=entity.identity.name, detail=note),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="recall", description="See what a cue brings to someone's mind. (GM)")
+    @app_commands.describe(
+        who="Whose memory to stir.",
+        cue="What they see, hear or smell — 'lantern', 'rain', a name.",
+    )
+    async def recall(self, interaction: discord.Interaction, who: str, cue: str) -> None:
+        """Recall *rewrites*: the gist firms up and the present can leak in as a
+        false detail. That is deliberate, so this command changes state."""
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        entity = found.store.entities.by_name(who)
+        if entity is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who), ephemeral=True
+            )
+            return
+
+        cues = [c for c in cue.lower().split() if c]
+        seq = found.store.campaigns.next_seq(found.campaign.id)
+        imprint = minds.imprint_triggered(
+            found.store, entity, cues, found.campaign.world_time
+        )
+        hits = minds.recall_for(
+            found.store,
+            entity,
+            cues,
+            world_time=found.campaign.world_time,
+            rng=_seeded(found.campaign, seq),
+            present_details=cues,
+        )
+        await interaction.response.send_message(
+            embed=minds_ui.recall_view(entity, hits, imprint), ephemeral=True
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Relationships (P2)
+    # ------------------------------------------------------------------ #
+    @app_commands.command(name="relate", description="Record something between two people, or look. (GM)")
+    @app_commands.describe(
+        who="Whose feelings change.",
+        toward="About whom.",
+        what="What happened. Leave blank to just look at the current state.",
+    )
+    async def relate(
+        self, interaction: discord.Interaction, who: str, toward: str, what: str = ""
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        a = found.store.entities.by_name(who)
+        b = found.store.entities.by_name(toward)
+        if a is None or b is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who if a is None else toward),
+                ephemeral=True,
+            )
+            return
+
+        if what:
+            refusal = context.require_gm(
+                found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+            )
+            if refusal:
+                await interaction.response.send_message(refusal, ephemeral=True)
+                return
+            if what not in relationship_kinds():
+                await interaction.response.send_message(
+                    lang_dnd.TT_RELATE_UNKNOWN.format(
+                        kind=what, kinds=", ".join(relationship_kinds())
+                    ),
+                    ephemeral=True,
+                )
+                return
+            updated = minds.relate(
+                found.store, a, b, what, world_time=found.campaign.world_time
+            )
+            await interaction.response.send_message(
+                lang_dnd.TT_RELATE_DONE.format(
+                    a=a.identity.name, b=b.identity.name, summary=updated.summary()
+                )
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=minds_ui.relationship_view(
+                a.identity.name,
+                b.identity.name,
+                found.store.relations.between(a.id, b.id),
+                found.store.relations.between(b.id, a.id),
+            ),
+            ephemeral=True,
+        )
+
+    @relate.autocomplete("what")
+    async def _relate_autocomplete(self, interaction: discord.Interaction, current: str):
+        current = (current or "").lower()
+        return [
+            app_commands.Choice(name=k.replace("_", " ").title(), value=k)
+            for k in relationship_kinds()
+            if current in k
+        ][:25]
+
+    # ------------------------------------------------------------------ #
+    #  Time (P2 — the manual stand-in for the world tick in P3)
+    # ------------------------------------------------------------------ #
+    @app_commands.command(name="advance", description="Let time pass, and let minds age. (GM)")
+    @app_commands.describe(days="How many in-world days go by.")
+    async def advance(self, interaction: discord.Interaction, days: float) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        if days <= 0 or days > MAX_ADVANCE_DAYS:
+            await interaction.response.send_message(
+                lang_dnd.TT_ADVANCE_TOO_FAR.format(max=MAX_ADVANCE_DAYS), ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+        seq = found.store.campaigns.next_seq(found.campaign.id)
+        report = minds.advance(
+            found.store, found.campaign, days, _seeded(found.campaign, seq)
+        )
+        message = (
+            lang_dnd.TT_ADVANCE_FROZEN.format(days=days)
+            if report["frozen"]
+            else lang_dnd.TT_ADVANCE_DONE.format(
+                days=days,
+                entities=report["entities"],
+                imprints=report["new_imprints"],
+                confab=report["confabulated"],
+                pruned=report["pruned"],
+            )
+        )
+        await interaction.followup.send(message)
+
+    # ------------------------------------------------------------------ #
+    #  Tuning — nothing is baked in (P2)
+    # ------------------------------------------------------------------ #
+    @tune.command(name="show", description="Current simulation settings for this campaign.")
+    async def tune_show(self, interaction: discord.Interaction) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        tuning = minds.tuning_for(found.store, found.campaign)
+        await interaction.response.send_message(
+            embed=minds_ui.tuning_view(tuning.entries(), found.campaign.name), ephemeral=True
+        )
+
+    @tune.command(name="set", description="Change a simulation setting for this campaign. (GM)")
+    @app_commands.describe(
+        key="Which setting.",
+        value="The new value. Leave blank to clear it back to inherited.",
+    )
+    async def tune_set(
+        self, interaction: discord.Interaction, key: str, value: float | None = None
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        spec = tuning_registry.BY_KEY.get(key)
+        if spec is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_TUNING_UNKNOWN.format(key=key), ephemeral=True
+            )
+            return
+
+        before = minds.tuning_for(found.store, found.campaign)
+        old, source = before.get(key), before.source_of(key)
+
+        settings = dict(found.campaign.settings or {})
+        overrides = dict(settings.get("tuning") or {})
+        if value is None:
+            overrides.pop(key, None)
+        else:
+            overrides[key] = tuning_registry.coerce(key, value)
+        settings["tuning"] = overrides
+        found.store.campaigns.save_settings(found.campaign.id, settings)
+
+        found.campaign.settings = settings
+        after = minds.tuning_for(found.store, found.campaign)
+        template = (
+            lang_dnd.TT_TUNING_CLEARED if value is None else lang_dnd.TT_TUNING_SET
+        )
+        await interaction.response.send_message(
+            template.format(
+                label=spec["label"], value=after.get(key), old=old, source=source
+            ),
+            ephemeral=True,
+        )
+
+    @tune_set.autocomplete("key")
+    async def _tune_autocomplete(self, interaction: discord.Interaction, current: str):
+        current = (current or "").lower()
+        return [
+            app_commands.Choice(name=f"{s['group']}: {s['label']}", value=s["key"])
+            for s in tuning_registry.TUNABLES
+            if current in s["key"] or current in s["label"].lower()
+        ][:25]
 
     # ------------------------------------------------------------------ #
     #  Legacy import (owner only)

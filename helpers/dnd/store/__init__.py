@@ -26,6 +26,8 @@ from helpers.dnd.store.entities import EntityRepo
 from helpers.dnd.store.events import EventRepo
 from helpers.dnd.store.indices import ensure_indices  # noqa: F401  (re-exported)
 from helpers.dnd.store.knowledge import KnowledgeRepo
+from helpers.dnd.store.memories import MemoryRepo
+from helpers.dnd.store.relations import RelationRepo
 from helpers.dnd.store.repo import Scope, ScopedRepo, ScopeError  # noqa: F401
 from helpers.dnd.store.scenes import SceneRepo
 
@@ -51,6 +53,11 @@ class CampaignStore:
         self.knowledge = KnowledgeRepo(self.scope)
         self.beliefs = BeliefRepo(self.scope)
         self.canon = CanonRepo(self.scope)
+        # P2: the minds. Memory and relationships are per entity and grow, so
+        # they live in their own collections and are loaded only for entities
+        # that are actually being thought about.
+        self.memories = MemoryRepo(self.scope)
+        self.relations = RelationRepo(self.scope)
 
     @property
     def guild_id(self) -> int:
