@@ -78,8 +78,13 @@ class Tabletop(commands.Cog, name="dnd"):
         name="lore", description="The campaign's world knowledge."
     )
     npc = app_commands.Group(name="npc", description="The people who live in the world.")
+    # Everything a GM does lives under one group. Discord caps an application at
+    # 100 top-level commands across the whole bot, and a group costs one slot
+    # however many subcommands it holds — so GM tooling is grouped and the
+    # frequent play commands (/dice, /check, /look) stay top-level.
+    gm = app_commands.Group(name="gm", description="Running the game. (GM)")
     tune = app_commands.Group(
-        name="tune", description="Simulation settings for this campaign."
+        name="tune", description="Simulation settings for this campaign.", parent=gm
     )
 
     def __init__(self, bot):
@@ -685,7 +690,7 @@ class Tabletop(commands.Cog, name="dnd"):
             embed=kb.player_view(entity, scene, present, beliefs, facts), ephemeral=True
         )
 
-    @app_commands.command(name="knows", description="What someone believes to be true.")
+    @gm.command(name="knows", description="What someone believes to be true.")
     @app_commands.describe(who="Whose head to look inside. GMs may name any entity.")
     async def knows(self, interaction: discord.Interaction, who: str | None = None) -> None:
         found = context.resolve(interaction)
@@ -719,7 +724,7 @@ class Tabletop(commands.Cog, name="dnd"):
             embed=kb.gm_view(entity, beliefs, is_gm=is_gm), ephemeral=True
         )
 
-    @app_commands.command(name="believe", description="Give someone a belief. (GM)")
+    @gm.command(name="believe", description="Give someone a belief. (GM)")
     @app_commands.describe(
         who="Who holds the belief.",
         claim="What they think is true.",
@@ -780,9 +785,7 @@ class Tabletop(commands.Cog, name="dnd"):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="canon", description="Facts the narrator invented, awaiting review. (GM)"
-    )
+    @gm.command(name="canon", description="Invented facts awaiting review. (GM)")
     async def canon(self, interaction: discord.Interaction) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -924,7 +927,7 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Memory (P2)
     # ------------------------------------------------------------------ #
-    @app_commands.command(name="remember", description="Give someone a memory. (GM)")
+    @gm.command(name="remember", description="Give someone a memory. (GM)")
     @app_commands.describe(
         who="Who remembers it.",
         what="What happened, in their words.",
@@ -984,7 +987,7 @@ class Tabletop(commands.Cog, name="dnd"):
             ephemeral=True,
         )
 
-    @app_commands.command(name="recall", description="See what a cue brings to someone's mind. (GM)")
+    @gm.command(name="recall", description="See what a cue brings to someone's mind. (GM)")
     @app_commands.describe(
         who="Whose memory to stir.",
         cue="What they see, hear or smell — 'lantern', 'rain', a name.",
@@ -1029,7 +1032,7 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Relationships (P2)
     # ------------------------------------------------------------------ #
-    @app_commands.command(name="relate", description="Record something between two people, or look. (GM)")
+    @gm.command(name="relate", description="Record something between two people, or look. (GM)")
     @app_commands.describe(
         who="Whose feelings change.",
         toward="About whom.",
@@ -1098,7 +1101,7 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Time (P2 — the manual stand-in for the world tick in P3)
     # ------------------------------------------------------------------ #
-    @app_commands.command(name="advance", description="Let time pass, and let minds age. (GM)")
+    @gm.command(name="advance", description="Let time pass, and let minds age. (GM)")
     @app_commands.describe(days="How many in-world days go by.")
     async def advance(self, interaction: discord.Interaction, days: float) -> None:
         found = context.resolve(interaction)
@@ -1210,16 +1213,10 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Legacy import (owner only)
     # ------------------------------------------------------------------ #
-    @commands.hybrid_command(
-        name="dndmigrate",
-        description="Import legacy DnD sessions into this server (owner only).",
-        hidden=True,
-    )
+    # Prefix-only, not hybrid: owner tooling run once per server does not need to
+    # occupy one of the application's hundred slash-command slots.
+    @commands.command(name="dndmigrate", hidden=True)
     @checks.is_owner()
-    @app_commands.describe(
-        confirm="Off by default: the command reports what it would do and writes nothing.",
-        ruleset="Which ruleset the imported campaigns should use.",
-    )
     async def dnd_migrate(
         self, context: Context, confirm: bool = False, ruleset: str = "srd5e"
     ) -> None:

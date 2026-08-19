@@ -53,11 +53,19 @@ Pinned to the scene card, always available:
 /dnd scene open|close|recap
 /dnd act <text>          # for people who prefer typing
 /dice <expr>             # not /roll — the deathroll minigame owns that name
-/gm suggest              # narrative proposals (07-NARRATIVE-ENGINE.md §6)
-/gm npc spawn|inspect|tier
+/npc create|list|mind    # mind = the inspector
+/gm knows|believe        # what someone believes
+/gm remember|recall      # give or stir a memory
+/gm relate|advance       # relationships; let time pass
 /gm canon                # pending canon queue, inline approve
-/gm undo                 # event-log rewind
-/gm scene set <field>
+/gm tune show|set        # this campaign's simulation settings
+/gm suggest              # narrative proposals (P5)
+/gm undo                 # event-log rewind (P5)
+
+Everything a GM does is grouped under /gm. Discord caps an application at 100
+top-level slash commands across the whole bot, and a group costs one slot
+however many subcommands it holds — so only the frequent play commands stay
+top-level.
 ```
 
 Registered through the existing visibility system so a server can hide GM commands

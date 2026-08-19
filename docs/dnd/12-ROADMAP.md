@@ -16,11 +16,13 @@ Shipped: `helpers/dnd/{rules,world,store}`, `cogs/dnd/`, `web/dnd/`,
 `helpers/dnd/migrate.py`, and `tests/test_dnd_p0.py` (95 checks, no pytest or
 mongomock dependency — the collections are swapped for an in-memory fake).
 Commands: `/campaign create|list|info|join|leave`, `/character create|sheet|retire`,
-`/scene open|close`, `/dice`, `/check`, plus owner-only `dndmigrate`.
+`/scene open|close`, `/dice`, `/check`, plus owner-only prefix `dndmigrate`.
 
-Top-level command names must be unique across all cogs or the whole cog fails to
-load — `tests/test_command_names.py` guards that, added after `/roll` collided
-with the deathroll minigame in production.
+`tests/test_command_names.py` guards two things that each took the whole cog
+offline in production once: a **duplicate top-level name** (`/roll` collided with
+the deathroll minigame) and **Discord's cap of 100 top-level slash commands**
+(P2 pushed the bot from exactly 100 to 106). A group costs one slot however many
+subcommands it holds, so GM tooling lives under `/gm`.
 
 - `store/` — repositories, scope enforcement, indices
 - `rules/` — ruleset protocol, dice grammar, resolution; **both** `freeform` and
@@ -50,7 +52,7 @@ Shipped: `world/knowledge.py` + `world/belief.py`, `store/knowledge.py` (budgete
 retrieval), `store/beliefs.py`, `store/canon.py`, `cogs/dnd/knowledge.py`, panel
 knowledge + canon sections, and `tests/test_dnd_p1.py` (52 checks) plus
 `tests/test_dnd_panel.py` (20). Commands: `/lore add|list|search|remove`,
-`/look`, `/knows`, `/believe`, `/canon`.
+`/look`, and under the GM group `/gm knows|believe|canon`.
 
 P1 also **separated tabletop from the rest of the bot** — see `15-SEPARATION.md`.
 
@@ -78,8 +80,8 @@ Shipped: `mind/` (traits with inheritance, needs, memory, relationships),
 `world/memory.py` + `world/relationship.py`, `store/memories.py` +
 `store/relations.py`, `helpers/dnd/minds.py`, **`helpers/dnd/tuning.py`**, the
 panel **entity inspector** and campaign tuning page, and `tests/test_dnd_p2.py`
-(104 checks). Commands: `/npc create|list|mind`, `/remember`, `/recall`,
-`/relate`, `/advance`, `/tune show|set`.
+(104 checks). Commands: `/npc create|list|mind` and `/gm remember|recall|relate|advance`,
+plus `/gm tune show|set`.
 
 **Forgetting is a power law, not a decay timer.** Three things shape how long a
 memory holds together, and all three are tunable (including to zero):
