@@ -26,6 +26,7 @@ def dnd_routes() -> list:
         api_dnd_lore,
         api_dnd_param,
         api_dnd_tune,
+        api_dnd_tune_server,
     )
     from web.dnd.pages import campaign_page, entity_page, tabletop_page
     from web.routes import require_scope
@@ -48,4 +49,7 @@ def dnd_routes() -> list:
         web.post("/api/guild/{gid}/dnd/lore", view(api_dnd_lore)),
         web.post("/api/guild/{gid}/dnd/canon", view(api_dnd_canon)),
         web.post("/api/guild/{gid}/dnd/tune", view(api_dnd_tune)),
+        # Server-level tuning is server configuration, so it needs the same
+        # scope the general settings page does.
+        web.post("/api/guild/{gid}/dnd/tune-server", configure(api_dnd_tune_server)),
     ]

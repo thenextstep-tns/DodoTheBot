@@ -61,7 +61,7 @@ CHEESE_TYPES = [
     {"name": "Aged Parmigiano Reggiano", "emoji": "🧀", "weight": 3, "snap_min": 3, "snap_max": 6, "like_mult": 10,
      "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/Parmigiano_Reggiano%2C_Italien%2C_Europ%C3%A4ische_Union.jpg/250px-Parmigiano_Reggiano%2C_Italien%2C_Europ%C3%A4ische_Union.jpg"},
 ]
-CHEESE_PULL_STRENGTHS = [2, 3, 5, 6, 8]  # A single 👌-pull adds a random amount from this pool
+CHEESE_PULL_STRENGTHS = [2, 3, 4]  # A single 👌-pull adds a random amount from this pool
 CHEESE_STEAL_DIVISOR = 5         # A thief grabs ceil(stretch / this) for themselves
 CHEESE_EVENT_TIMEOUT = 25        # Seconds of inactivity before the cheese hardens (fizzle)
 CHEESE_MOUSE_CHANCE = 0.02       # Per-pull chance an adopted mouse peeks out to snatch the cheese (~1 in 50)

@@ -291,7 +291,8 @@ def _engine_settings(bot, guild) -> str:
     {toggles}
     <div class="fields">{rows}</div>
   </div>
-</div>"""
+</div>
+{_server_tuning_section(guild)}"""
 
 
 def _dnd_param_input(spec: dict) -> str:
@@ -461,6 +462,18 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
       if (data.ok) location.reload();
     }});
   }});
+  document.querySelectorAll(".dndtune-server").forEach((el) => {{
+    el.addEventListener("change", () => {{
+      post(`/api/guild/${{gid}}/dnd/tune-server`, {{key: el.dataset.key, value: el.value}});
+    }});
+  }});
+  document.querySelectorAll(".dndtune-server-clear").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/tune-server`,
+        {{key: el.dataset.key, value: null}});
+      if (data.ok) location.reload();
+    }});
+  }});
   document.querySelectorAll(".dndtune").forEach((el) => {{
     el.addEventListener("change", () => {{
       post(`/api/guild/${{gid}}/dnd/tune`,
@@ -494,12 +507,15 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
 #  default -> server -> campaign. This page is the campaign layer, so a GM can
 #  retune their own game without touching anyone else's.
 # --------------------------------------------------------------------------- #
-def _tuning_section(tuning, campaign, is_gm: bool) -> str:
-    if not is_gm:
-        return ""
+def _tuning_rows(entries: list[dict], css_class: str, *, own_label: str) -> str:
+    """Rows for one tuning layer.
 
+    Shared by the server and campaign sections so the two can never drift into
+    showing the same setting differently. ``own_label`` is what an override *at
+    this layer* is called; anything else is inherited and says where from.
+    """
     by_group: dict = {}
-    for entry in tuning.entries():
+    for entry in entries:
         by_group.setdefault(entry["group"], []).append(entry)
 
     blocks = ""
@@ -509,13 +525,11 @@ def _tuning_section(tuning, campaign, is_gm: bool) -> str:
             continue
         rows = ""
         for item in items:
-            # "inherited" means this campaign has no opinion and is taking the
-            # server's value (or the built-in default). Saying so is the whole
-            # point of showing the source.
             source = item["source"]
             badge = (
-                '<span class="chip">yours</span>' if source == "campaign"
-                else f'<span class="muted small">from {source}</span>'
+                f'<span class="chip">{_escape(own_label)}</span>'
+                if source == item.get("own_source")
+                else f'<span class="muted small">from {_escape(source)}</span>'
             )
             step = "1" if item["type"] == "int" else "any"
             rows += f"""
@@ -525,9 +539,10 @@ def _tuning_section(tuning, campaign, is_gm: bool) -> str:
     <div class="muted small"><code>{item['key']}</code> · {item['min']}–{item['max']}</div>
   </div>
   <div>
-    <input type="number" step="{step}" class="dndtune" data-key="{item['key']}"
+    <input type="number" step="{step}" class="{css_class}" data-key="{item['key']}"
            value="{item['value']}" min="{item['min']}" max="{item['max']}">
-    <button class="dndtune-clear" data-key="{item['key']}" title="Back to inherited">↺</button>
+    <button class="{css_class}-clear" data-key="{item['key']}"
+            title="Back to inherited">↺</button>
   </div>
 </div>"""
         blocks += f"""
@@ -535,13 +550,41 @@ def _tuning_section(tuning, campaign, is_gm: bool) -> str:
   <div class="coghead"><div><h3>{_escape(group)}</h3></div></div>
   <div class="catbody"><div class="fields">{rows}</div></div>
 </div>"""
+    return blocks
 
+
+def _server_tuning_section(guild) -> str:
+    """The server layer: the house style every campaign inherits.
+
+    Sits under Engine on the Tabletop index, because it is server configuration
+    rather than anything to do with one game.
+    """
+    tuning = tuning_registry.Tuning(
+        server=dnd_parameters.tuning_overrides(guild.id)
+    )
+    entries = [
+        {**entry, "own_source": "server"}
+        for entry in tuning.entries(scope=tuning_registry.SCOPE_SERVER)
+    ]
+    return f"""
+<h2>Simulation defaults</h2>
+<p class="muted small">The house style for <b>every campaign on this server</b>.
+A campaign that sets its own value overrides this; one that doesn't inherits it.
+The ↺ button clears yours and falls back to the built-in default.</p>
+{_tuning_rows(entries, "dndtune-server", own_label="server")}"""
+
+
+def _tuning_section(tuning, campaign, is_gm: bool) -> str:
+    """The campaign layer: this game's own opinions, overriding the server's."""
+    if not is_gm:
+        return ""
+    entries = [{**entry, "own_source": "campaign"} for entry in tuning.entries()]
     return f"""
 <h2>Simulation settings</h2>
-<p class="muted small">These apply to <b>this campaign only</b>, and override the
-server's. The ↺ button clears yours and goes back to inheriting. Setting
+<p class="muted small">These apply to <b>this campaign only</b> and override the
+server's defaults. The ↺ button clears yours and goes back to inheriting. Setting
 <b>Forgetting speed</b> to 0 switches forgetting off entirely.</p>
-{blocks}"""
+{_tuning_rows(entries, "dndtune", own_label="yours")}"""
 
 
 # --------------------------------------------------------------------------- #

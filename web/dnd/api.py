@@ -241,3 +241,47 @@ async def api_dnd_tune(request: web.Request):
     return web.json_response(
         {"ok": True, "value": resolved.get(key), "source": resolved.source_of(key)}
     )
+
+
+async def api_dnd_tune_server(request: web.Request):
+    """Set or clear one **server-level** tunable: ``{key, value}``.
+
+    The layer beneath campaigns: a server admin sets the house style, and any
+    campaign that has not formed its own opinion inherits it. ``value: null``
+    clears the server override so the built-in default applies again.
+
+    Separate handler from the campaign one because the two have different
+    gatekeepers — this route is behind ``SCOPE_FULL`` (server admin), while the
+    campaign route is behind a per-campaign GM check.
+    """
+    from web.routes import _record_change
+
+    gid = int(request.match_info["gid"])
+    data = await request.json()
+
+    key = str(data.get("key", ""))
+    spec = tuning_registry.BY_KEY.get(key)
+    if spec is None:
+        return _bad("Unknown setting.")
+
+    before = tuning_registry.Tuning(server=dnd_parameters.tuning_overrides(gid))
+    was = before.get(key)
+
+    raw = data.get("value")
+    if raw in (None, ""):
+        dnd_parameters.set_tuning(gid, key, None)
+    else:
+        try:
+            dnd_parameters.set_tuning(gid, key, tuning_registry.coerce(key, raw))
+        except (TypeError, ValueError) as error:
+            return _bad(error)
+
+    after = tuning_registry.Tuning(server=dnd_parameters.tuning_overrides(gid))
+    now = after.get(key)
+    await _record_change(
+        request, "dnd_tuning", key, was, now,
+        f"changed the server's tabletop **{spec['label']}**",
+    )
+    return web.json_response(
+        {"ok": True, "value": now, "source": after.source_of(key)}
+    )

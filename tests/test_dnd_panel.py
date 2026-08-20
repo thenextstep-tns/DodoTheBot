@@ -214,6 +214,19 @@ def test_tuning_section() -> None:
           "from default" in gm_html or "yours" in gm_html)
     check("tuning: ranges are shown", 'min="0.0"' in gm_html or "0.0–5.0" in gm_html)
 
+    # --- the server layer, on the Tabletop index --------------------------- #
+    server_html = pages._server_tuning_section(guild)
+    check("tuning: server layer renders", "Simulation defaults" in server_html)
+    check("tuning: server controls are distinct from campaign ones",
+          'class="dndtune-server"' in server_html)
+    check("tuning: server layer explains inheritance",
+          "every campaign on this server" in server_html)
+
+    admin_page = pages.campaigns_html(FakeBot(), guild, panel_access.SCOPE_FULL, 1)
+    player_page = pages.campaigns_html(FakeBot(), guild, panel_access.SCOPE_STATS, 2)
+    check("tuning: an admin gets the server defaults", "Simulation defaults" in admin_page)
+    check("tuning: a player does not", "Simulation defaults" not in player_page)
+
     # A campaign override shows as the campaign's own.
     campaign.settings = {"tuning": {"memory_decay_rate": 0}}
     overridden = pages._tuning_section(
