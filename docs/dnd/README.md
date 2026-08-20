@@ -19,6 +19,8 @@ differentiator isn't "AI GM" — it's **minds that persist and a world that
 continues while you're asleep**, and those are simulation problems, not prompting
 problems.
 
+**Picking this up in a new session? Read [HANDOFF.md](HANDOFF.md) first** — current state, the traps that have already caused outages, and what P3 is.
+
 ## Read in this order
 
 | # | File | What it covers |
@@ -39,6 +41,7 @@ problems.
 | 13 | [MIGRATION](13-MIGRATION.md) | Carrying the existing `dodo_dnd` data across |
 | 14 | [CONVENTIONS](14-CONVENTIONS.md) | **Instructions for Claude** — house style, invariants, what not to do |
 | 15 | [SEPARATION](15-SEPARATION.md) | What is kept separate from the rest of the bot, what is shared, and every merge note |
+| — | [HANDOFF](HANDOFF.md) | **Start here in a new session** — state, standing rules, known traps, what P3 is |
 
 ## The six ideas that matter
 
