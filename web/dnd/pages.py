@@ -14,6 +14,7 @@ pages, so this looks native rather than bolted on.
 from __future__ import annotations
 
 import html
+import re
 
 from aiohttp import web
 
@@ -109,7 +110,7 @@ def campaigns_html(bot, guild, guild_scope: str, viewer_id: int) -> str:
            else "An admin can turn it back on.</p>")
     )
     return f"""
-<div class="guildpage">
+<div class="ttpage">
   <div class="statshead">
     <div><span class="muted">{_escape(guild.name)}</span>
       <h1>Tabletop <span class="muted">· {len(visible)} campaign(s)</span></h1></div>
@@ -216,7 +217,7 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
     ) or '<li class="muted">No scenes yet.</li>'
 
     return f"""
-<div class="guildpage">
+<div class="ttpage">
   <div class="statshead">
     <div><span class="muted">{_escape(guild.name)} ·
       <a href="/guild/{guild.id}/tabletop">Tabletop</a></span>
@@ -289,7 +290,7 @@ def _engine_settings(bot, guild) -> str:
   <p class="muted small">Tabletop is managed here, not on the main cog page.</p></div></div>
   <div class="catbody">
     {toggles}
-    <div class="fields">{rows}</div>
+    <div class="params">{rows}</div>
   </div>
 </div>
 {_server_tuning_section(guild)}"""
@@ -487,6 +488,29 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
       if (data.ok) location.reload();
     }});
   }});
+  // Tuning side menu: one group at a time. Panels are hidden rather than
+  // removed, so a control in a group you are not looking at still posts.
+  document.querySelectorAll(".tunepage").forEach((page) => {{
+    const items = Array.from(page.querySelectorAll(".sidenavitem"));
+    const panels = Array.from(page.querySelectorAll(".sidepanel"));
+    if (!items.length) return;
+    const show = (key) => {{
+      if (!panels.some((p) => p.dataset.panel === key)) key = panels[0].dataset.panel;
+      panels.forEach((p) => {{ p.hidden = p.dataset.panel !== key; }});
+      items.forEach((a) => a.classList.toggle("active", a.dataset.panel === key));
+      return key;
+    }};
+    items.forEach((item) => {{
+      item.addEventListener("click", (e) => {{
+        e.preventDefault();
+        // Replace rather than push: back should leave the page, not walk you
+        // through every group you glanced at.
+        history.replaceState(null, "", "#" + show(item.dataset.panel));
+      }});
+    }});
+    const wanted = (location.hash || "").replace("#", "");
+    if (panels.some((p) => p.dataset.panel === wanted)) show(wanted);
+  }});
   document.querySelectorAll(".canon-accept, .canon-reject").forEach((el) => {{
     el.addEventListener("click", async () => {{
       const action = el.classList.contains("canon-accept") ? "accept" : "reject";
@@ -507,50 +531,99 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
 #  default -> server -> campaign. This page is the campaign layer, so a GM can
 #  retune their own game without touching anyone else's.
 # --------------------------------------------------------------------------- #
+
+# One emoji per tuning group, so the side menu is scannable without reading it.
+_GROUP_EMOJI = {
+    "Memory": "🧠", "Forgetting": "🌫️", "Salience": "⚡", "Needs": "🍞",
+    "Relationships": "🤝", "Knowledge": "📚", "Generation": "🎲",
+}
+
+
+def _emphasise(escaped: str) -> str:
+    """Render the ``**bold**`` and ``*italic*`` in a tunable's description.
+
+    The descriptions are written as prose with markdown emphasis — several of
+    them lean on it to shout that a setting can be switched off entirely — and
+    were reaching the panel with the asterisks still in. Runs *after* escaping,
+    so the tags it adds are the only markup in the string.
+    """
+    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    return re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<i>\1</i>", out)
+
+
+def _tune_row(item: dict, css_class: str, own_label: str) -> str:
+    """One setting: a wide label column, a narrow control, and where it came from."""
+    source = item["source"]
+    badge = (
+        f'<span class="chip">{_escape(own_label)}</span>'
+        if source == item.get("own_source")
+        else f'<span class="muted small">from {_escape(source)}</span>'
+    )
+    step = "1" if item["type"] == "int" else "any"
+    return f"""
+<div class="paramrow tunerow">
+  <div class="tunelabel">
+    <b>{_escape(item['label'])}</b> {badge}
+    <div class="muted small tunedesc">{_emphasise(_escape(item['description']))}</div>
+    <div class="muted small tunemeta"><code>{item['key']}</code>
+      <span>{item['min']}–{item['max']}</span></div>
+  </div>
+  <div class="tunectl">
+    <input type="number" step="{step}" class="{css_class}" data-key="{item['key']}"
+           value="{item['value']}" min="{item['min']}" max="{item['max']}">
+    <button class="{css_class}-clear tuneclear" data-key="{item['key']}"
+            title="Back to inherited">↺</button>
+  </div>
+</div>"""
+
+
 def _tuning_rows(entries: list[dict], css_class: str, *, own_label: str) -> str:
-    """Rows for one tuning layer.
+    """One tuning layer, as a side menu with one group showing at a time.
 
     Shared by the server and campaign sections so the two can never drift into
     showing the same setting differently. ``own_label`` is what an override *at
     this layer* is called; anything else is inherited and says where from.
+
+    Thirty-four settings stacked as seven cards became seven narrow columns of
+    two-word lines, so this borrows the trial-ranks shape: the groups are the
+    menu, and the panel gets the full width a sentence needs.
     """
     by_group: dict = {}
     for entry in entries:
         by_group.setdefault(entry["group"], []).append(entry)
 
-    blocks = ""
-    for group in tuning_registry.GROUPS:
-        items = by_group.get(group)
-        if not items:
-            continue
-        rows = ""
-        for item in items:
-            source = item["source"]
-            badge = (
-                f'<span class="chip">{_escape(own_label)}</span>'
-                if source == item.get("own_source")
-                else f'<span class="muted small">from {_escape(source)}</span>'
-            )
-            step = "1" if item["type"] == "int" else "any"
-            rows += f"""
-<div class="paramrow">
-  <div><b>{_escape(item['label'])}</b> {badge}
-    <div class="muted small">{_escape(item['description'])}</div>
-    <div class="muted small"><code>{item['key']}</code> · {item['min']}–{item['max']}</div>
-  </div>
-  <div>
-    <input type="number" step="{step}" class="{css_class}" data-key="{item['key']}"
-           value="{item['value']}" min="{item['min']}" max="{item['max']}">
-    <button class="{css_class}-clear" data-key="{item['key']}"
-            title="Back to inherited">↺</button>
-  </div>
+    groups = [g for g in tuning_registry.GROUPS if by_group.get(g)]
+    if not groups:
+        return ""
+
+    # Namespaced so the campaign and server layers can never fight over the hash.
+    slug = css_class.replace("dndtune", "tune").replace("-", "") or "tune"
+
+    nav, panels = "", ""
+    for index, group in enumerate(groups):
+        items = by_group[group]
+        overridden = sum(1 for i in items if i["source"] == i.get("own_source"))
+        hint = f"{len(items)} setting{'' if len(items) == 1 else 's'}"
+        if overridden:
+            hint += f" · {overridden} changed"
+        key = f"{slug}-{group.lower()}"
+        nav += f"""
+<a class="sidenavitem{' active' if index == 0 else ''}" href="#{key}" data-panel="{key}">
+  <span class="navemoji">{_GROUP_EMOJI.get(group, '•')}</span>
+  <span class="navlabel">{_escape(group)}</span>
+  <span class="navhint">{hint}</span></a>"""
+        rows = "".join(_tune_row(item, css_class, own_label) for item in items)
+        panels += f"""
+<section class="sidepanel" data-panel="{key}"{'' if index == 0 else ' hidden'}>
+  <h2 class="panelhead">{_GROUP_EMOJI.get(group, '')} {_escape(group)}</h2>
+  {rows}
+</section>"""
+
+    return f"""
+<div class="tunepage sidepanels">
+  <aside class="sidebar sidenav">{nav}</aside>
+  <main class="content">{panels}</main>
 </div>"""
-        blocks += f"""
-<div class="cogcard">
-  <div class="coghead"><div><h3>{_escape(group)}</h3></div></div>
-  <div class="catbody"><div class="fields">{rows}</div></div>
-</div>"""
-    return blocks
 
 
 def _server_tuning_section(guild) -> str:
@@ -721,7 +794,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
 
     budget = store.memories.tier_counts(entity.id)
     return f"""
-<div class="guildpage">
+<div class="ttpage">
   <div class="statshead">
     <div><span class="muted">{_escape(guild.name)} ·
       <a href="/guild/{guild.id}/tabletop/{campaign.id}">{_escape(campaign.name)}</a></span>

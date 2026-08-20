@@ -585,35 +585,63 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
 #trialsearch { width: 100%; margin-bottom: 10px; }
 
-/* Trial ranks: sticky side menu + one panel at a time, same shape as the cogs
-   page. Six stacked accordions meant scrolling a 46-row table to reach anything. */
+/* Sticky side menu + one panel at a time, same shape as the cogs page. Built for
+   trial ranks (six stacked accordions meant scrolling a 46-row table to reach
+   anything) and reused by tabletop tuning, which had the same problem with 34
+   settings. The generic .side* names are the reusable half; .trial* stays as an
+   alias so that page's markup did not need rewriting to share this. */
 main:has(.trialspage) { max-width: none; }
-.triallayout { display: flex; align-items: flex-start; gap: 20px; }
-.trialnav { width: 250px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+.triallayout, .sidepanels { display: flex; align-items: flex-start; gap: 20px; }
+.trialnav, .sidenav { width: 250px; flex: none; position: sticky; top: 76px; align-self: flex-start;
   display: flex; flex-direction: column; gap: 2px; }
-.trialnavitem { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto;
+.trialnavitem, .sidenavitem { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto;
   column-gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm);
   text-decoration: none; color: var(--color-body); border: 1px solid transparent; }
-.trialnavitem:hover { background: var(--color-surface-soft); }
-.trialnavitem.active { background: rgba(255, 56, 92, .07); border-color: rgba(255, 56, 92, .3); }
-.trialnavitem .navemoji { grid-row: 1 / 3; font-size: 16px; text-align: center; }
-.trialnavitem .navlabel { font-size: 13px; font-weight: var(--weight-semibold);
+.trialnavitem:hover, .sidenavitem:hover { background: var(--color-surface-soft); }
+.trialnavitem.active, .sidenavitem.active { background: rgba(255, 56, 92, .07); border-color: rgba(255, 56, 92, .3); }
+.trialnavitem .navemoji, .sidenavitem .navemoji { grid-row: 1 / 3; font-size: 16px; text-align: center; }
+.trialnavitem .navlabel, .sidenavitem .navlabel { font-size: 13px; font-weight: var(--weight-semibold);
   color: var(--color-ink); }
-.trialnavitem.active .navlabel { color: var(--color-primary); }
-.trialnavitem .navhint { font-size: 11px; color: var(--color-muted); }
+.trialnavitem.active .navlabel, .sidenavitem.active .navlabel { color: var(--color-primary); }
+.trialnavitem .navhint, .sidenavitem .navhint { font-size: 11px; color: var(--color-muted); }
 .navfoot { margin: 12px 4px 0; padding-top: 10px; border-top: 1px solid var(--color-hairline); }
-.triallayout > .content { flex: 1 1 auto; min-width: 0; background: var(--color-canvas);
+.triallayout > .content, .sidepanels > .content { flex: 1 1 auto; min-width: 0; background: var(--color-canvas);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-md); padding: 18px 20px; }
 .panelhead { font-size: 16px; font-weight: var(--weight-semibold); margin: 0 0 12px;
   padding-bottom: 10px; border-bottom: 1px solid var(--color-hairline-soft); }
-.trialpanel[hidden] { display: none; }
+.trialpanel[hidden], .sidepanel[hidden] { display: none; }
 
 @media (max-width: 900px) {
-  .triallayout { flex-direction: column; }
-  .trialnav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
-  .trialnavitem { flex: 1 1 auto; }
-  .trialnavitem .navhint, .navfoot { display: none; }
+  .triallayout, .sidepanels { flex-direction: column; }
+  .trialnav, .sidenav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+  .trialnavitem, .sidenavitem { flex: 1 1 auto; }
+  .trialnavitem .navhint, .sidenavitem .navhint, .navfoot { display: none; }
 }
+
+/* Tabletop pages stack; they are not the cogs page. They borrowed .guildpage for
+   its full width and inherited its two-column flex, which turned every heading,
+   card and tuning group on the page into a narrow column of its own. */
+main:has(.ttpage) { max-width: 1240px; }
+.ttpage > .cogcard { margin-left: 0; margin-right: 0; }
+.ttpage > h2 { margin-bottom: 4px; }
+
+/* Tabletop tuning rows. A setting is a wide label column and a narrow control,
+   never a card in a column pile — the description has to be readable at a glance
+   or the knob may as well not have a name. */
+.tunerow { align-items: flex-start; gap: 24px; padding: 12px 2px; }
+.tunerow + .tunerow { border-top: 1px solid var(--color-hairline-soft); }
+.tunelabel { flex: 1 1 auto; min-width: 0; }
+.tunelabel .tunedesc { margin: 3px 0 0; line-height: 1.5; max-width: 68ch; }
+.tunelabel .tunemeta { margin-top: 4px; display: flex; align-items: center; gap: 7px;
+  flex-wrap: wrap; }
+.tunelabel .tunemeta code { background: var(--color-surface-soft); border-radius: 4px;
+  padding: 1px 6px; font-size: 11px; font-family: var(--font-mono); color: var(--color-muted); }
+.tunectl { flex: none; display: flex; align-items: center; gap: 6px; padding-top: 1px; }
+.tuneclear { margin: 0; padding: 4px 9px; font-size: 13px; line-height: 1.2;
+  background: var(--color-canvas); color: var(--color-muted);
+  border: 1px solid var(--color-hairline); }
+.tuneclear:hover { background: var(--color-surface-soft); color: var(--color-ink);
+  border-color: var(--color-ink); }
 
 /* Prog interest: one row per raid, drawn against the twelve a group needs. */
 .proggrid { display: flex; flex-direction: column; gap: 6px; }
