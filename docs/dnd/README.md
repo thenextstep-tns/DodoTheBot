@@ -2,8 +2,8 @@
 
 The plan for replacing `cogs/dnd.py` with a living-world tabletop engine.
 
-**Status: design. Not built.** Nothing here describes existing code except where a
-file is named explicitly.
+**Status: P0–P2 built, tested and live. P3 next.** See [HANDOFF.md](HANDOFF.md)
+for current state; phases beyond P2 in these documents are still design.
 
 ---
 
@@ -73,10 +73,11 @@ problems.
 | LLM host | **Local only.** Ollama on the owner's laptop (Ryzen 7 8845H, 28 GB LPDDR5X-7500 ≈ 120 GB/s → ~20–28 tok/s on a 4B), reached over Tailscale. No hosted API in any tier. The VPS is closed as an option — see `08` §2 |
 | AI surface | **Deterministic first.** Two tasks call a model, one calls it as a fallback, two never do — `08` §5 |
 
-## Current state of the thing being replaced
+## What was replaced
 
-`cogs/dnd.py`, 361 lines: character sheets are a hardcoded stat array identical for
-every character; dice are cosmetic and feed nothing; memory is an unbounded
-LLM-written string; there is no `guild_id` anywhere so it cannot serve two
-servers; and it is wired to none of the bot's platform systems. It is a chat
-wrapper with a session table. See `00` §2.
+The old `cogs/dnd.py` — 361 lines in which character sheets were a hardcoded stat
+array identical for every character, dice were cosmetic and fed nothing, memory
+was an unbounded LLM-written string, and no document carried a `guild_id` so it
+could not serve two servers. It survives as `cogs/dnd_legacy.py` for one release
+while campaigns migrate across (`13-MIGRATION.md`). See `00` §2 for the full
+diagnosis.
