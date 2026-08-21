@@ -83,7 +83,10 @@ class FakeMember:
 
 
 class FakeGuild:
-    id = 7777
+    # A real-shaped snowflake, not a small integer. The id used to be 7777,
+    # which survives a trip through JavaScript intact — so a page embedding it
+    # as a numeric literal looked fine here and 404'd against every real guild.
+    id = 806174526383325225
     name = "Test Server"
 
     def get_member(self, uid):
@@ -200,6 +203,43 @@ def test_inspector() -> None:
     check("inspector: LOOKING DOES NOT CHANGE THE MIND", before == after)
 
 
+def test_script_wiring() -> None:
+    """The panel script's two silent killers, both of which shipped.
+
+    Neither is visible in rendered HTML, which is all the other checks look at,
+    and both made every control on the page do nothing at all:
+
+    * a snowflake embedded as a **numeric literal** loses precision above 2^53,
+      so the request goes to a guild that does not exist and 404s at the scope
+      check;
+    * the status element emitted *after* the script means ``getElementById``
+      returns null, so nothing can ever report the failure.
+    """
+    import re
+
+    guild = FakeGuild()
+    script = pages._dnd_script(guild.id, "abc123")
+
+    check("script: the guild id is a string, not a numeric literal",
+          f'const gid = "{guild.id}"' in script,
+          "a bare 64-bit literal silently becomes a different id")
+
+    # Belt and braces: no unquoted integer anywhere in the script may exceed
+    # JavaScript's safe range, whoever writes the next line of it. Comments are
+    # stripped first — the one explaining this trap quotes the offending id.
+    code = re.sub(r"//[^\n]*", "", script)
+    unsafe = [
+        found for found in re.findall(r"(?<![\"'\w.])(\d{16,})(?![\"'\w])", code)
+        if int(found) > 2**53
+    ]
+    check("script: no unsafe integer literals at all", not unsafe, str(unsafe[:3]))
+
+    body = script.find("</script>")
+    check("script: the status element exists before the script runs",
+          0 <= script.find('id="status"') < body,
+          "emitted after the script, so getElementById returns null")
+
+
 def test_tuning_section() -> None:
     guild, campaign, store = build()
     tuning = minds.tuning_for(store, campaign)
@@ -238,6 +278,7 @@ def test_tuning_section() -> None:
 def main() -> int:
     test_pages()
     test_inspector()
+    test_script_wiring()
     test_tuning_section()
     for line in PASSED:
         print(f"  ok   {line}")

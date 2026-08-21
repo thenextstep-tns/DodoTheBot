@@ -416,10 +416,16 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
     settings back through the shared API this separation exists to avoid.
     """
     return f"""
+<p id="status" class="status"></p>
 <script>
 (function() {{
-  const gid = {guild_id};
+  // Snowflakes are 64-bit. As a bare numeric literal 806174526383325225 parses
+  // as ...200 — a guild that does not exist — so every tabletop request 404'd
+  // at the scope check, silently. Strings, exactly as panel.js's header says.
+  const gid = "{guild_id}";
   const cid = "{campaign_id}";
+  // Looked up after the element above exists: it used to be emitted *below*
+  // this script, so this was null and no control could ever report anything.
   const status = document.getElementById("status");
   // .status is opacity:0 until something adds "show" — setting textContent
   // alone left every tabletop control silently doing nothing visible, which is
@@ -539,8 +545,7 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
     }});
   }});
 }})();
-</script>
-<p id="status" class="status"></p>"""
+</script>"""
 
 
 # --------------------------------------------------------------------------- #

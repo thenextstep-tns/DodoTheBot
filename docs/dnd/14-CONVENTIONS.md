@@ -115,6 +115,46 @@ Breaking any of these is a review failure, not a style preference.
   checked for leakage.
 - **Property tests** — memory ≤ budget; salience monotonic in reinforcement;
   utility finite; decay never raises a fidelity.
+- **Panel script wiring** (`tests/test_dnd_panel.py::test_script_wiring`) — no
+  unquoted integer above 2⁵³ anywhere in the generated JavaScript, and the
+  status element emitted before the script that looks it up. Both of those
+  shipped at once and between them made **every control in the tabletop section
+  do nothing at all**, silently, for days.
+
+### 5a. What the panel tests do *not* cover
+
+`tests/test_dnd_panel.py` asserts on **HTML strings**. Nothing in this repo
+executes a page's JavaScript or calls a panel endpoint, so a control wired to
+nothing passes every test in the suite. 305 green tests did not notice that the
+switch which turns the whole engine on had never once worked.
+
+So the rule is: **a panel control is not done until it has been clicked.**
+
+```bash
+py tests/render_panel.py && py -m http.server 8899 --directory .preview
+```
+
+Open it, click the thing you changed, and **read the browser console** — before
+reasoning about the code, not after. On the bug above, the console named the
+cause in one step; inference from reading the source did not, over many.
+
+Two specific traps, both of which cost a real outage:
+
+- **Discord ids are 64-bit.** `806174526383325225` as a bare JavaScript numeric
+  literal parses as `…200` — a guild that does not exist — so every request 404s
+  at the scope check. Interpolate snowflakes as **strings**, as `panel.js` says
+  in its opening comment. Tabletop's script is separate by design
+  (`15-SEPARATION.md`), which is exactly why it re-introduced this.
+- **Test fixtures must use real-shaped ids.** The fake guild was `7777`, small
+  enough to survive JavaScript intact, so the bug was invisible in tests and
+  present for every real guild. `FakeGuild.id` is a genuine snowflake now.
+
+### 5b. "Deployed" is not "works"
+
+Grepping the journal for `Loaded cog 'cogs.dnd` proves the process started. It
+proves nothing about whether the feature functions. Do not report a panel change
+as verified on the strength of a log line — either exercise it, or say plainly
+that it is deployed but untested.
 
 ## 6. Integration checklist for anything new
 
