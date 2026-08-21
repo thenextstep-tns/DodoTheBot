@@ -48,19 +48,26 @@ the bot disagree about the guild — that is a real bug.
 drop the lowest of four; `adv` should show two d20s with the higher taken.
 
 ```
-> /check approach:finesse dc:10 description:slipping past the night watch
-> /check approach:finesse dc:20 description:slipping past the night watch
+> /check approach:finesse dc:7 description:slipping past the night watch
+> /check approach:finesse dc:12 description:slipping past the night watch
 ```
 Run each **five times**.
 
-Harbour is a **freeform** campaign, and freeform has exactly four approaches —
-`force`, `finesse`, `wits`, `presence`. Skill names like *stealth* belong to
-`srd5e`, which offers the six abilities plus the full skill list. The
-autocomplete on `approach:` always shows the right vocabulary for the campaign
-you are in; trust it over this document.
+Harbour is a **freeform** campaign. Freeform has four approaches — `force`,
+`finesse`, `wits`, `presence` — and resolves on **2d6 + your rating**, so with
+`finesse +2` every roll lands between 4 and 14. Its default DC is **7**. Do not
+bring d20 numbers here: `dc:20` is not hard, it is *impossible*, and five
+attempts at it tell you nothing.
 
-→ DC 10 should mostly succeed, DC 20 should mostly fail, and you should see more
-than one *degree* across the ten (not just pass/fail — the ruleset grades four).
+| DC | fail | cost | success | triumph |
+| --- | --- | --- | --- | --- |
+| 7 | 16% | 41% | 25% | 16% |
+| 12 | 83% | 16% | 0% | 0% |
+
+→ DC 7 should mostly land somewhere other than failure; DC 12 should mostly
+fail. Across the ten you want to see **all four degrees** — not just pass/fail.
+DC 7 is the only band where triumph is reachable, which is why it is the one
+used here.
 
 🚩 If DC changes nothing, resolution is not consuming the roll.
 
