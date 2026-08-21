@@ -48,10 +48,16 @@ the bot disagree about the guild — that is a real bug.
 drop the lowest of four; `adv` should show two d20s with the higher taken.
 
 ```
-> /check approach:stealth dc:10 description:slipping past the night watch
-> /check approach:stealth dc:20 description:slipping past the night watch
+> /check approach:finesse dc:10 description:slipping past the night watch
+> /check approach:finesse dc:20 description:slipping past the night watch
 ```
 Run each **five times**.
+
+Harbour is a **freeform** campaign, and freeform has exactly four approaches —
+`force`, `finesse`, `wits`, `presence`. Skill names like *stealth* belong to
+`srd5e`, which offers the six abilities plus the full skill list. The
+autocomplete on `approach:` always shows the right vocabulary for the campaign
+you are in; trust it over this document.
 
 → DC 10 should mostly succeed, DC 20 should mostly fail, and you should see more
 than one *degree* across the ten (not just pass/fail — the ruleset grades four).
