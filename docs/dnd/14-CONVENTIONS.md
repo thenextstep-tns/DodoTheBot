@@ -149,6 +149,27 @@ Two specific traps, both of which cost a real outage:
   enough to survive JavaScript intact, so the bug was invisible in tests and
   present for every real guild. `FakeGuild.id` is a genuine snowflake now.
 
+### 5a-bis. Work in increments the user can check
+
+**Do not build a phase and hand it over.** Build the smallest piece that is
+complete enough to exercise, verify it yourself at the level it will be used,
+then **stop and ask the user to check it** — naming the exact thing to do and
+what they should see. Continue only once they confirm.
+
+This is not a style preference. P0–P2 were delivered as three finished phases,
+34 tunables and a panel section, all reported green — and the checkbox that
+turns the engine on had never worked once. Every hour after that bug landed was
+spent building on something nobody could switch on. A big delivery hides the
+hole; a small one cannot.
+
+Practically:
+
+- One increment = one thing the user can click, run or type, end to end.
+- Say what to check in a sentence, not a twelve-act script.
+- If an increment turns out to be blocked, say so and stop — do not carry on
+  into the next one to keep the momentum.
+- The user's confirmation is the gate. Not the test suite, not the deploy log.
+
 ### 5b. "Deployed" is not "works"
 
 Grepping the journal for `Loaded cog 'cogs.dnd` proves the process started. It

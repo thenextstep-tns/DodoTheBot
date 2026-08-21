@@ -130,10 +130,17 @@ under `/gm` — not new top-level ones.
 
 ## 8. Working preferences
 
+- **Ship one complete, checkable thing at a time.** Not a phase, not a batch —
+  the smallest increment the user can actually exercise. Then stop, say plainly
+  what to check and how, and *wait for them to confirm* before continuing. A
+  phase delivered whole is a phase where every part can be broken at once, and
+  the user pays for the whole thing before finding out.
+- **Verify the increment yourself first**, at the level it will be used. For a
+  panel control that means clicking it (`14-CONVENTIONS.md` §5a). "The tests
+  pass" and "the cog loaded" are not evidence that a feature works — an earlier
+  version of this list said they were, and on the strength of it a switch that
+  had never once functioned was reported as verified twice.
 - Do not spawn subagents or run deep research unless asked.
-- Do not burn effort verifying things through the Discord or panel UI — the user
-  tests those. Server-side facts (did the cog load, do the tests pass) are worth
-  one command.
 - Commit messages describe the *effect*, not the mechanics. See `git log`.
 - Push after every commit.
 - **Scope your `git add`.** A blanket `git add -A` once swept an unrelated
