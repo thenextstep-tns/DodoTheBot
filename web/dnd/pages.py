@@ -421,15 +421,34 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
   const gid = {guild_id};
   const cid = "{campaign_id}";
   const status = document.getElementById("status");
+  // .status is opacity:0 until something adds "show" — setting textContent
+  // alone left every tabletop control silently doing nothing visible, which is
+  // exactly how a failing save looks like a dead checkbox.
+  function flash(message, ok) {{
+    if (!status) return;
+    status.textContent = message;
+    status.className = "status show " + (ok ? "ok" : "err");
+    setTimeout(() => {{ status.className = "status"; }}, 3000);
+  }}
   async function post(url, body) {{
-    const res = await fetch(url, {{
-      method: "POST", headers: {{"Content-Type": "application/json"}},
-      body: JSON.stringify(body),
-    }});
-    const data = await res.json().catch(() => ({{ok: false}}));
-    if (status) {{
-      status.textContent = data.ok ? "Saved." : ("Error: " + (data.error || "failed"));
+    let res, raw = "", data = {{}};
+    try {{
+      res = await fetch(url, {{
+        method: "POST", headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify(body),
+      }});
+    }} catch (err) {{
+      flash("Network error: " + err.message, false);
+      return {{ok: false}};
     }}
+    try {{ raw = await res.text(); data = JSON.parse(raw); }} catch (_) {{ }}
+    // Say what actually came back. A non-JSON reply — a login redirect, a 404
+    // from the scope check, a proxy error — used to surface as nothing at all.
+    if (!res.ok || !data.ok) {{
+      flash(data.error || `HTTP ${{res.status}} — ${{raw.slice(0, 120) || "empty reply"}}`, false);
+      return data.ok ? data : {{ok: false}};
+    }}
+    flash("Saved.", true);
     return data;
   }}
   document.querySelectorAll(".dndparam").forEach((el) => {{

@@ -125,6 +125,10 @@ async def api_dnd_cog(request: web.Request):
         request, "dnd_cog", cog, was, enabled,
         f"{'enabled' if enabled else 'disabled'} tabletop **{cog}**",
     )
+    # Flipping the switch has to reach Discord, or the engine is on and every
+    # command is still missing. The general cog endpoint has always done this;
+    # this one did not, so switching tabletop back on visibly changed nothing.
+    bot.command_syncer.request_sync(gid)
     return web.json_response({"ok": True, "enabled": enabled})
 
 
