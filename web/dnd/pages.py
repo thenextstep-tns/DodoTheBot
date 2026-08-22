@@ -209,15 +209,62 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
   <tbody>{body}</tbody>
 </table>"""
 
-    attribution = getattr(ruleset, "attribution", "")
     day = campaign.world_time // 1440 + 1
+    fact_count = len(store.knowledge.campaign_facts())
     scenes = store.scenes.recent(5)
     scene_lines = "".join(
         f"<li>{_escape(s.title)} <span class='muted small'>· {s.status}</span></li>" for s in scenes
     ) or '<li class="muted">No scenes yet.</li>'
 
+    attribution = getattr(ruleset, "attribution", "")
+
+    # Sections, not one scroll. A campaign page is a place you play from, and a
+    # single column that ran characters into lore into engine settings meant
+    # hunting for everything. Same shape as trial ranks and the tuning page.
+    #
+    # Server-level configuration is deliberately absent: the Engine section and
+    # the server defaults live on the Tabletop index, one level up, because they
+    # belong to the whole guild and have no business inside one game.
+    sections = [
+        ("cast", "👥", "Cast", f"{len(pcs)} player, {len(others)} other", f"""
+  <h2 class="panelhead">Characters</h2>
+  {table(pcs, "Nobody has made a character yet.")}
+  <h2 class="panelhead">NPCs &amp; factions</h2>
+  {table(others, "No NPCs yet — make one with <code>/npc create</code>.")}"""),
+        ("scenes", "🎭", "Scenes", f"{len(scenes)} recent", f"""
+  <h2 class="panelhead">Recent scenes</h2>
+  <ul>{scene_lines}</ul>
+  <h2 class="panelhead">Recent events</h2>
+  <p class="muted small">Every change is an event, which is what makes replay possible.</p>
+  {_events_table(store, guild)}"""),
+        ("lore", "📚", "Lore &amp; facts", f"{fact_count} fact(s)",
+         _knowledge_section(store, campaign, is_gm)),
+    ]
+    if is_gm:
+        sections.append(
+            ("canon", "⚖️", "Canon queue", "invented facts awaiting a ruling",
+             _canon_section(store, is_gm))
+        )
+        sections.append(
+            ("tuning", "🎛️", "This game's rules", "campaign only",
+             _tuning_section(minds.tuning_for(store, campaign), campaign, is_gm))
+        )
+
+    nav, panels = "", ""
+    for index, (key, emoji, label, hint, body) in enumerate(sections):
+        if not body.strip():
+            continue
+        nav += f"""
+<a class="campnavitem sidenavitem{' active' if index == 0 else ''}"
+   href="#{key}" data-panel="{key}">
+  <span class="navemoji">{emoji}</span>
+  <span class="navlabel">{label}</span>
+  <span class="navhint">{_escape(hint)}</span></a>"""
+        panels += f"""
+<section class="camppanel" data-panel="{key}"{'' if index == 0 else ' hidden'}>{body}</section>"""
+
     return f"""
-<div class="ttpage">
+<div class="ttpage camppage">
   <div class="statshead">
     <div><span class="muted">{_escape(guild.name)} ·
       <a href="/guild/{guild.id}/tabletop">Tabletop</a></span>
@@ -230,26 +277,10 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
     <span class="chip">{campaign.seq} events</span>
     <span class="chip">{'GM' if scope == access.CAMPAIGN_GM else 'Player'}</span>
   </div>
-
-  <h2>Characters</h2>
-  {table(pcs, "Nobody has made a character yet.")}
-
-  <h2>NPCs &amp; factions</h2>
-  {table(others, "No NPCs yet — they arrive with the world engine in a later phase.")}
-
-  <h2>Recent scenes</h2>
-  <ul>{scene_lines}</ul>
-
-  {_knowledge_section(store, campaign, is_gm)}
-
-  {_canon_section(store, is_gm)}
-
-  {_tuning_section(minds.tuning_for(store, campaign), campaign, is_gm)}
-
-  <h2>Recent events</h2>
-  <p class="muted small">Every change is an event, which is what makes replay and undo possible.</p>
-  {_events_table(store, guild)}
-
+  <div class="sidepanels">
+    <aside class="sidebar sidenav">{nav}</aside>
+    <main class="content">{panels}</main>
+  </div>
   {f'<p class="muted small">{_escape(attribution)}</p>' if attribution else ''}
 </div>
 {_dnd_script(guild.id, str(campaign.id))}"""
@@ -458,6 +489,8 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
     flash("Saved.", true);
     return data;
   }}
+  // Server-level controls exist only on the Tabletop index; a campaign page must
+  // not even carry the wiring for guild-wide configuration.
   document.querySelectorAll(".dndparam").forEach((el) => {{
     el.addEventListener("change", () => {{
       const value = el.type === "checkbox" ? el.checked : el.value;
@@ -516,9 +549,17 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
   }});
   // Tuning side menu: one group at a time. Panels are hidden rather than
   // removed, so a control in a group you are not looking at still posts.
-  document.querySelectorAll(".tunepage").forEach((page) => {{
-    const items = Array.from(page.querySelectorAll(".sidenavitem"));
-    const panels = Array.from(page.querySelectorAll(".sidepanel"));
+  // Two independent side menus can be on one page: the campaign's sections, and
+  // the tuning groups nested inside one of them. Each binds only its own, or the
+  // outer one would swallow the inner one's clicks.
+  const menus = [
+    [".camppage", ".campnavitem", ".camppanel"],
+    [".tunepage", ".sidenavitem:not(.campnavitem)", ".sidepanel"],
+  ];
+  menus.forEach(([host, itemSel, panelSel]) => {{
+  document.querySelectorAll(host).forEach((page) => {{
+    const items = Array.from(page.querySelectorAll(itemSel));
+    const panels = Array.from(page.querySelectorAll(panelSel));
     if (!items.length) return;
     const show = (key) => {{
       if (!panels.some((p) => p.dataset.panel === key)) key = panels[0].dataset.panel;
@@ -536,6 +577,7 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
     }});
     const wanted = (location.hash || "").replace("#", "");
     if (panels.some((p) => p.dataset.panel === wanted)) show(wanted);
+  }});
   }});
   // Traits are editable per NPC: generation hands you the middle of a
   // distribution, and the outliers are the interesting people.
@@ -760,25 +802,46 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
     memories = store.memories.for_entity(entity.id)
 
     # --- disposition ---
-    # Editable, because rolling until an interesting person appears is not a
-    # design tool. A moral thief, a warm killer, an honourable vampire — the
-    # outliers are the point, and generation can only ever hand you the middle
-    # of the distribution. Every axis is settable per NPC.
+    # Read-only by default, and that is the point. Who someone is gets settled
+    # when they are made; after that it moves through what happens to them —
+    # events, beliefs, imprints, drift (`04-ENTITIES.md` §3a) — not through a GM
+    # nudging a slider mid-game. A number you can reach for at any moment is a
+    # number that stops meaning anything, and it makes the simulation's own
+    # answer unfalsifiable: you can no longer tell whether Marla got colder
+    # because of the winter or because you typed -0.4 last Tuesday.
+    #
+    # The override still exists, because it is the GM's world. It is folded away
+    # behind a warning rather than sitting open next to the meters.
     trait_rows = ""
+    override_rows = ""
     for axis in TEMPERAMENT + DRIVES + FACULTIES:
         value = traits.axis(axis)
         low = -1.0 if axis in TEMPERAMENT else 0.0
+        label = _escape(TRAIT_LABELS.get(axis, axis))
         trait_rows += (
-            f'<tr><td>{_escape(TRAIT_LABELS.get(axis, axis))}</td>'
-            f'<td>{_meter(value, low, 1.0)} '
+            f'<tr><td>{label}</td>'
+            f'<td>{_meter(value, low, 1.0)} {value:+.2f}</td></tr>'
+        )
+        override_rows += (
+            f'<tr><td>{label}</td><td>'
             f'<input type="number" class="dndtrait" data-axis="{axis}" '
             f'step="0.01" min="{low}" max="1.0" value="{value:.2f}"></td></tr>'
         )
-    trait_rows += (
-        '<tr><td colspan="2" class="muted small">Set any axis directly — this is '
-        'how you build the exception rather than waiting for one to be rolled. '
-        'Temperament runs −1…1, drives and retention 0…1.</td></tr>'
-    )
+    override_rows = f"""
+<details class="traitoverride">
+  <summary>&#9888;&#65039; Overwrite this person by hand</summary>
+  <div class="warnbox">
+    <p><b>You almost certainly do not want this.</b> Disposition is set when
+    someone is created and moves after that through what happens to them —
+    events, imprints, long-held beliefs. That is the whole simulation.</p>
+    <p class="muted small">Editing an axis directly is not a correction, it is a
+    rewrite: nothing in their history explains the new value, and you will no
+    longer be able to tell whether they changed because of the world or because
+    of you. Use it to author someone at creation — a moral thief, a warm killer
+    — and then leave it alone.</p>
+  </div>
+  <table class="ranktable"><tbody>{override_rows}</tbody></table>
+</details>"""
 
     # --- body ---
     need_rows = ""
@@ -862,6 +925,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <b>Retention</b> is a faculty, not a personality trait — it decides how long this
   particular mind holds on to things.</p>
   <table class="ranktable"><tbody>{trait_rows}</tbody></table>
+  {override_rows}
 
   <h2>Body</h2>
   <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
