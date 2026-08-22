@@ -58,6 +58,19 @@ def phrase(kind: str, actor: str, subject: str) -> str:
     return f"{actor} {PHRASES.get(kind, kind.replace('_', ' '))} {subject}"
 
 
+def deepen(relationship, amount: float):
+    """Close the distance between two people by ``amount``.
+
+    Familiarity in ``DELTAS`` is a flat token — ``met`` is +0.10 whoever you met
+    and whatever came of it. But the night someone saved your life you know them
+    incomparably better than after a chat, so the orchestration edge scales this
+    by what the event was worth (``mind/stakes.py``). Kept here rather than
+    written into the deltas because it is not a property of the *kind*.
+    """
+    relationship.familiarity = max(0.0, min(1.0, relationship.familiarity + amount))
+    return relationship
+
+
 def felt_valence(kind: str) -> float:
     """How an event of this kind feels, derived from the deltas rather than a
     second table that could drift out of step with them.

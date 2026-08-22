@@ -169,7 +169,13 @@ def capacity_of(standing: float, traits=None,
     """
     if traits is None or tuning.disposition_reach <= 0:
         return standing
-    return clamp01(standing * (1.0 - tuning.disposition_reach * attentiveness(traits)))
+    # Only ever *downward*. Standing is the ceiling, as documented — a cold,
+    # solitary man is not more insulated than his station allows, he simply
+    # keeps all of it. Letting negative attentiveness multiply above 1 put two
+    # middling dockside characters at capacity 0.67 and 0.69 against a ceiling
+    # of 0.50, and made both of them nearly unmovable.
+    attention = max(0.0, attentiveness(traits))
+    return clamp01(standing * (1.0 - tuning.disposition_reach * attention))
 
 
 def attentiveness(traits) -> float:

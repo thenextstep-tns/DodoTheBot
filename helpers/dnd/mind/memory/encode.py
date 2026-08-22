@@ -119,6 +119,7 @@ def encode(
     existing_gists=(),
     affinities: dict | None = None,
     source_event_seq: int | None = None,
+    salience_scale: float = 1.0,
     salience_tuning: SalienceTuning = DEFAULT_SALIENCE,
     memory_tuning: MemoryTuning = DEFAULT_MEMORY,
 ) -> Memory | None:
@@ -186,6 +187,17 @@ def encode(
         memory.salience = round(
             max(0.0, min(1.0, memory.salience * (1 + salience_tuning.value_weight * align))), 4
         )
+    # How much the event was *worth* to this witness scales how firmly it is
+    # held — and only that. It must never reach the fidelity block below:
+    # perception is sensory access, stake is significance, and routing stake
+    # through perception made a trivial thing that happened this morning render
+    # as "a while ago, maybe". You do not misremember *when* something happened
+    # because it did not matter; you remember it accurately and briefly.
+    if salience_scale != 1.0:
+        memory.salience = round(
+            max(0.0, min(1.0, memory.salience * max(0.0, salience_scale))), 4
+        )
+
     # Poor perception means a hazier record from the start, not just a shorter
     # one — the fidelity it begins with is the fidelity it perceived.
     if perception < PARTIAL_CLARITY:

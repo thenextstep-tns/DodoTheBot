@@ -370,10 +370,16 @@ The headline case. Same act, wildly different meaning, and a reputation bought
 for nothing.
 
 ```
-> /npc create name:Lord Vashen role:merchant lord importance:0.95
-> /npc create name:Teo role:dock hand importance:0.15
+> /npc create name:Lord Vashen role:merchant lord importance:0.95 standing:0.95
+> /npc create name:Teo role:dock hand importance:0.15 standing:0.12
 > /gm relate who:Teo toward:Lord Vashen what:helped magnitude:0.8 description:paid off the whole debt without being asked
 ```
+
+**`standing:` is the one that matters here.** `importance` is the engine's own
+budget — how much CPU this entity is worth — and it is *not* what you can absorb
+a loss with. Setting only `importance` leaves both men at the default standing
+of 0.5 and the two stakes come out nearly identical, which is not the engine
+disagreeing with you, it is the wrong field.
 
 → Read the **"what it was worth"** line. Vashen should come back around
 *"cost them nothing they noticed"*; Teo around *"the kind of thing a life turns
@@ -392,7 +398,7 @@ already forgotten.
 ### Someone was watching
 
 ```
-> /npc create name:Sten role:fishwife
+> /npc create name:Sten role:fishwife standing:0.3
 > /gm present who:Sten
 > /gm relate who:Teo toward:Lord Vashen what:gifted description:sent bread to the whole row
 > /npc mind who:Sten

@@ -202,6 +202,11 @@ TUNABLES: list[dict] = [
           "does not. **Set to 0 and station alone decides**, so the powerful "
           "never notice anything — simpler, and a cliché.",
           0.7, minimum=0.0, maximum=1.0),
+    _spec("stakes_familiarity_reach", "Stakes", "Knowing someone",
+          "How much a significant event closes the distance between two people, "
+          "on top of what the event kind gives. At 0 you know someone no better "
+          "for having been saved by them than for having been introduced.",
+          0.35, minimum=0.0, maximum=1.0),
     _spec("stakes_witness_reach", "Stakes", "Bystanders judge",
           "How far an event moves the feelings of people who merely *saw* it, "
           "relative to those it happened to. 0 means onlookers remember it and "
@@ -359,6 +364,7 @@ class Tuning:
             unknown_actor_floor=self.get("stakes_unknown_actor_floor"),
             witness_reach=self.get("stakes_witness_reach"),
             disposition_reach=self.get("stakes_disposition_reach"),
+            familiarity_reach=self.get("stakes_familiarity_reach"),
         )
 
     def generation(self) -> "GenerationTuning":
@@ -436,6 +442,7 @@ class StakesTuning:
     unknown_actor_floor: float = 0.25
     witness_reach: float = 0.5
     disposition_reach: float = 0.7
+    familiarity_reach: float = 0.35
 
 
 @dataclass(frozen=True)

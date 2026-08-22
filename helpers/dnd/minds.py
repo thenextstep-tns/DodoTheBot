@@ -91,6 +91,7 @@ def remember(
     participants=None,
     details=None,
     perception: float = 1.0,
+    salience_scale: float = 1.0,
     location_id: Any = None,
     source_event_seq: int | None = None,
     tuning: Tuning | None = None,
@@ -115,6 +116,7 @@ def remember(
         location_id=location_id,
         traits=traits_of(entity),
         perception=perception,
+        salience_scale=salience_scale,
         relationship_to_actor=_actor_affinity(affinities, participants, entity.id),
         existing_gists=store.memories.gists_of(entity.id),
         affinities=affinities,
@@ -331,6 +333,7 @@ def relate(
     *,
     world_time: int,
     intensity: float = 1.0,
+    familiarity_bonus: float = 0.0,
     tuning: Tuning | None = None,
     description: str = "",
     rng: Random | None = None,
@@ -358,6 +361,8 @@ def relate(
         world_time=world_time,
         tuning=tuning.relationships(),
     )
+    if familiarity_bonus:
+        rel_mod.deepen(relationship, familiarity_bonus)
     saved = store.relations.save(relationship)
     return saved
 
@@ -416,6 +421,12 @@ def interact(
     base_valence = rel_mod.felt_valence(kind)
 
     # Who was touched, how aware each is, and how much of the event was theirs.
+    # Who it happened *to*. Salience weighs being a participant far above having
+    # merely watched (`05-MEMORY.md` §2) — "a story you tell" against "a story
+    # that happened to you" — so the two principals must appear in their own
+    # memory's participant list. Listing only the other person had a man's debt
+    # being cleared score as something he saw somebody else go through.
+    principals = [actor.id, subject.id]
     parties: list[tuple[Entity, Entity, float, float]] = [
         (subject, actor, subject_awareness, 1.0),
         (actor, subject, actor_awareness, 1.0),
@@ -444,6 +455,11 @@ def interact(
                 store, holder, other, kind,
                 world_time=world_time,
                 intensity=stake.weight,
+                # Knowing someone is not a flat +0.02 whatever happened. The
+                # night a man saved your life you know him far better than after
+                # a conversation, so how far you close the distance follows what
+                # it was worth to you.
+                familiarity_bonus=stake_tuning.familiarity_reach * stake.weight,
                 tuning=tuning,
             )
 
@@ -458,9 +474,16 @@ def interact(
             world_time=world_time,
             rng=rng,
             valence=base_valence * stake.felt,
-            participants=[other.id],
-            # How much of it they took in follows how much it was worth to them.
-            perception=max(0.1, min(1.0, 0.25 + 0.75 * stake.felt)),
+            participants=list(principals),
+            # They were there, so they saw it clearly. Perception is sensory
+            # access — distance, light, distraction — and it is NOT how much the
+            # thing mattered. Feeding stake in here made a trivial event arrive
+            # already blurred, so something that happened this morning read as
+            # "a while ago, maybe".
+            perception=1.0,
+            # Significance goes where it belongs: how firmly it is held. A
+            # trivial event is now remembered accurately and briefly.
+            salience_scale=0.25 + 0.75 * stake.felt,
             source_event_seq=source_event_seq,
             tuning=tuning,
         )

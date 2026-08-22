@@ -551,6 +551,26 @@ def test_stakes() -> None:
     check("stakes: a bystander forms an opinion of the actor",
           store.relations.between(crowd.id, lord.id).affinity > 0)
 
+    # Significance must not travel through perception. It did, and a thing that
+    # happened this morning rendered as "a while ago, maybe" because a low stake
+    # blurred the `when` field at encoding.
+    fresh = result["memories"][debtor.id]
+    check("stakes: A FRESH MEMORY IS NOT BORN HAZY",
+          fresh.fidelity["when"] == 1.0 and "recently" in fresh.describe(),
+          f"when={fresh.fidelity['when']:.2f} :: {fresh.describe()[-24:]}")
+    check("stakes: it happened TO them, not merely near them",
+          debtor.id in fresh.participants and lord.id in fresh.participants)
+    check("stakes: knowing someone follows what it was worth",
+          store.relations.between(debtor.id, lord.id).familiarity
+          > store.relations.between(lord.id, debtor.id).familiarity)
+
+    # Standing is a ceiling: disposition may only ever cut insulation.
+    from helpers.dnd.mind.traits import Traits
+    cold = Traits(warmth=-0.6, honour=0.1, belonging=0.1)
+    check("stakes: a cold nature cannot insulate past your station",
+          stakes.capacity_of(0.5, cold) <= 0.5 + 1e-9,
+          f"capacity {stakes.capacity_of(0.5, cold):.3f} against a 0.50 ceiling")
+
     # --- station must not decide character ------------------------------- #
     def as_lord(name, warmth, honour, belonging):
         entity = minds.spawn_npc(store, name=name, role="lord", world_time=0,
