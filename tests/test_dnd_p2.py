@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import sys
 from random import Random
+from typing import Mapping
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -69,7 +70,9 @@ from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd.tuning import TUNABLES, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
 from helpers.dnd.world.entity import KIND_NPC, Entity, Identity  # noqa: E402
+from helpers.dnd.world.belief import Belief, adopt  # noqa: E402
 from helpers.dnd.world.memory import TIER_IMPRINT, TIER_MID, Memory  # noqa: E402
+from helpers.dnd.world.relationship import Relationship  # noqa: E402
 
 for _cls, _name in (
     (campaigns_module.CampaignRepo, "dnd_campaigns"),
@@ -1013,6 +1016,172 @@ def test_end_to_end() -> None:
           other_store.relations.between(marla.id, ondry.id).affinity == 0)
 
 
+# --------------------------------------------------------------------------- #
+#  18. The projection an NPC decides from
+#
+#  P3's decision engine is only worth building if "NPCs act on what they believe"
+#  is true structurally. These tests are about what the engine *cannot* reach.
+# --------------------------------------------------------------------------- #
+def _walk(value, seen=None):
+    """Every object reachable from a view, so a leak has nowhere to hide."""
+    seen = seen if seen is not None else set()
+    if id(value) in seen:
+        return
+    seen.add(id(value))
+    yield value
+    if isinstance(value, (str, bytes, int, float, bool)) or value is None:
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _walk(key, seen)
+            yield from _walk(item, seen)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            yield from _walk(item, seen)
+        return
+    for name in getattr(value, "__dataclass_fields__", ()):
+        yield from _walk(getattr(value, name), seen)
+
+
+def test_entity_view() -> None:
+    campaign, store = _campaign(9311, "What Marla Knows")
+    marla = _npc(store, campaign, "Marla", warmth=0.4, boldness=0.6, retention=0.5)
+    ondry = _npc(store, campaign, "Ondry")
+    hooded = _npc(store, campaign, "A hooded man")
+    duchess = _npc(store, campaign, "The Duchess")
+    rng = Random(11)
+    now = 10_000
+
+    # Marla knows Ondry, has never met the hooded man, and has only heard of the
+    # Duchess — three kinds of acquaintance the view has to tell apart.
+    minds.relate(store, marla, ondry, "helped", world_time=now, familiarity_bonus=0.4)
+    store.beliefs.add(adopt("the duchess is poisoning the wells",
+                            holder_id=marla.id, subject_id=duchess.id,
+                            source_kind="told", at=now))
+    store.beliefs.add(adopt("ondry owes the harbourmaster",
+                            holder_id=marla.id, subject_id=ondry.id,
+                            source_kind="witnessed", at=now))
+    minds.remember(store, marla, "the fire on the north dock", world_time=now,
+                   rng=rng, valence=-0.7, participants=[ondry.id],
+                   details=["a green lantern"])
+
+    view = minds.view_for(store, marla, world_time=now)
+
+    # --- 1. The world is not reachable from the view ---------------------- #
+    forbidden = (Entity, Memory, Belief, Relationship)
+    leaks = [type(o).__name__ for o in _walk(view) if isinstance(o, forbidden)]
+    check("view: THE ENGINE CANNOT REACH WORLD TRUTH", not leaks, str(sorted(set(leaks))))
+    check("view: importance never reaches a decision", not hasattr(view, "importance"))
+
+    # --- 2. The GM's truth flag does not travel --------------------------- #
+    marked = store.beliefs.held_by(marla.id)[0]
+    store.beliefs.set_truth(marked.id, False)
+    lying = minds.view_for(store, marla, world_time=now)
+    check("view: the GM's truth flag is not a field on a held belief",
+          all(not hasattr(b, "truth") for b in lying.beliefs))
+    check("view: and nothing else carries it either",
+          not any(hasattr(o, "truth") for o in _walk(lying)))
+
+    # --- 3. Nothing in a view can be written ------------------------------ #
+    froze = True
+    try:
+        view.name = "someone else"
+        froze = False
+    except Exception:
+        pass
+    try:
+        view.others[ondry.id] = None
+        froze = False
+    except Exception:
+        pass
+    check("view: a decision cannot rewrite the mind it is reading", froze)
+
+    # --- 4. Three kinds of acquaintance ----------------------------------- #
+    check("view: someone they know has a name", view.of(ondry.id).name == "Ondry")
+    # Ondry helped Marla, so Marla likes him and is in his debt — from her side,
+    # which is the only side a view ever has.
+    check("view: and the feelings are the viewer's own",
+          view.of(ondry.id).affinity > 0 and view.of(ondry.id).i_owe_them == 1)
+    check("view: a debt is not readable backwards", view.of(ondry.id).they_owe_me == 0)
+    check("view: someone never met is a stranger", view.of(hooded.id).stranger)
+    check("view: a stranger has no name", view.of(hooded.id).name == "")
+    check("view: someone only heard of is still in mind", duchess.id in view.others)
+    check("view: and unnamed, because they have never met",
+          view.of(duchess.id).name == "" and view.of(duchess.id).beliefs)
+
+    # Somebody in the room is visible whether or not they are recognised.
+    present = minds.view_for(store, marla, world_time=now, include=(hooded.id,))
+    check("view: whoever is in the room is in the view", hooded.id in present.others)
+    check("view: and is still a stranger", present.of(hooded.id).stranger)
+
+    # --- 5. A memory arrives in the state decay left it in ---------------- #
+    check("view: what is remembered comes through",
+          any("north dock" in m.gist for m in view.memories))
+    minds.age_entity(store, marla, 4000, world_time=now, rng=Random(3))
+    faded = minds.view_for(store, marla, world_time=now)
+    old = [m for m in faded.memories if "north dock" in m.gist]
+    check("view: an old memory arrives faded, or does not arrive at all",
+          not old or old[0].clarity < 1.0,
+          f"{old[0].clarity:.2f}" if old else "dropped below the floor")
+    check("view: a numb memory carries no feeling",
+          all(m.valence == 0.0 for m in faded.memories if m.numb))
+
+    # --- 6. Looking does not change anything ------------------------------ #
+    before = [(m.id, m.recall_count, dict(m.fidelity))
+              for m in store.memories.for_entity(marla.id)]
+    twice = minds.view_for(store, marla, world_time=now)
+    after = [(m.id, m.recall_count, dict(m.fidelity))
+             for m in store.memories.for_entity(marla.id)]
+    check("view: building one writes nothing", before == after)
+    check("view: and is deterministic", twice == faded)
+
+    # --- 7. Every limit is tunable, and every one switches off ------------ #
+    for _ in range(6):
+        minds.remember(store, ondry, f"a dull errand {_}", world_time=now, rng=rng)
+    for i in range(6):
+        store.beliefs.add(adopt(f"a thin rumour {i}", holder_id=ondry.id,
+                                subject_id=marla.id, source_kind="assumed", at=now))
+
+    capped = minds.view_for(store, ondry, world_time=now,
+                            tuning=Tuning(campaign={"view_memory_limit": 2,
+                                                    "view_belief_limit": 1}))
+    check("view: the memory cap bites", len(capped.memories) == 2)
+    check("view: the belief cap bites", len(capped.beliefs) == 1)
+
+    uncapped = minds.view_for(store, ondry, world_time=now,
+                              tuning=Tuning(campaign={"view_memory_limit": 0,
+                                                      "view_belief_limit": 0,
+                                                      "view_belief_floor": 0}))
+    check("view: A CAP OF 0 IS NO CAP AT ALL",
+          len(uncapped.memories) >= 6 and len(uncapped.beliefs) >= 6,
+          f"{len(uncapped.memories)} memories, {len(uncapped.beliefs)} beliefs")
+
+    # An assumed belief sits at 0.35; a floor above it keeps it out of decisions
+    # without the holder ceasing to hold it.
+    sure_only = minds.view_for(store, ondry, world_time=now,
+                               tuning=Tuning(campaign={"view_belief_floor": 0.5}))
+    check("view: too unsure to act on is left out of the decision",
+          not sure_only.beliefs and store.beliefs.count_for(ondry.id) >= 6)
+
+    # And the stranger floor: at 0 everyone is recognised on sight.
+    village = minds.view_for(store, marla, world_time=now, include=(hooded.id,),
+                             tuning=Tuning(campaign={"view_stranger_floor": 0}))
+    check("view: a floor of 0 recognises everyone",
+          village.of(duchess.id).name == "The Duchess")
+
+    # --- 8. The tunables are registered and reach the panel ---------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("view: every perception knob is a registered tunable",
+          {"view_memory_limit", "view_belief_limit", "view_relationship_limit",
+           "view_belief_floor", "view_clarity_floor", "view_stranger_floor"} <= keys)
+    check("view: they are grouped for the panel",
+          all(s["group"] == "Perception" for s in TUNABLES if s["key"].startswith("view_")))
+    check("view: and layered like everything else",
+          Tuning(server={"view_memory_limit": 5},
+                 campaign={"view_memory_limit": 9}).perception().memory_limit == 9)
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1032,6 +1201,7 @@ def main() -> int:
         test_scene_consolidation,
         test_stakes,
         test_roles_emerge,
+        test_entity_view,
         test_end_to_end,
     ):
         test()

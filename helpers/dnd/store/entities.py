@@ -66,6 +66,24 @@ class EntityRepo(ScopedRepo):
         doc = self.find_one({"legacy_id": legacy_id})
         return Entity.from_doc(doc) if doc else None
 
+    def identities_of(self, entity_ids) -> dict:
+        """``{id: {"name", "kind"}}`` for a set of ids, in one query.
+
+        Building an entity's view needs a name for everyone they have any
+        standing toward, and that is the one place where fetching whole entities
+        would turn a decision into a hundred round trips.
+        """
+        wanted = [i for i in dict.fromkeys(entity_ids) if i is not None]
+        if not wanted:
+            return {}
+        return {
+            doc.get("_id"): {
+                "name": ((doc.get("identity") or {}).get("name") or ""),
+                "kind": doc.get("kind", ""),
+            }
+            for doc in self.find({"_id": {"$in": wanted}})
+        }
+
     # ------------------------------------------------------------------ #
     #  Writes
     # ------------------------------------------------------------------ #

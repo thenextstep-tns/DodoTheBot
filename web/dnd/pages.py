@@ -613,7 +613,8 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
 # One emoji per tuning group, so the side menu is scannable without reading it.
 _GROUP_EMOJI = {
     "Memory": "🧠", "Forgetting": "🌫️", "Salience": "⚡", "Needs": "🍞",
-    "Relationships": "🤝", "Knowledge": "📚", "Generation": "🎲",
+    "Relationships": "🤝", "Stakes": "⚖️", "Perception": "👁️",
+    "Continuity": "⏳", "Knowledge": "📚", "Generation": "🎲",
 }
 
 

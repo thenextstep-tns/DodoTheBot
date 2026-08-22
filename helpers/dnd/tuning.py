@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from helpers.dnd.world import memory as memory_model
+from helpers.dnd.world import view as view_model
 
 # Who may change a given tunable.
 SCOPE_SERVER = "server"       # server admins only
@@ -42,7 +43,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Continuity", "Knowledge", "Generation",
+    "Perception", "Continuity", "Knowledge", "Generation",
 )
 
 
@@ -257,6 +258,43 @@ TUNABLES: list[dict] = [
           "feel nothing about the person who did it.",
           0.5, minimum=0.0, maximum=2.0),
 
+    # --- Perception (P3) --------------------------------------------------- #
+    # How much of a mind reaches one decision. These are the difference between
+    # a character who acts on what is on their mind and one who weighs their
+    # entire life every time somebody says hello.
+    _spec("view_memory_limit", "Perception", "Memories per decision",
+          "How many memories a character brings to bear on one choice, strongest "
+          "first. Higher is a longer memory in the moment and a slower world. "
+          "**0 lifts the cap entirely** — everything they hold comes to mind.",
+          view_model.MEMORY_LIMIT, kind="int", minimum=0, maximum=200),
+    _spec("view_belief_limit", "Perception", "Beliefs per decision",
+          "How many of a character's convictions can shape one choice, the ones "
+          "they hold most firmly first. **0 lifts the cap entirely.**",
+          view_model.BELIEF_LIMIT, kind="int", minimum=0, maximum=200),
+    _spec("view_relationship_limit", "Perception", "People in mind",
+          "How many other people a character weighs when deciding — the ones who "
+          "figure most in their life. Anyone actually in the room is always "
+          "included regardless. **0 lifts the cap entirely.**",
+          view_model.RELATIONSHIP_LIMIT, kind="int", minimum=0, maximum=500),
+    _spec("view_belief_floor", "Perception", "Too unsure to act on",
+          "Confidence below which something a character half-believes does not "
+          "sway what they do. They still hold it, and can still repeat it — they "
+          "just don't stake anything on it. **0 means every belief counts**, "
+          "however thin.",
+          view_model.BELIEF_FLOOR, minimum=0.0, maximum=1.0),
+    _spec("view_clarity_floor", "Perception", "Too faded to recall",
+          "How intact a memory must still be to come to mind at all. Below this "
+          "it is gone from the moment, though not from the record. **0 means "
+          "even the barest shred surfaces**, which is how you get a character "
+          "haunted by something they can no longer describe.",
+          view_model.CLARITY_FLOOR, minimum=0.0, maximum=1.0),
+    _spec("view_stranger_floor", "Perception", "Recognising a face",
+          "How familiar somebody must be before a character knows who they are. "
+          "Below it they are a stranger — seen, weighed, unnamed. **0 means "
+          "everyone is recognised on sight**, which suits a small village and "
+          "ruins a city.",
+          view_model.STRANGER_FLOOR, minimum=0.0, maximum=1.0),
+
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
           "How much campaign knowledge a scene may draw on.",
@@ -433,6 +471,16 @@ class Tuning:
             actor_echo=self.get("stakes_actor_echo"),
         )
 
+    def perception(self) -> "PerceptionTuning":
+        return PerceptionTuning(
+            memory_limit=int(self.get("view_memory_limit")),
+            belief_limit=int(self.get("view_belief_limit")),
+            relationship_limit=int(self.get("view_relationship_limit")),
+            belief_floor=self.get("view_belief_floor"),
+            clarity_floor=self.get("view_clarity_floor"),
+            stranger_floor=self.get("view_stranger_floor"),
+        )
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -537,6 +585,23 @@ class StakesTuning:
 
 
 @dataclass(frozen=True)
+class PerceptionTuning:
+    """How much of a mind reaches one decision (``world/view.py``).
+
+    Every limit here switches off at 0, which is the whole cap lifted rather
+    than nothing getting through — a floor of 0 lets everything past, and a cap
+    of 0 is no cap.
+    """
+
+    memory_limit: int = view_model.MEMORY_LIMIT
+    belief_limit: int = view_model.BELIEF_LIMIT
+    relationship_limit: int = view_model.RELATIONSHIP_LIMIT
+    belief_floor: float = view_model.BELIEF_FLOOR
+    clarity_floor: float = view_model.CLARITY_FLOOR
+    stranger_floor: float = view_model.STRANGER_FLOOR
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -555,4 +620,5 @@ DEFAULT_NEEDS = NeedsTuning()
 DEFAULT_RELATIONSHIPS = RelationshipTuning()
 DEFAULT_STAKES = StakesTuning()
 DEFAULT_RUMOURS = RumourTuning()
+DEFAULT_PERCEPTION = PerceptionTuning()
 DEFAULT_GENERATION = GenerationTuning()

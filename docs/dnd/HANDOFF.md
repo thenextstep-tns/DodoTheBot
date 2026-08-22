@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — step 1 of 6 (`EntityView`) is built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -52,7 +52,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**368 tests** across five suites, all passing:
+**385 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -108,6 +108,7 @@ helpers/dnd/mind/       minds: traits, needs, memory, relationships,
                         stakes — what an act was worth to each party
                                                              (pure, seeded)
 helpers/dnd/world/      what exists: entity, memory, belief, event    (dataclasses)
+                        — and view.py, the only thing a decision may see
 helpers/dnd/rules/      dice and rulesets                             (pure, seeded)
 helpers/dnd/store/      repositories — every query carries its tenant
 ```
@@ -141,10 +142,28 @@ met its subject. What is missing is *an NPC pursuing a goal*.
 piece in P3 — do **not** attempt it in one increment. Suggested split, each
 checkable on its own:
 
-1. **`EntityView`** (`world/view.py`) — the projection an NPC decides from:
-   their beliefs, memories, needs, traits. Nothing else may reach the engine.
-   This is what makes "NPCs act on what they believe" true at the type level
-   rather than by discipline. Build and test this alone first.
+1. **`EntityView`** — ✅ **built** (`world/view.py`, `minds.view_for`, panel group
+   *Perception*). The projection an NPC decides from, and the only door between
+   the world and the engine. What it buys, and what the next steps must not
+   undo:
+   * `Recollection` and `HeldBelief` are **projections, not records**. Decay is
+     already applied, so a faded memory arrives faded; and `HeldBelief` has no
+     `truth` field, so the GM's marking of whether a claim is *actually so* is
+     not one attribute access away from every scoring term.
+   * Everything is frozen and every mapping is a read-only proxy — a decision
+     cannot rewrite the mind it is reading, which is what keeps replay honest.
+   * `importance` is deliberately absent: it is a CPU knob, and reading it as
+     standing made every PC immune to every event once already.
+   * `view_for` **does not reconsolidate**. Thinking about something rewrites it,
+     but a view is built for every NPC every tick, and 200 minds rewriting their
+     own history four times an hour is a world that drifts while nobody plays in
+     it. Reconsolidation belongs to step 5, where an NPC actually acts.
+   * Six tunables under **Perception**, each switchable off (a cap of 0 is no
+     cap; a floor of 0 lets everything through).
+   The test to keep green is `test_entity_view` in `tests/test_dnd_p2.py`: it
+   walks every object reachable from a view and fails if an `Entity`, `Memory`,
+   `Belief` or `Relationship` is among them. **If a later step needs something
+   the view does not carry, add it to the projection — do not pass the record.**
 2. **`ruleset.affordances(actor, scene)`** — add to the protocol and both
    rulesets. What a scene physically permits: attack, flee, speak, give, take,
    hide, wait, use, move. `04-ENTITIES.md` §2 says it was deferred until a Scene
@@ -190,6 +209,16 @@ Clocks page and the decision-trace view.
 
 ## 7. Known gaps, honestly
 
+- **`time_mode` has no working panel control.** It is the one `choice` tunable,
+  and `_tune_row` in `web/dnd/pages.py` renders every tunable as
+  `<input type="number" min="0.0" max="1.0">` — so the row shows an empty number
+  box and a GM cannot select `automatic` or `timeless` from the panel at all.
+  `_dnd_param_input` a few hundred lines above already knows how to render a
+  choice; `_tune_row` needs the same three lines. Found while adding the
+  Perception group; left alone to keep that increment clean.
+- **`tests/fake_mongo.py` has no `$unset`**, so *clearing* a server-level tunable
+  back to inherited is the one leg of the tuning round trip no test can exercise.
+  The campaign layer clears fine (it rewrites the whole settings document).
 - **`/canon` is empty and stays empty until P4.** Nothing invents facts yet.
 - **Nothing narrates.** Every message is mechanical output, by design.
 - **The legacy cog is still loaded** as `dnd_legacy`. It goes one release after

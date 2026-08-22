@@ -33,6 +33,7 @@ from helpers.dnd.world.entity import (
 from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
+from helpers.dnd.world import view as view_model
 from helpers.dnd.world.memory import TIER_WORKING, Memory
 from helpers.dnd.world.relationship import Relationship
 
@@ -233,6 +234,65 @@ def imprint_triggered(store, entity: Entity, cues, world_time: int) -> Memory | 
     A dramatic event rather than a lookup — the moment the NPC goes quiet.
     """
     return recall.triggered_by(store.memories.imprints(entity.id), cues, world_time)
+
+
+# --------------------------------------------------------------------------- #
+#  What an entity has to decide with
+# --------------------------------------------------------------------------- #
+def view_for(
+    store,
+    entity: Entity,
+    *,
+    world_time: int,
+    cues=(),
+    include=(),
+    tuning: Tuning | None = None,
+) -> view_model.EntityView:
+    """Build the projection this entity decides from.
+
+    The only supported way to get one. Everything the decision engine is allowed
+    to see passes through here, so a term that wants world truth has nowhere to
+    get it — see ``world/view.py`` for why that is structural rather than a
+    matter of care.
+
+    ``cues`` narrows the memories the way recall actually works: what is present
+    drags things up, rather than the engine querying a life. Without cues the
+    strongest memories come along, which is what an NPC deciding alone in a room
+    has. ``include`` is who is in front of them — those people appear in the view
+    whether or not it knows them, because you can see a stranger.
+
+    Nothing is written. Recall here does **not** reconsolidate: a view is built
+    for every NPC on every tick, and rewriting 200 memories four times an hour
+    would be a world that drifts while nobody is playing in it.
+    """
+    tuning = tuning or tuning_for(store)
+    perception = tuning.perception()
+
+    memories = store.memories.for_entity(entity.id)
+    if cues:
+        limit = perception.memory_limit or len(memories)
+        memories = recall.recall(memories, cues, world_time, limit=limit)
+
+    beliefs = store.beliefs.held_by(entity.id)
+    relations = store.relations.outgoing(entity.id)
+
+    named = [r.to_id for r in relations]
+    named += [b.subject_id for b in beliefs]
+    named += list(include)
+    identities = store.entities.identities_of(named)
+
+    return view_model.project(
+        entity,
+        world_time=world_time,
+        needs=needs_of(entity, world_time, tuning).to_doc(),
+        traits=entity.traits,
+        memories=memories,
+        beliefs=beliefs,
+        relations=relations,
+        identities=identities,
+        include=tuple(include),
+        perception=perception,
+    )
 
 
 # --------------------------------------------------------------------------- #
