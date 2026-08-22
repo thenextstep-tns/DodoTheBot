@@ -120,13 +120,14 @@ under `/gm` — not new top-level ones.
 - **Nothing narrates.** Every message is mechanical output, by design.
 - **The legacy cog is still loaded** as `dnd_legacy`. It goes one release after
   the migration has actually been run (`13-MIGRATION.md` §6).
-- **Nothing ever writes  after creation.**  §3
+- **Nothing ever writes `entity.traits` after creation.** `04-ENTITIES.md` §3
   says temperament shifts on an imprint and drives drift with experience; the
   only trait access in the codebase is a read. The mechanic is specified in
-  §3a and unbuilt — an NPC is the person they were rolled as, permanently.
-- **Beliefs never decay.** Confidence is set from  and never moves
+  `04-ENTITIES.md` §3a and unbuilt — an NPC is the person they were rolled as,
+  permanently.
+- **Beliefs never decay.** Confidence is set from `source_kind` and never moves
   again, so a rumour assumed once sits at 0.35 a decade later. Spec is
-   §4; both land in P3.
+  `03-KNOWLEDGE-BASE.md` §4; both land in P3.
 - **Value keywords are English-only** (`mind/memory/values.py`). Fine for now;
   it would need attention before a non-English campaign.
 - **`web/routes.py` is ~3300 lines.** Tabletop stays out of it; anything new goes
