@@ -380,6 +380,43 @@ DELTAS = {
 Magnitude scales with the witness's `arousal` at encoding and their traits (a
 high-`honour` NPC weights `debt` far more heavily).
 
+### Stakes — the same act is not the same event
+
+Deltas above are what an act is worth *in the abstract*. What it is worth to a
+given person is `mind/stakes.py`, and without it a relationship system says a
+paid debt is a paid debt:
+
+> A merchant lord settles a stranger's debt with a wave of a finger. It costs him
+> nothing he notices and he never learns the man's name. For the debtor it is the
+> day his life did not end, and he tells everyone. The lord's reputation is built
+> on an afternoon he has already forgotten — which is why nobody believes it
+> later when he turns out to be selling people's organs.
+
+Each party's **stake** scales both how far their relationship moves and how
+firmly they remember, and a stake beneath noticing forms **no memory at all**.
+Three inputs:
+
+- **Capacity** — how insulated they are. Standing (`importance`) sets the
+  ceiling; **disposition decides how much of it applies.** A warm, honourable
+  lord notices what his household does for him; a cold one of identical rank
+  does not. Deriving insulation from rank alone would hardcode *"the powerful
+  never care"*, which is a cliché, not a rule.
+- **Need pressure** — what it relieved. Bread means more to the starving.
+  Deliberately *not* folded into capacity: being thirsty this afternoon should
+  not lower a man's station, and with nothing yet able to satisfy a need (§5a)
+  it would collapse every capacity in the world to zero.
+- **Awareness, per direction and never assumed mutual.** You can do someone a
+  kindness they never trace to you; you can come to admire someone who has no
+  idea you exist. **Familiarity is therefore not symmetric** — it moves for
+  whoever actually perceived the other.
+
+Witnesses take a share of the same event (`stakes_witness_reach`), which is how
+a reputation reaches people it never happened to.
+
+Every part is tunable to zero: `stakes_capacity_reach: 0` makes every event
+worth the same to everyone, `stakes_disposition_reach: 0` lets station alone
+decide.
+
 **Faction standing propagates as a prior**, not as a fact: a member of a hostile
 faction *starts* at that standing, and their own traits and memories move them
 off it. That is how you get the sympathetic enemy soldier without scripting one.

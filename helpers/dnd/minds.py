@@ -18,6 +18,7 @@ from typing import Any
 
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
+from helpers.dnd.mind import stakes
 from helpers.dnd.mind import traits as traits_mod
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall
 from helpers.dnd.mind.memory import values as value_model
@@ -358,29 +359,115 @@ def relate(
         tuning=tuning.relationships(),
     )
     saved = store.relations.save(relationship)
+    return saved
 
-    if rng is not None:
-        # ``from_entity`` is whose feelings moved, so ``to_entity`` is the one
-        # who acted: "Ondry helped Marla" for `/gm relate who:Marla toward:Ondry`.
-        gist = description.strip() or rel_mod.phrase(
-            kind, to_entity.identity.name, from_entity.identity.name
+
+def need_pressure(entity: Entity, world_time: int, tuning: Tuning | None = None) -> float:
+    """The worst thing their body is currently telling them, 0..1."""
+    current = needs_of(entity, world_time, tuning)
+    return max((current.value(name) for name in needs_mod.NEEDS), default=0.0)
+
+
+def interact(
+    store,
+    actor: Entity,
+    subject: Entity,
+    kind: str,
+    *,
+    world_time: int,
+    rng: Random,
+    description: str = "",
+    magnitude: float | None = None,
+    actor_awareness: float = 1.0,
+    subject_awareness: float = 1.0,
+    witnesses: list[Entity] | None = None,
+    source_event_seq: int | None = None,
+    tuning: Tuning | None = None,
+) -> dict:
+    """One act, and what it was worth to each person it touched.
+
+    ``actor`` did the thing; ``subject`` had it done to them. The same act is not
+    the same event for the two of them, and the difference is not a flourish —
+    it is the mechanism that lets a reputation be bought cheaply:
+
+    > A merchant lord settles a stranger's debt with a wave of a finger. It costs
+    > him nothing he will notice and he does not trouble to learn the man's name.
+    > For the debtor it is the day his life did not end, and he will tell
+    > everyone. The lord's standing rises on an afternoon he has already
+    > forgotten.
+
+    Each party's stake (``mind/stakes.py``) scales *both* how far their
+    relationship moves and how firmly they remember it — and a stake beneath
+    noticing forms **no memory at all**, which is how the lord forgets.
+
+    Awareness is per-direction and never assumed mutual. You can do someone a
+    kindness they never trace to you, and they can be changed by it while having
+    nobody to thank.
+
+    Returns ``{"stakes": {entity_id: Stake}, "memories": {entity_id: Memory}}``.
+    """
+    tuning = tuning or tuning_for(store)
+    stake_tuning = tuning.stakes()
+
+    size = stakes.default_magnitude(kind) if magnitude is None else magnitude
+    gist = description.strip() or rel_mod.phrase(
+        kind, actor.identity.name, subject.identity.name
+    )
+    base_valence = rel_mod.felt_valence(kind)
+
+    # Who was touched, how aware each is, and how much of the event was theirs.
+    parties: list[tuple[Entity, Entity, float, float]] = [
+        (subject, actor, subject_awareness, 1.0),
+        (actor, subject, actor_awareness, 1.0),
+    ]
+    for witness in witnesses or []:
+        if witness.id in (actor.id, subject.id):
+            continue
+        # It did not happen to them; they only saw it happen to someone else.
+        parties.append((witness, actor, 1.0, stake_tuning.witness_reach))
+
+    out_stakes, out_memories = {}, {}
+    for holder, other, awareness, share in parties:
+        pressure = need_pressure(holder, world_time, tuning)
+        stake = stakes.stake_for(
+            size * share,
+            stakes.capacity_of(holder.importance, traits_of(holder), tuning=stake_tuning),
+            awareness=awareness,
+            need_pressure=pressure,
+            tuning=stake_tuning,
         )
-        valence = rel_mod.felt_valence(kind)
-        # One event, a memory each. They are encoded separately, so the two
-        # recollections diverge by perception and disposition from the start.
-        for owner, other in ((from_entity, to_entity), (to_entity, from_entity)):
-            remember(
-                store,
-                owner,
-                gist,
+        out_stakes[holder.id] = stake
+
+        # A relationship only moves toward someone you know was involved.
+        if awareness > 0 and not stake.negligible:
+            relate(
+                store, holder, other, kind,
                 world_time=world_time,
-                rng=rng,
-                valence=valence,
-                participants=[other.id],
-                source_event_seq=source_event_seq,
+                intensity=stake.weight,
                 tuning=tuning,
             )
-    return saved
+
+        # Beneath noticing is beneath remembering. This is the line the lord
+        # falls on the wrong side of, and it is the point of the whole model.
+        if stake.negligible:
+            continue
+        memory = remember(
+            store,
+            holder,
+            gist,
+            world_time=world_time,
+            rng=rng,
+            valence=base_valence * stake.felt,
+            participants=[other.id],
+            # How much of it they took in follows how much it was worth to them.
+            perception=max(0.1, min(1.0, 0.25 + 0.75 * stake.felt)),
+            source_event_seq=source_event_seq,
+            tuning=tuning,
+        )
+        if memory is not None:
+            out_memories[holder.id] = memory
+
+    return {"stakes": out_stakes, "memories": out_memories}
 
 
 # --------------------------------------------------------------------------- #

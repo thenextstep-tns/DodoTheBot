@@ -50,6 +50,7 @@ pymongo.errors.DuplicateKeyError = DuplicateKeyError
 from helpers.dnd import minds  # noqa: E402
 from helpers.dnd.mind import needs as needs_mod  # noqa: E402
 from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
+from helpers.dnd.mind import stakes  # noqa: E402
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall  # noqa: E402
 from helpers.dnd.mind.memory import values as value_model  # noqa: E402
 from helpers.dnd.mind.traits import Traits, derive_traits  # noqa: E402
@@ -515,6 +516,83 @@ def test_relationships() -> None:
 # --------------------------------------------------------------------------- #
 #  12. End to end through the store
 # --------------------------------------------------------------------------- #
+def test_stakes() -> None:
+    """The same act is a different event for each person in it.
+
+    The merchant lord settles a stranger's debt with a wave of a finger. That
+    must cost him nothing he notices while being the day the debtor's life did
+    not end — and it must NOT follow from his rank alone, or the model has just
+    hardcoded "the powerful never care", which is a cliche and not a rule.
+    """
+    campaign, store = _campaign(9401, "Stakes")
+    lord = minds.spawn_npc(store, name="Vashen", role="merchant lord",
+                           world_time=0, rng=Random(2), importance=0.95)
+    debtor = minds.spawn_npc(store, name="Teo", role="dock hand",
+                             world_time=0, rng=Random(5), importance=0.15)
+    crowd = minds.spawn_npc(store, name="Fishwife", role="fishwife",
+                            world_time=0, rng=Random(8), importance=0.3)
+
+    result = minds.interact(
+        store, lord, debtor, "helped", world_time=0, rng=Random(1),
+        description="paid off the whole debt without being asked",
+        witnesses=[crowd],
+    )
+    lord_stake = result["stakes"][lord.id]
+    debtor_stake = result["stakes"][debtor.id]
+
+    check("stakes: the same act is worth wildly different amounts",
+          debtor_stake.weight > lord_stake.weight * 5,
+          f"lord {lord_stake.weight:.3f} vs debtor {debtor_stake.weight:.3f}")
+    check("stakes: beneath noticing forms no memory",
+          lord_stake.negligible and lord.id not in result["memories"])
+    check("stakes: the one it happened to remembers it",
+          debtor.id in result["memories"])
+    check("stakes: a bystander forms an opinion of the actor",
+          store.relations.between(crowd.id, lord.id).affinity > 0)
+
+    # --- station must not decide character ------------------------------- #
+    def as_lord(name, warmth, honour, belonging):
+        entity = minds.spawn_npc(store, name=name, role="lord", world_time=0,
+                                 rng=Random(3), importance=0.95)
+        doc = dict(entity.traits)
+        doc.update(warmth=warmth, honour=honour, belonging=belonging)
+        entity.traits = doc
+        store.entities.save(entity)
+        return entity
+
+    cold = as_lord("Cold", -0.6, 0.2, 0.2)
+    warm = as_lord("Warm", 0.8, 0.85, 0.8)
+    servant = minds.spawn_npc(store, name="Nurse", role="servant", world_time=0,
+                              rng=Random(6), importance=0.15)
+    cold_result = minds.interact(store, servant, cold, "helped", world_time=0,
+                                 rng=Random(1), description="nursed them through a fever")
+    warm_result = minds.interact(store, servant, warm, "helped", world_time=0,
+                                 rng=Random(1), description="nursed them through a fever")
+    check("stakes: A BENEVOLENT LORD REMEMBERS what was done for him",
+          warm.id in warm_result["memories"])
+    check("stakes: an indifferent one of equal rank does not",
+          cold.id not in cold_result["memories"])
+
+    # --- awareness is not mutual ----------------------------------------- #
+    hidden = minds.interact(store, lord, debtor, "saved", world_time=0,
+                            rng=Random(9), description="cut the rope before anyone saw",
+                            subject_awareness=0.0)
+    check("stakes: an unseen act still marks the person it happened to",
+          hidden["stakes"][debtor.id].weight > 0)
+    check("stakes: but it is worth less than one they can credit",
+          hidden["stakes"][debtor.id].weight
+          < stakes.stake_for(stakes.default_magnitude("saved"),
+                             stakes.capacity_of(debtor.importance,
+                                                minds.traits_of(debtor))).weight)
+
+    # --- and all of it switches off -------------------------------------- #
+    flat = stakes.StakesTuning(capacity_reach=0.0, disposition_reach=0.0)
+    rich = stakes.stake_for(0.5, stakes.capacity_of(0.95), tuning=flat)
+    poor = stakes.stake_for(0.5, stakes.capacity_of(0.15), tuning=flat)
+    check("stakes: circumstances can be switched off entirely",
+          abs(rich.weight - poor.weight) < 1e-9)
+
+
 def test_end_to_end() -> None:
     campaign, store = _campaign(9301, "Minds")
 
@@ -577,6 +655,7 @@ def main() -> int:
         test_budgets,
         test_everything_tunable,
         test_relationships,
+        test_stakes,
         test_end_to_end,
     ):
         test()

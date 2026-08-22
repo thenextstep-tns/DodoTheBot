@@ -1038,10 +1038,13 @@ class Tabletop(commands.Cog, name="dnd"):
         toward="About whom.",
         what="What happened. Leave blank to just look at the current state.",
         description="In your words — becomes what they both remember of it.",
+        magnitude="0-1. How big a deal this was in itself. Defaults to the kind.",
+        anonymous="They never learn who did it. Changes them; gives them nobody to thank.",
     )
     async def relate(
         self, interaction: discord.Interaction, who: str, toward: str,
         what: str = "", description: str = "",
+        magnitude: float | None = None, anonymous: bool = False,
     ) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -1071,16 +1074,28 @@ class Tabletop(commands.Cog, name="dnd"):
                     ephemeral=True,
                 )
                 return
-            # The relationship shift is one third of what an event does; the
-            # other two are the event log and a memory in each of their heads.
+            # `who` is whose feelings change, so `toward` is who acted. The same
+            # act is a different event for each of them, and for anyone watching:
+            # minds.interact works out what it was worth to each.
             seq = found.store.campaigns.next_seq(found.campaign.id)
-            updated = minds.relate(
-                found.store, a, b, what,
+            scene = found.store.scenes.open_in_channel(interaction.channel_id)
+            onlookers = []
+            if scene is not None:
+                onlookers = [
+                    e for e in found.store.entities.list()
+                    if e.id in scene.present and e.id not in (a.id, b.id)
+                ]
+            result = minds.interact(
+                found.store, b, a, what,
                 world_time=found.campaign.world_time,
-                description=description,
                 rng=_seeded(found.campaign, seq),
+                description=description,
+                magnitude=None if magnitude is None else max(0.0, min(1.0, magnitude)),
+                subject_awareness=0.0 if anonymous else 1.0,
+                witnesses=onlookers,
                 source_event_seq=seq,
             )
+            updated = found.store.relations.between(a.id, b.id)
             found.store.events.append(
                 events.RELATION,
                 actor_id=b.id,
@@ -1092,10 +1107,24 @@ class Tabletop(commands.Cog, name="dnd"):
                     "description": description.strip(),
                 },
             )
+            by_id = {e.id: e for e in [a, b] + onlookers}
+            lines = []
+            for entity_id, stake in result["stakes"].items():
+                entity = by_id.get(entity_id)
+                if entity is None:
+                    continue
+                line = lang_dnd.TT_RELATE_STAKE_LINE.format(
+                    name=entity.identity.name, stake=stake.describe()
+                )
+                if stake.negligible:
+                    line += lang_dnd.TT_RELATE_FORGOT
+                lines.append(line)
             await interaction.response.send_message(
                 lang_dnd.TT_RELATE_DONE.format(
                     a=a.identity.name, b=b.identity.name, summary=updated.summary()
                 )
+                + "\n"
+                + lang_dnd.TT_RELATE_STAKES.format(lines="; ".join(lines))
             )
             return
 

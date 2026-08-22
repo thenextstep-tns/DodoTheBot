@@ -164,6 +164,11 @@ TT_RECALL_EMPTY = "Nothing comes to mind."
 TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
 
 TT_RELATE_DONE = "**{a}** now: {summary} (toward **{b}**)."
+# The asymmetry is the feature, so it has to be visible: the same act is worth
+# different amounts to the two people in it, and to anyone watching.
+TT_RELATE_STAKES = "What it was worth: {lines}"
+TT_RELATE_STAKE_LINE = "**{name}** — {stake}"
+TT_RELATE_FORGOT = " *(beneath noticing — forms no memory)*"
 TT_RELATE_UNKNOWN = "I don't know what `{kind}` means. Try one of: {kinds}"
 TT_RELATE_TITLE = "{a} → {b}"
 

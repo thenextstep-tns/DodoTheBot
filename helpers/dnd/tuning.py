@@ -41,7 +41,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 
 # Groups, in the order the panel shows them.
 GROUPS = (
-    "Memory", "Forgetting", "Salience", "Needs", "Relationships",
+    "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
     "Knowledge", "Generation",
 )
 
@@ -162,6 +162,35 @@ TUNABLES: list[dict] = [
     _spec("faction_prior", "Relationships", "Faction prior",
           "How strongly whose-side-you're-on seeds a first impression, before "
           "anything personal has happened.", 0.6),
+
+    # --- Stakes ------------------------------------------------------------ #
+    _spec("stakes_capacity_reach", "Stakes", "Circumstances matter",
+          "How much what someone *has* decides what an event is worth to them. At "
+          "1 a wealthy lord barely notices the debt he settles while it saves the "
+          "debtor's life. **Set to 0 to make every event worth the same to "
+          "everyone**, which is how most games do it.",
+          1.0, minimum=0.0, maximum=4.0),
+    _spec("stakes_need_reach", "Stakes", "Desperation matters",
+          "How much a pressing need magnifies whatever relieves it. Bread means "
+          "more to the starving. 0 ignores need entirely.",
+          1.0, minimum=0.0, maximum=3.0),
+    _spec("stakes_unknown_actor_floor", "Stakes", "Unknown benefactor",
+          "How much an event still moves someone when they never learn who did "
+          "it. Above 0 they are changed by it without having anyone to thank or "
+          "blame; at 0 an anonymous act leaves no mark on them at all.",
+          0.25),
+    _spec("stakes_disposition_reach", "Stakes", "Character over station",
+          "How much a person's warmth, honour and belonging override the "
+          "insulation their standing gives them. High means a benevolent lord "
+          "notices what his servants do for him while a cold one of equal rank "
+          "does not. **Set to 0 and station alone decides**, so the powerful "
+          "never notice anything — simpler, and a cliché.",
+          0.7, minimum=0.0, maximum=1.0),
+    _spec("stakes_witness_reach", "Stakes", "Bystanders judge",
+          "How far an event moves the feelings of people who merely *saw* it, "
+          "relative to those it happened to. 0 means onlookers remember it and "
+          "feel nothing about the person who did it.",
+          0.5, minimum=0.0, maximum=2.0),
 
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
@@ -307,6 +336,15 @@ class Tuning:
             faction_prior=self.get("faction_prior"),
         )
 
+    def stakes(self) -> "StakesTuning":
+        return StakesTuning(
+            capacity_reach=self.get("stakes_capacity_reach"),
+            need_reach=self.get("stakes_need_reach"),
+            unknown_actor_floor=self.get("stakes_unknown_actor_floor"),
+            witness_reach=self.get("stakes_witness_reach"),
+            disposition_reach=self.get("stakes_disposition_reach"),
+        )
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -373,6 +411,15 @@ class RelationshipTuning:
 
 
 @dataclass(frozen=True)
+class StakesTuning:
+    capacity_reach: float = 1.0
+    need_reach: float = 1.0
+    unknown_actor_floor: float = 0.25
+    witness_reach: float = 0.5
+    disposition_reach: float = 0.7
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -386,4 +433,5 @@ DEFAULT_MEMORY = MemoryTuning()
 DEFAULT_SALIENCE = SalienceTuning()
 DEFAULT_NEEDS = NeedsTuning()
 DEFAULT_RELATIONSHIPS = RelationshipTuning()
+DEFAULT_STAKES = StakesTuning()
 DEFAULT_GENERATION = GenerationTuning()
