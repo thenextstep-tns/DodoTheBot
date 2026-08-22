@@ -749,37 +749,47 @@ _TIER_LABELS = {
 }
 
 
-def _meter(value: float, low: float = 0.0, high: float = 1.0) -> str:
-    """A bar for one axis, drawn from the centre when the axis is signed.
+def _meter(value: float, low: float = 0.0, high: float = 1.0,
+           neutral: float | None = None) -> str:
+    """A bar drawn from an axis's **neutral point**, not from its left edge.
 
-    Two things were wrong with the previous version. It hardcoded a dark track
-    (``#3a3a3a``) and filled it with ``currentColor``, which on the light panel
-    was black on charcoal. And it filled every bar from the left — so warmth
-    −0.33 drew a third of a bar, reading as *a bit warm* when it means the
-    opposite. A signed axis has to diverge from its zero or it is telling the
-    reader the wrong thing.
+    Every axis on the sheet has a resting value, and it is not always the bottom
+    of the range. Temperament is −1…1 resting at 0; drives are 0…1 resting at
+    **0.5**; a need is 0…1 resting at 0, because no hunger really is none.
+
+    Filling from the left regardless got both halves wrong in the same column:
+    warmth −0.33 drew a third of a bar and read as mildly warm, and greed 0.54 —
+    a hair above neutral — drew a half-full bar and read as grasping.
+    ``traits.strongest()`` has always measured drives from 0.5 for exactly this
+    reason; the meter now agrees with it.
+
+    ``neutral`` defaults to 0 for signed axes and to ``low`` for magnitudes.
     """
     span = (high - low) or 1.0
-    if low < 0:
-        # Signed: zero is the middle, and the fill grows out toward its sign.
-        amount = max(-1.0, min(1.0, value / max(abs(low), abs(high))))
-        width = abs(amount) * 50.0
-        left = 50.0 if amount >= 0 else 50.0 - width
-        sign = "pos" if amount >= 0 else "neg"
-        return (
-            f'<span class="meter signed"><i class="{sign}" '
-            f'style="left:{left:.1f}%;width:{width:.1f}%"></i></span>'
-        )
-    width = max(0.0, min(100.0, (value - low) / span * 100.0))
-    return f'<span class="meter"><i class="pos" style="left:0;width:{width:.1f}%"></i></span>'
-
-
-def _axis_cell(value: float, low: float = 0.0, high: float = 1.0) -> str:
-    """Meter plus its number, aligned so a column of them can be read down."""
-    return (
-        f'<span class="metrow">{_meter(value, low, high)}'
-        f'<span class="metval">{value:+.2f}</span></span>'
+    if neutral is None:
+        neutral = 0.0 if low < 0 else low
+    at = lambda v: max(0.0, min(100.0, (v - low) / span * 100.0))
+    zero, mark = at(neutral), at(value)
+    left, width = min(zero, mark), abs(mark - zero)
+    sign = "pos" if value >= neutral else "neg"
+    tick = (
+        f'<b style="left:{zero:.1f}%"></b>' if 1.0 < zero < 99.0 else ""
     )
+    return (
+        f'<span class="meter">{tick}<i class="{sign}" '
+        f'style="left:{left:.1f}%;width:{max(width, 1.2):.1f}%"></i></span>'
+    )
+
+
+def _axis_cell(value: float, low: float = 0.0, high: float = 1.0,
+               neutral: float | None = None) -> str:
+    """Meter plus its number, aligned so a column of them can be read down.
+
+    Signed axes print their sign; a magnitude does not, because ``+0.54`` on a
+    0…1 scale implies a direction the number does not have.
+    """
+    text = f"{value:+.2f}" if low < 0 else f"{value:.2f}"
+    return f'<span class="metrow">{_meter(value, low, high, neutral)}<span class="metval">{text}</span></span>'
 
 
 def _memory_card(entity, memory, explain) -> str:
@@ -838,11 +848,15 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
     override_rows = ""
     for axis in TEMPERAMENT + DRIVES + FACULTIES:
         value = traits.axis(axis)
-        low = -1.0 if axis in TEMPERAMENT else 0.0
+        signed = axis in TEMPERAMENT
+        low = -1.0 if signed else 0.0
+        # A drive resting at 0.5 must be drawn from 0.5, or every NPC in the
+        # world looks grasping the moment they are a hair above average.
+        neutral = 0.0 if signed else 0.5
         label = _escape(TRAIT_LABELS.get(axis, axis))
         trait_rows += (
             f'<tr><td>{label}</td>'
-            f'<td>{_axis_cell(value, low, 1.0)}</td></tr>'
+            f'<td>{_axis_cell(value, low, 1.0, neutral)}</td></tr>'
         )
         override_rows += (
             f'<tr><td>{label}</td><td>'

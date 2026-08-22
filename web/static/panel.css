@@ -1096,3 +1096,8 @@ body.board { background: var(--color-surface-soft); }
 .meter > i.neg { background: var(--color-ink); opacity: .55; }
 .meter.signed::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
   width: 1px; background: var(--color-hairline); z-index: 1; }
+
+/* The neutral tick sits wherever the axis actually rests — mid-scale for
+   temperament and drives, at the left edge for a magnitude, where it is hidden. */
+.meter > b { position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--color-hairline); z-index: 1; }
