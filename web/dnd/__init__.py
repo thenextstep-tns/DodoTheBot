@@ -23,6 +23,7 @@ def dnd_routes() -> list:
     from web.dnd.api import (
         api_dnd_canon,
         api_dnd_cog,
+        api_dnd_entity_traits,
         api_dnd_lore,
         api_dnd_param,
         api_dnd_tune,
@@ -49,6 +50,8 @@ def dnd_routes() -> list:
         web.post("/api/guild/{gid}/dnd/lore", view(api_dnd_lore)),
         web.post("/api/guild/{gid}/dnd/canon", view(api_dnd_canon)),
         web.post("/api/guild/{gid}/dnd/tune", view(api_dnd_tune)),
+        # Per-NPC traits: GM-gated inside the handler, like lore and canon.
+        web.post("/api/guild/{gid}/dnd/entity-traits", view(api_dnd_entity_traits)),
         # Server-level tuning is server configuration, so it needs the same
         # scope the general settings page does.
         web.post("/api/guild/{gid}/dnd/tune-server", configure(api_dnd_tune_server)),

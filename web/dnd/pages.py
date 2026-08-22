@@ -408,7 +408,7 @@ narrator is switched on, and stay out of canon until you accept them.</p>"""
 <table class="ranktable"><tbody>{rows}</tbody></table>"""
 
 
-def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
+def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> str:
     """Tabletop's own panel script.
 
     Deliberately not part of ``panel.js``: that file binds ``.param`` controls to
@@ -424,6 +424,7 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
   // at the scope check, silently. Strings, exactly as panel.js's header says.
   const gid = "{guild_id}";
   const cid = "{campaign_id}";
+  const eid = "{entity_id}";
   // Looked up after the element above exists: it used to be emitted *below*
   // this script, so this was null and no control could ever report anything.
   const status = document.getElementById("status");
@@ -535,6 +536,17 @@ def _dnd_script(guild_id: int, campaign_id: str = "") -> str:
     }});
     const wanted = (location.hash || "").replace("#", "");
     if (panels.some((p) => p.dataset.panel === wanted)) show(wanted);
+  }});
+  // Traits are editable per NPC: generation hands you the middle of a
+  // distribution, and the outliers are the interesting people.
+  document.querySelectorAll(".dndtrait").forEach((el) => {{
+    el.addEventListener("change", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/entity-traits`, {{
+        campaign_id: cid, entity_id: eid,
+        axis: el.dataset.axis, value: el.value,
+      }});
+      if (data.ok) location.reload();   // the meters and the read-line follow
+    }});
   }});
   document.querySelectorAll(".canon-accept, .canon-reject").forEach((el) => {{
     el.addEventListener("click", async () => {{
@@ -748,14 +760,25 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
     memories = store.memories.for_entity(entity.id)
 
     # --- disposition ---
+    # Editable, because rolling until an interesting person appears is not a
+    # design tool. A moral thief, a warm killer, an honourable vampire — the
+    # outliers are the point, and generation can only ever hand you the middle
+    # of the distribution. Every axis is settable per NPC.
     trait_rows = ""
     for axis in TEMPERAMENT + DRIVES + FACULTIES:
         value = traits.axis(axis)
         low = -1.0 if axis in TEMPERAMENT else 0.0
         trait_rows += (
             f'<tr><td>{_escape(TRAIT_LABELS.get(axis, axis))}</td>'
-            f'<td>{_meter(value, low, 1.0)} {value:+.2f}</td></tr>'
+            f'<td>{_meter(value, low, 1.0)} '
+            f'<input type="number" class="dndtrait" data-axis="{axis}" '
+            f'step="0.01" min="{low}" max="1.0" value="{value:.2f}"></td></tr>'
         )
+    trait_rows += (
+        '<tr><td colspan="2" class="muted small">Set any axis directly — this is '
+        'how you build the exception rather than waiting for one to be rolled. '
+        'Temperament runs −1…1, drives and retention 0…1.</td></tr>'
+    )
 
     # --- body ---
     need_rows = ""
@@ -862,7 +885,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <h2>How others feel about them</h2>
   <p class="muted small">Often the more interesting direction, and the one easy to forget to ask about.</p>
   <table class="ranktable"><tbody>{_rel_rows(store.relations.incoming(entity.id), "from_id")}</tbody></table>
-</div>"""
+</div>{_dnd_script(guild.id, str(campaign.id), str(entity.id))}"""
 
 
 # --------------------------------------------------------------------------- #

@@ -30,6 +30,7 @@ from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
+from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT
 from helpers.dnd.world.knowledge import KINDS, Fact
 from web.dnd import access
 
@@ -289,3 +290,58 @@ async def api_dnd_tune_server(request: web.Request):
     return web.json_response(
         {"ok": True, "value": now, "source": after.source_of(key)}
     )
+
+
+# --------------------------------------------------------------------------- #
+#  Entity traits
+# --------------------------------------------------------------------------- #
+async def api_dnd_entity_traits(request: web.Request):
+    """Set one trait axis on one NPC: ``{campaign_id, entity_id, axis, value}``.
+
+    Generation can only ever hand a GM the middle of a distribution. The people
+    worth building a story on are the exceptions — the moral thief, the warm
+    killer, the honourable vampire — and those have to be *authored*, not waited
+    for. So every axis is settable per entity, which is also the object level the
+    "expose every knob" rule asks for.
+
+    The value is clamped to the axis's own range rather than rejected, since a
+    GM reaching for 2.0 means "as far as this goes".
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    axis = str(data.get("axis", ""))
+    if axis not in TEMPERAMENT + DRIVES + FACULTIES:
+        return _bad("Unknown trait axis.")
+
+    raw_id = str(data.get("entity_id", ""))
+    entity = next(
+        (e for e in store.entities.list(include_retired=True, limit=500)
+         if str(e.id) == raw_id),
+        None,
+    )
+    if entity is None:
+        return _bad("Entity not found.")
+
+    try:
+        value = float(data.get("value"))
+    except (TypeError, ValueError):
+        return _bad("Trait value must be a number.")
+    low = -1.0 if axis in TEMPERAMENT else 0.0
+    value = round(max(low, min(1.0, value)), 3)
+
+    doc = dict(entity.traits or {})
+    was = doc.get(axis)
+    doc[axis] = value
+    entity.traits = doc
+    store.entities.save(entity)
+
+    await _record_change(
+        request, "dnd_trait", f"{entity.identity.name}.{axis}", was, value,
+        f"set **{entity.identity.name}**'s {axis} to {value}",
+    )
+    return web.json_response({"ok": True, "axis": axis, "value": value})
