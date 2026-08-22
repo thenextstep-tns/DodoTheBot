@@ -101,20 +101,37 @@ class CommandSyncer:
         return result
 
     def _signature(self, guild_id: int) -> str:
-        """A stable hash of the computed tree, used to skip unchanged startup syncs."""
-        entries = sorted(
-            (c.name, self._effective_level(guild_id, c), self._cog_name(c) or "")
-            for c in self.bot.tree.get_commands()
-        )
-        # Fold in the guild's cog-disabled set (affects which entries are dropped).
-        payload = {
-            "entries": [
-                (name, lvl, cog)
-                for (name, lvl, cog) in entries
-                if lvl != LEVEL_OWNER and (not cog or self.bot.visibility.cog_enabled(guild_id, cog))
-            ]
-        }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        """A stable hash of what would actually be sent, used to skip unchanged syncs.
+
+        **Hash the payload, not a summary of it.** This used to hash only
+        top-level ``(name, level, cog)`` triples, which meant a command could
+        change in every way that matters — a new parameter, a renamed option, a
+        new subcommand under an existing group — without the hash moving. The
+        startup sync then decided nothing had changed and skipped, so Discord
+        kept serving a schema that no longer matched the code, indefinitely.
+        Adding ``description:`` to ``/gm relate`` was invisible for exactly this
+        reason, and every subcommand P3 adds under ``/gm`` would have been too.
+
+        Hashing ``to_dict()`` output ties the guard to the thing it guards: the
+        hash changes if and only if the payload does.
+        """
+        commands = self.build_guild_commands(guild_id)
+        try:
+            payload = [command.to_dict(self.bot.tree) for command in commands]
+        except Exception:
+            # Never let the fast-path guard break startup. Falling back to the
+            # old summary means at worst a missed sync, which `force=True` and
+            # any command-level change still resolve.
+            self.bot.logger.warning(
+                "Command signature fell back to names only; parameter changes "
+                "will not trigger a sync until something else does."
+            )
+            payload = sorted(
+                (c.name, self._effective_level(guild_id, c), self._cog_name(c) or "")
+                for c in commands
+            )
+        blob = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode()).hexdigest()
 
     # ------------------------------------------------------------------ #
     #  Syncing

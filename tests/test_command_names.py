@@ -130,7 +130,54 @@ def main() -> int:
             f"({APP_COMMAND_LIMIT - count} of {APP_COMMAND_LIMIT} slots free)"
         )
 
+    # --- 3. the sync guard must notice a changed parameter ---------------- #
+    # The startup sync is skipped when a stored hash matches. That hash once
+    # covered only top-level (name, level, cog), so adding a parameter to a
+    # command changed nothing it could see: Discord kept serving a stale schema
+    # forever, and `/gm relate`'s new `description:` option never appeared.
+    if not _signature_sees_parameters():
+        print(
+            "  FAIL the command-sync signature ignores parameters — a changed "
+            "option will never reach Discord"
+        )
+        failed = True
+    else:
+        print("  ok   command-sync signature covers parameters and subcommands")
+
     return 1 if failed else 0
+
+
+def _signature_sees_parameters() -> bool:
+    """Does hashing the sync payload notice a new option on a subcommand?"""
+    import hashlib
+    import json
+
+    import discord
+    from discord import app_commands
+
+    def tree_with(extra: bool):
+        tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
+        group = app_commands.Group(name="probe", description="probe")
+        if extra:
+            @group.command(name="thing", description="probe")
+            async def _cmd(i: discord.Interaction, a: str, b: str = ""): ...
+        else:
+            @group.command(name="thing", description="probe")
+            async def _cmd(i: discord.Interaction, a: str): ...
+        tree.add_command(group)
+        return tree
+
+    def digest(tree) -> str:
+        payload = [c.to_dict(tree) for c in tree.get_commands()]
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
+    try:
+        return digest(tree_with(False)) != digest(tree_with(True))
+    except Exception as error:      # to_dict is the mechanism; say so if it moves
+        print(f"       could not build a probe tree: {error}")
+        return False
 
 
 if __name__ == "__main__":
