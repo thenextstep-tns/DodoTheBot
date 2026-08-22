@@ -47,7 +47,7 @@ from helpers.dnd.store import campaign_store, campaigns_for, ensure_indices
 from helpers.dnd.mind import traits as traits_mod
 from helpers.dnd.world import event as events
 from helpers.dnd.world.campaign import Campaign
-from helpers.dnd.world.entity import KIND_PC, TIER_FOCUS, Entity, Identity, Position
+from helpers.dnd.world.entity import KIND_PC, TIER_ACTIVE, TIER_FOCUS, Entity, Identity, Position
 from helpers.dnd.world.belief import SOURCE_ASSUMED, adopt
 from helpers.dnd.world.event import event_seed
 from helpers.dnd.mind.relationships import kinds as relationship_kinds
@@ -1160,6 +1160,54 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Time (P2 — the manual stand-in for the world tick in P3)
     # ------------------------------------------------------------------ #
+    @gm.command(name="present", description="Put someone in the open scene, or take them out. (GM)")
+    @app_commands.describe(
+        who="Who is in the room.",
+        leave="Take them out instead of putting them in.",
+    )
+    async def present(
+        self, interaction: discord.Interaction, who: str, leave: bool = False
+    ) -> None:
+        """Scenes open with the player characters in them and no way to add
+        anyone, which left every NPC permanently off-screen — so nobody could
+        witness anything, and the witness half of `/gm relate` could never fire.
+        """
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+
+        scene = found.store.scenes.open_in_channel(interaction.channel_id)
+        if scene is None:
+            await interaction.response.send_message(lang_dnd.TT_SCENE_NONE, ephemeral=True)
+            return
+        entity = found.store.entities.by_name(who)
+        if entity is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who), ephemeral=True
+            )
+            return
+
+        present = [e for e in scene.present if str(e) != str(entity.id)]
+        if not leave:
+            present.append(entity.id)
+        found.store.scenes.set_present(scene.id, present)
+        # Being on screen is what makes an entity worth simulating in full.
+        found.store.entities.set_tier(
+            entity.id, TIER_ACTIVE if leave else TIER_FOCUS
+        )
+        await interaction.response.send_message(
+            (lang_dnd.TT_PRESENT_LEFT if leave else lang_dnd.TT_PRESENT_JOINED).format(
+                name=entity.identity.name, title=scene.title, count=len(present)
+            )
+        )
+
     @gm.command(name="advance", description="Let time pass, and let minds age. (GM)")
     @app_commands.describe(days="How many in-world days go by.")
     async def advance(self, interaction: discord.Interaction, days: float) -> None:

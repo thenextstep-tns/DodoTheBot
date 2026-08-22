@@ -167,6 +167,8 @@ TT_RECALL_TITLE = "{name} remembers…"
 TT_RECALL_EMPTY = "Nothing comes to mind."
 TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
 
+TT_PRESENT_JOINED = "**{name}** is in *{title}* — {count} present. They will witness what happens here."
+TT_PRESENT_LEFT = "**{name}** is no longer in *{title}* — {count} present."
 TT_RELATE_DONE = "**{a}** now: {summary} (toward **{b}**)."
 # The asymmetry is the feature, so it has to be visible: the same act is worth
 # different amounts to the two people in it, and to anyone watching.

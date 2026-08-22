@@ -312,58 +312,140 @@ think` matches on the useful words too.
 
 ---
 
-## Act 10 — People feel things about each other
+## Act 10 — One act, two people, two different events
+
+This is the act the whole engine turns on. **The same thing that happened did
+not happen equally to both of them.**
 
 ```
 > /gm relate who:Marla toward:Ondry what:helped description:he paid her debt to the Compact without being asked
-> /gm relate who:Marla toward:Ondry
-> /gm relate who:Ondry toward:Marla
 ```
 
-`what:` is **not** free text — it is one of sixteen predefined event kinds, each
+`who` is whose feelings change; `toward` is who *acted*. So this reads *Ondry
+helped Marla*. `what:` is not free text — it is one of sixteen kinds, each
 carrying its own multi-axis delta: `attacked, bested, betrayed, gifted, healed,
 helped, insulted, kept_word, lied, met, praised, saved, stole, talked,
-threatened, travelled`. The kind is what moves trust, warmth, debt and fear.
-`description:` is your prose, and it becomes **what they both remember**. Leave
-`what:` blank to look without changing anything.
+threatened, travelled`. `description:` is your prose and becomes **what they
+remember**.
 
-→ The reply may still say **"a stranger"**. That is not a failure: one favour
-from a cold-natured harbourmaster lands just under the threshold where the
-one-line summary changes. The numbers moved — the look-only call above shows all
-five axes and both directions, and that is where to check.
+→ The reply now ends with **"What it was worth:"** and a line per person. Marla
+and Ondry should *not* read the same. That is the feature.
 
-→ **Both of them now remember it.** Run `/npc mind who:Marla` and
-`/npc mind who:Ondry`: the same event, encoded separately, so the two accounts
-can already differ. Then:
+→ It may still say **"a stranger"**. Not a failure — one favour lands just under
+the threshold where the summary sentence changes. The axes moved:
+
+```
+> /gm relate who:Marla toward:Ondry
+```
+→ All five axes, **both directions**, side by side.
+
+🚩 If the two directions are mirror images, the model has gone symmetric and the
+asymmetry that makes relationships interesting is gone.
+
+### Both of them remember it now
+
+```
+> /npc mind who:Marla
+> /npc mind who:Ondry
+```
+→ The same event in two heads, encoded separately — so salience, clarity and
+feeling can already differ between them.
 
 ```
 > /gm recall who:Marla cue:compact
 ```
-→ The memory comes back, because the cues were extracted from your description.
-Without a `description:` the gist is templated from the kind instead — *"Ondry
-helped Marla"* — so an undescribed event still leaves a memory rather than none.
+→ It comes back, because the cues were pulled out of *your* description. Drop
+`description:` next time and the gist is templated from the kind instead —
+*"Ondry helped Marla"* — so an undescribed event still leaves a memory.
 
-→ Multi-axis feelings (trust, warmth, debt, fear). The second call with no
-`what:` just looks.
-
-→ **The two directions should not match.** Marla owing Ondry is not the same
-relationship as Ondry being owed, and if the panel shows them as mirror images
-the model has quietly become symmetric.
-
-Then check it compounds with memory:
-```
-> /gm remember who:Marla what:Ondry standing between her and the Compact's men feeling:0.7 detail:north dock clarity:1.0
-> /npc mind who:Marla
-```
-→ A memory involving someone she now has feelings about should score higher on
-the social contribution to salience than the same event with a stranger.
+🚩 If either of them has no memory of it at all, check the "what it was worth"
+line first — a stake beneath noticing forms no memory **on purpose**, and Act 11
+is about exactly that.
 
 ---
 
-## Act 11 — Every knob turns, including all the way off
+## Act 11 — The merchant lord
 
-The standing rule is that nothing is baked in and anything that can be softened
-can be switched off entirely. Verify the strongest version of that:
+The headline case. Same act, wildly different meaning, and a reputation bought
+for nothing.
+
+```
+> /npc create name:Lord Vashen role:merchant lord importance:0.95
+> /npc create name:Teo role:dock hand importance:0.15
+> /gm relate who:Teo toward:Lord Vashen what:helped magnitude:0.8 description:paid off the whole debt without being asked
+```
+
+→ Read the **"what it was worth"** line. Vashen should come back around
+*"cost them nothing they noticed"*; Teo around *"the kind of thing a life turns
+on"* or better.
+
+```
+> /npc mind who:Lord Vashen
+> /npc mind who:Teo
+```
+→ **Vashen should have no memory of it whatsoever.** Teo should have a vivid
+one. That is the whole model: the lord's standing rises on an afternoon he has
+already forgotten.
+
+🚩 If Vashen remembers it, `stakes_capacity_reach` is not reaching the encoder.
+
+### Someone was watching
+
+```
+> /npc create name:Sten role:fishwife
+> /gm present who:Sten
+> /gm relate who:Teo toward:Lord Vashen what:gifted description:sent bread to the whole row
+> /npc mind who:Sten
+> /gm relate who:Sten toward:Lord Vashen
+```
+→ Sten was never involved and now has **a memory of it and an opinion of
+Vashen**. That is how a reputation reaches people it never happened to.
+
+### And the version nobody can credit
+
+```
+> /gm relate who:Teo toward:Lord Vashen what:saved anonymous:True description:cut the rope before anyone saw
+> /npc mind who:Teo
+> /gm relate who:Teo toward:Lord Vashen
+```
+→ Teo is **changed by it** — the memory is there — but his feelings toward
+Vashen should barely move, because he has nobody to thank. Awareness is not
+mutual, and neither is familiarity.
+
+---
+
+## Act 12 — Who people turn out to be
+
+```
+> /npc create name:Nobody One
+> /npc create name:Nobody Two
+> /npc create name:Nobody Three
+```
+No `role:` at all. Each is rolled as a person first, then falls into a trade
+that suits them.
+
+→ Each reply names the trade they landed in and how well it fits — *"every inch
+an innkeeper"*, *"an odd fit for guard work"*.
+
+```
+> /npc create name:Sella role:thief
+```
+→ A named thief still varies. Run it a few times: some will read *"every inch a
+thief"* and some *"an unremarkable thief"*, because disposition is rolled, not
+stamped.
+
+**The point:** across a population thieves come out less honourable *on average*
+because dishonourable people fall into thieving — not because being called a
+thief lowered anyone's honour. The stereotype is a distribution, and the honest
+thief exists inside it.
+
+To build one deliberately, open the NPC in the panel and use **⚠️ Overwrite this
+person by hand**. It is folded away behind a warning on purpose: disposition is
+meant to move through what happens to someone, not through you editing a field.
+
+---
+
+## Act 13 — Every knob turns, including all the way off
 
 ```
 > /gm tune set key:memory_decay_rate value:0
@@ -371,44 +453,52 @@ can be switched off entirely. Verify the strongest version of that:
 > /gm advance days:3650
 > /npc mind who:Sennet
 ```
-→ `/gm advance` should report the world as **frozen**, and Sennet's memories
-should be byte-identical across a decade. Forgetting is off.
+→ `/gm advance` reports the world **frozen**, and Sennet's memories are
+byte-identical across a decade.
 
 ```
+> /gm tune set key:stakes_capacity_reach value:0
+> /gm relate who:Teo toward:Lord Vashen what:helped description:the same favour again
+```
+→ With circumstances switched off, the lord and the dock hand should now get
+**the same** stake from the same act. Then put it back:
+
+```
+> /gm tune set key:stakes_capacity_reach
 > /gm tune set key:memory_decay_rate
 > /gm tune show
 ```
-→ Blank value clears the override back to inherited. `/gm tune show` should say
-where each value comes from — default, server, or campaign.
+→ Blank clears an override back to inherited, and `/gm tune show` says where each
+value comes from — default, server, or campaign.
 
-Now the same knob from the other surface: panel → 🎲 Tabletop → the campaign →
-tuning section. **The value you set in Discord must already be showing there.**
+Now the panel: **🎲 Tabletop → Harbour → This game's rules**. The values you set
+in Discord must already be showing there, under the **Stakes** group.
 
 🚩 Two surfaces disagreeing about a tunable means the resolution order broke.
 
 ---
 
-## Act 12 — The inspector as the demo
+## Act 14 — The panel as the demo
 
-Panel → 🎲 Tabletop → Harbour → click **Marla**.
+**Tabletop → Harbour.** Five sections in the side menu: Cast, Scenes, Lore &
+facts, Canon queue, This game's rules.
 
-This page is the P2 deliverable — the thing that is supposed to prove the phase
-worked. Look for:
+→ Nothing server-wide should be reachable from inside a campaign. The engine
+switch and the server defaults live one level up, on the Tabletop index.
 
-- Traits and needs as meters, not numbers
-- Every memory with **per-field clarity**, so you can see what has gone
-- A line per memory explaining *why it is sticking* — salience, her retention
-  faculty, her values
+Now **Cast → Marla**.
+
+- Traits and needs as meters, **read-only**
+- Every memory with per-field clarity, so you can see what has gone
+- A line per memory saying *why it is sticking*
 - Beliefs, with source and confidence
 - Feelings toward others **and** how others feel about her, separately
 
-**The real question, and the only one that matters:** reading this page, do you
-know who Marla is? Could you play her at a table from it — not "look up her
-stats", but *speak as her*?
+**The only question that matters:** reading this page, do you know who Marla is?
+Could you *speak as her* at a table — not look up her stats?
 
-If yes, P2 worked and P3 is worth building.
-If no, write down precisely what is missing. That list is worth more than the
-next phase.
+If yes, P2 worked and P3 is worth building. If no, write down exactly what is
+missing; that list is worth more than the next phase.
 
 ---
 
@@ -417,13 +507,13 @@ next phase.
 ```
 > /scene close
 ```
-Leave the campaigns — a second session of this script wants the aged state.
+Leave the campaigns — a second run wants the aged state.
 
 ---
 
 ## What to send back
 
 1. Every 🚩 you hit, with the command and what came back.
-2. Act 8's answer: did a confabulation read like a person or like a bug?
-3. Act 12's answer: could you play Marla from that page?
+2. Act 11: did Vashen genuinely forget, and did Sten's opinion move?
+3. Act 14: could you play Marla from that page?
 4. The one place you were *bored*. That is the most useful line in the report.
