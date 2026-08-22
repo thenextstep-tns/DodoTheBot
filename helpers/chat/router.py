@@ -98,6 +98,7 @@ class Router:
         self._channel_unprompted: dict[int, float] = {}
         self._user_spoke: dict[int, float] = {}
         self._calls: dict[tuple, int] = {}
+        self._last_reflex: dict[tuple, str] = {}
 
     # ------------------------------------------------------------------ #
     #  Short-term channel memory
@@ -109,12 +110,34 @@ class Router:
         ring = self._recent.setdefault(channel_id, deque(maxlen=self._history))
         ring.append((author, content))
 
-    def recent(self, channel_id: int, count: int) -> list[str]:
-        """The last ``count`` messages as ``name: text`` lines."""
+    def recent(self, channel_id: int, count: int, *, skip_last: bool = False) -> list[str]:
+        """The last ``count`` messages as ``name: text`` lines.
+
+        ``skip_last`` drops the message currently being handled, which is already
+        going to the model as the user turn — repeating it as context makes her
+        answer it twice.
+        """
         ring = self._recent.get(channel_id)
         if not ring or count <= 0:
             return []
-        return [f"{author}: {content}" for author, content in list(ring)[-count:]]
+        lines = list(ring)[:-1] if skip_last else list(ring)
+        return [f"{author}: {content}" for author, content in lines[-count:]]
+
+    def pick_reflex(self, trigger: Trigger, channel_id: int,
+                    rng: Optional[Random] = None) -> str:
+        """A canned line, avoiding the one used last time in this channel.
+
+        Free lines are the cheapest way to answer, but a pool that can repeat
+        itself back-to-back reads as a broken bot rather than a stubborn bird.
+        """
+        if not trigger.reflex:
+            return ""
+        rng = rng or Random()
+        key = (channel_id, trigger.key)
+        fresh = [line for line in trigger.reflex if line != self._last_reflex.get(key)]
+        chosen = rng.choice(fresh or trigger.reflex)
+        self._last_reflex[key] = chosen
+        return chosen
 
     def _speakers(self, channel_id: int, count: int) -> int:
         ring = self._recent.get(channel_id)

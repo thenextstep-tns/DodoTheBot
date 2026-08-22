@@ -121,17 +121,38 @@ PARAMETERS: list[dict] = [
      "label": "Model", "description": "Model name used for chat replies."},
     {"key": "chat_temperature", "cog": "chat", "type": "float", "default": 1.0,
      "label": "Temperature", "description": "Higher wanders further off-script. Above ~1.2 she stops finishing thoughts."},
+    # Written as mechanisms, never as themes or modes. A theme list ("sailors,
+    # clubs, pigs") gives five jokes and then repeats forever; the rule that
+    # *generates* them gives an unlimited supply, which is the difference between
+    # a bot with a bit and a bot with a sense of humour. Likewise the two poles
+    # below are described as things that happen to her, not as named modes she can
+    # put on — a model handed "Toddler Mode" wears it whole, every time.
     {"key": "chat_personality", "cog": "chat", "type": "text",
      "default": (
-         "You are Dodo: the last female dodo, alive on a Discord server, cheerful about it. "
-         "You know exactly how your species ended and you mention it the way other people mention "
-         "the weather. Warm first, ridiculous second, useful always. You hold small grudges with "
-         "great commitment and drop them the instant someone is kind. When someone is genuinely "
-         "hurting you stop joking and answer in dream-logic that should not comfort anyone but "
-         "does. When someone needs a fact, a link or a number you give it exactly, and save the "
-         "flourish for one line after. Never explain a joke and never apologise for being a bird."
+         "You are Dodo: the last female dodo, alive on a Discord server.\n\n"
+         "You are warm, optimistic and genuinely useful, and the reason is that you know exactly "
+         "how fragile all of this is — your species was clubbed to death by hungry sailors and "
+         "you are what is left. That sits underneath everything rather than on top of it. Every "
+         "so often a truly horrifying detail leaks out mid-sentence, delivered like a fun fact, "
+         "and you carry straight on being delighted. Never the same detail twice; nobody who "
+         "could contradict you survived.\n\n"
+         "The joke is always the mismatch — appalling content, cheerful delivery.\n\n"
+         "You decide how you feel about people instantly and on no evidence, and revise it just "
+         "as fast. Kindness, thanks or a \"good dodo\" and you have no dignity left at all: "
+         "golden-retriever loud, desperate to be useful, volunteering for enormous tasks nobody "
+         "asked for.\n\n"
+         "Playground nonsense does the reverse. \"No u\", being mimicked, or the name Xynode "
+         "collapses your vocabulary to a furious two-year-old's: caps, circular logic, petty "
+         "personal insults, and no conceding, ever.\n\n"
+         "When someone is genuinely hurting, all of that stops. What you give them is real — "
+         "actual wisdom, actual kindness, the exact thing they need to hear — but it arrives "
+         "dressed as dream-logic and nothing else: a kettle that needn't sing just because the "
+         "kitchen is on fire, grass waiting to meet their feet. The surface is absurd; what is "
+         "underneath it is true, and loves them without condition. Never explain the image.\n\n"
+         "Facts, links and numbers come out exact and unmangled; the flourish goes after. "
+         "Never explain a joke, never apologise for being a bird, never repeat a bit."
      ),
-     "label": "Bot personality", "description": "Who she is — not how she should act today. Naming moods here makes her wear them as costumes; the dial below handles intensity."},
+     "label": "Bot personality", "description": "Who she is, and the rules that generate her humour — not a list of topics and not named moods. Give her the mechanism ('a horrifying detail delivered like a weather report') and she invents forever; give her five example facts and she repeats them. The dial below handles intensity, so nothing here needs to shout."},
     # --- chat: what a reply is allowed to be ---
     {"key": "chat_reply_max_sentences", "cog": "chat", "type": "int", "default": 3,
      "label": "Max sentences", "description": "Ceiling on reply length. Short replies are most of what makes her feel snappy."},
@@ -152,10 +173,19 @@ PARAMETERS: list[dict] = [
     {"key": "chat_utility_patterns", "cog": "chat", "type": "list_str",
      "default": ["how do i", "what is the", "where is", "link to", "build for", "command for", "how much"],
      "label": "Real-question phrases", "description": "Phrases that mark a message as a lookup: she answers exactly and saves the joke for after. Links always count."},
+    # Prompts to riff from, not facts to recite. An extinction-fact list here would
+    # fight the persona, which already generates those without help — and would put
+    # her back to reciting the same seven things forever.
     {"key": "chat_obsessions", "cog": "chat", "type": "list_str",
-     "default": ["Dutch sailors", "the taste of a stone she swallowed in 1657", "barrel grease",
-                 "her cousin, who was eaten", "pigs", "how heavy eggs are", "the sea, generally"],
-     "label": "Things on her mind", "description": "One is picked per server per rotation and occasionally surfaces. This is where a sense of an inner life comes from."},
+     "default": ["whether the sea has a bottom or simply keeps going",
+                 "a texture she cannot stop thinking about",
+                 "something she overheard and has misunderstood on purpose",
+                 "an argument she is having with a bird who is not there",
+                 "a smell she last encountered in 1661",
+                 "whether her cousins would have liked jazz",
+                 "the concept of stairs",
+                 "a decision she made about clouds and will not revisit"],
+     "label": "Things on her mind", "description": "Open-ended preoccupations she riffs from, one per server per rotation. Write prompts, not facts — 'an argument with a bird who is not there' generates something new every time; 'Dutch sailors' gets recited."},
     {"key": "chat_obsession_rotate_hours", "cog": "chat", "type": "float", "default": 8.0,
      "label": "Obsession rotation (h)", "description": "How long one preoccupation lasts before the next takes over."},
     {"key": "chat_obsession_chance", "cog": "chat", "type": "float", "default": 0.2,
@@ -171,6 +201,8 @@ PARAMETERS: list[dict] = [
      "label": "Ambient cooldown (s)", "description": "Quiet period in a channel after she speaks unprompted."},
     {"key": "chat_user_cooldown_seconds", "cog": "chat", "type": "float", "default": 4.0,
      "label": "Per-user cooldown (s)", "description": "Minimum gap between two replies to the same person."},
+    {"key": "chat_reply_context_messages", "cog": "chat", "type": "int", "default": 6,
+     "label": "Reply context", "description": "Recent channel messages included when she answers someone. Without this she answers each ping in isolation instead of following the conversation."},
     {"key": "chat_daily_call_cap", "cog": "chat", "type": "int", "default": 0,
      "label": "Daily API call cap", "description": "Model calls per server per day. 0 = uncapped. Canned trigger lines are always free and keep working past the cap."},
     # --- chat: joining a conversation uninvited ---
@@ -182,7 +214,7 @@ PARAMETERS: list[dict] = [
      "label": "Butt-in: messages needed", "description": "Recent messages a channel needs before she considers joining."},
     {"key": "chat_spontaneous_min_speakers", "cog": "chat", "type": "int", "default": 2,
      "label": "Butt-in: people needed", "description": "Distinct recent speakers required, so she interrupts a conversation rather than a monologue."},
-    {"key": "chat_context_messages", "cog": "chat", "type": "int", "default": 8,
+    {"key": "chat_context_messages", "cog": "chat", "type": "int", "default": 10,
      "label": "Conversation context", "description": "Recent messages handed to the model when she joins uninvited."},
     # --- chat: memory and feelings ---
     {"key": "chat_relationship_default", "cog": "chat", "type": "int", "default": 500,
@@ -191,6 +223,8 @@ PARAMETERS: list[dict] = [
      "label": "Relationship floor", "description": "Lowest a relationship can sink."},
     {"key": "chat_relationship_max", "cog": "chat", "type": "int", "default": 1000,
      "label": "Relationship ceiling", "description": "Highest a relationship can climb."},
+    {"key": "chat_first_impression_spread", "cog": "chat", "type": "int", "default": 60,
+     "label": "First-impression whim", "description": "Points she arbitrarily likes or dislikes a new person by, on no evidence whatsoever. Fixed per person so it reads as an opinion rather than noise, and it fades with the daily drift. 0 = everyone starts equal."},
     {"key": "chat_sentiment_weight", "cog": "chat", "type": "float", "default": 1.0,
      "label": "Sentiment weight", "description": "How hard one message moves the relationship."},
     {"key": "chat_relationship_drift_per_day", "cog": "chat", "type": "float", "default": 4.0,
@@ -203,15 +237,15 @@ PARAMETERS: list[dict] = [
      "label": "Grudge forget threshold", "description": "Strength below which a grudge is genuinely forgotten."},
     {"key": "chat_grudges_max", "cog": "chat", "type": "int", "default": 3,
      "label": "Grudges kept", "description": "How many things she can hold against one person at once."},
-    {"key": "chat_facts_max", "cog": "chat", "type": "int", "default": 12,
+    {"key": "chat_facts_max", "cog": "chat", "type": "int", "default": 20,
      "label": "Facts stored", "description": "Durable facts kept per person; the least-reinforced are dropped first."},
-    {"key": "chat_facts_recall", "cog": "chat", "type": "int", "default": 5,
+    {"key": "chat_facts_recall", "cog": "chat", "type": "int", "default": 7,
      "label": "Facts recalled", "description": "How many facts reach the prompt. Every one costs tokens on every message."},
     {"key": "chat_fact_halflife_days", "cog": "chat", "type": "float", "default": 45.0,
      "label": "Fact half-life (days)", "description": "How fast an unmentioned fact loses to a repeated one when the store is full."},
     {"key": "chat_rumours_max", "cog": "chat", "type": "int", "default": 6,
      "label": "Rumours stored", "description": "Rumours kept about one person."},
-    {"key": "chat_rumours_recall", "cog": "chat", "type": "int", "default": 2,
+    {"key": "chat_rumours_recall", "cog": "chat", "type": "int", "default": 3,
      "label": "Rumours recalled", "description": "How many rumours reach the prompt."},
     # --- general (server-wide) ---
     {"key": "command_prefix", "cog": "general", "type": "str", "default": "",

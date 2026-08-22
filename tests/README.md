@@ -36,6 +36,20 @@ what it verified, in order, in English.
 | `png`, `health`, `interest`, `detail`, `ttl`, `logchannel`, `rolelog` | The rest |
 | `load` | That the cog actually loads into a real `commands.Bot` |
 
+## Seeing it rather than asserting it
+
+Two scripts render real output for things a test cannot judge:
+
+```bash
+py -3 tests/render_panel.py       # the tabletop panel pages, to .preview/
+py -3 tests/preview_chat.py       # the prompts Dodo is actually given
+py -3 tests/preview_chat.py --live   # ...and what she says back (costs money)
+```
+
+Whether the machinery is correct is a test. Whether the character is any *good*
+is a judgement, and it lives in prose — the persona and the trigger notes. Read
+the preview, edit the prose, run it again.
+
 ## If one fails
 
 The runner prints the tail of the output, which is where the assertion is. Run

@@ -42,6 +42,23 @@ recovered = state_model.from_document(sour, "1", tuning, now=NOW)
 assert recovered.affinity == tuning.affinity_default, "drift should stop at neutral, not cross it"
 print("state           drift stops at neutral from below too")
 
+# She makes her mind up about strangers on no evidence — but the same way every
+# time, or it is noise rather than an opinion.
+whim = state_model.Tuning(first_impression_spread=60)
+impressions = {uid: state_model.from_document(None, uid, whim, now=NOW).affinity
+               for uid in ("111", "222", "333", "444", "555")}
+assert len(set(impressions.values())) > 1, "everyone got the same arbitrary first impression"
+assert all(abs(a - whim.affinity_default) <= 60 for a in impressions.values()), impressions
+assert state_model.from_document(None, "111", whim, now=NOW).affinity == impressions["111"], \
+    "an opinion that changes each time you look at it is noise, not a whim"
+flat = state_model.Tuning(first_impression_spread=0)
+assert state_model.from_document(None, "111", flat, now=NOW).affinity == flat.affinity_default, \
+    "spread 0 must let everyone start equal"
+# A stored relationship always wins, so the whim never overwrites real history.
+known = state_model.from_document({"relationship": 700}, "111", whim, now=NOW)
+assert known.affinity == 700, "the whim leaked over somebody she already knows"
+print("state           strangers get a stable arbitrary first impression, history overrides it")
+
 # The legacy blob becomes fact zero, so nothing stored today is lost.
 migrated = state_model.from_document({"memory": "plays healer; hates mushrooms"}, "2", tuning, now=NOW)
 assert [f["text"] for f in migrated.facts] == ["plays healer; hates mushrooms"], migrated.facts
@@ -118,6 +135,87 @@ print("triggers        the shipped defaults are complete")
 
 
 # --------------------------------------------------------------------------- #
+#  The personality itself — the part that is the product
+# --------------------------------------------------------------------------- #
+# These are not style opinions. Each one is a specific way the character dies:
+# by being handed a mode to wear, by being handed a list to recite, or by having
+# its notes shout an emotion instead of describing a situation.
+from helpers import parameters  # noqa: E402
+
+persona = next(spec for spec in parameters.PARAMETERS
+               if spec["key"] == "chat_personality")["default"].lower()
+
+for pillar, needle in (("extinction fatalism", "like a fun fact"),
+                       ("puppy", "golden-retriever"),
+                       ("toddler", "two-year-old"),
+                       ("surreal comfort", "dream-logic"),
+                       ("utility", "exact")):
+    assert needle in persona, f"the {pillar} pillar is missing from the persona"
+print("persona         all five pillars survive in the default persona")
+
+assert "mismatch" in persona, \
+    "the persona must name the register clash — it is what generalises the humour"
+assert "never the same one twice" in persona or "never repeat a bit" in persona, \
+    "the persona must forbid reciting, or she cycles the same five jokes forever"
+assert "contradict you survived" in persona, \
+    "the persona must license inventing new material rather than recalling a list"
+print("persona         it teaches the mechanism, not a list of topics")
+
+# The fatalism is the floor the optimism stands on, not the subject she keeps
+# raising. Foreground it and she is a bird who will not stop talking about dying.
+assert "underneath everything rather than on top" in persona, \
+    "the extinction has to be background for the optimism, not the topic"
+assert "leaks out" in persona, "the dark details should leak, not be delivered"
+assert persona.index("warm, optimistic") < persona.index("clubbed to death"), \
+    "the optimism should be stated before the horror it rests on"
+print("persona         fatalism is the background; the optimism is the surface")
+
+assert "on no evidence" in persona and "revise it just as fast" in persona, \
+    "she has to like and dislike people on a whim, and change her mind as easily"
+assert "desperate to be useful" in persona, \
+    "the happy-to-serve half of the puppy response is the point of it"
+print("persona         she forms opinions on a whim and wants badly to be useful")
+
+# The absurdity is the wrapping. Something true has to be inside it, or the
+# comfort mode is just a bird being weird at someone who is in pain.
+assert "actual wisdom" in persona and "exact thing they need to hear" in persona, \
+    "the surreal comfort must carry real wisdom, not only dream-logic"
+assert "surface is absurd" in persona and "underneath it is true" in persona, \
+    "the persona must separate the absurd surface from the true thing inside it"
+assert "without condition" in persona, "the comfort has to be unconditional love, explicitly"
+print("persona         the nonsense has real wisdom inside it, said plainly")
+
+comfort = next(spec for spec in trigger_model.DEFAULT_TRIGGERS
+               if spec[trigger_model.K_NAME] == "comfort")[trigger_model.K_NOTE].lower()
+assert "actually need to hear" in comfort and "loving underneath" in comfort, \
+    "the comfort trigger must ask for the real thing, not only the surreal wrapper"
+print("triggers        the comfort trigger asks for substance, not just strangeness")
+
+for costume in ("puppy mode", "toddler mode", "surreal mode", "utility protocol"):
+    assert costume not in persona, \
+        f"'{costume}' is a named mode; a model hands that back as a costume, whole, every time"
+print("persona         no pillar is named as a mode she can put on")
+
+for spec in trigger_model.DEFAULT_TRIGGERS:
+    note = spec.get(trigger_model.K_NOTE, "")
+    assert note and not note.isupper(), f"{spec[trigger_model.K_NAME]}: a shouted note"
+    assert not note.lstrip().lower().startswith(("be ", "act ", "respond ")), \
+        (f"{spec[trigger_model.K_NAME]}: the note starts as an instruction to perform. "
+         "Describe what happened; the dial handles intensity.")
+print("triggers        every default note describes a situation, not a performance")
+
+pools = {spec[trigger_model.K_NAME]: spec.get(trigger_model.K_REFLEX) or []
+         for spec in trigger_model.DEFAULT_TRIGGERS}
+for name, lines in pools.items():
+    assert len(lines) != 1, f"{name}: a one-line pool repeats itself immediately"
+    assert len(set(lines)) == len(lines), f"{name}: duplicate canned lines"
+    if lines:
+        assert len(lines) >= 3, f"{name}: {len(lines)} canned lines is too few to feel alive"
+assert not pools["comfort"], "canned lines have no business answering someone who is hurting"
+print("triggers        canned pools are deep enough not to loop, and comfort has none")
+
+
+# --------------------------------------------------------------------------- #
 #  Router: noticing without speaking, and speaking without being asked
 # --------------------------------------------------------------------------- #
 router = router_model.Router()
@@ -179,6 +277,23 @@ assert router_model.RouterTuning().spontaneous_chance <= 0.01, \
     "the shipped butt-in chance has to stay miniscule"
 print("router          the default butt-in chance is tiny")
 
+# A pool that can repeat itself back-to-back reads as a broken bot rather than a
+# stubborn bird, which is the whole value of the canned lines.
+pooled = trigger_model.Trigger({trigger_model.K_PATTERNS: ["x"],
+                                trigger_model.K_REFLEX: ["one", "two"]})
+picker = router_model.Router()
+picks = [picker.pick_reflex(pooled, 5, Random(seed)) for seed in range(6)]
+assert all(a != b for a, b in zip(picks, picks[1:])), f"a canned line repeated itself: {picks}"
+single = trigger_model.Trigger({trigger_model.K_PATTERNS: ["x"], trigger_model.K_REFLEX: ["only"]})
+assert picker.pick_reflex(single, 5) == "only", "a one-line pool must still answer"
+print("router          canned lines never fire twice in a row in the same channel")
+
+ring = router_model.Router()
+for who, said in (("Ada", "one"), ("Bo", "two"), ("Ada", "three")):
+    ring.observe(4, who, said)
+assert ring.recent(4, 5, skip_last=True) == ["Ada: one", "Bo: two"], ring.recent(4, 5, skip_last=True)
+print("router          the message being answered is not also fed back as context")
+
 
 # --------------------------------------------------------------------------- #
 #  Dial: a budget, not an adjective
@@ -206,6 +321,15 @@ tired = dial_model.compute(distant, hot, dt, rng=Random(0), fatigue=3)
 assert tired.spice < fresh.spice, "the fourth 'no u' must be quieter than the first"
 assert "pulled" in tired.line(), f"a worn bit should say so: {tired.line()}"
 print("dial            a repeated bit loses its budget and admits it")
+
+# Wear should make her bored of a bit, not strip her of a personality. Fatigue
+# eats the trigger's bonus and stops; the base allowance is hers regardless.
+plain = dial_model.compute(close, None, dt, rng=Random(0))
+exhausted = dial_model.compute(close, hot, dt, rng=Random(0), fatigue=50)
+assert exhausted.spice >= plain.spice, \
+    f"a worn-out bit fell below her ordinary self ({exhausted.spice} < {plain.spice})"
+assert exhausted.spice >= 1, "a matched trigger should never produce a characterless reply"
+print("dial            wear costs the trigger's bonus, never her baseline")
 
 muted = dial_model.compute(close, hot, dial_model.DialTuning(spice_max=0, spice_jitter=0),
                            rng=Random(0))
@@ -251,9 +375,12 @@ assert prompt_model.J_LEARNED in built and "null" in built
 assert "updated_memory" not in built, "the old echo-the-whole-memory contract is gone"
 print("prompt          state, grudges, facts and rumour targets all reach the model")
 
+# The scaffold is everything that is *not* personality — state, dial, task. That
+# part should stay lean, because it buys nothing at the table. The persona itself
+# is deliberately not budgeted: it is the product.
 words = len(built.split())
-assert words < 220, f"the assembled prompt has drifted long again: {words} words"
-print(f"prompt          the whole system prompt is {words} words")
+assert words < 260, f"the prompt scaffold has drifted long again: {words} words"
+print(f"prompt          the scaffold around the persona is {words} words")
 
 unprompted = prompt_model.build(
     persona="You are Dodo.", name="Ada", state=rich, tuning=tuning,

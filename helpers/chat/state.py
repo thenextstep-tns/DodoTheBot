@@ -31,6 +31,7 @@ Old documents migrate on first read: the ``memory`` string becomes fact zero.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from dataclasses import dataclass, field
@@ -84,6 +85,7 @@ class Tuning:
     affinity_max: int = 1000
     sentiment_weight: float = 1.0
     affinity_drift_per_day: float = 4.0
+    first_impression_spread: int = 0
 
     familiarity_per_message: float = 0.01
     familiarity_max: float = 1.0
@@ -237,6 +239,24 @@ class ChatState:
 # --------------------------------------------------------------------------- #
 #  Decay — applied on load, never on a timer
 # --------------------------------------------------------------------------- #
+def first_impression(user_id: str, spread: int) -> int:
+    """An arbitrary opinion formed on sight, worth ``±spread`` points.
+
+    She decides how she feels about people instantly and on no evidence. Doing
+    that with ``random`` would make it *noise* — she would like you differently
+    every time she looked. Deriving it from the user id instead makes it an
+    **opinion**: arbitrary, unearned, and completely consistent from then on,
+    which is what makes it read as a personality rather than a bug.
+
+    A stable digest rather than ``hash()``, whose string seed is randomised per
+    process — the whole point is that it survives a restart.
+    """
+    if spread <= 0:
+        return 0
+    digest = hashlib.blake2b(str(user_id).encode("utf-8"), digest_size=4).digest()
+    return int.from_bytes(digest, "big") % (2 * spread + 1) - spread
+
+
 def _decay_affinity(affinity: int, since: float, tuning: Tuning, now: float) -> int:
     """Pull affinity toward neutral by ``affinity_drift_per_day``. Set the
     parameter to 0 to freeze relationships exactly where they are."""
@@ -279,7 +299,16 @@ def from_document(document: Optional[dict], user_id: str, tuning: Tuning,
         if legacy.lower() not in _EMPTY_MEMORIES:
             facts = [{K_TEXT: legacy, K_AT: document.get(F_LAST_SEEN) or now, K_HITS: 1}]
 
-    affinity = int(document.get(F_AFFINITY, tuning.affinity_default))
+    # Someone she has never met starts at neutral plus whatever she has already
+    # decided about them for no reason at all. Note the drift above pulls back to
+    # plain neutral, so an unearned dislike fades if they never come back — the
+    # whim is a first impression, not a life sentence.
+    if F_AFFINITY in document:
+        affinity = int(document[F_AFFINITY])
+    else:
+        affinity = tuning.affinity_default + first_impression(
+            user_id, tuning.first_impression_spread)
+    affinity = max(tuning.affinity_min, min(tuning.affinity_max, affinity))
     affinity_at = float(document.get(F_AFFINITY_AT) or document.get(F_LAST_SEEN) or 0.0)
 
     return ChatState(

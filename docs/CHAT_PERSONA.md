@@ -64,6 +64,17 @@ matters, because the router runs on every message in every server.
 
 ---
 
+## Reading what she is actually told
+
+`py -3.13 tests/preview_chat.py` prints the real assembled prompt for thirteen
+representative situations — praise, worn-out banter, Xynode, someone hurting, a
+straight question, joining uninvited. Free and offline. Add `--live` to also make
+one real API call per scenario and print what she says back, which costs money.
+
+The unit tests prove the machinery. They cannot tell you whether the character is
+any good, because that judgement lives in prose — the persona and the trigger
+notes. Read the preview, edit the prose, run it again.
+
 ## The three ideas worth keeping
 
 ### 1. A budget, not an adjective
@@ -89,7 +100,11 @@ grudge, and says nothing — and it colours whatever she says three messages
 later. This is the whole difference between a character and a soundboard, and it
 costs one probability check.
 
-### 3. Bits wear out
+### 3. Bits wear out — without her going flat
+
+Fatigue eats the **trigger's** bonus and stops there; the base allowance is hers
+no matter how tired the bit is. Let it eat into the base too and the fifth "no u"
+gets a bot with no personality at all, which is a worse failure than repetition.
 
 Every trigger fire bumps a per-user, per-trigger counter that decays on a
 half-life (`chat_fatigue_halflife_minutes`). `chat_fatigue_bite` turns that
@@ -136,7 +151,7 @@ A user who has not spoken in a month costs exactly one document read to catch up
 
 ## Where the knobs are
 
-**Per-server parameters** (42 of them) live in `helpers/parameters.py` under the
+**Per-server parameters** (44 of them) live in `helpers/parameters.py` under the
 `chat` cog and render in the panel under that cog. See
 `docs/PER_SERVER_PARAMETERS.md` for the groups.
 
@@ -183,6 +198,18 @@ The difference between charming and infuriating here is entirely frequency.
 Raise the chance with care; 1-in-500 is charming and 1-in-20 is not.
 
 ---
+
+## She likes some people for no reason
+
+`chat_first_impression_spread` gives a stranger an arbitrary ±60 points before
+they have said a word. It is derived from their user id, not from `random` —
+which is the whole point. Random would make it *noise*: she would like you
+differently every time she looked at you. Derived from the id it is an
+**opinion**: unearned, unjustifiable, and completely consistent from then on.
+
+The daily drift pulls it back toward neutral, so an unearned dislike fades if
+they never come back. It is a first impression, not a life sentence. Set the
+spread to 0 and everyone starts equal.
 
 ## Costs
 

@@ -122,7 +122,13 @@ def compute(state: ChatState, trigger: Optional[Trigger], tuning: DialTuning, *,
         spice += 1
     elif state.closeness <= tuning.distant_penalty_at:
         spice -= 1
-    spice -= fatigue * tuning.fatigue_bite
+
+    # Wear erodes the *trigger's* bonus and stops there. A bit that has been
+    # pulled five times should get a bird who is bored of it — not a bird with no
+    # personality at all, which is what happens if fatigue is allowed to eat into
+    # the base allowance as well.
+    if trigger is not None:
+        spice -= min(fatigue * tuning.fatigue_bite, trigger.spice)
 
     # A little jitter so two identical messages are not two identical replies.
     if tuning.spice_jitter and rng.random() < tuning.spice_jitter:

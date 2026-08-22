@@ -197,7 +197,7 @@ Admin UI over `GuildConfigManager`; no game params of its own. **Should grow** t
 
 ## chat — `chat` cog (`chat`) — **DONE**
 
-All 42 parameters are live and editable in the panel under the chat cog; the
+All 44 parameters are live and editable in the panel under the chat cog; the
 string listeners themselves live on the **Events page**, not here, because they
 are per-server rows rather than single values. See `docs/CHAT_PERSONA.md` for
 what each group is for and how the pieces fit together.
@@ -216,7 +216,8 @@ Groups, in the order the panel shows them:
   `chat_user_cooldown_seconds`, `chat_daily_call_cap`.
 - **Joining uninvited** — `chat_spontaneous_*`, `chat_context_messages`.
 - **Memory and feelings** — `chat_relationship_*`, `chat_sentiment_weight`,
-  `chat_familiarity_per_message`, `chat_grudge*`, `chat_fact*`, `chat_rumours_*`.
+  `chat_familiarity_per_message`, `chat_first_impression_spread`, `chat_grudge*`,
+  `chat_fact*`, `chat_rumours_*`.
 
 Two proposed keys were dropped deliberately. `chat_system_prompt` became
 `chat_personality` holding *only* the persona — the rest of the prompt is

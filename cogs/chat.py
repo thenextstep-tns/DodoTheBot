@@ -19,7 +19,6 @@ already been made.
 """
 
 import json
-import random
 import time
 
 from openai import OpenAI, OpenAIError
@@ -66,6 +65,7 @@ class Chat(commands.Cog, name=COG_NAME):
             affinity_max=self._param(guild, "chat_relationship_max"),
             sentiment_weight=self._param(guild, "chat_sentiment_weight"),
             affinity_drift_per_day=self._param(guild, "chat_relationship_drift_per_day"),
+            first_impression_spread=self._param(guild, "chat_first_impression_spread"),
             familiarity_per_message=self._param(guild, "chat_familiarity_per_message"),
             facts_max=self._param(guild, "chat_facts_max"),
             facts_recall=self._param(guild, "chat_facts_recall"),
@@ -241,25 +241,42 @@ class Chat(commands.Cog, name=COG_NAME):
                 return True
         return False
 
-    async def _replied_context(self, message: discord.Message) -> "list[str] | None":
-        """The message being replied to, so a reply reads as part of a thread.
+    async def _reply_context(self, message: discord.Message) -> "list[str] | None":
+        """What was being said around here, so an answer reads as part of a thread.
 
-        Uses the cached copy discord.py already attached; only falls back to a
-        fetch when the reply itself is the thing being answered, which is rare
-        enough to be worth one call.
+        The last few channel messages, plus whatever is being replied to if that
+        has already scrolled out of them. Without this she answers each ping in
+        isolation, which is the difference between a conversation and a series of
+        unrelated statements.
+        """
+        count = self._param(message.guild, "chat_reply_context_messages")
+        lines = self.router.recent(message.channel.id, count, skip_last=True)
+
+        replied = await self._replied_message(message)
+        if replied is not None and replied.content:
+            line = f"{replied.author.display_name}: {replied.content}"
+            if line not in lines:
+                lines.insert(0, line)
+        return lines or None
+
+    @staticmethod
+    async def _replied_message(message: discord.Message) -> "discord.Message | None":
+        """The message being replied to, from cache where possible.
+
+        Only falls back to a fetch when the reply is the thing being answered,
+        which is rare enough to be worth one call.
         """
         reference = message.reference
         if reference is None:
             return None
-        replied = reference.resolved if isinstance(reference.resolved, discord.Message) else None
-        if replied is None and reference.message_id:
-            try:
-                replied = await message.channel.fetch_message(reference.message_id)
-            except (discord.HTTPException, discord.Forbidden):
-                return None
-        if replied is None or not replied.content:
+        if isinstance(reference.resolved, discord.Message):
+            return reference.resolved
+        if not reference.message_id:
             return None
-        return [f"{replied.author.display_name}: {replied.content}"]
+        try:
+            return await message.channel.fetch_message(reference.message_id)
+        except (discord.HTTPException, discord.Forbidden):
+            return None
 
     def _absorb(self, message: discord.Message, trigger) -> None:
         """Feel a trigger she is not going to answer. One read, one write, no model."""
@@ -287,7 +304,7 @@ class Chat(commands.Cog, name=COG_NAME):
         channel = message.channel
         if decision.route == router_model.REFLEX:
             self.router.note_spoke(channel.id, message.author.id)
-            await self._send(channel.send, random.choice(decision.trigger.reflex))
+            await self._send(channel.send, self.router.pick_reflex(decision.trigger, channel.id))
             return
 
         client = self._client_for(message.guild, message.author)
@@ -299,7 +316,7 @@ class Chat(commands.Cog, name=COG_NAME):
             recent = self.router.recent(
                 channel.id, self._param(message.guild, "chat_context_messages"))
         else:
-            recent = await self._replied_context(message)
+            recent = await self._reply_context(message)
 
         async with channel.typing():
             reply = await self._engage(

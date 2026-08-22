@@ -162,6 +162,21 @@ run(cog.handle_message(Message(ada, "hi", guild=guild, channel=channel, mentions
 assert channel.sent == [], "an ignored channel must stay quiet even for a direct ping"
 print("cog             ignored channels are honoured")
 
+# Answering a ping in isolation is the difference between a conversation and a
+# series of unrelated statements.
+cog, bot, guild, channel, dodo_role = build(chat_user_cooldown_seconds=0)
+bo = User(3, "Bo")
+run(cog.handle_message(Message(ada, "we should raid tonight", guild=guild, channel=channel)))
+run(cog.handle_message(Message(bo, "i can heal", guild=guild, channel=channel)))
+run(cog.handle_message(Message(ada, "what do you think?", guild=guild, channel=channel,
+                               mentions=[bot.user])))
+system = CALLS[-1]["messages"][0]["content"]
+assert "Ada: we should raid tonight" in system and "Bo: i can heal" in system, \
+    f"she answered the ping without reading the room:\n{system}"
+assert system.count("what do you think?") == 0, \
+    "the message she is answering should not also be pasted in as context"
+print("cog             an ordinary reply sees the conversation it is part of")
+
 
 # --------------------------------------------------------------------------- #
 #  Noticing without speaking
@@ -171,10 +186,13 @@ bot.chat_triggers.create(GUILD_ID, {
     trigger_model.K_NAME: "insult", trigger_model.K_PATTERNS: ["bad bot"],
     trigger_model.K_AFFINITY: -8, trigger_model.K_GRUDGE: 0.6, trigger_model.K_CHANCE: 0.0,
 })
+# Her arbitrary opinion of a stranger is the baseline here, not plain neutral.
+tuning = cog._state_tuning(guild)
+before = state_model.from_document(None, "1", tuning).affinity
 run(cog.handle_message(Message(ada, "bad bot", guild=guild, channel=channel)))
 assert channel.sent == [] and CALLS == [], "chance 0 must not speak or spend"
-stored = state_model.from_document(memories.find_one({"user_id": "1"}), "1", state_model.Tuning())
-assert stored.affinity < state_model.Tuning().affinity_default, "the insult should still land"
+stored = state_model.from_document(memories.find_one({"user_id": "1"}), "1", tuning)
+assert stored.affinity < before, f"the insult should still land ({stored.affinity} vs {before})"
 assert stored.top_grudge() is not None, "she should be holding it against them"
 print("cog             a noticed phrase costs nothing and still changes how she feels")
 
@@ -246,11 +264,12 @@ print("cog             the unprompted feature can be switched off")
 # --------------------------------------------------------------------------- #
 cog, bot, guild, channel, dodo_role = build(
     payload={"say": "noted", "felt": 5, "learned": "plays healer", "rumour": None})
+before = state_model.from_document(None, "1", cog._state_tuning(guild)).affinity
 run(cog.handle_message(Message(ada, "i play healer", guild=guild, channel=channel,
                                mentions=[bot.user])))
 saved = memories.find_one({"user_id": "1"})
 assert [f["text"] for f in saved["facts"]] == ["plays healer"], saved["facts"]
-assert saved["relationship"] == 505, f"sentiment did not apply: {saved['relationship']}"
+assert saved["relationship"] == before + 5, f"sentiment did not apply: {saved['relationship']}"
 print("cog             a learned fact is appended and the sentiment lands")
 
 # A model that answers with rubbish must not destroy anything.
