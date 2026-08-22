@@ -21,10 +21,29 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | --- | --- | --- |
 | P0 | ✅ live | Campaigns, characters from a real ruleset, scenes, dice wired into resolution, event log, legacy importer |
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
-| P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, **34 tunables in two layers** |
+| P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
+| P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
 | P3 | next | Decisions, faction clocks, the world tick |
 
-**305 tests** across five suites, all passing:
+**P0–P2 have now been played through by a human**, act by act, using
+`PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
+the shape of them is the most useful thing in this file:
+
+| What broke | Why no test caught it |
+| --- | --- |
+| The engine's on-switch had never worked — a 64-bit guild id became a JS number literal and every panel request 404'd | Tests assert on HTML strings; nothing executes a page's JS, and `FakeGuild.id` was `7777`, small enough to survive intact |
+| Adding a command parameter never reached Discord | The sync-skip hash covered only top-level names |
+| A memory formed this morning read as "a while ago, maybe" | Stake was driving *perception*; no test asserted a fresh memory is sharp |
+| The man who was **saved** was recorded as the creditor | A test asserted the inverted sign — the bug had a guard holding it in place |
+| Every PC was immune to every event | `importance` (a CPU knob, pinned at 1.0 for PCs) was read as standing |
+| Disposition could insulate someone past their own station | Nothing asserted the documented ceiling |
+| Nothing ever left the `working` memory tier | `consolidate_scene` was written and called from nowhere |
+
+Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
+read the console before reasoning about the source**, and **a green suite proves
+whatever the fixture encodes** — three of those bugs had tests defending them.
+
+**329 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -74,7 +93,9 @@ ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min'
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/mind/       minds: traits, needs, memory, relationships   (pure, seeded)
+helpers/dnd/mind/       minds: traits, needs, memory, relationships,
+                        stakes — what an act was worth to each party
+                                                             (pure, seeded)
 helpers/dnd/world/      what exists: entity, memory, belief, event    (dataclasses)
 helpers/dnd/rules/      dice and rulesets                             (pure, seeded)
 helpers/dnd/store/      repositories — every query carries its tenant
@@ -104,6 +125,26 @@ From `12-ROADMAP.md`, with everything it depends on already built:
 - **Rumour propagation** — beliefs travel the social graph and mutate. The
   belief model already has `mutations` and `shared_with` for exactly this.
 
+Four things were designed during the playtest and are P3's to build. Each has a
+spec section; none has a line of code:
+
+- **Deprivation effects** (`04-ENTITIES.md` §5a) — needs bend mood and apply
+  ruleset conditions. Optional lethality, default off, and **interlocked**:
+  nothing can satisfy a need yet, so needs peg at 1.00 within a day and turning
+  lethality on now would empty the world in a week.
+- **Trait drift and rupture** (§3a, §3b) — an exposure ledger moves a baseline
+  in bounded steps; sustained extreme exposure breaks one axis past the ceiling.
+  Rupture is gated by the campaign's lines, not merely tunable.
+- **Belief lifecycle** (`03-KNOWLEDGE-BASE.md` §4) — `fact`/`rumour`/`value`
+  kinds; the first two erode, values harden and feed the ledger.
+- **Standing and importance emerge** (§2b) — standing rides the same ledger;
+  importance is recomputed from story entanglement, so the simulation budget
+  follows whoever the game is about.
+
+**Start with the world tick.** It is the spine the other four hang from, and
+`minds.advance()` already does the per-entity work — the tick is the loop around
+it plus the `focus`/`active`/`dormant` split.
+
 Acceptance: leave a campaign alone for a simulated week and have clocks advance,
 an NPC pursue a goal, a rumour about a PC reach someone who never met them —
 with the tick under 25 ms for 200 active NPCs.
@@ -132,9 +173,20 @@ under `/gm` — not new top-level ones.
   it would need attention before a non-English campaign.
 - **`web/routes.py` is ~3300 lines.** Tabletop stays out of it; anything new goes
   in `web/dnd/`.
-- **The user has not yet play-tested P1 or P2 in Discord.** The walkthroughs in
-  the chat history are the scripts for that; nothing has been confirmed by a
-  human at a table.
+- **`boldness` is read by nothing.** Declared, rolled, stored, displayed, and
+  consulted by no code anywhere. P3's risk term is where it starts mattering.
+- **Seeded backstories are stamped "recently".** `_seed_history` dates them
+  `max(0, world_time - randint(200, 20000))` minutes, which clamps to 0 in a
+  fresh campaign and is only ~14 days even when it does not — so a formative
+  childhood event reads as last week. They also carry no cue (`details=[]`), so
+  they can never be recalled *and* can never contaminate a confabulation.
+- **Arc consolidation (mid → long) is still called from nowhere.** Scene-level
+  now runs on `/scene close`; the arc level belongs with P3's tick.
+- **Prior tables are still Python.** `04-ENTITIES.md` §9 step 1 says culture and
+  role come from the campaign KB. `role_prior_weight` makes them switchable but
+  not yet *editable* — a GM cannot add a trade.
+- **Rulesets do not model wealth**, so `standing` is set by hand. Deriving it
+  from the sheet is the natural next step (`04-ENTITIES.md` §2b).
 
 ## 8. Working preferences
 
