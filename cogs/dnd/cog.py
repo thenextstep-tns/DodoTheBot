@@ -1311,7 +1311,9 @@ class Tabletop(commands.Cog, name="dnd"):
             found.store, found.campaign, days, _seeded(found.campaign, seq)
         )
         message = (
-            lang_dnd.TT_ADVANCE_FROZEN.format(days=days)
+            lang_dnd.TT_ADVANCE_TIMELESS
+            if report.get("timeless")
+            else lang_dnd.TT_ADVANCE_FROZEN.format(days=days)
             if report["frozen"]
             else lang_dnd.TT_ADVANCE_DONE.format(
                 days=days,
@@ -1340,10 +1342,10 @@ class Tabletop(commands.Cog, name="dnd"):
     @tune.command(name="set", description="Change a simulation setting for this campaign. (GM)")
     @app_commands.describe(
         key="Which setting.",
-        value="The new value. Leave blank to clear it back to inherited.",
+        value="The new value, or a name like 'timeless'. Blank clears it.",
     )
     async def tune_set(
-        self, interaction: discord.Interaction, key: str, value: float | None = None
+        self, interaction: discord.Interaction, key: str, value: str | None = None
     ) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -1367,10 +1369,23 @@ class Tabletop(commands.Cog, name="dnd"):
 
         settings = dict(found.campaign.settings or {})
         overrides = dict(settings.get("tuning") or {})
-        if value is None:
+        if value is None or not str(value).strip():
             overrides.pop(key, None)
+            value = None
         else:
-            overrides[key] = tuning_registry.coerce(key, value)
+            # Text rather than a number, so a choice tunable ("timeless") and a
+            # switch ("on") are as settable here as a rate is. coerce owns the
+            # conversion and the clamping.
+            try:
+                overrides[key] = tuning_registry.coerce(key, value)
+            except (TypeError, ValueError):
+                await interaction.response.send_message(
+                    lang_dnd.TT_TUNING_BAD_VALUE.format(
+                        label=spec["label"], value=value
+                    ),
+                    ephemeral=True,
+                )
+                return
         settings["tuning"] = overrides
         found.store.campaigns.save_settings(found.campaign.id, settings)
 

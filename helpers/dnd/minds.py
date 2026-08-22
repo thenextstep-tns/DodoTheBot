@@ -298,7 +298,7 @@ def due_for_tick(campaign, now: float, tuning: Tuning | None = None) -> bool:
     stay a dumb scheduler and every campaign keeps its own cadence.
     """
     continuity = (tuning or Tuning.for_campaign(campaign.guild_id, campaign)).continuity()
-    if not continuity.enabled:
+    if not continuity.automatic:
         return False
     last = float(campaign.settings.get("ticked_at") or 0)
     return (now - last) >= continuity.hours * 3600.0
@@ -371,6 +371,14 @@ def advance(store, campaign, days: float, rng: Random) -> dict:
     functions, driven by a GM command instead of a schedule.
     """
     tuning = tuning_for(store, campaign)
+    # A timeless campaign does not age, whoever asked. A dungeon crawl has no
+    # use for a harbourmaster forgetting a face between rooms, and switching off
+    # every decay knob one at a time to get there is not a setting, it is a
+    # chore. `timeless` is the one switch that means "time is not the point".
+    if tuning.continuity().timeless:
+        return {"days": days, "world_time": campaign.world_time, "entities": 0,
+                "new_imprints": 0, "confabulated": 0, "pruned": 0,
+                "frozen": True, "timeless": True}
     minutes = int(days * MINUTES_PER_DAY)
     world_time = store.campaigns.advance_time(campaign.id, minutes)
 

@@ -440,9 +440,16 @@ def test_everything_tunable() -> None:
     check("tuning: a registry exists", len(TUNABLES) >= 30, str(len(TUNABLES)))
     check("tuning: every tunable is documented",
           all(s["label"] and s["description"] and s["group"] for s in TUNABLES))
-    check("tuning: every tunable has a range",
-          all(s["min"] <= s["default"] <= s["max"] for s in TUNABLES),
-          str([s["key"] for s in TUNABLES if not s["min"] <= s["default"] <= s["max"]]))
+    numeric = [s for s in TUNABLES if s["type"] not in ("choice",)]
+    check("tuning: every numeric tunable has a range",
+          all(s["min"] <= s["default"] <= s["max"] for s in numeric),
+          str([s["key"] for s in numeric if not s["min"] <= s["default"] <= s["max"]]))
+    # A choice has options instead of a range, and its default must be one of
+    # them — a tunable whose default is not selectable cannot be reset.
+    choices = [s for s in TUNABLES if s["type"] == "choice"]
+    check("tuning: every choice offers its own default",
+          all(s["choices"] and s["default"] in s["choices"] for s in choices),
+          str([s["key"] for s in choices if s["default"] not in (s["choices"] or ())]))
 
     # Layering: campaign beats server beats default.
     layered = Tuning(server={"memory_decay_rate": 0.5}, campaign={"memory_decay_rate": 2.0})
@@ -538,8 +545,8 @@ def test_world_tick() -> None:
     check("tick: and tick() refuses rather than guessing",
           minds.tick(slow_store, slow, NOW, Random(1)) is None)
 
-    def configure(campaign, store, hours, days):
-        settings = {"tuning": {"tick_enabled": 1, "tick_hours": hours, "tick_days": days}}
+    def configure(campaign, store, hours, days, mode="automatic"):
+        settings = {"tuning": {"time_mode": mode, "tick_hours": hours, "tick_days": days}}
         store.campaigns.save_settings(campaign.id, settings)
         campaign.settings = settings
 
@@ -566,6 +573,26 @@ def test_world_tick() -> None:
           minds.due_for_tick(slow_store.campaigns.get(slow.id), later) is False)
     check("tick: while the quicker one is ready again",
           minds.due_for_tick(fast_store.campaigns.get(fast.id), later) is True)
+
+    # --- three modes, and a dungeon crawl needs the third ---------------- #
+    timeless, tl_store = _campaign(9603, "Crawl")
+    configure(timeless, tl_store, 6.0, 1.0, mode="timeless")
+    minds.spawn_npc(tl_store, name="C", world_time=0, rng=Random(5))
+    check("tick: a timeless campaign never turns on its own",
+          minds.due_for_tick(timeless, NOW) is False)
+    told = minds.advance(tl_store, timeless, 5.0, Random(1))
+    check("tick: AND DECLINES TO AGE EVEN WHEN ASKED",
+          told.get("timeless") is True
+          and tl_store.campaigns.get(timeless.id).world_time == 0)
+    check("tick: it says so rather than silently doing nothing",
+          told["frozen"] is True)
+
+    # A mode has to be settable by name, or it is not settable from Discord.
+    from helpers.dnd import tuning as tuning_registry
+    check("tick: modes are set by name",
+          tuning_registry.coerce("time_mode", "TIMELESS") == "timeless")
+    check("tick: and nonsense falls back to the default rather than wedging",
+          tuning_registry.coerce("time_mode", "sideways") == "manual")
 
     # Manual and automatic must be the same code path, or the world ages
     # differently depending on whether anyone was looking.

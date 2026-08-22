@@ -202,11 +202,16 @@ TUNABLES: list[dict] = [
           "does not. **Set to 0 and station alone decides**, so the powerful "
           "never notice anything — simpler, and a cliché.",
           0.7, minimum=0.0, maximum=1.0),
-    _spec("tick_enabled", "Continuity", "The world keeps turning",
-          "Whether time passes in this campaign on its own, without a GM asking. "
-          "**Off by default** — a campaign only starts ageing when you decide it "
-          "should. `/gm advance` works either way.",
-          0.0, kind="bool"),
+    _spec("time_mode", "Continuity", "How time works here",
+          "**manual** — nothing moves unless you say so with `/gm advance`. The "
+          "default, and right for most tables. "
+          "**automatic** — the world turns on its own at the pace set below, so "
+          "coming back after a week finds things changed. "
+          "**timeless** — time is not a thing in this campaign. Nothing ages, "
+          "nothing is forgotten, needs never press, and `/gm advance` politely "
+          "declines. For a dungeon crawl, a one-shot, or any game where the "
+          "world outside the room is not the point.",
+          "manual", kind="choice", choices=["manual", "automatic", "timeless"]),
     _spec("tick_hours", "Continuity", "Real hours per tick",
           "How often the world moves while nobody is looking. Low values make a "
           "campaign feel alive and cost more; high ones are cheaper and calmer.",
@@ -272,6 +277,12 @@ def coerce(key: str, raw: Any) -> Any:
     spec = BY_KEY.get(key)
     if spec is None:
         raise KeyError(f"Unknown tunable: {key!r}")
+    if spec["type"] == "choice":
+        # An unknown option falls back to the default rather than raising: a
+        # tunable that can reject its own value is a tunable that can wedge a
+        # campaign shut.
+        text = str(raw).strip().lower()
+        return text if text in (spec.get("choices") or ()) else spec["default"]
     if spec["type"] == "int":
         value = int(float(raw))
     elif spec["type"] == "bool":
@@ -379,7 +390,7 @@ class Tuning:
 
     def continuity(self) -> "ContinuityTuning":
         return ContinuityTuning(
-            enabled=bool(self.get("tick_enabled")),
+            mode=str(self.get("time_mode")),
             hours=self.get("tick_hours"),
             days=self.get("tick_days"),
         )
@@ -465,9 +476,18 @@ class RelationshipTuning:
 
 @dataclass(frozen=True)
 class ContinuityTuning:
-    enabled: bool = False
+    mode: str = "manual"
     hours: float = 6.0
     days: float = 1.0
+
+    @property
+    def automatic(self) -> bool:
+        return self.mode == "automatic"
+
+    @property
+    def timeless(self) -> bool:
+        """Nothing ages at all — not on a tick, not on a GM's command."""
+        return self.mode == "timeless"
 
 
 @dataclass(frozen=True)

@@ -169,6 +169,7 @@ TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
 
 # What closing a scene did to the memories formed in it. Said out loud
 # because a tier moving silently is how nothing ever left "working".
+TT_TUNING_BAD_VALUE = "**{label}** does not take `{value}`."
 TT_SCENE_CONSOLIDATED = (" {minds} mind(s) settled: {kept} memory/memories kept, "
                          "{gone} let go.")
 TT_PRESENT_JOINED = "**{name}** is in *{title}* — {count} present. They will witness what happens here."
@@ -184,6 +185,8 @@ TT_RELATE_TITLE = "{a} → {b}"
 
 TT_ADVANCE_DONE = "**{days} day(s)** pass. {entities} mind(s) aged: {imprints} new imprint(s), {confab} misremembering, {pruned} memory/memories let go."
 TT_ADVANCE_FROZEN = "**{days} day(s)** pass — but forgetting is switched off for this campaign, so nothing faded."
+# Timeless is not the same as frozen: nothing moved at all, on purpose.
+TT_ADVANCE_TIMELESS = ("This campaign is **timeless** — the clock is not part of it, so nothing aged. Change it under *This game's rules → How time works here*.")
 TT_ADVANCE_TOO_FAR = "That's further than one jump should go. Keep it under {max} days."
 
 TT_TUNING_TITLE = "{campaign} — simulation settings"
