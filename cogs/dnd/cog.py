@@ -28,11 +28,12 @@ working; the legacy session manager now loads as ``dnd_legacy``.
 
 from __future__ import annotations
 
+import time
 from random import Random
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ext.commands import Context
 
 import lang_dnd
@@ -93,6 +94,62 @@ class Tabletop(commands.Cog, name="dnd"):
 
     async def cog_load(self) -> None:
         ensure_indices()
+        self.world_tick.start()
+
+    def cog_unload(self) -> None:
+        self.world_tick.cancel()
+
+    # ------------------------------------------------------------------ #
+    #  The world tick (P3) — time passes without anyone asking
+    # ------------------------------------------------------------------ #
+    @tasks.loop(minutes=15)
+    async def world_tick(self) -> None:
+        """Move every campaign that is due, at its own pace.
+
+        The loop is a dumb scheduler on a fixed cadence; **each campaign decides
+        how often it actually turns and how far** (`tick_hours`, `tick_days`,
+        both campaign-scoped). One table can run a day per six hours while
+        another next door runs a season a week.
+
+        Default is off. A campaign only starts ageing when its GM says so, and
+        `/gm advance` keeps working either way — it shares this exact code path,
+        because a world that ages differently when nobody is watching would be a
+        world with two rulesets.
+        """
+        now = time.time()
+        for guild in list(self.bot.guilds):
+            if not self.bot.visibility.cog_enabled(guild.id, "dnd"):
+                continue
+            try:
+                campaigns = campaigns_for(guild.id).list()
+            except Exception:
+                continue
+            for campaign in campaigns:
+                store = campaign_store(guild.id, campaign.id)
+                try:
+                    seq = store.campaigns.next_seq(campaign.id)
+                    report = minds.tick(
+                        store, campaign, now, _seeded(campaign, seq)
+                    )
+                except Exception as error:
+                    # One bad campaign must never stop the world for the others.
+                    self.bot.logger.error(
+                        f"World tick failed for campaign {campaign.id}: {error}"
+                    )
+                    continue
+                if report is None:
+                    continue
+                store.events.append(
+                    events.TIME_ADVANCED,
+                    actor_id=0,
+                    seq=seq,
+                    seed=event_seed(campaign.seed, seq),
+                    payload={"automatic": True, **report},
+                )
+
+    @world_tick.before_loop
+    async def _before_world_tick(self) -> None:
+        await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------------ #
     #  /campaign

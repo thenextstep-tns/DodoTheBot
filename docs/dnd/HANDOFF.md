@@ -39,6 +39,15 @@ the shape of them is the most useful thing in this file:
 | Disposition could insulate someone past their own station | Nothing asserted the documented ceiling |
 | Nothing ever left the `working` memory tier | `consolidate_scene` was written and called from nowhere |
 
+**The human verdict on P0–P2: the mechanics are there and it is not playable.**
+Verbatim, so it does not get softened: *"the syntax is way too complicated, the
+whole narrative structure is confusing and not explained — pretty much
+impossible to play in any way, too convoluted for no payoff."* The simulation is
+real and the game around it is not. That is a **surface** problem, not a model
+one, and it is deferred by agreement until the mechanics are in place — but it
+is the thing standing between this and a product, and no amount of P3 makes it
+smaller. `00-PRODUCT.md`'s risk table called this exactly.
+
 Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.

@@ -291,6 +291,41 @@ def enforce_budget(store, entity: Entity, world_time: int,
     return len(pruned)
 
 
+def due_for_tick(campaign, now: float, tuning: Tuning | None = None) -> bool:
+    """Whether enough real time has passed for this campaign to move on its own.
+
+    Pure arithmetic over the campaign's own record, so the loop that calls it can
+    stay a dumb scheduler and every campaign keeps its own cadence.
+    """
+    continuity = (tuning or Tuning.for_campaign(campaign.guild_id, campaign)).continuity()
+    if not continuity.enabled:
+        return False
+    last = float(campaign.settings.get("ticked_at") or 0)
+    return (now - last) >= continuity.hours * 3600.0
+
+
+def tick(store, campaign, now: float, rng: Random,
+         tuning: Tuning | None = None) -> dict | None:
+    """One turn of the world, for one campaign.
+
+    The manual `/gm advance` and this share the same body deliberately: a world
+    that ages differently when nobody is watching is a world with two rulesets,
+    and the difference would only ever surface as a bug nobody could reproduce.
+
+    Returns the ageing report, or ``None`` when the campaign was not due.
+    """
+    tuning = tuning or tuning_for(store, campaign)
+    if not due_for_tick(campaign, now, tuning):
+        return None
+
+    report = advance(store, campaign, tuning.continuity().days, rng)
+    settings = dict(campaign.settings or {})
+    settings["ticked_at"] = float(now)
+    store.campaigns.save_settings(campaign.id, settings)
+    campaign.settings = settings
+    return report
+
+
 def close_scene(store, entities: list[Entity], world_time: int,
                 tuning: Tuning | None = None) -> dict:
     """End of scene: working memories are promoted or let go.

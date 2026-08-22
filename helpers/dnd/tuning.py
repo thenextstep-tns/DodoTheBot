@@ -42,7 +42,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Knowledge", "Generation",
+    "Continuity", "Knowledge", "Generation",
 )
 
 
@@ -202,6 +202,19 @@ TUNABLES: list[dict] = [
           "does not. **Set to 0 and station alone decides**, so the powerful "
           "never notice anything — simpler, and a cliché.",
           0.7, minimum=0.0, maximum=1.0),
+    _spec("tick_enabled", "Continuity", "The world keeps turning",
+          "Whether time passes in this campaign on its own, without a GM asking. "
+          "**Off by default** — a campaign only starts ageing when you decide it "
+          "should. `/gm advance` works either way.",
+          0.0, kind="bool"),
+    _spec("tick_hours", "Continuity", "Real hours per tick",
+          "How often the world moves while nobody is looking. Low values make a "
+          "campaign feel alive and cost more; high ones are cheaper and calmer.",
+          6.0, minimum=0.25, maximum=168.0),
+    _spec("tick_days", "Continuity", "In-world days per tick",
+          "How much time passes each time it turns. At 1 day per 6 hours, a week "
+          "away is about a month in the world.",
+          1.0, minimum=0.01, maximum=90.0),
     _spec("stakes_actor_echo", "Stakes", "Doing versus receiving",
           "How much of a feeling the person who *did* something keeps for the "
           "person they did it to. Helping someone warms you to them a little, "
@@ -364,6 +377,13 @@ class Tuning:
             faction_prior=self.get("faction_prior"),
         )
 
+    def continuity(self) -> "ContinuityTuning":
+        return ContinuityTuning(
+            enabled=bool(self.get("tick_enabled")),
+            hours=self.get("tick_hours"),
+            days=self.get("tick_days"),
+        )
+
     def stakes(self) -> "StakesTuning":
         return StakesTuning(
             capacity_reach=self.get("stakes_capacity_reach"),
@@ -441,6 +461,13 @@ class NeedsTuning:
 class RelationshipTuning:
     scale: float = 1.0
     faction_prior: float = 0.6
+
+
+@dataclass(frozen=True)
+class ContinuityTuning:
+    enabled: bool = False
+    hours: float = 6.0
+    days: float = 1.0
 
 
 @dataclass(frozen=True)

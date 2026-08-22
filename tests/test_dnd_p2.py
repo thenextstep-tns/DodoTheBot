@@ -521,6 +521,59 @@ def test_relationships() -> None:
 # --------------------------------------------------------------------------- #
 #  12. End to end through the store
 # --------------------------------------------------------------------------- #
+def test_world_tick() -> None:
+    """Time passes on its own, at a pace each campaign sets for itself.
+
+    Default off: a campaign starts ageing when its GM decides, not because it
+    exists. And two campaigns on one server must be able to run at completely
+    different speeds, since the loop is a fixed-cadence scheduler and the
+    *campaign* owns the rate.
+    """
+    slow, slow_store = _campaign(9601, "Slow")
+    fast, fast_store = _campaign(9602, "Fast")
+    NOW = 1_000_000.0
+
+    check("tick: a campaign does not age until asked",
+          minds.due_for_tick(slow, NOW) is False)
+    check("tick: and tick() refuses rather than guessing",
+          minds.tick(slow_store, slow, NOW, Random(1)) is None)
+
+    def configure(campaign, store, hours, days):
+        settings = {"tuning": {"tick_enabled": 1, "tick_hours": hours, "tick_days": days}}
+        store.campaigns.save_settings(campaign.id, settings)
+        campaign.settings = settings
+
+    configure(slow, slow_store, hours=168.0, days=30.0)   # a month a week
+    configure(fast, fast_store, hours=6.0, days=1.0)      # a day a night
+
+    minds.spawn_npc(slow_store, name="A", world_time=0, rng=Random(3))
+    minds.spawn_npc(fast_store, name="B", world_time=0, rng=Random(4))
+
+    check("tick: both are due when they have never turned",
+          minds.due_for_tick(slow, NOW) and minds.due_for_tick(fast, NOW))
+
+    minds.tick(slow_store, slow, NOW, Random(1))
+    minds.tick(fast_store, fast, NOW, Random(1))
+    slow_days = slow_store.campaigns.get(slow.id).world_time / 1440
+    fast_days = fast_store.campaigns.get(fast.id).world_time / 1440
+    check("tick: EACH CAMPAIGN MOVES AT ITS OWN PACE",
+          round(slow_days) == 30 and round(fast_days) == 1,
+          f"slow {slow_days:.0f}d, fast {fast_days:.0f}d")
+
+    # Cadence, not just size: the slow table is not due again for a week.
+    later = NOW + 7 * 3600
+    check("tick: a campaign that just turned waits its interval",
+          minds.due_for_tick(slow_store.campaigns.get(slow.id), later) is False)
+    check("tick: while the quicker one is ready again",
+          minds.due_for_tick(fast_store.campaigns.get(fast.id), later) is True)
+
+    # Manual and automatic must be the same code path, or the world ages
+    # differently depending on whether anyone was looking.
+    manual = minds.advance(fast_store, fast_store.campaigns.get(fast.id), 1.0, Random(9))
+    check("tick: /gm advance and the tick share one body",
+          set(manual) >= {"entities", "frozen"})
+
+
 def test_scene_consolidation() -> None:
     """Closing a scene has to empty the working tier.
 
@@ -816,6 +869,7 @@ def main() -> int:
         test_budgets,
         test_everything_tunable,
         test_relationships,
+        test_world_tick,
         test_scene_consolidation,
         test_stakes,
         test_roles_emerge,
