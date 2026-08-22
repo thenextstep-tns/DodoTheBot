@@ -530,6 +530,68 @@ def test_relationships() -> None:
 # --------------------------------------------------------------------------- #
 #  12. End to end through the store
 # --------------------------------------------------------------------------- #
+def test_rumours() -> None:
+    """A claim about a PC reaches someone who has never met them.
+
+    Half of P3's acceptance criterion, and the whole of reputation: word travels
+    the relationship graph on its own, arriving weaker and slightly wrong.
+    """
+    from helpers.dnd.mind import rumour
+    from helpers.dnd.world.belief import SOURCE_WITNESSED, adopt
+
+    campaign, store = _campaign(9801, "Gossip")
+    chain = {n: minds.spawn_npc(store, name=n, world_time=0, rng=Random(i))
+             for i, n in enumerate(("Marla", "Sennet", "Teo", "Wren"))}
+    subject = minds.spawn_npc(store, name="Kesh", world_time=0, rng=Random(90))
+
+    # A line, not a clique: Wren only knows Teo, and Teo only knows Sennet.
+    for left, right in (("Marla", "Sennet"), ("Sennet", "Teo"), ("Teo", "Wren")):
+        for a, b in ((left, right), (right, left)):
+            rel = store.relations.between(chain[a].id, chain[b].id)
+            rel.familiarity, rel.trust = 0.8, 0.7
+            store.relations.save(rel)
+
+    store.beliefs.add(adopt(
+        "Kesh owes the Compact a debt", holder_id=chain["Marla"].id,
+        subject_id=subject.id, source_kind=SOURCE_WITNESSED, at=0,
+    ))
+
+    def knows(name):
+        return next((b for b in store.beliefs.held_by(chain[name].id)
+                     if str(b.subject_id) == str(subject.id)), None)
+
+    check("rumours: only the witness knows to begin with",
+          knows("Marla") is not None and knows("Wren") is None)
+
+    for turn in range(1, 12):
+        minds.advance(store, store.campaigns.get(campaign.id), 1.0, Random(turn))
+
+    far = knows("Wren")
+    check("rumours: IT REACHES SOMEONE WHO NEVER MET THE SUBJECT", far is not None)
+    check("rumours: and arrives weaker than it started",
+          far is not None and far.confidence < knows("Marla").confidence,
+          f"{far.confidence:.2f} vs {knows('Marla').confidence:.2f}" if far else "")
+    check("rumours: the witness's own belief is not damaged by the retelling",
+          knows("Marla").confidence > 0.9 and knows("Marla").mutations == 0)
+    check("rumours: nobody accumulates echoes of one claim",
+          len(store.beliefs.about(subject.id)) <= len(chain),
+          str(len(store.beliefs.about(subject.id))))
+
+    # The drift vocabulary must terminate, or six retellings produce soup.
+    keys = set(rumour._DRIFT_WORDS)
+    produced = {w.lower() for opts in rumour._DRIFT_WORDS.values()
+                for o in opts for w in o.split()}
+    check("rumours: a drift replacement is never itself driftable",
+          not (keys & produced), str(keys & produced))
+
+    # And it can be switched off entirely, like everything else.
+    quiet, quiet_store = _campaign(9802, "Silent")
+    quiet.settings = {"tuning": {"rumour_exchanges": 0}}
+    quiet_store.campaigns.save_settings(quiet.id, quiet.settings)
+    report = minds.advance(quiet_store, quiet_store.campaigns.get(quiet.id), 5.0, Random(1))
+    check("rumours: can be switched off entirely", report["rumours"]["told"] == 0)
+
+
 def test_clocks() -> None:
     """Fronts fill whether anyone engages or not.
 
@@ -964,6 +1026,7 @@ def main() -> int:
         test_budgets,
         test_everything_tunable,
         test_relationships,
+        test_rumours,
         test_clocks,
         test_world_tick,
         test_scene_consolidation,

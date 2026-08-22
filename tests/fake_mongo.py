@@ -39,6 +39,18 @@ def _matches(doc: dict, query: dict) -> bool:
                 elif operator == "$gt":
                     if not (value is not None and value > operand):
                         return False
+                elif operator == "$gte":
+                    if not (value is not None and value >= operand):
+                        return False
+                elif operator == "$lt":
+                    if not (value is not None and value < operand):
+                        return False
+                elif operator == "$lte":
+                    if not (value is not None and value <= operand):
+                        return False
+                elif operator == "$nin":
+                    if value in operand:
+                        return False
                 elif operator == "$in":
                     if value not in operand:
                         return False

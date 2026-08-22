@@ -18,6 +18,7 @@ from typing import Any
 
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
+from helpers.dnd.mind import rumour
 from helpers.dnd.mind import stakes
 from helpers.dnd.mind import traits as traits_mod
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall
@@ -29,6 +30,7 @@ from helpers.dnd.world.entity import (
     Entity,
     Identity,
 )
+from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world.memory import TIER_WORKING, Memory
@@ -405,7 +407,83 @@ def advance(store, campaign, days: float, rng: Random) -> dict:
     # Fronts fill whether or not anybody was watching. Done here rather than in
     # the tick loop so `/gm advance` moves them too — one body, as ever.
     report["clocks"] = advance_clocks(store, campaign, days, world_time)
+    report["rumours"] = spread_rumours(store, world_time, rng, tuning)
     return report
+
+
+def spread_rumours(store, world_time: int, rng: Random,
+                   tuning: Tuning | None = None) -> dict:
+    """People who know each other talk, and what they pass on arrives worse.
+
+    The mechanism behind reputation: run this on the tick and a claim about a PC
+    reaches somebody who has never met them, weaker and slightly wrong. Nothing
+    here is narrated and no model is involved — it is a walk over the
+    relationship graph (`03-KNOWLEDGE-BASE.md` §4).
+
+    Both parties also *remember the telling*, which matters more than it looks:
+    a rumour you were told is an event that happened to you, so it decays, can
+    be recalled by a cue, and can itself be misremembered later.
+    """
+    tuning = tuning or tuning_for(store)
+    settings = tuning.rumours()
+    if settings.exchanges <= 0:
+        return {"told": 0, "drifted": 0}
+
+    pairs = rumour.talkative_pairs(
+        store.relations.familiar(settings.familiarity_floor), rng, settings
+    )
+    told, drifted = 0, 0
+    for relation in pairs:
+        teller = store.entities.get(relation.from_id)
+        listener = store.entities.get(relation.to_id)
+        if teller is None or listener is None:
+            continue
+
+        held = store.beliefs.held_by(teller.id)
+        chosen = rumour.pick(held, listener.id, rng, max_hops=settings.max_hops)
+        if chosen is None or not rumour.will_share(chosen, traits_of(teller), rng):
+            continue
+        # Do not tell someone what they already think. Without this, two people
+        # trade the same claim back and forth forever — the original witness ends
+        # up being told her own rumour, and the collection fills with echoes.
+        if any(str(b.subject_id) == str(chosen.subject_id)
+               for b in store.beliefs.held_by(listener.id)):
+            store.beliefs.mark_shared(chosen.id, listener.id)
+            continue
+
+        # How much the *listener* trusts the teller decides what arrives — not
+        # how much the teller likes them. You discount what you are told by who
+        # told you.
+        trust = max(0.0, store.relations.between(listener.id, teller.id).trust)
+        claim, mutations, trust = rumour.travel(chosen, trust, rng, settings)
+        if mutations > chosen.mutations:
+            drifted += 1
+
+        store.beliefs.add(belief_model.adopt(
+            claim,
+            holder_id=listener.id,
+            subject_id=chosen.subject_id,
+            source_kind=belief_model.SOURCE_TOLD,
+            source_id=teller.id,
+            at=world_time,
+            trust=trust,
+            mutations=mutations,
+        ))
+        store.beliefs.mark_shared(chosen.id, listener.id)
+        told += 1
+
+        gist = f"{teller.identity.name} said {claim}"
+        for holder, other in ((listener, teller), (teller, listener)):
+            remember(
+                store, holder, gist,
+                world_time=world_time, rng=rng,
+                valence=0.0,
+                participants=[teller.id, listener.id],
+                salience_scale=0.5,     # hearing a thing is not living it
+                tuning=tuning,
+            )
+
+    return {"told": told, "drifted": drifted}
 
 
 def advance_clocks(store, campaign, days: float, world_time: int) -> dict:

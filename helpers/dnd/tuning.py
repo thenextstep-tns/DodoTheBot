@@ -202,6 +202,25 @@ TUNABLES: list[dict] = [
           "does not. **Set to 0 and station alone decides**, so the powerful "
           "never notice anything — simpler, and a cliché.",
           0.7, minimum=0.0, maximum=1.0),
+    _spec("rumour_exchanges", "Continuity", "Conversations per turn",
+          "How many times word gets passed along each time the world moves. "
+          "**0 stops rumours entirely** — people still believe things, they just "
+          "never tell anyone.",
+          8.0, kind="int", minimum=0, maximum=200),
+    _spec("rumour_familiarity", "Continuity", "Close enough to gossip",
+          "How well two people must know each other before one repeats "
+          "something to the other. Higher makes news travel only among "
+          "intimates; lower and the whole town talks.",
+          0.15),
+    _spec("rumour_mutate", "Continuity", "Retelling changes it",
+          "Chance the claim itself drifts on being passed on — a debt becomes a "
+          "fortune, once becomes twice. **0 means rumours weaken but never "
+          "distort.**",
+          0.25),
+    _spec("rumour_max_hops", "Continuity", "How far word travels",
+          "How many hands a claim can pass through before it is too thin to be "
+          "worth repeating.",
+          6.0, kind="int", minimum=1, maximum=30),
     _spec("time_mode", "Continuity", "How time works here",
           "**manual** — nothing moves unless you say so with `/gm advance`. The "
           "default, and right for most tables. "
@@ -395,6 +414,14 @@ class Tuning:
             days=self.get("tick_days"),
         )
 
+    def rumours(self) -> "RumourTuning":
+        return RumourTuning(
+            familiarity_floor=self.get("rumour_familiarity"),
+            mutate_chance=self.get("rumour_mutate"),
+            max_hops=int(self.get("rumour_max_hops")),
+            exchanges=int(self.get("rumour_exchanges")),
+        )
+
     def stakes(self) -> "StakesTuning":
         return StakesTuning(
             capacity_reach=self.get("stakes_capacity_reach"),
@@ -491,6 +518,14 @@ class ContinuityTuning:
 
 
 @dataclass(frozen=True)
+class RumourTuning:
+    familiarity_floor: float = 0.15   # below this, two people do not chat
+    mutate_chance: float = 0.25       # how often the claim itself drifts
+    max_hops: int = 6                 # past this a claim is too thin to carry
+    exchanges: int = 8                # conversations per tick, per campaign
+
+
+@dataclass(frozen=True)
 class StakesTuning:
     capacity_reach: float = 1.0
     need_reach: float = 1.0
@@ -519,4 +554,5 @@ DEFAULT_SALIENCE = SalienceTuning()
 DEFAULT_NEEDS = NeedsTuning()
 DEFAULT_RELATIONSHIPS = RelationshipTuning()
 DEFAULT_STAKES = StakesTuning()
+DEFAULT_RUMOURS = RumourTuning()
 DEFAULT_GENERATION = GenerationTuning()

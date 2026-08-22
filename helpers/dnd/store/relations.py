@@ -51,6 +51,19 @@ class RelationRepo(ScopedRepo):
         docs = self.find({"from_id": from_id}, sort=[("familiarity", -1)])
         return [Relationship.from_doc(d) for d in docs]
 
+    def familiar(self, floor: float = 0.15, limit: int = 400) -> list[Relationship]:
+        """Every directed pair who know each other well enough to talk.
+
+        The rumour tick's one read. Bounded rather than complete: a town does
+        not need every acquaintance considered every turn, and an unbounded
+        query here is how a big campaign starts costing real money.
+        """
+        docs = self.find(
+            {"familiarity": {"$gte": float(floor)}},
+            sort=[("familiarity", -1)], limit=limit,
+        )
+        return [Relationship.from_doc(d) for d in docs]
+
     def incoming(self, to_id: Any) -> list[Relationship]:
         """Everyone who has feelings about this entity — often the more
         interesting direction, and the one a GM forgets to ask about."""

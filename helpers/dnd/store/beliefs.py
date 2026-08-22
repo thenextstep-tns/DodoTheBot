@@ -54,6 +54,19 @@ class BeliefRepo(ScopedRepo):
         """GM marks a belief true or false. Never visible to the holder."""
         return self.update_by_id(belief_id, {"truth": truth})
 
+    def mark_shared(self, belief_id: Any, listener_id: Any) -> int:
+        """Note that this belief has already been told to someone.
+
+        Without it a pair would trade the same claim back and forth every tick
+        until the collection filled with copies of one piece of gossip.
+        """
+        current = self.get(belief_id)
+        if current is None or listener_id in current.shared_with:
+            return 0
+        return self.update_by_id(
+            belief_id, {"shared_with": current.shared_with + [listener_id]}
+        )
+
     def forget(self, belief_id: Any) -> int:
         return self.delete({"_id": belief_id})
 
