@@ -388,6 +388,17 @@ main:has(.eventspage) { max-width: 1000px; }
 .rulebtns button { margin: 0; }
 @media (max-width: 720px) { .rulegrid { grid-template-columns: 1fr; } }
 
+/* Chat string listeners share the rule-card chrome; their fields stack, because
+   a trigger is mostly prose (patterns, how she feels, canned lines). */
+.trigpage { margin-top: 36px; }
+.trigcard > label { display: flex; flex-direction: column; gap: 5px; font-size: 13px;
+  color: var(--muted); margin-bottom: 4px; }
+.trigcard > label + .muted { margin: -2px 0 10px; }
+.trigcard .rulegrid { grid-template-columns: repeat(4, 1fr); margin-top: 10px; }
+.trigcard .rulegrid label.inline { flex-direction: row; align-items: center; gap: 8px; }
+.trigcard .rulegrid label.inline input { width: auto; }
+@media (max-width: 900px) { .trigcard .rulegrid { grid-template-columns: 1fr 1fr; } }
+
 /* ------------------------------------------------------- Panel access (owner) */
 .accessbody { padding: 12px 16px 16px; }
 .accessbody table.stats { margin-bottom: 12px; }

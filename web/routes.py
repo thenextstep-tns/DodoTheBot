@@ -30,6 +30,7 @@ import discord
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, share_tokens, stats, validate
+from helpers.chat import triggers as chat_triggers
 from helpers.dnd import registry as dnd_registry
 from helpers import tribes as tribe_rules
 from helpers import trial_ranks, trial_image
@@ -1074,6 +1075,98 @@ def _rule_card(rule: dict, guild) -> str:
 </div>"""
 
 
+def _trigger_card(trigger: dict) -> str:
+    """One chat string listener, editable in place.
+
+    Laid out as feelings first, speech second, because that is the order that
+    matters: a trigger that only moves the numbers is a perfectly good trigger,
+    and the page should make that obvious rather than implying every one of them
+    has to produce a message.
+    """
+    trigger_id = str(trigger["_id"])
+    enabled = trigger.get(chat_triggers.K_ENABLED, True)
+    patterns = "\n".join(trigger.get(chat_triggers.K_PATTERNS) or [])
+    reflex = "\n".join(trigger.get(chat_triggers.K_REFLEX) or [])
+    return f"""
+<div class="rulecard trigcard{"" if enabled else " off"}" data-trigger="{trigger_id}">
+  <div class="rulehead">
+    <input class="rulename trigname" value="{html.escape(trigger.get(chat_triggers.K_NAME) or "")}"
+      placeholder="Trigger name">
+    <label class="switch"><input type="checkbox" class="trigtoggle"
+      {"checked" if enabled else ""}> on</label>
+    <button class="ghost trigdelete" title="Delete this trigger">Delete</button>
+  </div>
+  <label>When a message contains any of these
+    <textarea class="trigpatterns" rows="3" spellcheck="false"
+      placeholder="one phrase per line">{html.escape(patterns)}</textarea></label>
+  <div class="muted small">Plain text, not patterns. Matched on whole words, ignoring case.</div>
+  <label>She feels
+    <textarea class="trignote" rows="2" spellcheck="false"
+      placeholder="What just happened, from her point of view…">{html.escape(trigger.get(chat_triggers.K_NOTE) or "")}</textarea></label>
+  <div class="muted small">Describe the situation, not the performance. "They were rude to you" reads as
+  a bird reacting; "BE FURIOUS" reads as a bot doing an impression of one.</div>
+  <div class="rulegrid">
+    <label>Relationship change
+      <input type="number" class="trigaffinity" step="1"
+        min="{chat_triggers.AFFINITY_MIN}" max="{chat_triggers.AFFINITY_MAX}"
+        value="{int(trigger.get(chat_triggers.K_AFFINITY, 0))}"></label>
+    <label>Grudge strength (0–1)
+      <input type="number" class="triggrudge" step="0.05" min="0" max="1"
+        value="{float(trigger.get(chat_triggers.K_GRUDGE, 0.0))}"></label>
+    <label>Extra flourishes ({chat_triggers.SPICE_MIN}–{chat_triggers.SPICE_MAX})
+      <input type="number" class="trigspice" step="1"
+        min="{chat_triggers.SPICE_MIN}" max="{chat_triggers.SPICE_MAX}"
+        value="{int(trigger.get(chat_triggers.K_SPICE, 1))}"></label>
+    <label>Chance she replies (0–1)
+      <input type="number" class="trigchance" step="0.05" min="0" max="1"
+        value="{float(trigger.get(chat_triggers.K_CHANCE, 0.0))}"></label>
+  </div>
+  <div class="muted small">Chance 0 means she notices and says nothing — the feeling still lands and
+  colours whatever she says next. Relationship change applies either way.</div>
+  <label>Canned replies
+    <textarea class="trigreflex" rows="3" spellcheck="false"
+      placeholder="one line per reply — leave empty to always use the model">{html.escape(reflex)}</textarea></label>
+  <div class="rulegrid">
+    <label>Chance a reply is canned (0–1)
+      <input type="number" class="trigreflexchance" step="0.05" min="0" max="1"
+        value="{float(trigger.get(chat_triggers.K_REFLEX_CHANCE, 0.0))}"></label>
+    <label class="inline"><input type="checkbox" class="trigforgives"
+      {"checked" if trigger.get(chat_triggers.K_FORGIVES) else ""}> clears every grudge</label>
+  </div>
+  <div class="muted small">Canned lines cost nothing and keep working after the daily API cap is spent.</div>
+  <div class="rulebtns"><button class="trigsave">Save</button></div>
+</div>"""
+
+
+def _triggers_html(bot, guild) -> str:
+    """The chat string listeners, alongside the event rules they rhyme with."""
+    triggers = bot.chat_triggers.raw_for_guild(guild.id)
+    cards = "".join(_trigger_card(trigger) for trigger in triggers) or (
+        '<p class="muted">No triggers. Add one, or reset to the defaults.</p>'
+    )
+    listening = bot.visibility.feature_enabled(guild.id, "chat_listeners")
+    unprompted = bot.visibility.feature_enabled(guild.id, "chat_unprompted")
+    off = []
+    if not listening:
+        off.append("String listeners are off for this server")
+    if not unprompted:
+        off.append("Unprompted chat is off for this server")
+    warning = (f'<p class="muted"><b>{html.escape(" · ".join(off))}.</b> '
+               f'Turn them on under the chat cog on the <a href="/guild/{guild.id}">main page</a>.</p>'
+               if off else "")
+    return f"""
+<div class="trigpage" data-guild="{guild.id}">
+  <h2>Chat triggers <span class="muted">· {len(triggers)}</span></h2>
+  <p class="muted">When someone <i>says</i> something, rather than when something happens. A match always
+  changes how Dodo feels about the speaker; whether she answers is the chance below. Repeated triggers
+  wear out on their own, so the fourth "no u" gets a tireder bird than the first.</p>
+  {warning}
+  <button id="addtrigger">+ New trigger</button>
+  <button class="ghost" id="resettriggers">Reset to defaults</button>
+  <div id="triggerlist">{cards}</div>
+</div>"""
+
+
 def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
     rules = bot.event_rules.for_guild(guild.id)
     cards = "".join(_rule_card(rule, guild) for rule in rules) or (
@@ -1100,6 +1193,7 @@ def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
   <button id="addrule">+ New rule</button>
   <div id="rulelist">{cards}</div>
 </div>
+{_triggers_html(bot, guild)}
 <p id="status" class="status"></p>
 """
 
@@ -3535,6 +3629,73 @@ async def api_guild_event_rule(request: web.Request):
     return web.json_response({"ok": False, "error": "bad request"}, status=400)
 
 
+@require_scope(panel_access.SCOPE_CONFIG)
+async def api_guild_chat_trigger(request: web.Request):
+    """Create / update / delete / reset this server's chat string listeners.
+
+    Body: {action:"create"|"update"|"delete"|"reset", id?, name?, patterns?, note?,
+    spice?, affinity?, grudge?, chance?, reflex?, reflex_chance?, forgives?, enabled?}.
+    Numeric fields are clamped rather than rejected — a slider that refuses to save
+    is worse than one that stops at its end.
+    """
+    bot = request.app["bot"]
+    gid = int(request.match_info["gid"])
+    if bot.get_guild(gid) is None:
+        return web.json_response({"ok": False, "error": "guild not found"}, status=404)
+    data = await request.json()
+    action = data.get("action")
+
+    try:
+        clean: dict = {}
+        for key in (chat_triggers.K_NAME, chat_triggers.K_NOTE):
+            if key in data:
+                clean[key] = validate.text(data.get(key) or "", field=key, max_length=validate.MAX_TEXT)
+        for key in (chat_triggers.K_PATTERNS, chat_triggers.K_REFLEX):
+            if key in data:
+                clean[key] = validate.text(
+                    data.get(key) if isinstance(data.get(key), str) else "\n".join(data.get(key) or []),
+                    field=key, max_length=validate.MAX_TEXT)
+        for key in (chat_triggers.K_SPICE, chat_triggers.K_AFFINITY, chat_triggers.K_GRUDGE,
+                    chat_triggers.K_CHANCE, chat_triggers.K_REFLEX_CHANCE):
+            if key in data:
+                clean[key] = data[key]
+        for key in (chat_triggers.K_FORGIVES, chat_triggers.K_ENABLED):
+            if key in data:
+                clean[key] = validate.boolean(data.get(key), field=key)
+        trigger_id = None
+        if action in ("update", "delete"):
+            trigger_id = validate.text(data.get("id"), field="trigger id",
+                                       max_length=64, allow_empty=False)
+    except validate.ValidationError as error:
+        return _bad(error)
+
+    name = clean.get(chat_triggers.K_NAME) or trigger_id or ""
+    try:
+        if action == "create":
+            trigger = bot.chat_triggers.create(gid, clean)
+            await _record_change(request, audit_log.KIND_CHAT_TRIGGER, name or "trigger",
+                                 None, name, f"Chat trigger **{name or 'trigger'}** created")
+            return web.json_response({"ok": True, "id": str(trigger[chat_triggers.K_ID])})
+        if action == "delete":
+            bot.chat_triggers.delete(gid, trigger_id)
+            await _record_change(request, audit_log.KIND_CHAT_TRIGGER, name,
+                                 name, None, f"Chat trigger **{name}** deleted")
+            return web.json_response({"ok": True})
+        if action == "update":
+            bot.chat_triggers.update(gid, trigger_id, clean)
+            await _record_change(request, audit_log.KIND_CHAT_TRIGGER, name,
+                                 None, name, f"Chat trigger **{name}** edited")
+            return web.json_response({"ok": True})
+        if action == "reset":
+            bot.chat_triggers.reset(gid)
+            await _record_change(request, audit_log.KIND_CHAT_TRIGGER, "all", None, None,
+                                 "Chat triggers reset to defaults")
+            return web.json_response({"ok": True})
+    except (KeyError, TypeError, ValueError) as error:
+        return _bad(f"invalid trigger: {error}")
+    return web.json_response({"ok": False, "error": "bad request"}, status=400)
+
+
 @require_owner
 async def api_guild_access(request: web.Request):
     """Grant/revoke panel access for a role or user in one guild (owner only).
@@ -3628,6 +3789,7 @@ def create_app(bot) -> web.Application:
             web.post("/api/guild/{gid}/tribe", api_guild_tribe),
             web.post("/api/guild/{gid}/setting", api_guild_setting),
             web.post("/api/guild/{gid}/event-rule", api_guild_event_rule),
+            web.post("/api/guild/{gid}/chat-trigger", api_guild_chat_trigger),
             web.post("/api/guild/{gid}/access", api_guild_access),
             web.get("/lang", lang_page),
             web.post("/api/cog", api_cog),

@@ -33,6 +33,7 @@ from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.events import EventRuleManager
+from helpers.chat.triggers import ChatTriggerManager
 from helpers.panel_access import PanelAccessManager
 from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
@@ -115,6 +116,10 @@ class DodoBot(commands.Bot):
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)
+        # "When someone says X, react like this" — the chat cog's string
+        # listeners, edited on the same Events page. Consulted on every message,
+        # so it keeps compiled patterns cached per guild.
+        self.chat_triggers = ChatTriggerManager(config_py.chat_triggers)
         # DMs the owner when a guild admin changes their server's config — those
         # changes now bind everyone, owners included (see helpers/visibility.py).
         # Durable record of every panel change (owner's included).
@@ -488,22 +493,30 @@ async def on_message(message: discord.Message) -> None:
 
     bot.logger.debug(f"{message.guild}: {message.channel}: {message.author}: {message.content}")
 
-    if bot.user.id in (user.id for user in message.mentions) and message.author.id != bot.user.id:
-        context = await bot.get_context(message)
-        if message.reference:
-            replied = await message.channel.fetch_message(message.reference.message_id)
-            await _invoke_command(
-                context,
-                "chat",
-                message=f"{replied.author.display_name} previously said: {replied.content}. "
-                f"Then {message.author} said: {message.content}",
-            )
-        else:
-            await _invoke_command(context, "chat", message=message.content)
+    # Everything Dodo says on her own initiative — answering a ping, reacting to
+    # a phrase, or joining a conversation uninvited — is decided inside the chat
+    # cog. This hook only hands it the message; see cogs/chat.py.
+    await _dispatch_chat(message)
 
     await check_sweetroll_chance(message)
     await bot.process_commands(message)
     await check_tags(message)
+
+
+async def _dispatch_chat(message: discord.Message) -> None:
+    """Hand a message to the chat cog, if it is loaded.
+
+    Wrapped because chat is the one listener that reaches an external API: a
+    failure in it must never stop the rest of ``on_message`` (sweetrolls,
+    commands, tags) from running.
+    """
+    cog = bot.get_cog("chat")
+    if cog is None:
+        return
+    try:
+        await cog.handle_message(message)
+    except Exception as error:  # noqa: BLE001 - never break the gateway over chat
+        bot.logger.exception(f"chat listener failed: {error}")
 
 
 async def _invoke_command(context: commands.Context, name: str, **kwargs) -> None:

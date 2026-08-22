@@ -123,6 +123,13 @@ class FakeCollection:
         self.docs.append(stored)
         return type("Result", (), {"inserted_id": stored["_id"]})()
 
+    def insert_many(self, docs: list[dict]):
+        # Mirrors pymongo: the caller's dicts are stamped with their new _id in
+        # place, which seeding relies on to render freshly created rows.
+        for doc in docs:
+            doc["_id"] = self.insert_one(doc).inserted_id
+        return type("Result", (), {"inserted_ids": [d["_id"] for d in docs]})()
+
     def update_one(self, query: dict, update: dict, upsert: bool = False):
         for doc in self.docs:
             if _matches(doc, query or {}):
@@ -185,7 +192,12 @@ class _FakeCursor:
     def __init__(self, docs: list[dict]) -> None:
         self._docs = docs
 
-    def sort(self, spec):
+    def sort(self, spec, direction: int = 1):
+        # pymongo accepts both sort("key", 1) and sort([("key", 1), …]); callers
+        # in this repo use each, so the fake has to take both or it fails on the
+        # call shape rather than on the behaviour under test.
+        if isinstance(spec, str):
+            spec = [(spec, direction)]
         for field, direction in reversed(spec):
             self._docs.sort(key=lambda d: _sort_key(_resolve(d, field)), reverse=direction < 0)
         return self

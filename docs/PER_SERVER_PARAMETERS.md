@@ -195,11 +195,36 @@ Admin UI over `GuildConfigManager`; no game params of its own. **Should grow** t
 
 # 🤖 AI & Conversation
 
-## chat — `chat` cog (`chat`)
-- **`chat_model`** — LLM model · *str* · **review** `[HARD]`
-- **`chat_system_prompt`** — persona/system prompt · *str* · **review** `[HARD/LANG]`
-- **`chat_memory_enabled`** / **`chat_memory_length`** — long-term memory · *bool/int* · **review**
-- **`chat_channels`** — where @mention chat is allowed · *list[channel]* · **review**
+## chat — `chat` cog (`chat`) — **DONE**
+
+All 42 parameters are live and editable in the panel under the chat cog; the
+string listeners themselves live on the **Events page**, not here, because they
+are per-server rows rather than single values. See `docs/CHAT_PERSONA.md` for
+what each group is for and how the pieces fit together.
+
+Groups, in the order the panel shows them:
+
+- **The model** — `chat_api_key`, `chat_base_url`, `chat_model`,
+  `chat_temperature`, `chat_personality`.
+- **What a reply may be** — `chat_reply_max_sentences`, the `chat_spice_*`
+  budget, `chat_close_bonus_at` / `chat_distant_penalty_at`,
+  `chat_fatigue_bite` / `chat_fatigue_halflife_minutes`,
+  `chat_utility_patterns`, `chat_obsession*`.
+- **Who she answers** — `chat_respond_to_role_ping`, `chat_ignored_channels`
+  (replaces the proposed `chat_channels`, as a deny-list),
+  `chat_ambient_multiplier`, `chat_ambient_cooldown_seconds`,
+  `chat_user_cooldown_seconds`, `chat_daily_call_cap`.
+- **Joining uninvited** — `chat_spontaneous_*`, `chat_context_messages`.
+- **Memory and feelings** — `chat_relationship_*`, `chat_sentiment_weight`,
+  `chat_familiarity_per_message`, `chat_grudge*`, `chat_fact*`, `chat_rumours_*`.
+
+Two proposed keys were dropped deliberately. `chat_system_prompt` became
+`chat_personality` holding *only* the persona — the rest of the prompt is
+assembled from state, so exposing it as one editable blob would let a server
+break the JSON contract. `chat_memory_enabled`/`chat_memory_length` became
+`chat_facts_max` / `chat_facts_recall` / `chat_fact_halflife_days`: memory is a
+capped, decaying list rather than a transcript window, so "how many messages
+back" was never the knob that mattered.
 
 ## talkengine — `talkengine` cog (`imitate`)
 - **`imitate_sample_size`** — messages sampled for the Markov chain · *int* · **review** `[HARD]`

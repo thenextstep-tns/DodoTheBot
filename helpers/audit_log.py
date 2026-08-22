@@ -25,6 +25,7 @@ KIND_FEATURE = "feature"
 KIND_PARAM = "param"
 KIND_SETTING = "setting"
 KIND_EVENT_RULE = "event_rule"
+KIND_CHAT_TRIGGER = "chat_trigger"
 KIND_ACCESS = "panel_access"
 KIND_LANG = "lang"
 KIND_TRIBE = "tribe"
@@ -40,6 +41,7 @@ KIND_LABELS = {
     KIND_PARAM: "Parameter",
     KIND_SETTING: "Setting",
     KIND_EVENT_RULE: "Event rule",
+    KIND_CHAT_TRIGGER: "Chat trigger",
     KIND_ACCESS: "Panel access",
     KIND_LANG: "String",
     KIND_TRIBE: "Tribe",
@@ -54,6 +56,7 @@ KIND_LABELS = {
 KIND_SCOPE = {
     KIND_SETTING: "config",
     KIND_EVENT_RULE: "config",
+    KIND_CHAT_TRIGGER: "config",
     KIND_TRIAL: "config",
     KIND_COG: "full",
     KIND_COG_LEVEL: "full",

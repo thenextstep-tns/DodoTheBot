@@ -121,6 +121,10 @@ FEATURES: list[dict] = [
      "description": "Hourly sweep that grants roles from the rules on the server's Tribes page."},
     {"key": "event_rules", "cog": "event_actions", "label": "Event rules",
      "description": "Run the 'when X happens, post this' rules built on the server's Events page."},
+    {"key": "chat_listeners", "cog": "chat", "label": "Chat string listeners",
+     "description": "React to phrases in ordinary messages, using the triggers on the server's Events page."},
+    {"key": "chat_unprompted", "cog": "chat", "label": "Unprompted chat",
+     "description": "Very rarely join a live conversation nobody addressed, using the last few messages as context."},
 ]
 
 _FEATURES_BY_COG: dict[str, list[dict]] = {}

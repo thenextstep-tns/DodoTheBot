@@ -428,6 +428,66 @@ if (_eventsPage) {
   });
 }
 
+// --- Events page: chat string listeners ("when someone SAYS X") ---
+const _trigPage = document.querySelector(".trigpage");
+if (_trigPage) {
+  const guildId = _trigPage.dataset.guild;
+  const api = (body) => post(`/api/guild/${guildId}/chat-trigger`, body);
+
+  const bindTrigger = (card) => {
+    const id = card.dataset.trigger;
+    const val = (cls) => card.querySelector(cls).value;
+
+    card.querySelector(".trigsave").addEventListener("click", async () => {
+      const res = await api({
+        action: "update",
+        id,
+        name: val(".trigname"),
+        patterns: val(".trigpatterns"),
+        note: val(".trignote"),
+        reflex: val(".trigreflex"),
+        spice: val(".trigspice"),
+        affinity: val(".trigaffinity"),
+        grudge: val(".triggrudge"),
+        chance: val(".trigchance"),
+        reflex_chance: val(".trigreflexchance"),
+        forgives: card.querySelector(".trigforgives").checked,
+      });
+      flash(res.ok ? "trigger saved ✓" : (res.error || "Failed"), res.ok);
+    });
+
+    card.querySelector(".trigtoggle").addEventListener("change", async (event) => {
+      const enabled = event.target.checked;
+      const res = await api({ action: "update", id, enabled });
+      flash(res.ok ? `trigger ${enabled ? "on" : "off"} ✓` : (res.error || "Failed"), res.ok);
+      if (res.ok) card.classList.toggle("off", !enabled);
+      else event.target.checked = !enabled;
+    });
+
+    card.querySelector(".trigdelete").addEventListener("click", async () => {
+      if (!confirm("Delete this trigger?")) return;
+      const res = await api({ action: "delete", id });
+      if (res.ok) { card.remove(); flash("trigger deleted ✓", true); }
+      else flash(res.error || "Failed", false);
+    });
+  };
+
+  _trigPage.querySelectorAll(".trigcard").forEach(bindTrigger);
+
+  document.getElementById("addtrigger").addEventListener("click", async () => {
+    const res = await api({ action: "create", name: "New trigger", patterns: "", note: "" });
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    location.reload();
+  });
+
+  document.getElementById("resettriggers").addEventListener("click", async () => {
+    if (!confirm("Throw away this server's triggers and restore the defaults?")) return;
+    const res = await api({ action: "reset" });
+    if (res.ok) location.reload();
+    else flash(res.error || "Failed", false);
+  });
+}
+
 // --- Guild page: panel access grants (owner-only card) ---
 const _accessCard = document.getElementById("cat-access");
 if (_accessCard) {

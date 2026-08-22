@@ -28,6 +28,7 @@ what it verified, in order, in English.
 |---|---|
 | `ranks`, `wr`, `stale` | Scoring: ladders, world-record bonus, interest that expires as it's earned |
 | `divider` | That moving a role divider changes **nothing** that scores |
+| `chat`, `chatcog`, `trigpage` | Dodo's personality: decay without a scheduler, triggers that are felt without being answered, and a prompt that can no longer be told to forget you |
 | `apply`, `listener`, `auto`, `consent_paths` | Role application, hierarchy refusals, what gets logged, who gets asked |
 | `presets`, `presetapi`, `tokens` | Write paths that have broken before, and capability-link security |
 | `board`, `trials_page`, `dashboard`, `langpage`, `preview` | Rendering, and what must never leak into a page |
