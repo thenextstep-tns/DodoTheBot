@@ -202,6 +202,13 @@ TUNABLES: list[dict] = [
           "does not. **Set to 0 and station alone decides**, so the powerful "
           "never notice anything — simpler, and a cliché.",
           0.7, minimum=0.0, maximum=1.0),
+    _spec("stakes_actor_echo", "Stakes", "Doing versus receiving",
+          "How much of a feeling the person who *did* something keeps for the "
+          "person they did it to. Helping someone warms you to them a little, "
+          "and wronging them cools you — but never as much as being on the "
+          "receiving end. **At 0 the actor's feelings do not move at all**; "
+          "debt still changes hands either way.",
+          0.3, minimum=0.0, maximum=1.0),
     _spec("stakes_familiarity_reach", "Stakes", "Knowing someone",
           "How much a significant event closes the distance between two people, "
           "on top of what the event kind gives. At 0 you know someone no better "
@@ -365,6 +372,7 @@ class Tuning:
             witness_reach=self.get("stakes_witness_reach"),
             disposition_reach=self.get("stakes_disposition_reach"),
             familiarity_reach=self.get("stakes_familiarity_reach"),
+            actor_echo=self.get("stakes_actor_echo"),
         )
 
     def generation(self) -> "GenerationTuning":
@@ -443,6 +451,7 @@ class StakesTuning:
     witness_reach: float = 0.5
     disposition_reach: float = 0.7
     familiarity_reach: float = 0.35
+    actor_echo: float = 0.3
 
 
 @dataclass(frozen=True)

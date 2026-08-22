@@ -334,6 +334,7 @@ def relate(
     world_time: int,
     intensity: float = 1.0,
     familiarity_bonus: float = 0.0,
+    deltas: dict | None = None,
     tuning: Tuning | None = None,
     description: str = "",
     rng: Random | None = None,
@@ -359,6 +360,7 @@ def relate(
         traits=traits_of(from_entity),
         intensity=intensity,
         world_time=world_time,
+        deltas=deltas,
         tuning=tuning.relationships(),
     )
     if familiarity_bonus:
@@ -427,18 +429,19 @@ def interact(
     # memory's participant list. Listing only the other person had a man's debt
     # being cleared score as something he saw somebody else go through.
     principals = [actor.id, subject.id]
-    parties: list[tuple[Entity, Entity, float, float]] = [
-        (subject, actor, subject_awareness, 1.0),
-        (actor, subject, actor_awareness, 1.0),
+    # (holder, other, awareness, share of the event, their role in it)
+    parties: list[tuple[Entity, Entity, float, float, str]] = [
+        (subject, actor, subject_awareness, 1.0, "subject"),
+        (actor, subject, actor_awareness, 1.0, "actor"),
     ]
     for witness in witnesses or []:
         if witness.id in (actor.id, subject.id):
             continue
         # It did not happen to them; they only saw it happen to someone else.
-        parties.append((witness, actor, 1.0, stake_tuning.witness_reach))
+        parties.append((witness, actor, 1.0, stake_tuning.witness_reach, "witness"))
 
     out_stakes, out_memories = {}, {}
-    for holder, other, awareness, share in parties:
+    for holder, other, awareness, share, role in parties:
         pressure = need_pressure(holder, world_time, tuning)
         stake = stakes.stake_for(
             size * share,
@@ -449,12 +452,26 @@ def interact(
         )
         out_stakes[holder.id] = stake
 
-        # A relationship only moves toward someone you know was involved.
+        # A relationship only moves toward someone you know was involved, and
+        # which way it moves depends on which end of the act you were on.
         if awareness > 0 and not stake.negligible:
+            if role == "subject":
+                deltas = None                      # the table as written
+            elif role == "actor":
+                deltas = rel_mod.actor_view(kind, stake_tuning.actor_echo)
+            else:
+                # A bystander thinks better or worse of whoever did it, but
+                # nobody owes anybody anything for a thing they merely watched.
+                deltas = {
+                    axis: base * stake_tuning.actor_echo
+                    for axis, base in (rel_mod.DELTAS.get(kind) or {}).items()
+                    if axis != "debt"
+                }
             relate(
                 store, holder, other, kind,
                 world_time=world_time,
                 intensity=stake.weight,
+                deltas=deltas,
                 # Knowing someone is not a flat +0.02 whatever happened. The
                 # night a man saved your life you know him far better than after
                 # a conversation, so how far you close the distance follows what

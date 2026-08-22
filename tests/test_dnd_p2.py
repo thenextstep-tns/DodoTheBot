@@ -488,7 +488,11 @@ def test_relationships() -> None:
 
     helped = rel_mod.blank("A", "B")
     rel_mod.apply(helped, "helped", traits=Traits(), world_time=0)
-    check("relations: help creates a debt", helped.debt == -1)
+    # Positive debt is "I owe them" (`Relationship.summary`). The table is
+    # written from the point of view of the person it happened to, so being
+    # helped puts you in someone's debt. This asserted -1 before, which reads as
+    # "is owed" — the beneficiary was recorded as the creditor.
+    check("relations: being helped puts you in their debt", helped.debt == 1)
 
     # Traits modulate: an honourable character weighs things differently.
     honourable = rel_mod.blank("A", "B")
@@ -563,6 +567,29 @@ def test_stakes() -> None:
     check("stakes: knowing someone follows what it was worth",
           store.relations.between(debtor.id, lord.id).familiarity
           > store.relations.between(lord.id, debtor.id).familiarity)
+
+    # Which end of the act you were on decides which way it moves you. The
+    # delta table is written from the point of view of the person it happened
+    # TO; applying it unchanged to the actor had a lord come out "fond of them,
+    # and is owed 4" while the man he saved came out indifferent.
+    saver = minds.spawn_npc(store, name="Saver", role="lord", world_time=0,
+                            rng=Random(21), standing=0.9)
+    saved = minds.spawn_npc(store, name="Saved", role="hand", world_time=0,
+                            rng=Random(22), standing=0.1)
+    minds.interact(store, saver, saved, "saved", world_time=0, rng=Random(1),
+                   description="cut the rope before the tide took him")
+    theirs = store.relations.between(saved.id, saver.id)
+    mine = store.relations.between(saver.id, saved.id)
+    check("stakes: THE ONE WHO WAS SAVED OWES, not the one who saved",
+          theirs.debt > 0 >= mine.debt, f"saved {theirs.debt}, saver {mine.debt}")
+    check("stakes: and feels it far more than the actor does",
+          theirs.affinity > mine.affinity,
+          f"{theirs.affinity:+.3f} vs {mine.affinity:+.3f}")
+    check("stakes: doing a kindness still warms you a little",
+          rel_mod.actor_view("saved", 0.3)["affinity"] > 0)
+    check("stakes: unless the echo is switched off",
+          "affinity" not in rel_mod.actor_view("saved", 0.0)
+          and rel_mod.actor_view("saved", 0.0)["debt"] < 0)
 
     # Standing is a ceiling: disposition may only ever cut insulation.
     from helpers.dnd.mind.traits import Traits

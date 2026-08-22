@@ -19,11 +19,15 @@ from helpers.dnd.world.relationship import AXES, Relationship
 
 # Base deltas per event kind. Tuned so a single act moves a relationship
 # noticeably but not decisively — except betrayal, which should.
+# **Written from the point of view of the person it happened TO.** Debt is
+# positive when *this* person owes the other: being helped puts you in someone's
+# debt. It read -1 before, which `summary()` renders as "is owed", so the man
+# whose debt had just been cleared was recorded as the creditor.
 DELTAS: dict[str, dict] = {
-    "helped":     {"affinity": +0.15, "trust": +0.10, "debt": -1},
-    "saved":      {"affinity": +0.35, "trust": +0.25, "respect": +0.20, "debt": -2},
-    "gifted":     {"affinity": +0.10, "debt": -1},
-    "healed":     {"affinity": +0.20, "trust": +0.15, "debt": -1},
+    "helped":     {"affinity": +0.15, "trust": +0.10, "debt": +1},
+    "saved":      {"affinity": +0.35, "trust": +0.25, "respect": +0.20, "debt": +2},
+    "gifted":     {"affinity": +0.10, "debt": +1},
+    "healed":     {"affinity": +0.20, "trust": +0.15, "debt": +1},
     "praised":    {"affinity": +0.10, "respect": +0.05},
     "kept_word":  {"trust": +0.20, "respect": +0.10},
 
@@ -56,6 +60,36 @@ PHRASES: dict[str, str] = {
 def phrase(kind: str, actor: str, subject: str) -> str:
     """One line describing what happened, for a memory nobody wrote a gist for."""
     return f"{actor} {PHRASES.get(kind, kind.replace('_', ' '))} {subject}"
+
+
+def actor_view(kind: str, echo: float = 0.3) -> dict:
+    """The same act, from the side of the person who *did* it.
+
+    ``DELTAS`` is written from the point of view of the person it happened to,
+    and applying it unchanged to the actor produces nonsense: a lord who settles
+    a stranger's debt ends up liking and trusting that stranger exactly as much
+    as the stranger likes him, and both of them are recorded as the creditor.
+    Teo was saved and came out indifferent while Vashen came out *"fond of them,
+    and is owed 4"*.
+
+    Two changes, and they are the whole asymmetry:
+
+    * **Debt inverts.** If I helped you, you owe me. Same number, other sign.
+    * **Feeling is an echo, not a mirror.** Doing someone a kindness warms you to
+      them a little (and wronging them cools you a little — people devalue those
+      they have harmed), but nothing like as much as receiving it. ``echo``
+      scales that and at 0 the actor's feelings simply do not move.
+    """
+    deltas = DELTAS.get(kind)
+    if not deltas:
+        return {}
+    out = {}
+    for axis, base in deltas.items():
+        if axis == "debt":
+            out[axis] = -int(base)
+        elif echo:
+            out[axis] = base * echo
+    return out
 
 
 def deepen(relationship, amount: float):
@@ -112,6 +146,7 @@ def apply(
     traits: Traits | None = None,
     intensity: float = 1.0,
     world_time: int = 0,
+    deltas: dict | None = None,
     tuning: RelationshipTuning = DEFAULT_RELATIONSHIPS,
 ) -> Relationship:
     """Move a relationship in response to something that happened.
@@ -119,7 +154,7 @@ def apply(
     ``intensity`` is the witness's arousal — the same act lands harder on someone
     it frightened. Mutates and returns the relationship.
     """
-    deltas = DELTAS.get(kind)
+    deltas = DELTAS.get(kind) if deltas is None else deltas
     if not deltas:
         return relationship
 
