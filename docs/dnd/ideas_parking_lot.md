@@ -44,16 +44,40 @@ More than it looks like.
 
 ### The shape it should take
 
-**Do not build an obfuscation layer.** A bad reading is not a new rendering
-mode — it is the existing renderer with a **clarity ceiling** imposed by the
-roll. Cap every field at `min(actual_clarity, read_quality)` and the current
-code already produces exactly the right output.
+**Three bands, and the interesting part is that they fail differently.**
 
-That gives the feature its best property for free: below the confabulation
-threshold a field is not blanked, it is **filled with a plausible wrong value**.
-A poor telepath does not learn nothing — they learn something false, confidently,
-and have no way to know. That is worth more than any amount of hedged prose, and
-it costs nothing to implement because forgetting already works that way.
+| Read quality | What comes back | Does the reader know it failed? |
+| --- | --- | --- |
+| **Low** | Noise. Fragments, wrong words, the target's thoughts contaminated with rumours and other people's beliefs. An unusable mess. | **Yes** — obviously |
+| **Medium** | Coherent, mostly right, quietly wrong in places. | **No** |
+| **High** | Close to the GM's own view. | n/a |
+
+That middle band is the dangerous one, and it comes almost free. **Do not build
+an obfuscation layer for it** — it is the existing renderer with a **clarity
+ceiling** imposed by the roll. Cap every field at `min(actual_clarity,
+read_quality)` and the current code already produces the right output: below the
+confabulation threshold a field is not blanked, it is *filled with a plausible
+wrong value drawn from that character's other memories*. Competent telepaths
+therefore learn something false, confidently, with no way to tell. Forgetting
+already works exactly this way, so this band is a parameter, not a feature.
+
+The low band is the one piece of genuinely new machinery, and it needs one idea
+to be good rather than annoying: **the noise must be contaminated, not random.**
+Draw the junk from material that actually exists in the world — rumours in the
+campaign KB, beliefs *other* entities hold about the target, fragments of the
+reader's own memories — so a failed reading is full of real names and real
+half-truths in the wrong order. Random text is a "you fail" message with extra
+steps; contaminated noise is a player convinced they saw something and arguing
+about it later. The belief store already holds everything needed to build it.
+
+Two details that decide whether it plays well:
+
+- **Blur the band edges.** Hard thresholds get reverse-engineered within a
+  session. Make the transition probabilistic near the boundaries so a player
+  cannot infer their own rating from the output shape.
+- **The bands are tunable**, per the standing rule, including collapsing them:
+  a campaign can set the low band's width to zero and only ever get the
+  confident-but-wrong flavour, or widen it so telepathy is mostly useless.
 
 Two consequences worth designing in:
 
