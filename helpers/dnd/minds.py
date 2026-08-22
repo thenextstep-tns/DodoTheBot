@@ -29,7 +29,7 @@ from helpers.dnd.world.entity import (
     Entity,
     Identity,
 )
-from helpers.dnd.world.memory import Memory
+from helpers.dnd.world.memory import TIER_WORKING, Memory
 from helpers.dnd.world.relationship import Relationship
 
 MINUTES_PER_DAY = 1440
@@ -289,6 +289,44 @@ def enforce_budget(store, entity: Entity, world_time: int,
     if summary is not None:
         store.memories.add(summary)
     return len(pruned)
+
+
+def close_scene(store, entities: list[Entity], world_time: int,
+                tuning: Tuning | None = None) -> dict:
+    """End of scene: working memories are promoted or let go.
+
+    ``05-MEMORY.md`` §1 defines the working tier as *"current scene, verbatim,
+    evicted at scene end"*, and §8 says consolidation runs at scene end. Both
+    ``consolidate_scene`` and ``consolidate_arc`` were written and then called
+    from nowhere, so nothing ever left the working tier: a decade-old memory
+    still sat in the tier that is supposed to hold the last ten minutes, the
+    per-tier budgets never applied, and the inspector filed everything under
+    **Right now** forever.
+
+    What survives moves to ``mid``. What does not is dropped, and what is
+    dropped leaves a summary, so a scene compresses to its substance rather
+    than vanishing.
+
+    Returns ``{entity_id: (promoted, dropped)}`` so the GM can be told.
+    """
+    tuning = tuning or tuning_for(store)
+    report = {}
+    for entity in entities:
+        working = store.memories.for_entity(entity.id, tier=TIER_WORKING)
+        if not working:
+            continue
+        kept, dropped = consolidate.consolidate_scene(working)
+        if kept:
+            store.memories.save_all(kept)
+        if dropped:
+            summary = consolidate.summarise(dropped, entity.id, world_time)
+            store.memories.forget_many(dropped)
+            if summary is not None:
+                store.memories.add(summary)
+        # Promotion can push a tier past its cap, so the budget runs after.
+        enforce_budget(store, entity, world_time, tuning=tuning)
+        report[entity.id] = (len(kept), len(dropped))
+    return report
 
 
 def advance(store, campaign, days: float, rng: Random) -> dict:

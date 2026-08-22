@@ -167,6 +167,10 @@ TT_RECALL_TITLE = "{name} remembers…"
 TT_RECALL_EMPTY = "Nothing comes to mind."
 TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
 
+# What closing a scene did to the memories formed in it. Said out loud
+# because a tier moving silently is how nothing ever left "working".
+TT_SCENE_CONSOLIDATED = (" {minds} mind(s) settled: {kept} memory/memories kept, "
+                         "{gone} let go.")
 TT_PRESENT_JOINED = "**{name}** is in *{title}* — {count} present. They will witness what happens here."
 TT_PRESENT_LEFT = "**{name}** is no longer in *{title}* — {count} present."
 TT_RELATE_DONE = "**{a}** now: {summary} (toward **{b}**)."

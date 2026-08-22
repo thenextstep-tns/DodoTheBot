@@ -443,13 +443,29 @@ class Tabletop(commands.Cog, name="dnd"):
             await interaction.response.send_message(lang_dnd.TT_SCENE_NONE, ephemeral=True)
             return
         found.store.scenes.close(open_scene.id)
+        # The working tier means "this scene", so closing one is what empties
+        # it: what mattered is promoted, the rest goes and leaves a summary.
+        present = [e for e in found.store.entities.list() if e.id in open_scene.present]
+        report = minds.close_scene(
+            found.store, present, found.campaign.world_time
+        )
+        for entity in present:
+            found.store.entities.set_tier(entity.id, TIER_ACTIVE)
+        kept = sum(k for k, _ in report.values())
+        gone = sum(d for _, d in report.values())
         found.store.events.append(
             events.SCENE_CLOSED,
             actor_id=interaction.user.id,
-            payload={"title": open_scene.title, "scene_id": str(open_scene.id)},
+            payload={
+                "title": open_scene.title, "scene_id": str(open_scene.id),
+                "kept": kept, "dropped": gone,
+            },
         )
         await interaction.response.send_message(
             lang_dnd.TT_SCENE_CLOSED.format(title=open_scene.title)
+            + lang_dnd.TT_SCENE_CONSOLIDATED.format(
+                minds=len(report), kept=kept, gone=gone
+            )
         )
 
     # ------------------------------------------------------------------ #

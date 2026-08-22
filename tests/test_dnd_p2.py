@@ -521,6 +521,43 @@ def test_relationships() -> None:
 # --------------------------------------------------------------------------- #
 #  12. End to end through the store
 # --------------------------------------------------------------------------- #
+def test_scene_consolidation() -> None:
+    """Closing a scene has to empty the working tier.
+
+    `05-MEMORY.md` §1 calls working *"current scene, verbatim, evicted at scene
+    end"*. `consolidate_scene` was written and called from nowhere, so nothing
+    ever left it: a decade-old memory still sat in the tier meant to hold the
+    last ten minutes, the per-tier budgets never applied, and the inspector
+    filed everything under **Right now** forever.
+    """
+    campaign, store = _campaign(9501, "Scenes")
+    marla = minds.spawn_npc(store, name="Marla", role="harbourmaster",
+                            world_time=0, rng=Random(7))
+    minds.remember(store, marla, "a knife fight outside the office", world_time=0,
+                   rng=Random(1), valence=-0.9, details=["a green lantern"])
+    minds.remember(store, marla, "someone shifted a crate", world_time=0,
+                   rng=Random(2), valence=0.0)
+
+    before = store.memories.tier_counts(marla.id)
+    check("scene: memories start in the working tier", before.get("working", 0) >= 2)
+
+    report = minds.close_scene(store, [marla], 0)
+    after = store.memories.tier_counts(marla.id)
+    check("scene: CLOSING IT EMPTIES THE WORKING TIER",
+          after.get("working", 0) == 0, str(after))
+    check("scene: what mattered was promoted, not deleted",
+          after.get("mid", 0) >= 1 and report[marla.id][0] >= 1)
+
+    # Below the working floor, a memory is let go rather than promoted — and
+    # what goes leaves a trace, so a scene compresses instead of vanishing.
+    trivial = [m for m in store.memories.for_entity(marla.id) if m.salience < 0.15]
+    check("scene: nothing below the floor survived as itself",
+          all(m.tier != "working" for m in trivial))
+
+    idle = minds.close_scene(store, [marla], 0)
+    check("scene: closing again with nothing working is a no-op", not idle)
+
+
 def test_stakes() -> None:
     """The same act is a different event for each person in it.
 
@@ -779,6 +816,7 @@ def main() -> int:
         test_budgets,
         test_everything_tunable,
         test_relationships,
+        test_scene_consolidation,
         test_stakes,
         test_roles_emerge,
         test_end_to_end,
