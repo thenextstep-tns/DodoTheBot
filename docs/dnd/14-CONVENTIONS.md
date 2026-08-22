@@ -170,6 +170,23 @@ Practically:
   into the next one to keep the momentum.
 - The user's confirmation is the gate. Not the test suite, not the deploy log.
 
+### 5a-ter. Update the handoff before you stop
+
+**The last act of any session that changed state is updating `HANDOFF.md`.** Not
+an offer, not a nicety — part of finishing. Context is summarised rather than
+preserved and a summary is lossy; that file is the only thing that survives
+intact into the next session.
+
+It must say what shipped, what is now fixed or stale, what broke and why nothing
+caught it, and **the next increment with the shape it should take**. Correct
+anything that has stopped being true. A handoff naming an already-built thing as
+"start here" is worse than no handoff, because it will be believed: one line in
+this file once told a session not to verify through the UI, and a switch that
+had never worked got reported as verified twice on the strength of it.
+
+Keep it readable. It is onboarding, not reference — the reference is the
+sixteen documents next to it.
+
 ### 5b. "Deployed" is not "works"
 
 Grepping the journal for `Loaded cog 'cogs.dnd` proves the process started. It

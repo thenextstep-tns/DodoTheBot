@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | next | Decisions, faction clocks, the world tick |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -52,7 +52,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**329 tests** across five suites, all passing:
+**368 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -117,54 +117,76 @@ configuration** (tuning is resolved at the orchestration edge and passed in as
 typed dataclasses), and **every repository requires a `Scope`**, so an unscoped
 query cannot be written.
 
-## 6. What P3 is
+## 6. P3 — three increments landed, one remains
 
-From `12-ROADMAP.md`, with everything it depends on already built:
+### Already built and live
 
-- **Appraisal and impulses** — `mind/needs.py` already generates impulses;
-  P3 consumes them.
-- **Utility scoring** — `U = Σ wᵢ · curveᵢ(state)`, softmax selection seeded per
-  `(campaign, entity, tick)`, **with the term breakdown stored on the event** so
-  the GM can be told *why* an NPC did something. `06-DECISION-ENGINE.md` is the
-  spec and it is unchanged.
-- **Simulation tiers** — `focus` / `active` / `dormant` are already on `Entity`
-  and nothing uses them yet. Dormant entities are extrapolated in closed form;
-  `needs.advanced()` is already written that way, so follow its shape.
-- **World tick** — a `discord.ext.tasks` loop replacing the manual `/gm advance`,
-  which stays as the GM's fast-forward.
-- **Faction clocks** — fronts that advance whether or not players engage.
-- **Rumour propagation** — beliefs travel the social graph and mutate. The
-  belief model already has `mutations` and `shared_with` for exactly this.
+| Piece | Where | What to know |
+| --- | --- | --- |
+| **World tick** | `minds.tick`, `due_for_tick`; the `world_tick` loop in `cogs/dnd/cog.py` | A 15-minute scheduler asks each campaign whether *it* is due. The campaign owns the pace: `tick_hours`, `tick_days`, both campaign-scoped |
+| **Time modes** | `time_mode` tunable | `manual` (default) / `automatic` / `timeless`. Timeless is not "off": nothing ages on a tick *or* on command, for dungeon crawls |
+| **Faction clocks** | `world/clock.py`, `store/clocks.py`, `minds.advance_clocks`; `/gm clock add|list|nudge` | Fronts fill on their own, fire `on_complete` as data, can start successors, and stop dead while `blocked_by` is non-empty |
+| **Rumours** | `mind/rumour.py`, `minds.spread_rumours` | Claims walk the relationship graph, degrade by listener→teller trust, and drift one word per hop |
 
-Four things were designed during the playtest and are P3's to build. Each has a
-spec section; none has a line of code:
+**The rule that held all three together: they run inside `advance()`, not inside
+the tick loop**, so `/gm advance` moves them too. A world that ages differently
+when nobody is watching is a world with two rulesets.
+
+Acceptance is half-met: clocks advance and a rumour reaches someone who never
+met its subject. What is missing is *an NPC pursuing a goal*.
+
+### What remains: the decision engine
+
+`06-DECISION-ENGINE.md` is the spec and is unchanged. This is the largest single
+piece in P3 — do **not** attempt it in one increment. Suggested split, each
+checkable on its own:
+
+1. **`EntityView`** (`world/view.py`) — the projection an NPC decides from:
+   their beliefs, memories, needs, traits. Nothing else may reach the engine.
+   This is what makes "NPCs act on what they believe" true at the type level
+   rather than by discipline. Build and test this alone first.
+2. **`ruleset.affordances(actor, scene)`** — add to the protocol and both
+   rulesets. What a scene physically permits: attack, flee, speak, give, take,
+   hide, wait, use, move. `04-ENTITIES.md` §2 says it was deferred until a Scene
+   existed; it exists.
+3. **Goals on `Entity`** plus **behaviour packs**. The roadmap says packs come
+   from the global KB — note that the prior tables are still Python
+   (§7), so decide deliberately whether packs repeat that mistake.
+4. **`mind/decide.py`** — perceive → appraise → propose → score → select, pure
+   and seeded. Eight utility terms, each bounded to −1…1 before weighting.
+   **Traits modulate the terms, never the weights** (§6 of the spec) — per-entity
+   weights would be untunable across 200 NPCs.
+5. **Commit + traces** — the term breakdown stored on the `WorldEvent`, and a
+   decision-trace view in the panel inspector. This is the explainability
+   feature and the debugger; it is not optional polish.
+6. **Coarse and dormant paths** — `active` NPCs run argmax with no perception;
+   `dormant` are extrapolated in closed form. Follow the shape of
+   `needs.advanced()`, which is already written that way.
+
+Budget: < 1 ms per focus NPC, < 25 ms for a 200-NPC tick. If the full pipeline
+is too slow the fix is `CANDIDATE_CAP` or fewer terms — **never** caching
+decisions, which would break replay.
+
+`boldness` is read by nothing today; step 4 is where it starts mattering.
+
+### Four things designed during the playtest, still unbuilt
+
+Each has a spec section and no code. None blocks the decision engine, and all
+four want the tick that now exists:
 
 - **Deprivation effects** (`04-ENTITIES.md` §5a) — needs bend mood and apply
-  ruleset conditions. Optional lethality, default off, and **interlocked**:
-  nothing can satisfy a need yet, so needs peg at 1.00 within a day and turning
-  lethality on now would empty the world in a week.
-- **Trait drift and rupture** (§3a, §3b) — an exposure ledger moves a baseline
-  in bounded steps; sustained extreme exposure breaks one axis past the ceiling.
-  Rupture is gated by the campaign's lines, not merely tunable.
+  ruleset conditions. Lethality default off and **interlocked**: nothing can
+  satisfy a need until NPCs can act, so switching it on now empties the world.
+- **Trait drift and rupture** (§3a, §3b) — an exposure ledger; sustained extreme
+  exposure breaks one axis past the ceiling. Rupture is gated by the campaign's
+  lines, not merely tunable.
 - **Belief lifecycle** (`03-KNOWLEDGE-BASE.md` §4) — `fact`/`rumour`/`value`
   kinds; the first two erode, values harden and feed the ledger.
 - **Standing and importance emerge** (§2b) — standing rides the same ledger;
-  importance is recomputed from story entanglement, so the simulation budget
-  follows whoever the game is about.
+  importance recomputed from story entanglement.
 
-**Start with the world tick.** It is the spine the other four hang from, and
-`minds.advance()` already does the per-entity work — the tick is the loop around
-it plus the `focus`/`active`/`dormant` split.
-
-Acceptance: leave a campaign alone for a simulated week and have clocks advance,
-an NPC pursue a goal, a rumour about a PC reach someone who never met them —
-with the tick under 25 ms for 200 active NPCs.
-
-**Everything in P3 must be tunable and must have a panel control.** Expect to add
-a Clocks page and a decision-trace view to the entity inspector.
-
-Two slots of the 100-command budget are the safe margin, so P3's commands go
-under `/gm` — not new top-level ones.
+**Everything in P3 must be tunable and must have a panel control.** Expect a
+Clocks page and the decision-trace view.
 
 ## 7. Known gaps, honestly
 
@@ -192,7 +214,10 @@ under `/gm` — not new top-level ones.
   childhood event reads as last week. They also carry no cue (`details=[]`), so
   they can never be recalled *and* can never contaminate a confabulation.
 - **Arc consolidation (mid → long) is still called from nowhere.** Scene-level
-  now runs on `/scene close`; the arc level belongs with P3's tick.
+  runs on `/scene close`. The arc level now has a tick to hang from and still
+  is not wired — a cheap next job.
+- **`PYTHONIOENCODING=utf-8` is needed** to run the suites in this shell, or the
+  clock faces and arrows crash the Windows console rather than the code.
 - **Prior tables are still Python.** `04-ENTITIES.md` §9 step 1 says culture and
   role come from the campaign KB. `role_prior_weight` makes them switchable but
   not yet *editable* — a GM cannot add a trade.
