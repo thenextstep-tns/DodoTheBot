@@ -315,10 +315,23 @@ think` matches on the useful words too.
 ## Act 10 — People feel things about each other
 
 ```
-> /gm relate who:Marla toward:Ondry what:he paid her debt to the Compact without being asked
+> /gm relate who:Marla toward:Ondry what:helped
 > /gm relate who:Marla toward:Ondry
 > /gm relate who:Ondry toward:Marla
 ```
+
+`what:` is **not** free text — it is one of sixteen predefined event kinds, each
+carrying its own multi-axis delta: `attacked, bested, betrayed, gifted, healed,
+helped, insulted, kept_word, lied, met, praised, saved, stole, talked,
+threatened, travelled`. The kind is what moves trust, warmth, debt and fear;
+prose would have nothing to apply. Leave `what:` blank to look without changing
+anything.
+
+**Note what this does *not* do:** it shifts the relationship and forms **no
+memory**. Marla's trust in Ondry moves and nothing in her head records why. Run
+`/npc mind who:Marla` straight after and you will find the feeling without the
+event behind it.
+
 → Multi-axis feelings (trust, warmth, debt, fear). The second call with no
 `what:` just looks.
 
