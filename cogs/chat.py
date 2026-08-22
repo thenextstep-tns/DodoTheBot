@@ -87,6 +87,7 @@ class Chat(commands.Cog, name=COG_NAME):
             distant_penalty_at=self._param(guild, "chat_distant_penalty_at"),
             fatigue_bite=self._param(guild, "chat_fatigue_bite"),
             sentences_max=self._param(guild, "chat_reply_max_sentences"),
+            chars_max=self._param(guild, "chat_reply_max_chars"),
             obsession_chance=self._param(guild, "chat_obsession_chance"),
         )
 

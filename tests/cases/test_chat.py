@@ -196,6 +196,23 @@ for costume in ("puppy mode", "toddler mode", "surreal mode", "utility protocol"
         f"'{costume}' is a named mode; a model hands that back as a costume, whole, every time"
 print("persona         no pillar is named as a mode she can put on")
 
+# A name in the persona is a name she will use on whoever is in front of her.
+# "Xynode" lived here once and she called an innocent user by it mid-argument;
+# server-specific enemies belong in a trigger, which only fires when named.
+assert "xynode" not in persona, \
+    "a specific name in the persona bleeds into unrelated replies — put it in a trigger"
+assert "never a name you were not given" in persona, \
+    "she needs telling to insult the person actually present"
+print("persona         it names no one, so she cannot misfire a name at a stranger")
+
+# One sentence of confident invention about a link does more damage than every
+# joke in here combined.
+assert "never invent a page" in persona and "confident wrong answer" in persona, \
+    "the persona must forbid inventing links and pages when answering a real question"
+assert "short" in persona and "nobody in a chat wants" in persona, \
+    "brevity has to be stated, not only enforced by the dial"
+print("persona         brevity is stated, and inventing an answer is forbidden outright")
+
 for spec in trigger_model.DEFAULT_TRIGGERS:
     note = spec.get(trigger_model.K_NOTE, "")
     assert note and not note.isupper(), f"{spec[trigger_model.K_NAME]}: a shouted note"
@@ -213,6 +230,21 @@ for name, lines in pools.items():
         assert len(lines) >= 3, f"{name}: {len(lines)} canned lines is too few to feel alive"
 assert not pools["comfort"], "canned lines have no business answering someone who is hurting"
 print("triggers        canned pools are deep enough not to loop, and comfort has none")
+
+# The extinction listener is deliberately broad: chiming in on Extinction
+# Rebellion is the joke, not the bug. What must not happen is her explaining the
+# subject back to people who raised it, so the note carries that and the dial
+# carries the length cap.
+seeded = trigger_model.ChatTriggerManager.__new__(trigger_model.ChatTriggerManager)
+seeded._cache = {0: [trigger_model.Trigger(spec) for spec in trigger_model.DEFAULT_TRIGGERS]}
+for hers in ("extinction rebellion", "wait were dodos real", "mauritius", "that species died out"):
+    hit = seeded.match(0, hers)
+    assert hit is not None and hit.name == "extinction", f"she should notice {hers!r}"
+extinction_note = next(spec for spec in trigger_model.DEFAULT_TRIGGERS
+                       if spec[trigger_model.K_NAME] == "extinction")[trigger_model.K_NOTE].lower()
+assert "one line" in extinction_note and "do not explain" in extinction_note, \
+    "she must be told to take it personally, not to lecture people about their own topic"
+print("triggers        extinction talk is hers to butt into, briefly and without a lecture")
 
 
 # --------------------------------------------------------------------------- #
@@ -305,8 +337,21 @@ distant = state_model.ChatState(user_id="8", affinity=100, seen=1)
 warm = dial_model.compute(close, None, dt, rng=Random(0))
 cold = dial_model.compute(distant, None, dt, rng=Random(0))
 assert warm.spice > cold.spice, "she should be louder with friends than strangers"
-assert warm.sentences > cold.sentences, "the budget should shape length too"
+assert warm.sentences >= cold.sentences, "the budget should shape length too"
 print("dial            closeness moves the flourish budget and the length with it")
+
+# The paragraph problem: an ordinary remark must get one sentence, not three.
+plain_chat = dial_model.compute(
+    state_model.ChatState(user_id="p", affinity=500, seen=20), None, dt, rng=Random(0))
+assert plain_chat.sentences == 1, \
+    f"ordinary chat should be one sentence, got {plain_chat.sentences}"
+big = dial_model.compute(close, trigger_model.Trigger({trigger_model.K_SPICE: 3}), dt,
+                         rng=Random(0))
+assert big.sentences > plain_chat.sentences, "a real occasion should still earn more room"
+assert big.chars > plain_chat.chars, "the character cap should scale with the sentence budget"
+assert "characters" in plain_chat.line(), \
+    f"the dial must carry a hard character cap, not just a sentence count: {plain_chat.line()}"
+print("dial            an ordinary remark gets one short sentence, not a paragraph")
 
 link = dial_model.compute(close, None, dt, text="here https://example.com/x", rng=Random(0))
 assert link.utility and link.spice <= 1, "a link is a link"

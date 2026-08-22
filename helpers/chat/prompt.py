@@ -41,6 +41,7 @@ J_RUMOUR_ABOUT = "about"
 J_RUMOUR_WHAT = "what"
 
 _TASK = (
+    "Obey the dial exactly: it is a hard limit, not a suggestion.\n"
     f'Reply as Dodo. Answer with JSON only: {{"{J_SAY}": string, "{J_FELT}": -10..10, '
     f'"{J_LEARNED}": string or null, "{J_RUMOUR}": null or '
     f'{{"{J_RUMOUR_ABOUT}": number, "{J_RUMOUR_WHAT}": string}}}}\n'

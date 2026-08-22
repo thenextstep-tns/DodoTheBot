@@ -52,6 +52,7 @@ class DialTuning:
     distant_penalty_at: float = 0.25
     fatigue_bite: float = 1.0
     sentences_max: int = 3
+    chars_max: int = 240
     obsession_chance: float = 0.2
 
 
@@ -60,16 +61,23 @@ class Dial:
     """The per-reply budget, and the short lines that express it."""
 
     spice: int = 1
-    sentences: int = 2
+    sentences: int = 1
+    chars: int = 240
     utility: bool = False
     worn: float = 0.0
     obsession: str = ""
     note: str = ""
 
     def line(self) -> str:
-        """The one-line ``dial:`` block that reaches the model."""
+        """The one-line ``dial:`` block that reaches the model.
+
+        The character cap is here because sentence counts alone do not hold — a
+        model told "2 sentences" will happily write two very long ones. A number
+        of characters is unambiguous and it obeys that.
+        """
         parts = [f"{self.spice} flourish{'es' if self.spice != 1 else ''}",
-                 f"{self.sentences} sentence{'s' if self.sentences != 1 else ''} max"]
+                 f"{self.sentences} sentence{'s' if self.sentences != 1 else ''} max",
+                 f"under {self.chars} characters"]
         if self.utility:
             parts.append("this one is a real question: answer it exactly, flourish after")
         if self.worn >= 2:
@@ -138,7 +146,14 @@ def compute(state: ChatState, trigger: Optional[Trigger], tuning: DialTuning, *,
         spice = min(spice, 1)
 
     spice = int(max(0, min(tuning.spice_max, round(spice))))
-    sentences = int(max(1, min(tuning.sentences_max, 1 + spice)))
+
+    # One sentence is her *normal*. Length is earned by the situation — a
+    # tantrum or someone in real trouble gets more room, an ordinary remark does
+    # not. The old mapping (1 + spice) made three sentences the common case,
+    # which is how you get a paragraph in reply to "what is happening".
+    sentences = 1 + (spice >= 2) + (spice >= 3)
+    sentences = int(max(1, min(tuning.sentences_max, sentences)))
+    chars = int(max(40, tuning.chars_max * sentences / max(1, tuning.sentences_max)))
 
     obsession = ""
     if not utility and rng.random() < tuning.obsession_chance:
@@ -147,6 +162,7 @@ def compute(state: ChatState, trigger: Optional[Trigger], tuning: DialTuning, *,
     return Dial(
         spice=spice,
         sentences=sentences,
+        chars=chars,
         utility=utility,
         worn=fatigue,
         obsession=obsession,

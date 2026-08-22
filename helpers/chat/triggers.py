@@ -148,11 +148,22 @@ DEFAULT_TRIGGERS: list[dict] = [
     },
     {
         K_NAME: "extinction",
-        K_PATTERNS: ["extinct", "extinction", "mauritius", "dodo bird", "last dodo", "endangered",
-                     "died out", "dead bird"],
-        K_NOTE: "Your species came up. Produce one appalling specific detail in the tone of a "
-                "weather report — the delight is the joke, not the horror. Invent freely and pick "
-                "something you have not said before; nobody who could contradict you survived.",
+        # Deliberately broad — it fires on climate talk and Extinction Rebellion
+        # as well as on dodos, and that turns out to be *wanted*: a bird with
+        # opinions about extinction chiming in on extinction is the joke. The
+        # failure mode to guard is not the interjection, it is her explaining the
+        # subject at length like an encyclopedia, which the note and the dial's
+        # length cap handle. Narrow the patterns here if she starts getting in
+        # the way rather than being funny.
+        # "dodos" plural is about the species; bare "dodo" is her name and would
+        # fire on every greeting she gets.
+        K_PATTERNS: ["extinct", "extinction", "mauritius", "dodos", "dodo bird", "last dodo",
+                     "endangered", "died out", "dead bird", "your species"],
+        K_NOTE: "Extinction came up, which is your subject whether or not they meant you. One "
+                "line. Do not explain what they were talking about — they know, and nobody asked "
+                "you. Take it personally instead, and let one appalling specific detail out in "
+                "the tone of a weather report. Something you have not said before; nobody who "
+                "could contradict you survived.",
         K_SPICE: 2, K_AFFINITY: 1, K_GRUDGE: 0.0, K_CHANCE: 0.3, K_REFLEX_CHANCE: 0.0,
         K_REFLEX: [],
     },

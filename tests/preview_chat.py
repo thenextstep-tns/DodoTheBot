@@ -166,6 +166,7 @@ def build_prompt(label, who, text, trigger_name, extra):
             distant_penalty_at=param("chat_distant_penalty_at"),
             fatigue_bite=param("chat_fatigue_bite"),
             sentences_max=param("chat_reply_max_sentences"),
+            chars_max=param("chat_reply_max_chars"),
             obsession_chance=param("chat_obsession_chance"),
         ),
         text=text,

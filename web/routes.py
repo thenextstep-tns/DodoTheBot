@@ -567,16 +567,28 @@ def _command_cards(commands: list[dict], scope: str = panel_access.SCOPE_OWNER) 
     return f'<div class="cmdgrid">{cards}</div>'
 
 
-def _feature_rows(features: list[dict]) -> str:
-    """Per-listener feature toggles (passive behaviors), nested under a cog."""
+def _feature_rows(features: list[dict], guild=None) -> str:
+    """Per-listener feature toggles (passive behaviors), nested under a cog.
+
+    A feature whose *content* lives on another page carries a ``link``, because
+    a switch with no route to the thing it switches is a dead end — the chat
+    listeners were exactly that: every other chat setting is here, and the
+    phrases themselves are on the Events page with nothing pointing at them.
+    """
     if not features:
         return ""
     rows = ""
     for feat in features:
         checked = "checked" if feat["enabled"] else ""
+        link = ""
+        if feat.get("link") and guild is not None:
+            page, label = feat["link"]
+            link = (f' <a href="/guild/{guild.id}/{html.escape(page)}">'
+                    f'{html.escape(label)}</a>')
         rows += f"""
     <div class="featrow" data-feature="{html.escape(feat["key"])}">
-      <div><b>{html.escape(feat["label"])}</b><div class="muted small">{html.escape(feat["description"])}</div></div>
+      <div><b>{html.escape(feat["label"])}</b>
+        <div class="muted small">{html.escape(feat["description"])}{link}</div></div>
       <label class="switch"><input type="checkbox" class="feattoggle" {checked}> on</label>
     </div>"""
     return f'<div class="features"><div class="muted small feathead">Passive features (listeners)</div>{rows}</div>'
@@ -689,7 +701,7 @@ def _cog_block(detail: dict, guild, *, toggleable: bool, scope: str = panel_acce
 <div class="cogcard" id="cog-{html.escape(detail["cog"])}" data-cog="{html.escape(detail["cog"])}">
   <div class="coghead"><h3>{html.escape(detail["cog"])}</h3>
     {_cog_level_select(detail, scope)}{toggle}</div>
-  {_feature_rows(detail["features"])}
+  {_feature_rows(detail["features"], guild)}
   {_param_rows(detail["params"], guild)}
   {body}
 </div>"""
@@ -1156,7 +1168,8 @@ def _triggers_html(bot, guild) -> str:
                if off else "")
     return f"""
 <div class="trigpage" data-guild="{guild.id}">
-  <h2>Chat triggers <span class="muted">· {len(triggers)}</span></h2>
+  <h2 id="chat-triggers">💬 Chat triggers — the words Dodo reacts to
+    <span class="muted">· {len(triggers)}</span></h2>
   <p class="muted">When someone <i>says</i> something, rather than when something happens. A match always
   changes how Dodo feels about the speaker; whether she answers is the chance below. Repeated triggers
   wear out on their own, so the fourth "no u" gets a tireder bird than the first.</p>
@@ -1190,6 +1203,8 @@ def _events_html(bot, guild, scope: str = panel_access.SCOPE_OWNER) -> str:
   {event_actions_limit()} messages per minute so a busy event can't flood a channel.
   {len(skipped)} events aren't listed because they carry no server
   (<code>{html.escape(", ".join(skipped[:6]))}…</code>).</p>
+  <p class="muted small">Looking for the words Dodo reacts to?
+    <a href="#chat-triggers">Chat triggers are further down this page</a>.</p>
   <button id="addrule">+ New rule</button>
   <div id="rulelist">{cards}</div>
 </div>

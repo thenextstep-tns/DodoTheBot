@@ -12,6 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from tests.fake_mongo import FakeCollection
 from web import routes
+from helpers import cog_categories
 from helpers.chat import triggers as trigger_model
 
 
@@ -48,6 +49,20 @@ print(f"page            a fresh server seeds {len(trigger_model.DEFAULT_TRIGGERS
 for phrase in ("xynode", "no u", "good bot"):
     assert phrase in html, f"default trigger phrase missing from the page: {phrase}"
 print("page            the shipped phrases are visible and editable")
+
+# A section nobody can find is a section that does not exist. It sits under a
+# long list of event rules, so the top of the page has to point at it.
+assert 'id="chat-triggers"' in html and 'href="#chat-triggers"' in html, \
+    "nothing at the top of the Events page points to the chat triggers"
+assert "the words Dodo reacts to" in html, \
+    "the heading should say what it is in the words someone would search for"
+feature = next(f for f in cog_categories.FEATURES if f["key"] == "chat_listeners")
+assert feature.get("link") == ("events", "Chat triggers"), \
+    "the chat cog's listener switch must link to the page holding its phrases"
+rendered = routes._feature_rows([{**feature, "enabled": True}], guild)
+assert f'href="/guild/{guild.id}/events"' in rendered, \
+    "the feature row rendered without its link"
+print("page            the chat cog links to the triggers, and the page signposts them")
 
 # Every control the JS looks for has to exist, and vice versa.
 script = pathlib.Path("web/static/panel.js").read_text(encoding="utf-8")
