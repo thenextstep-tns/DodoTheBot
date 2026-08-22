@@ -94,6 +94,39 @@ different collections and must never be conflated.
 - The GM panel shows both side by side — the "who's wrong about what" view, which
   is the single most fun page in the product.
 
+### Belief kinds, and what time does to them
+
+A belief carries a `source_kind` — how they came by it — but that says nothing
+about *what sort of claim it is*, and the two decay in opposite directions. One
+`kind` field, three values:
+
+| Kind | Example | What time does |
+| --- | --- | --- |
+| `fact` | "the north dock floods at spring tide" | erodes slowly toward uncertainty |
+| `rumour` | "Ondry works for the Compact" | erodes **fastest**; it was thin to begin with |
+| `value` | "debts must be paid" | **does not erode** — hardens with reinforcement |
+
+Without this, a rumour someone assumed once at confidence 0.35 is still held at
+exactly 0.35 a decade later, which is not how anyone works: an unreinforced
+suspicion about a stranger should soften into *"I had some idea about him once"*.
+So `fact` and `rumour` take a confidence curve of the same shape memory uses
+(`05-MEMORY.md` §4) — a power law, not a timer — with reinforcement resetting
+the clock and contradiction collapsing it.
+
+**Values invert it.** A value is not evidence about the world, it is a stance
+toward it, and stances calcify. Every event consistent with a value raises its
+confidence; time alone does nothing. This is what makes an NPC cheated once at
+twenty still insistent about honesty at fifty.
+
+Three fields carry it: `kind`, `reinforced_at`, and `reinforcement_count`.
+
+**Values are the slow input to personality.** A value held for years and
+repeatedly reinforced feeds the exposure ledger in `04-ENTITIES.md` §3a and
+gradually pulls the trait axes it implies. That is the loop that closes the
+system: events form memories, memories and repetition form beliefs, long-held
+beliefs reshape the person, and the reshaped person appraises the next event
+differently.
+
 ### Rumour propagation
 
 Runs on the world tick, no LLM:

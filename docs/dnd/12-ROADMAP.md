@@ -123,6 +123,14 @@ that proves it worked.
   ruleset conditions, not just rank actions. Optional lethality, **default off**
   and interlocked: it stays off until NPCs can act to feed themselves, or a
   campaign left alone empties itself in a week.
+- **Belief lifecycle** (`03-KNOWLEDGE-BASE.md` §4) — `fact`/`rumour`/`value`
+  kinds; the first two erode on a power law, values harden instead. Today a
+  rumour assumed once is held at identical confidence a decade later.
+- **Trait drift** (`04-ENTITIES.md` §3a) — an exposure ledger fed by events,
+  imprints and long-held beliefs moves the baseline in bounded, legible steps,
+  extrapolated in closed form for dormant entities. Nothing writes traits after
+  creation today, so §3's "temperament shifts when an imprint forms" is
+  specified and unbuilt.
 - Utility scoring, softmax selection, decision traces
 - Behaviour packs in the global KB
 - Simulation tiers, dormant extrapolation

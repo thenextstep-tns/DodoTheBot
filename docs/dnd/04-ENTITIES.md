@@ -127,9 +127,86 @@ distinct-feeling NPCs, few enough that a GM can read a sheet and predict
 behaviour. More axes make the utility weights unreadable and the NPCs mushier,
 not richer.
 
-**Traits change rarely.** Temperament shifts only when an imprint forms; drives
-drift slowly with reinforced experience. An NPC whose personality moves every
-session has no personality.
+**Traits change rarely.** An NPC whose personality moves every session has no
+personality. But one that never moves is furniture, and the difference between
+those two is the whole of §3a.
+
+### 3a. Drift — a life changes a person, slowly
+
+A boy raised rich and adored comes out gentle, capricious, and reasonably afraid
+of dying. Send him to one war and he is the same boy with a bad memory. Send him
+to six and he should not be that person any more: warmth worn down, fear of
+death worn down, honour built up. Nothing in that sentence happens in a moment,
+and that is the design constraint — **drift is an accumulation, never an
+event.** No single battle moves an axis enough to notice. Forty do.
+
+**Three layers, and conflating them is the mistake to avoid.**
+
+| Layer | Lifespan | Written to the entity? |
+| --- | --- | --- |
+| **Baseline** | rolled at creation from culture and inheritance (§4) | once |
+| **Drift** | permanent, accumulated over a life | **yes — slowly** |
+| **Modulation** | hours to days: deprivation, mood, fear in the room (§5a) | **never** |
+
+§5a's deprivation modulation is explicitly *not* a write, because a starving man
+is not a crueller man — he is a man who is starving, and he is himself again
+when he eats. Drift is the opposite: it is the part that does not lift.
+
+**What accumulates.** An **exposure ledger** per trait axis, fed from three
+sources that already exist:
+
+- **Events** — what keeps happening to them and around them. Witnessing death
+  pushes `warmth` down and `fear_of_death` down; being protected pushes
+  `belonging` up.
+- **Imprints** — the formative memories of `05-MEMORY.md`. These push hardest,
+  which is what "temperament shifts when an imprint forms" was reaching for, and
+  they push *once* and permanently.
+- **Long-held beliefs** — a belief carried for years, reinforced and never
+  contradicted, pulls the axes it implies. Someone who has believed for a decade
+  that debts must be paid ends up with the `honour` to match. Belief age is the
+  input, so this needs the belief lifecycle that `03-KNOWLEDGE-BASE.md` does not
+  yet specify.
+
+Drift applies when an accumulator crosses a threshold: the baseline moves one
+small step, the accumulator drains, and the entity keeps living. Thresholds
+rather than continuous integration, so an axis moves in legible increments a GM
+can be told about rather than sliding invisibly.
+
+**Four properties it has to have:**
+
+1. **Bounded.** An axis may drift at most `drift_ceiling` from its birth value.
+   Nobody becomes an entirely different person; the wealthy boy who has seen too
+   much is recognisably him, ruined. Without a cap, long-running campaigns
+   converge every NPC on the same weathered average.
+2. **Asymmetric.** Warmth is lost faster than it is regained. Fear of death,
+   once burned out, comes back slowly if at all. Each axis carries its own
+   erosion and recovery rates because that is how people work.
+3. **Plastic by life stage.** The young shift faster. A `plasticity` faculty
+   alongside `retention`, high in youth and falling with age, multiplies the
+   whole system. This is why the example is a *boy* sent to war and not a
+   forty-year-old sergeant, and the difference should be visible in the numbers.
+4. **Explainable.** The ledger is readable, like a decision trace. A GM asking
+   *why is he not the boy he was* gets **"warmth −0.31 over eleven years: 40
+   deaths witnessed, 2 imprints, the belief that nobody is coming"** — not a
+   changed number with no story attached.
+
+**Closed form for dormant entities.** Like needs (§5) and unlike anything that
+requires per-tick iteration, drift must be extrapolatable in one step from
+elapsed time and an exposure rate (`01-ARCHITECTURE.md` §6). An NPC nobody has
+looked at for two in-world years is aged in a single calculation when they are
+next observed, and must land where ticking would have put them.
+
+**PCs accumulate but do not drift silently.** A player character's ledger fills
+the same way, but crossing a threshold **proposes** the change rather than
+applying it — surfaced to the player and the GM. Automating decisions for a PC
+is already forbidden (`12-ROADMAP.md`, open question 2); quietly rewriting who
+their character *is* would be worse.
+
+Tunables, per the standing rule, each able to go to zero:
+`drift_enabled` (default **on** — this is a core mechanic, not a garnish),
+`drift_rate`, `drift_ceiling`, `drift_plasticity_reach`, and per-source weights
+for events, imprints and beliefs. Setting `drift_rate: 0` gives fixed
+personalities and the pre-drift behaviour exactly.
 
 ## 4. Inheritance — inherited qualities
 
