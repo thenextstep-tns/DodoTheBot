@@ -164,6 +164,54 @@ bottom-up is for building one that has people in it. `role_prior_weight` and
 culture and role should come from the campaign KB, and moving them there — so a
 GM can add, edit and delete trades and cultures — is outstanding.)*
 
+### 2b. Standing and importance both emerge — from different things
+
+Neither should be a number a GM types once and forgets, and they must not be fed
+by the same inputs. Conflating them is what made every player character immune to
+consequence (§7, Stakes).
+
+| | What it means | Emerges from |
+| --- | --- | --- |
+| **`standing`** | what you can absorb a loss with | family at birth, faction, the debts and fear you are owed, events that enrich or ruin you |
+| **`importance`** | what the *engine* spends on you | how entangled you are with the story: PCs who know you, scenes you are in, clocks you block |
+
+A beggar who becomes the players' closest ally is **low standing, high
+importance** — poor, and expensive to simulate, because everything he does
+matters to the table. A duke nobody has met is the reverse. Keeping them apart is
+what lets that be expressible at all.
+
+**Standing is the drift ledger with different axes.** §3a already specifies an
+exposure ledger — accumulate, cross a threshold, move in a bounded legible step,
+closed form for dormant entities, readable explanation. Standing needs exactly
+that and nothing new, so it is another axis on the same mechanism rather than a
+second accumulator beside it. Its inputs already exist:
+
+- **Birth.** Inheritance (§4) pulls traits toward the parents' midpoint;
+  standing should inherit *far more strongly* than temperament does. You get
+  half your mother's disposition and nearly all of her station.
+- **Faction.** `faction_prior` already seeds a standing relative to a group.
+- **The social graph.** `Relationship.debt` is already tracked and already
+  directional — the sum of what people owe you, weighted by *their* standing,
+  is most of what standing means. Fear and respect held by powerful people are
+  the rest.
+- **Events.** The same stream that feeds drift, filtered to acts that move
+  resources or position.
+
+The climb in "a beggar who is lucky, aligned and social can rise" is all three
+already present: **luck** is the seeded RNG in outcomes, **aligned** is
+`fit(traits, role)`, **social** is the relationship graph. Nothing new is
+required to express it — only the ledger to accumulate it.
+
+**Importance emerges on the tick**, from entanglement rather than station:
+count the PCs who hold a relationship with them, whether they are present in a
+live scene, whether a clock names them. It already drives memory budget and tier
+promotion, so making it emergent closes that loop — the world spends its budget
+on whoever the story is currently about, which is the correct answer to "which
+200 NPCs do we simulate".
+
+Both land in **P3**, because both need the tick and neither means anything
+until time passes on its own.
+
 ### 3a. Drift — a life changes a person, slowly
 
 A boy raised rich and adored comes out gentle, capricious, and reasonably afraid

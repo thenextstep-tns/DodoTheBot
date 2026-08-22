@@ -131,6 +131,10 @@ that proves it worked.
   extrapolated in closed form for dormant entities. Nothing writes traits after
   creation today, so §3's "temperament shifts when an imprint forms" is
   specified and unbuilt.
+- **Standing and importance emerge** (`04-ENTITIES.md` §2b) — standing rides
+  the same exposure ledger as drift, fed by inheritance, faction, the debt graph
+  and events; importance is recomputed on the tick from story entanglement, so
+  the budget follows whoever the game is about. Both are hand-set today.
 - **Rupture** (`04-ENTITIES.md` §3b) — sustained extreme exposure breaks one axis
   past the drift ceiling, permanently and narrowly. Default off and gated by the
   campaign's lines (`11-SAFETY.md`), not merely tunable.
