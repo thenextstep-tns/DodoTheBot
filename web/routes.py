@@ -21,6 +21,7 @@ import html
 import io
 import os
 import secrets
+import time
 from functools import wraps
 
 from aiohttp import web
@@ -30,6 +31,7 @@ import discord
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
 from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, share_tokens, stats, validate
+from helpers.chat import activity as chat_activity
 from helpers.chat import triggers as chat_triggers
 from helpers.dnd import registry as dnd_registry
 from helpers import tribes as tribe_rules
@@ -1099,10 +1101,12 @@ def _trigger_card(trigger: dict) -> str:
     enabled = trigger.get(chat_triggers.K_ENABLED, True)
     patterns = "\n".join(trigger.get(chat_triggers.K_PATTERNS) or [])
     reflex = "\n".join(trigger.get(chat_triggers.K_REFLEX) or [])
+    name = trigger.get(chat_triggers.K_NAME) or ""
     return f"""
-<div class="rulecard trigcard{"" if enabled else " off"}" data-trigger="{trigger_id}">
+<div class="rulecard trigcard{"" if enabled else " off"}" data-trigger="{trigger_id}"
+     id="trig-{html.escape(name)}">
   <div class="rulehead">
-    <input class="rulename trigname" value="{html.escape(trigger.get(chat_triggers.K_NAME) or "")}"
+    <input class="rulename trigname" value="{html.escape(name)}"
       placeholder="Trigger name">
     <label class="switch"><input type="checkbox" class="trigtoggle"
       {"checked" if enabled else ""}> on</label>
@@ -1150,6 +1154,65 @@ def _trigger_card(trigger: dict) -> str:
 </div>"""
 
 
+def _activity_html(bot, guild, fires: dict) -> str:
+    """What she actually did, most recent first.
+
+    The whole chat system is invisible from outside: a trigger matches and she
+    says nothing, a roll comes up short, a cooldown eats a reply — and all of
+    that looks exactly like the feature being switched off. Without this table
+    the numbers below are tuned by guesswork.
+    """
+    rows = ""
+    for entry in bot.chat_activity.recent(guild.id, 60):
+        label, tone = chat_activity.OUTCOMES.get(entry["outcome"], (entry["outcome"], "muted"))
+        said = (f'<div class="saidline">→ {html.escape(entry["said"])}</div>'
+                if entry["said"] else "")
+        detail = entry["reason"]
+        if entry.get("spice") is not None:
+            detail += f" · {entry['spice']} flourish"
+        rows += f"""
+    <tr class="act-{tone}">
+      <td class="muted small nowrap">{_ago(entry["at"])}</td>
+      <td class="muted small">#{html.escape(entry["channel"])}</td>
+      <td><b>{html.escape(entry["author"])}</b>
+        <div class="muted small">{html.escape(entry["text"]) or "<i>(no text)</i>"}</div>{said}</td>
+      <td class="nowrap">{f'<code>{html.escape(entry["trigger"])}</code>' if entry["trigger"] else '<span class="muted small">—</span>'}</td>
+      <td class="nowrap"><b>{html.escape(label)}</b>
+        <div class="muted small">{html.escape(detail)}</div></td>
+    </tr>"""
+
+    if not rows:
+        return ('<p class="muted">Nothing yet. This fills up as people talk — every time a '
+                'trigger matches or Dodo speaks, the decision and the reason for it land here. '
+                'It resets when the bot restarts.</p>')
+
+    counts = bot.chat_activity.counts(guild.id)
+    summary = " · ".join(
+        f"{count} {chat_activity.OUTCOMES.get(outcome, (outcome, ''))[0]}"
+        for outcome, count in sorted(counts.items(), key=lambda kv: -kv[1]))
+    fired = " · ".join(f"<code>{html.escape(name)}</code> {count}"
+                       for name, count in sorted(fires.items(), key=lambda kv: -kv[1])) or "none yet"
+    return f"""
+  <p class="muted small">{html.escape(summary)}</p>
+  <p class="muted small">Matches since restart: {fired}</p>
+  <div class="acttable"><table>
+    <thead><tr><th>when</th><th>where</th><th>message</th><th>trigger</th><th>what she did</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table></div>"""
+
+
+def _ago(stamp: float) -> str:
+    """Rough relative time — exact clock times are noise in a scrolling log."""
+    seconds = max(0, int(time.time() - stamp))
+    if seconds < 60:
+        return f"{seconds}s ago"
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    return f"{seconds // 86400}d ago"
+
+
 def _triggers_html(bot, guild) -> str:
     """The chat string listeners, alongside the event rules they rhyme with."""
     triggers = bot.chat_triggers.raw_for_guild(guild.id)
@@ -1166,15 +1229,33 @@ def _triggers_html(bot, guild) -> str:
     warning = (f'<p class="muted"><b>{html.escape(" · ".join(off))}.</b> '
                f'Turn them on under the chat cog on the <a href="/guild/{guild.id}">main page</a>.</p>'
                if off else "")
+    fires = bot.chat_activity.fires(guild.id)
+    per_trigger = ""
+    for trigger in triggers:
+        name = trigger.get(chat_triggers.K_NAME) or ""
+        per_trigger += (f'<a class="trigjump" href="#trig-{html.escape(name)}">'
+                        f'{html.escape(name)} <span class="muted">{fires.get(name, 0)}</span></a>')
+
     return f"""
 <div class="trigpage" data-guild="{guild.id}">
   <h2 id="chat-triggers">💬 Chat triggers — the words Dodo reacts to
     <span class="muted">· {len(triggers)}</span></h2>
   <p class="muted">When someone <i>says</i> something, rather than when something happens. A match always
-  changes how Dodo feels about the speaker; whether she answers is the chance below. Repeated triggers
-  wear out on their own, so the fourth "no u" gets a tireder bird than the first.</p>
+  changes how Dodo feels about the speaker; whether she answers is the chance below, so a trigger can
+  fire, land, and stay completely silent. Repeated triggers wear out on their own, so the fourth
+  "no u" gets a tireder bird than the first.</p>
   {warning}
+  <div class="trigjumps">{per_trigger}</div>
+
+  <h3>What she has been doing</h3>
+  {_activity_html(bot, guild, fires)}
+
+  <h3>The triggers</h3>
+  <p class="muted small">A server keeps the triggers it was first given, so ones shipped since
+  never arrive on their own. <b>Add new defaults</b> brings those in and leaves your edits alone;
+  <b>Reset</b> throws everything away and takes the current wording for all of them.</p>
   <button id="addtrigger">+ New trigger</button>
+  <button class="ghost" id="synctriggers">Add new defaults</button>
   <button class="ghost" id="resettriggers">Reset to defaults</button>
   <div id="triggerlist">{cards}</div>
 </div>"""
@@ -3706,6 +3787,13 @@ async def api_guild_chat_trigger(request: web.Request):
             await _record_change(request, audit_log.KIND_CHAT_TRIGGER, "all", None, None,
                                  "Chat triggers reset to defaults")
             return web.json_response({"ok": True})
+        if action == "sync":
+            added = bot.chat_triggers.sync_defaults(gid)
+            if added:
+                await _record_change(request, audit_log.KIND_CHAT_TRIGGER, "new defaults",
+                                     None, ", ".join(added),
+                                     f"Chat triggers added: **{', '.join(added)}**")
+            return web.json_response({"ok": True, "added": added})
     except (KeyError, TypeError, ValueError) as error:
         return _bad(f"invalid trigger: {error}")
     return web.json_response({"ok": False, "error": "bad request"}, status=400)

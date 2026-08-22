@@ -29,6 +29,7 @@ from discord.ext.commands import Context
 
 import config_py
 import lang
+from helpers.chat import activity as activity_model
 from helpers.chat import dial as dial_model
 from helpers.chat import prompt as prompt_model
 from helpers.chat import router as router_model
@@ -51,6 +52,9 @@ class Chat(commands.Cog, name=COG_NAME):
         self._default_key = getattr(config_py, "PROXY_API", None)
         self._clients: dict[tuple, OpenAI] = {}
         self.router = router_model.Router()
+        # The dial the last reply was built with, so the activity log can show
+        # what she was allowed rather than making the reader infer it.
+        self._last_spice = None
 
     # ------------------------------------------------------------------ #
     #  Per-server configuration
@@ -220,9 +224,25 @@ class Chat(commands.Cog, name=COG_NAME):
         if not decision.speaks:
             self.bot.logger.debug(
                 f"chat: {message.author} -> {decision.route} ({decision.reason})")
+            # Only worth a row if something nearly happened. A message that
+            # matched nothing is not evidence about anything.
+            if trigger is not None:
+                self._record(message, trigger, activity_model.SILENT, decision.reason)
             return
 
         await self._speak(message, decision)
+
+    def _record(self, message, trigger, outcome: str, reason: str,
+                said: str = "", spice=None) -> None:
+        """Put one decision on the panel's activity log."""
+        self.bot.chat_activity.record(
+            message.guild.id if message.guild else None,
+            channel=getattr(message.channel, "name", "dm"),
+            author=message.author.display_name,
+            text=message.content or "",
+            trigger=trigger.name if trigger is not None else "",
+            outcome=outcome, reason=reason, said=said, spice=spice,
+        )
 
     # ------------------------------------------------------------------ #
     #  Routing helpers
@@ -305,7 +325,10 @@ class Chat(commands.Cog, name=COG_NAME):
         channel = message.channel
         if decision.route == router_model.REFLEX:
             self.router.note_spoke(channel.id, message.author.id)
-            await self._send(channel.send, self.router.pick_reflex(decision.trigger, channel.id))
+            line = self.router.pick_reflex(decision.trigger, channel.id)
+            self._record(message, decision.trigger, activity_model.CANNED,
+                         decision.reason, said=line)
+            await self._send(channel.send, line)
             return
 
         client = self._client_for(message.guild, message.author)
@@ -334,8 +357,14 @@ class Chat(commands.Cog, name=COG_NAME):
         if unprompted:
             self.router.note_unprompted(channel.id)
         if not reply:
+            self._record(message, decision.trigger,
+                         activity_model.ABSTAINED if unprompted else activity_model.FAILED,
+                         decision.reason, spice=self._last_spice)
             return
         self.router.note_spoke(channel.id, message.author.id)
+        self._record(message, decision.trigger,
+                     activity_model.JOINED if unprompted else activity_model.SPOKE,
+                     decision.reason, said=reply, spice=self._last_spice)
         await self._send(channel.send, reply)
 
     # ------------------------------------------------------------------ #
@@ -368,6 +397,7 @@ class Chat(commands.Cog, name=COG_NAME):
             now=now,
             fatigue=fatigue,
         )
+        self._last_spice = dial.spice
         others = self._others(mentioned, tuning)
         system = prompt_model.build(
             persona=self._param(guild, "chat_personality"),

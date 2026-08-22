@@ -331,10 +331,42 @@ class ChatTriggerManager:
         self._invalidate(guild_id)
 
     def reset(self, guild_id: int) -> None:
-        """Throw the guild's triggers away and re-seed the defaults."""
+        """Throw the guild's triggers away and re-seed the defaults.
+
+        Destructive on purpose — it is the way to pull in improved wording for
+        triggers that have already been seeded, since :meth:`sync_defaults`
+        deliberately will not overwrite anything.
+        """
         self._col.delete_many({K_GUILD: guild_id})
         self._invalidate(guild_id)
         self.for_guild(guild_id)
+
+    def sync_defaults(self, guild_id: int) -> list[str]:
+        """Add default triggers this guild has never had, and touch nothing else.
+
+        Seeding only fires on an empty collection, so a guild set up last week
+        never sees a trigger shipped since — the rows it already has win, quietly
+        and forever. This closes that gap without the destructive reset: existing
+        rows, including every edit made in the panel, are left exactly alone.
+
+        Returns the names it added, so the panel can say what happened.
+        """
+        self.for_guild(guild_id)  # ensure the guild is seeded at all
+        have = {str(doc.get(K_NAME) or "").lower()
+                for doc in self._col.find({K_GUILD: guild_id})}
+        order = self._col.count_documents({K_GUILD: guild_id})
+        added = []
+        for spec in DEFAULT_TRIGGERS:
+            name = str(spec.get(K_NAME) or "")
+            if name.lower() in have:
+                continue
+            self._col.insert_one(
+                {K_GUILD: guild_id, K_ORDER: order, K_ENABLED: True, **_clean(spec)})
+            added.append(name)
+            order += 1
+        if added:
+            self._invalidate(guild_id)
+        return added
 
 
 def _key(trigger_id: str) -> Any:

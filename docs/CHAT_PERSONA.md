@@ -64,6 +64,31 @@ matters, because the router runs on every message in every server.
 
 ---
 
+## Watching it work
+
+The Events page carries a live **activity log**: every message that matched a
+trigger or produced a reply, with the decision and the reason attached. Without
+it the system is invisible from outside — a trigger that matched and stayed
+silent looks exactly like the feature being switched off, so every number below
+would be tuned by guesswork.
+
+It is an in-memory ring per guild, lost on restart, because the alternative is a
+database write on every message in every server.
+
+### Defaults do not reach a server twice
+
+Seeding runs only when a guild has **no** trigger rows. A server set up last week
+keeps the wording it was first given and never sees a trigger shipped since —
+this bit the live server, which sat on the first-ever notes for days while the
+defaults in this repo moved on.
+
+Two buttons on the page:
+
+* **Add new defaults** — inserts defaults this server has never had, and touches
+  nothing else. Safe: your edits survive.
+* **Reset to defaults** — deletes everything and re-seeds. The only way to pull
+  in *improved wording* for a trigger that already exists, and it discards edits.
+
 ## Reading what she is actually told
 
 `py -3.13 tests/preview_chat.py` prints the real assembled prompt for thirteen

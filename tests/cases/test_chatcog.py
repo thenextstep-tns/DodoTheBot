@@ -16,6 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tests.fake_mongo import FakeCollection
 import config_py
 from helpers import parameters
+from helpers.chat import activity as activity_model
 from helpers.chat import router as router_model
 from helpers.chat import state as state_model
 from helpers.chat import triggers as trigger_model
@@ -102,6 +103,7 @@ class Bot:
         self.params = parameters.ParamManager(FakeCollection())
         self.visibility = Vis()
         self.chat_triggers = trigger_model.ChatTriggerManager(FakeCollection())
+        self.chat_activity = activity_model.ChatActivity()
         self.config = {"owners": [1]}
         self.logger = type("L", (), {"debug": lambda *a: None, "warning": lambda *a: None})()
 
@@ -203,6 +205,19 @@ assert len(CALLS) == 1
 system = CALLS[0]["messages"][0]["content"]
 assert "holding against them" in system, f"the grudge never reached the prompt:\n{system}"
 print("cog             the grudge surfaces in the next reply she gives")
+
+# From outside, "matched and stayed silent" and "the feature is off" look
+# identical. The log is the only thing that tells them apart.
+entries = bot.chat_activity.recent(GUILD_ID)
+silent = next((e for e in entries if e["outcome"] == activity_model.SILENT), None)
+assert silent is not None, "a trigger that matched and said nothing left no trace"
+assert silent["trigger"] == "insult" and silent["text"] == "bad bot", silent
+assert silent["reason"], "a silent decision must record why it was silent"
+spoke = next((e for e in entries if e["outcome"] == activity_model.SPOKE), None)
+assert spoke is not None and spoke["said"] == "hello", spoke
+assert spoke["spice"] is not None, "a reply should log the budget it was given"
+assert bot.chat_activity.fires(GUILD_ID).get("insult") == 1, bot.chat_activity.fires(GUILD_ID)
+print("cog             every decision lands in the activity log, silent ones included")
 
 
 # --------------------------------------------------------------------------- #

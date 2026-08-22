@@ -34,6 +34,7 @@ from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.events import EventRuleManager
 from helpers.chat.triggers import ChatTriggerManager
+from helpers.chat.activity import ChatActivity
 from helpers.panel_access import PanelAccessManager
 from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
@@ -120,6 +121,9 @@ class DodoBot(commands.Bot):
         # listeners, edited on the same Events page. Consulted on every message,
         # so it keeps compiled patterns cached per guild.
         self.chat_triggers = ChatTriggerManager(config_py.chat_triggers)
+        # What the chat cog decided about recent messages, and why. In memory
+        # only — the panel reads it from this same process.
+        self.chat_activity = ChatActivity()
         # DMs the owner when a guild admin changes their server's config — those
         # changes now bind everyone, owners included (see helpers/visibility.py).
         # Durable record of every panel change (owner's included).

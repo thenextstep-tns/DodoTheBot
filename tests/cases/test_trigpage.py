@@ -13,6 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tests.fake_mongo import FakeCollection
 from web import routes
 from helpers import cog_categories
+from helpers.chat import activity as activity_model
 from helpers.chat import triggers as trigger_model
 
 
@@ -33,6 +34,7 @@ class Bot:
     def __init__(self, collection):
         self.visibility, self.event_rules = Vis(), Rules()
         self.chat_triggers = trigger_model.ChatTriggerManager(collection)
+        self.chat_activity = activity_model.ChatActivity()
 
 
 collection = FakeCollection()
@@ -72,7 +74,7 @@ for selector in (".trigname", ".trigpatterns", ".trignote", ".trigreflex", ".tri
     assert f'class="{selector[1:]}' in html or selector[1:] in html, \
         f"the page never renders {selector}"
     assert selector in script, f"nothing in panel.js binds {selector}"
-for element in ("addtrigger", "resettriggers"):
+for element in ("addtrigger", "resettriggers", "synctriggers"):
     assert f'id="{element}"' in html, f"the page is missing #{element}"
     assert f'"{element}"' in script, f"nothing in panel.js binds #{element}"
 assert 'querySelector(".trigpage")' in script, "the trigger block never binds at all"
@@ -98,6 +100,25 @@ bot.chat_triggers.delete(guild.id, str(made[trigger_model.K_ID]))
 assert bot.chat_triggers.match(guild.id, "I like pineapple") is None
 print("page            triggers can be added and removed per server")
 
+# A server keeps the triggers it was first given, so a default shipped later
+# never arrives — the live server sat on the first-ever wording for days because
+# of exactly this. Syncing adds the missing ones and touches nothing else.
+stale = FakeCollection()
+aged = trigger_model.ChatTriggerManager(stale)
+aged.for_guild(guild.id)
+newcomer = trigger_model.DEFAULT_TRIGGERS[-1][trigger_model.K_NAME]
+stale.delete_one({trigger_model.K_NAME: newcomer})
+edited = stale.find_one({trigger_model.K_GUILD: guild.id})
+aged.update(guild.id, str(edited["_id"]), {trigger_model.K_NOTE: "my own wording"})
+aged._invalidate(guild.id)
+
+added = aged.sync_defaults(guild.id)
+assert added == [newcomer], f"sync should add exactly the missing default, got {added}"
+assert stale.find_one({trigger_model.K_ID: edited["_id"]})[trigger_model.K_NOTE] == \
+    "my own wording", "syncing new defaults trampled an edit"
+assert aged.sync_defaults(guild.id) == [], "syncing twice should add nothing the second time"
+print("page            new default triggers can arrive without discarding edits")
+
 bot.chat_triggers.reset(guild.id)
 assert bot.chat_triggers.match(guild.id, "xynode is here") is not None, \
     "reset should bring the defaults back"
@@ -120,5 +141,23 @@ bot.visibility = type("Off", (), {"feature_enabled": lambda self, gid, key: Fals
 off_html = routes._events_html(bot, guild)
 assert "String listeners are off" in off_html and "Unprompted chat is off" in off_html
 print("page            a server with the listeners off is told so")
+
+# The activity log is the whole point of the page: without it a trigger that
+# matched and stayed silent is indistinguishable from the feature being off.
+bot.visibility = Vis()
+empty = routes._events_html(bot, guild)
+assert "Nothing yet" in empty, "an empty log should explain itself rather than render blank"
+
+bot.chat_activity.record(guild.id, channel="general", author="Ada", text="no u",
+                         trigger="banter", outcome=activity_model.SILENT, reason="chance")
+bot.chat_activity.record(guild.id, channel="general", author="Bo", text="good bot",
+                         trigger="praise", outcome=activity_model.CANNED, reason="trigger",
+                         said="say it again")
+live = routes._events_html(bot, guild)
+for expected in ("Ada", "no u", "said nothing", "chance", "canned line", "say it again"):
+    assert expected in live, f"the activity log never showed {expected!r}"
+assert bot.chat_activity.fires(guild.id) == {"banter": 1, "praise": 1},     bot.chat_activity.fires(guild.id)
+assert "banter" in live and "praise" in live
+print("page            silent matches are visible, with the reason they stayed silent")
 
 print("PASS")

@@ -480,8 +480,17 @@ if (_trigPage) {
     location.reload();
   });
 
+  document.getElementById("synctriggers").addEventListener("click", async () => {
+    const res = await api({ action: "sync" });
+    if (!res.ok) { flash(res.error || "Failed", false); return; }
+    if (res.added && res.added.length) location.reload();
+    else flash("already have every default trigger ✓", true);
+  });
+
   document.getElementById("resettriggers").addEventListener("click", async () => {
-    if (!confirm("Throw away this server's triggers and restore the defaults?")) return;
+    if (!confirm("Throw away this server's triggers and restore the defaults?\n\n" +
+                 "This discards any edits you have made, and takes the current wording " +
+                 "for every trigger.")) return;
     const res = await api({ action: "reset" });
     if (res.ok) location.reload();
     else flash(res.error || "Failed", false);

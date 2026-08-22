@@ -399,6 +399,26 @@ main:has(.eventspage) { max-width: 1000px; }
 .trigcard .rulegrid label.inline input { width: auto; }
 @media (max-width: 900px) { .trigcard .rulegrid { grid-template-columns: 1fr 1fr; } }
 
+/* The activity log: what she decided about recent messages, and why. */
+.trigjumps { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 18px; }
+.trigjump { background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; font-size: 13px; text-decoration: none; }
+.trigjump:hover { border-color: var(--accent); }
+.acttable { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); }
+.acttable table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.acttable th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+  font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .04em; }
+.acttable td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.acttable tr:last-child td { border-bottom: 0; }
+.acttable .nowrap { white-space: nowrap; }
+.acttable .saidline { margin-top: 3px; color: var(--accent); font-size: 12.5px; }
+.act-ok td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.act-warn td:first-child { box-shadow: inset 3px 0 0 #d9a441; }
+.act-bad td:first-child { box-shadow: inset 3px 0 0 #d05a5a; }
+.act-muted { opacity: .72; }
+
 /* ------------------------------------------------------- Panel access (owner) */
 .accessbody { padding: 12px 16px 16px; }
 .accessbody table.stats { margin-bottom: 12px; }
