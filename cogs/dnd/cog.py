@@ -46,6 +46,7 @@ from helpers.dnd.rules import dice
 from helpers.dnd.rules.ruleset import Action
 from helpers.dnd.store import campaign_store, campaigns_for, ensure_indices
 from helpers.dnd.mind import traits as traits_mod
+from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world.campaign import Campaign
 from helpers.dnd.world.entity import KIND_PC, TIER_ACTIVE, TIER_FOCUS, Entity, Identity, Position
@@ -87,6 +88,9 @@ class Tabletop(commands.Cog, name="dnd"):
     gm = app_commands.Group(name="gm", description="Running the game. (GM)")
     tune = app_commands.Group(
         name="tune", description="Simulation settings for this campaign.", parent=gm
+    )
+    clock = app_commands.Group(
+        name="clock", description="Fronts that fill whether you engage or not.", parent=gm
     )
 
     def __init__(self, bot):
@@ -1238,6 +1242,112 @@ class Tabletop(commands.Cog, name="dnd"):
     # ------------------------------------------------------------------ #
     #  Time (P2 — the manual stand-in for the world tick in P3)
     # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
+    #  Faction clocks (P3) — the world continuing without you
+    # ------------------------------------------------------------------ #
+    @clock.command(name="add", description="Start a front that fills on its own. (GM)")
+    @app_commands.describe(
+        name="What is going to happen. Write it as the outcome, not the plan.",
+        segments="How many steps until it lands. 4 is soon, 12 is a slow dread.",
+        rate="Segments per in-world day. 0.5 fills an 8-step clock in 16 days.",
+        announce="Optional. What the world sees when it fills.",
+    )
+    async def clock_add(
+        self, interaction: discord.Interaction, name: str,
+        segments: int = 8, rate: float = 0.5, announce: str = "",
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        if found.store.clocks.by_name(name):
+            await interaction.response.send_message(
+                lang_dnd.TT_CLOCK_EXISTS.format(name=name), ephemeral=True
+            )
+            return
+
+        created = found.store.clocks.create(clock_model.Clock(
+            name=name.strip()[:MAX_NAME],
+            segments=max(1, min(24, segments)),
+            rate=max(0.0, min(24.0, rate)),
+            created_at=found.campaign.world_time,
+            on_complete=(
+                [{"kind": "announce", "payload": {"text": announce.strip()}}]
+                if announce.strip() else []
+            ),
+        ))
+        await interaction.response.send_message(
+            lang_dnd.TT_CLOCK_ADDED.format(
+                name=created.name, face=created.describe()
+            )
+        )
+
+    @clock.command(name="list", description="Every front in this campaign. (GM)")
+    async def clock_list(self, interaction: discord.Interaction) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        clocks = found.store.clocks.list()
+        if not clocks:
+            await interaction.response.send_message(lang_dnd.TT_CLOCK_NONE, ephemeral=True)
+            return
+        lines = "\n".join(f"**{c.name}** — {c.describe()}" for c in clocks[:20])
+        await interaction.response.send_message(lines, ephemeral=True)
+
+    @clock.command(name="nudge", description="Push a front forward or drag it back. (GM)")
+    @app_commands.describe(
+        name="Which front.",
+        segments="How far. Negative drags it back — burning the ledgers is -2.",
+    )
+    async def clock_nudge(
+        self, interaction: discord.Interaction, name: str, segments: float
+    ) -> None:
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+        target = found.store.clocks.by_name(name)
+        if target is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_CLOCK_NOT_FOUND.format(name=name), ephemeral=True
+            )
+            return
+        clock_model.nudge(target, segments)
+        found.store.clocks.save(target)
+        await interaction.response.send_message(
+            lang_dnd.TT_CLOCK_NUDGED.format(name=target.name, face=target.describe())
+        )
+
+    @clock_nudge.autocomplete("name")
+    async def _clock_autocomplete(self, interaction: discord.Interaction, current: str):
+        found = context.resolve(interaction)
+        if not found:
+            return []
+        current = (current or "").lower()
+        return [
+            app_commands.Choice(name=c.name[:100], value=c.name[:100])
+            for c in found.store.clocks.list() if current in c.name.lower()
+        ][:25]
+
     @gm.command(name="present", description="Put someone in the open scene, or take them out. (GM)")
     @app_commands.describe(
         who="Who is in the room.",

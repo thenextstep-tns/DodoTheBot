@@ -83,8 +83,14 @@ def collect(app_only: bool = False) -> dict[str, list[str]]:
                         if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
                             names[keyword.value.value].append(_relative(path))
 
-                # Class-level ``app_commands.Group(name=...)`` attributes.
+                # Class-level ``app_commands.Group(name=...)`` attributes. A group
+                # declared with ``parent=`` is nested inside another one and costs
+                # no top-level slot — counting those made `/gm tune` and
+                # `/gm clock` each look like a whole command against the cap, and
+                # would have blocked real work while four slots were still free.
                 if isinstance(node, ast.Call) and "app_commands.Group" in ast.unparse(node.func):
+                    if any(k.arg == "parent" for k in node.keywords):
+                        continue
                     for keyword in node.keywords:
                         if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
                             names[keyword.value.value].append(_relative(path))

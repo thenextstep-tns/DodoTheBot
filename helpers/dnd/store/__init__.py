@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from helpers.dnd.store.beliefs import BeliefRepo
+from helpers.dnd.store.clocks import ClockRepo
 from helpers.dnd.store.campaigns import CampaignRepo
 from helpers.dnd.store.canon import CanonRepo
 from helpers.dnd.store.entities import EntityRepo
@@ -58,6 +59,8 @@ class CampaignStore:
         # that are actually being thought about.
         self.memories = MemoryRepo(self.scope)
         self.relations = RelationRepo(self.scope)
+        # P3: fronts that fill whether or not anyone is looking at them.
+        self.clocks = ClockRepo(self.scope)
 
     @property
     def guild_id(self) -> int:

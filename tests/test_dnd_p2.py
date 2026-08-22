@@ -59,6 +59,7 @@ from helpers.dnd.store import campaign_store, campaigns_for  # noqa: E402
 from helpers.dnd.store import beliefs as beliefs_module  # noqa: E402
 from helpers.dnd.store import campaigns as campaigns_module  # noqa: E402
 from helpers.dnd.store import canon as canon_module  # noqa: E402
+from helpers.dnd.store import clocks as clocks_module  # noqa: E402
 from helpers.dnd.store import entities as entities_module  # noqa: E402
 from helpers.dnd.store import events as events_module  # noqa: E402
 from helpers.dnd.store import knowledge as knowledge_module  # noqa: E402
@@ -78,6 +79,7 @@ for _cls, _name in (
     (knowledge_module.KnowledgeRepo, "dnd_knowledge"),
     (beliefs_module.BeliefRepo, "dnd_beliefs"),
     (canon_module.CanonRepo, "dnd_canon_queue"),
+    (clocks_module.ClockRepo, "dnd_clocks"),
     (memories_module.MemoryRepo, "dnd_memories"),
     (relations_module.RelationRepo, "dnd_relations"),
 ):
@@ -528,6 +530,72 @@ def test_relationships() -> None:
 # --------------------------------------------------------------------------- #
 #  12. End to end through the store
 # --------------------------------------------------------------------------- #
+def test_clocks() -> None:
+    """Fronts fill whether anyone engages or not.
+
+    `06-DECISION-ENGINE.md` §10: a clock is a thing that is going to happen
+    unless somebody stops it. A campaign where nothing moves between sessions is
+    a diorama, and this is the difference.
+    """
+    from helpers.dnd.world.clock import Clock, advance as tick_clock, nudge
+
+    campaign, store = _campaign(9701, "Fronts")
+    slow = store.clocks.create(Clock(name="The tide wall fails", segments=4, rate=0.1))
+    front = store.clocks.create(Clock(
+        name="The Compact seizes the north dock", segments=8, rate=0.5,
+        on_complete=[
+            {"kind": "announce", "payload": {"text": "The dock is theirs."}},
+            {"kind": "start_clock", "payload": {"name": "The Compact taxes the fishers",
+                                                "segments": 6, "rate": 0.2}},
+        ],
+    ))
+    check("clocks: a new front has not started filling", front.filled == 0.0)
+
+    minds.advance(store, store.campaigns.get(campaign.id), 10.0, Random(1))
+    front = store.clocks.by_name("The Compact seizes the north dock")
+    check("clocks: TIME FILLS THEM WITH NOBODY WATCHING",
+          front.filled == 5.0, f"{front.filled} of {front.segments}")
+    check("clocks: each at its own rate",
+          store.clocks.by_name("The tide wall fails").filled == 1.0)
+    check("clocks: and they say how long is left",
+          "6d left" in front.describe(), front.describe())
+
+    minds.advance(store, store.campaigns.get(campaign.id), 8.0, Random(2))
+    front = store.clocks.by_name("The Compact seizes the north dock")
+    check("clocks: a full front completes", front.status == "complete")
+    kinds = [e.kind for e in store.events.recent(8)]
+    check("clocks: completing is an event", "clock_filled" in kinds)
+    check("clocks: and its consequences fire", "clock_effect" in kinds)
+    check("clocks: a front can start another one",
+          store.clocks.by_name("The Compact taxes the fishers") is not None)
+
+    minds.advance(store, store.campaigns.get(campaign.id), 30.0, Random(3))
+    check("clocks: a completed one does not keep filling",
+          store.clocks.by_name("The Compact seizes the north dock").filled == 8.0)
+
+    # Players hold a front shut. That is the whole feedback loop between play
+    # and world: ignoring a problem costs you, and acting on it buys time.
+    # A fresh front, because the tide wall has long since filled by now — and a
+    # completed clock not moving would pass this check for the wrong reason.
+    siege = store.clocks.create(Clock(name="The siege tightens", segments=20, rate=0.5))
+    store.clocks.block(siege.id, "someone")
+    before = store.clocks.by_name("The siege tightens").filled
+    minds.advance(store, store.campaigns.get(campaign.id), 20.0, Random(4))
+    check("clocks: A BLOCKED FRONT DOES NOT MOVE",
+          store.clocks.by_name("The siege tightens").filled == before,
+          f"moved to {store.clocks.by_name('The siege tightens').filled}")
+    store.clocks.unblock(siege.id, "someone")
+    minds.advance(store, store.campaigns.get(campaign.id), 5.0, Random(5))
+    check("clocks: and resumes the moment they let go",
+          store.clocks.by_name("The siege tightens").filled > before)
+
+    # Nudging is the GM's hand, and dragging one back below the line revives it.
+    done = store.clocks.by_name("The Compact seizes the north dock")
+    nudge(done, -3)
+    check("clocks: dragged back below the line, a front lives again",
+          done.status == "running" and done.completed_at is None)
+
+
 def test_world_tick() -> None:
     """Time passes on its own, at a pace each campaign sets for itself.
 
@@ -896,6 +964,7 @@ def main() -> int:
         test_budgets,
         test_everything_tunable,
         test_relationships,
+        test_clocks,
         test_world_tick,
         test_scene_consolidation,
         test_stakes,

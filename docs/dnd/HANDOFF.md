@@ -87,6 +87,8 @@ each stated more than once, so treat them as settled:
 | Command groups built in `__init__` | Subcommands report no cog, so the per-guild switch is bypassed | Groups are **class attributes** |
 | `os.walk` yields `cogs.dnd`, not `cogs.dnd.` | DnD modules listed as cogs with dead Load buttons | `registry.is_dnd_extension` matches both |
 | Bash heredocs choke on this codebase's content | Silent truncation or parse errors | Write a `.py` patch script to the scratchpad and run it with `py` |
+| A `
+` inside a patch script's replacement string | Becomes a real newline and splits the target's source string in two — cost three separate repairs in one session | Escape it (`\n`), or use the Edit tool for anything containing escapes or `"""` |
 | `python` ≠ `py` on this machine | `ModuleNotFoundError: discord` | Always use `py` |
 
 **A cog that loads fine in isolation can still fail in production.** Both outages

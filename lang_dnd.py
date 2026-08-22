@@ -169,6 +169,11 @@ TT_RECALL_IMPRINT = "⚡ **That struck something.** {gist}"
 
 # What closing a scene did to the memories formed in it. Said out loud
 # because a tier moving silently is how nothing ever left "working".
+TT_CLOCK_ADDED = "**{name}** is now a thing that is going to happen.\n{face}"
+TT_CLOCK_EXISTS = "There is already a front called **{name}**."
+TT_CLOCK_NOT_FOUND = "No front called **{name}**."
+TT_CLOCK_NONE = "Nothing is closing in on this campaign yet."
+TT_CLOCK_NUDGED = "**{name}** — {face}"
 TT_TUNING_BAD_VALUE = "**{label}** does not take `{value}`."
 TT_SCENE_CONSOLIDATED = (" {minds} mind(s) settled: {kept} memory/memories kept, "
                          "{gone} let go.")

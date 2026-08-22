@@ -29,6 +29,8 @@ from helpers.dnd.world.entity import (
     Entity,
     Identity,
 )
+from helpers.dnd.world import clock as clock_model
+from helpers.dnd.world import event as events
 from helpers.dnd.world.memory import TIER_WORKING, Memory
 from helpers.dnd.world.relationship import Relationship
 
@@ -400,7 +402,59 @@ def advance(store, campaign, days: float, rng: Random) -> dict:
             entity.needs = needs_of(entity, world_time, tuning).to_doc()
             store.entities.save(entity)
 
+    # Fronts fill whether or not anybody was watching. Done here rather than in
+    # the tick loop so `/gm advance` moves them too — one body, as ever.
+    report["clocks"] = advance_clocks(store, campaign, days, world_time)
     return report
+
+
+def advance_clocks(store, campaign, days: float, world_time: int) -> dict:
+    """Move every running front, and fire what the filled ones were aimed at.
+
+    This is what makes ignoring a problem cost something, which is most of the
+    difference between a world and a set of rooms.
+    """
+    moved, completed = 0, []
+    for clock in store.clocks.ticking():
+        if not clock.running:
+            continue                      # blocked: somebody is holding it shut
+        filled = clock_model.advance(clock, days, world_time=world_time)
+        store.clocks.save(clock)
+        moved += 1
+        if filled:
+            completed.append(clock)
+
+    for clock in completed:
+        store.events.append(
+            events.CLOCK_FILLED,
+            actor_id=clock.faction_id or 0,
+            payload={
+                "clock": clock.name,
+                "clock_id": str(clock.id),
+                "segments": clock.segments,
+            },
+        )
+        # Consequences are data, so a front can be authored without code and a
+        # completed one replays identically.
+        for effect in clock.on_complete:
+            kind = str(effect.get("kind", ""))
+            payload = dict(effect.get("payload") or {})
+            if kind == "start_clock":
+                store.clocks.create(clock_model.Clock(
+                    name=str(payload.get("name", f"After {clock.name}")),
+                    segments=int(payload.get("segments", 8)),
+                    rate=float(payload.get("rate", clock.rate)),
+                    faction_id=clock.faction_id,
+                    created_at=world_time,
+                ))
+            elif kind in ("announce", "spawn_event"):
+                store.events.append(
+                    events.CLOCK_EFFECT,
+                    actor_id=clock.faction_id or 0,
+                    payload={"clock": clock.name, **payload},
+                )
+
+    return {"moved": moved, "filled": [c.name for c in completed]}
 
 
 # --------------------------------------------------------------------------- #
