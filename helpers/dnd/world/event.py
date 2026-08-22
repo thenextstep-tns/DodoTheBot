@@ -39,6 +39,7 @@ CHECK = "check"                 # an action resolved against a ruleset
 ROLL = "roll"                   # a bare dice roll, no resolution attached
 NPC_SPAWNED = "npc_spawned"     # an NPC entered the world with a mind (P2)
 TIME_ADVANCED = "time_advanced"  # the GM let world time pass (P2)
+RELATION = "relation"           # something happened between two entities (P2)
 LEGACY_ACTION = "legacy_action"  # imported from the old cog (13-MIGRATION.md)
 
 

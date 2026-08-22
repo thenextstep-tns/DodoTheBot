@@ -40,6 +40,42 @@ DELTAS: dict[str, dict] = {
     "travelled":  {"familiarity": +0.15, "affinity": +0.05},
 }
 
+# How each kind reads as a sentence, so an event that nobody described still
+# forms a memory someone could tell back. "Ondry helped Marla", not
+# "Ondry kept_word Marla".
+PHRASES: dict[str, str] = {
+    "helped": "helped", "saved": "saved", "gifted": "gave something to",
+    "healed": "healed", "praised": "praised", "kept_word": "kept their word to",
+    "betrayed": "betrayed", "attacked": "attacked", "threatened": "threatened",
+    "stole": "stole from", "lied": "lied to", "insulted": "insulted",
+    "bested": "bested", "met": "met", "talked": "talked with",
+    "travelled": "travelled with",
+}
+
+
+def phrase(kind: str, actor: str, subject: str) -> str:
+    """One line describing what happened, for a memory nobody wrote a gist for."""
+    return f"{actor} {PHRASES.get(kind, kind.replace('_', ' '))} {subject}"
+
+
+def felt_valence(kind: str) -> float:
+    """How an event of this kind feels, derived from the deltas rather than a
+    second table that could drift out of step with them.
+
+    Affinity is the emotional axis, so it leads; trust carries the kinds that
+    are about reliability rather than warmth (``kept_word``, ``lied``), and
+    familiarity covers the neutral ones. Doubled because the deltas are sized
+    for a relationship axis, and a memory's valence spans the full -1..1.
+    """
+    deltas = DELTAS.get(kind)
+    if not deltas:
+        return 0.0
+    for axis in ("affinity", "trust", "familiarity"):
+        if axis in deltas:
+            return _clamp(float(deltas[axis]) * 2.0)
+    return 0.0
+
+
 # Which trait sharpens which axis, and how much. Applied on top of the base.
 TRAIT_MODIFIERS = {
     "fear": ("fear_of_death", 0.5),

@@ -331,8 +331,22 @@ def relate(
     world_time: int,
     intensity: float = 1.0,
     tuning: Tuning | None = None,
+    description: str = "",
+    rng: Random | None = None,
+    source_event_seq: int | None = None,
 ) -> Relationship:
-    """Record that something happened between two entities."""
+    """Record that something happened between two entities.
+
+    The relationship shift is only one third of what an event does
+    (``06-DECISION-ENGINE.md`` §8): both parties should also *remember* it. Until
+    they did, a GM could move Marla's trust in Ondry and leave nothing in her
+    head about why — a feeling with no event behind it.
+
+    ``description`` is what actually happened, in the GM's words. Without one a
+    line is templated from the kind, so an undescribed event still leaves a
+    memory rather than none at all. Pass ``rng`` to form those memories; without
+    it only the relationship moves, which is what the pure-arithmetic tests want.
+    """
     tuning = tuning or tuning_for(store)
     relationship = store.relations.between(from_entity.id, to_entity.id)
     rel_mod.apply(
@@ -343,7 +357,30 @@ def relate(
         world_time=world_time,
         tuning=tuning.relationships(),
     )
-    return store.relations.save(relationship)
+    saved = store.relations.save(relationship)
+
+    if rng is not None:
+        # ``from_entity`` is whose feelings moved, so ``to_entity`` is the one
+        # who acted: "Ondry helped Marla" for `/gm relate who:Marla toward:Ondry`.
+        gist = description.strip() or rel_mod.phrase(
+            kind, to_entity.identity.name, from_entity.identity.name
+        )
+        valence = rel_mod.felt_valence(kind)
+        # One event, a memory each. They are encoded separately, so the two
+        # recollections diverge by perception and disposition from the start.
+        for owner, other in ((from_entity, to_entity), (to_entity, from_entity)):
+            remember(
+                store,
+                owner,
+                gist,
+                world_time=world_time,
+                rng=rng,
+                valence=valence,
+                participants=[other.id],
+                source_event_seq=source_event_seq,
+                tuning=tuning,
+            )
+    return saved
 
 
 # --------------------------------------------------------------------------- #

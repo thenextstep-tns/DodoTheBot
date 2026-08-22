@@ -1037,9 +1037,11 @@ class Tabletop(commands.Cog, name="dnd"):
         who="Whose feelings change.",
         toward="About whom.",
         what="What happened. Leave blank to just look at the current state.",
+        description="In your words — becomes what they both remember of it.",
     )
     async def relate(
-        self, interaction: discord.Interaction, who: str, toward: str, what: str = ""
+        self, interaction: discord.Interaction, who: str, toward: str,
+        what: str = "", description: str = "",
     ) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -1069,8 +1071,26 @@ class Tabletop(commands.Cog, name="dnd"):
                     ephemeral=True,
                 )
                 return
+            # The relationship shift is one third of what an event does; the
+            # other two are the event log and a memory in each of their heads.
+            seq = found.store.campaigns.next_seq(found.campaign.id)
             updated = minds.relate(
-                found.store, a, b, what, world_time=found.campaign.world_time
+                found.store, a, b, what,
+                world_time=found.campaign.world_time,
+                description=description,
+                rng=_seeded(found.campaign, seq),
+                source_event_seq=seq,
+            )
+            found.store.events.append(
+                events.RELATION,
+                actor_id=b.id,
+                seq=seq,
+                seed=event_seed(found.campaign.seed, seq),
+                payload={
+                    "kind": what,
+                    "subject_id": str(a.id),
+                    "description": description.strip(),
+                },
             )
             await interaction.response.send_message(
                 lang_dnd.TT_RELATE_DONE.format(
