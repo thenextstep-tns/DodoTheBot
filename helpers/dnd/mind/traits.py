@@ -167,11 +167,18 @@ def derive_traits(
     values.update({a: 0.5 for a in DRIVES})
     values.update({a: 0.5 for a in FACULTIES})
 
+    # Priors are *weighted*, and at zero they do not apply at all. A prior read
+    # forwards is a stereotype — "he is a thief, so here is the pattern for the
+    # class" — and a world built that way has one thief in it, printed twice.
+    # Read backwards the same table is a description (see `fit`), which is where
+    # the interesting version lives: nobody is assigned low honour for being a
+    # thief; people who happened to roll low honour are the ones who end up
+    # thieving, and the stereotype falls out as a distribution instead of a rule.
     for axis, offset in CULTURES.get(culture.lower().strip(), {}).items():
-        values[axis] = values[axis] + offset
+        values[axis] = values[axis] + offset * tuning.culture_prior_weight
 
     for axis, offset in _ROLE_PRIORS.get(role.lower().strip(), {}).items():
-        values[axis] = values[axis] + offset
+        values[axis] = values[axis] + offset * tuning.role_prior_weight
 
     if parents:
         for axis in values:
@@ -208,6 +215,74 @@ _ROLE_PRIORS: dict[str, dict] = {
     "smuggler": {"honour": -0.2, "boldness": 0.25, "greed": 0.2},
     "noble": {"honour": 0.1, "greed": 0.15, "warmth": -0.1},
 }
+
+
+def roles() -> list[str]:
+    """Every role the priors know about, for autocomplete and for fitting."""
+    return sorted(_ROLE_PRIORS)
+
+
+def fit(traits: Traits, role: str) -> float:
+    """How well this person suits that role, −1…1. **The table read backwards.**
+
+    Forwards, ``_ROLE_PRIORS`` stamps a disposition onto anyone called a thief.
+    Backwards it asks a much better question: given who this person actually is,
+    how thief-shaped are they? Same numbers, opposite causality, and the second
+    direction never flattens anybody — it just notices.
+
+    That makes the interesting cases expressible. A thief who fits at −0.4 is a
+    remarkably honest one, and the fact that such a person exists is the whole
+    argument against generating them top-down.
+    """
+    prior = _ROLE_PRIORS.get(role.lower().strip())
+    if not prior:
+        return 0.0
+    total = 0.0
+    for axis, offset in prior.items():
+        # Drives sit 0..1 around a neutral 0.5; temperament is already centred.
+        value = traits.axis(axis)
+        centred = (value - 0.5) * 2 if axis in DRIVES or axis in FACULTIES else value
+        # Agreement in sign and magnitude, normalised by how strong the prior is.
+        total += centred * (1.0 if offset > 0 else -1.0) * min(1.0, abs(offset) / 0.3)
+    return max(-1.0, min(1.0, total / max(1, len(prior))))
+
+
+def describe_fit(value: float, role: str) -> str:
+    """One line for the GM, because an emergent oddity nobody sees is wasted."""
+    if not role:
+        return ""
+    article = "an" if role[:1].lower() in "aeiou" else "a"
+    if value >= 0.45:
+        return f"every inch {article} {role}"
+    if value >= 0.15:
+        return f"suits {role} work"
+    if value > -0.15:
+        return f"an unremarkable {role}"
+    if value > -0.45:
+        return f"an odd fit for {role} work"
+    return f"has no business being {article} {role}"
+
+
+def suggest_role(traits: Traits, rng: Random, *, sharpness: float = 3.0) -> str:
+    """What someone like this would plausibly have ended up doing.
+
+    **Bottom-up generation.** Roll a person first, then ask what a person like
+    that becomes — rather than picking a job and stamping its pattern on them.
+    Run over a population it produces the stereotype as an *emergent normal
+    distribution*: thieves skew dishonourable because dishonourable people are
+    likelier to be selected into thieving, not because being a thief lowers your
+    honour on creation.
+
+    Weighted rather than argmax, so the honest thief and the brutal priest still
+    happen at the rate they should. ``sharpness`` sets how strongly fit decides;
+    at 0 the role is drawn uniformly and has nothing to do with who they are.
+    """
+    candidates = roles()
+    if not candidates:
+        return ""
+    weights = [max(0.001, (fit(traits, role) + 1.0) / 2.0) ** max(0.0, sharpness)
+               for role in candidates]
+    return rng.choices(candidates, weights=weights)[0]
 
 
 def shift_drive(traits: Traits, axis: str, amount: float) -> Traits:

@@ -44,6 +44,7 @@ from helpers.dnd import parameters as dnd_params
 from helpers.dnd.rules import dice
 from helpers.dnd.rules.ruleset import Action
 from helpers.dnd.store import campaign_store, campaigns_for, ensure_indices
+from helpers.dnd.mind import traits as traits_mod
 from helpers.dnd.world import event as events
 from helpers.dnd.world.campaign import Campaign
 from helpers.dnd.world.entity import KIND_PC, TIER_FOCUS, Entity, Identity, Position
@@ -861,10 +862,19 @@ class Tabletop(commands.Cog, name="dnd"):
             payload={"name": entity.name, "role": role, "culture": culture},
         )
         traits = minds.traits_of(entity)
+        # The role may have emerged from their disposition rather than the other
+        # way round, so say which trade they landed in and how well it suits them.
+        landed = entity.identity.role
+        fit_line = ""
+        if landed:
+            fit_line = lang_dnd.TT_NPC_FIT.format(
+                fit=traits_mod.describe_fit(traits_mod.fit(traits, landed), landed)
+            )
         await interaction.response.send_message(
             lang_dnd.TT_NPC_CREATED.format(
                 name=entity.name,
                 traits=traits.describe(),
+                fit=fit_line,
                 memories=found.store.memories.count_for(entity.id),
             )
         )

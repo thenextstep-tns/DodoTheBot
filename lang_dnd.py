@@ -141,7 +141,11 @@ TT_CANON_LINE = "**{title}** — {text}"
 # --------------------------------------------------------------------------- #
 #  Minds — NPCs, memory, relationships (P2)
 # --------------------------------------------------------------------------- #
-TT_NPC_CREATED = "**{name}** exists now — {traits}. They already remember {memories} thing(s)."
+TT_NPC_CREATED = ("**{name}** exists now — {traits}. {fit}"
+                  "They already remember {memories} thing(s).")
+# How well they suit the trade they ended up in. Worth saying out loud:
+# an emergent oddity nobody is told about may as well not have happened.
+TT_NPC_FIT = "*{fit}.* "
 TT_NPC_EXISTS = "There's already someone called **{name}** in this campaign."
 TT_NPC_NOT_FOUND = "No one called **{name}** in this campaign."
 TT_NPC_LIST_TITLE = "{campaign} — the people"

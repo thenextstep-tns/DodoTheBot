@@ -504,6 +504,14 @@ def spawn_npc(
     entity_traits = traits_mod.derive_traits(
         rng, culture=culture, parents=parent_traits, role=role, tuning=generation
     )
+    # No role given: roll the person first and ask what someone like that became.
+    # This is the bottom-up path — over a population the trades sort themselves
+    # by disposition, so the stereotype emerges as a distribution instead of
+    # being stamped on each individual at birth.
+    if not role.strip():
+        role = traits_mod.suggest_role(
+            entity_traits, rng, sharpness=generation.role_fit_sharpness
+        )
 
     stats = {}
     if ruleset is not None:

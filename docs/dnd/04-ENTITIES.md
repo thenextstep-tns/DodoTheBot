@@ -131,6 +131,39 @@ not richer.
 personality. But one that never moves is furniture, and the difference between
 those two is the whole of §3a.
 
+### 3a-pre. Priors are read backwards, not forwards
+
+A role prior applied at birth is a stereotype: *he is a thief, so here is the
+pattern for the class.* A world built that way contains one thief, printed as
+many times as you need. So the same table is used in **both directions**, and
+the default direction is the reverse one:
+
+| Direction | Question | Effect |
+| --- | --- | --- |
+| Forwards (`derive_traits`) | "what does a thief look like?" | stamps a disposition. Weighted by `role_prior_weight`; **0 disables it** |
+| Backwards (`fit`) | "how thief-shaped is this person?" | only *notices*. Never flattens anyone |
+
+**Bottom-up is the real generator.** `suggest_role` rolls a person first and
+asks what someone like that would have become, weighted by fit. Across a
+population the trades sort themselves and the stereotype emerges as a
+distribution rather than a rule — measured over 400 people with the priors
+switched **off entirely**, thieves come out at mean honour 0.35 and priests at
+0.64, purely from who fell into what. Individuals still span the range, so the
+honest thief exists and is interesting when he does.
+
+`fit` also gives the GM a line worth reading — *"an odd fit for guard work"*,
+*"has no business being a priest"* — which is how an emergent oddity gets
+noticed instead of sitting unseen in a stat block.
+
+**Both modes are supported on purpose.** Top-down populates a world fast and is
+the right tool for testing a specific behaviour or running a short campaign;
+bottom-up is for building one that has people in it. `role_prior_weight` and
+`culture_prior_weight` slide between them, per server and per campaign.
+
+*(The prior tables themselves are still Python. `04-ENTITIES.md` §9 step 1 says
+culture and role should come from the campaign KB, and moving them there — so a
+GM can add, edit and delete trades and cultures — is outstanding.)*
+
 ### 3a. Drift — a life changes a person, slowly
 
 A boy raised rich and adored comes out gentle, capricious, and reasonably afraid

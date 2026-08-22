@@ -179,6 +179,22 @@ TUNABLES: list[dict] = [
           "it. Above 0 they are changed by it without having anyone to thank or "
           "blame; at 0 an anonymous act leaves no mark on them at all.",
           0.25),
+    _spec("role_prior_weight", "Generation", "Role shapes the person",
+          "How much a named role stamps its pattern onto a new NPC. **At 0 a "
+          "thief is just a person who thieves** — traits roll freely and the "
+          "stereotype only emerges across a population, from who ends up doing "
+          "what. At 1 every thief arrives thief-shaped, which populates a world "
+          "fast but makes them all the same person.",
+          0.5),
+    _spec("culture_prior_weight", "Generation", "Culture shapes the person",
+          "The same, for where they are from. **0 means culture is a fact about "
+          "them and not a temperament.**",
+          0.5),
+    _spec("role_fit_sharpness", "Generation", "Fit decides the trade",
+          "When an NPC is created without a role, how strongly their disposition "
+          "decides what they turned out to be. 0 draws a trade at random; high "
+          "values make people fall into the work they are shaped for.",
+          3.0, minimum=0.0, maximum=10.0),
     _spec("stakes_disposition_reach", "Stakes", "Character over station",
           "How much a person's warmth, honour and belonging override the "
           "insulation their standing gives them. High means a benevolent lord "
@@ -348,6 +364,9 @@ class Tuning:
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
+            role_prior_weight=self.get("role_prior_weight"),
+            culture_prior_weight=self.get("culture_prior_weight"),
+            role_fit_sharpness=self.get("role_fit_sharpness"),
             heritability=self.get("heritability"),
             trait_variance=self.get("trait_variance"),
             retention_variance=self.get("retention_variance"),
@@ -425,6 +444,9 @@ class GenerationTuning:
     heritability: float = 0.4
     trait_variance: float = 0.25
     retention_variance: float = 0.32
+    role_prior_weight: float = 0.5
+    culture_prior_weight: float = 0.5
+    role_fit_sharpness: float = 3.0
 
 
 # Module-level defaults, so every pure function has something sensible to fall

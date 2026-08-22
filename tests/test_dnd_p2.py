@@ -51,6 +51,7 @@ from helpers.dnd import minds  # noqa: E402
 from helpers.dnd.mind import needs as needs_mod  # noqa: E402
 from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
 from helpers.dnd.mind import stakes  # noqa: E402
+from helpers.dnd.mind import traits as traits_mod  # noqa: E402
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall  # noqa: E402
 from helpers.dnd.mind.memory import values as value_model  # noqa: E402
 from helpers.dnd.mind.traits import Traits, derive_traits  # noqa: E402
@@ -593,6 +594,55 @@ def test_stakes() -> None:
           abs(rich.weight - poor.weight) < 1e-9)
 
 
+def test_roles_emerge() -> None:
+    """A stereotype must be a distribution, not a rule printed on each person.
+
+    Read forwards, the role table stamps low honour on anyone called a thief and
+    every thief in the world is the same man twice. Read backwards it only
+    *notices* — so with the priors switched off entirely, thieves should still
+    come out less honourable on average, because dishonourable people are the
+    ones who fall into thieving. That is the whole difference.
+    """
+    from helpers.dnd.tuning import GenerationTuning
+
+    emergent = GenerationTuning(role_prior_weight=0.0, culture_prior_weight=0.0)
+    rng = Random(11)
+    people = [derive_traits(rng, tuning=emergent) for _ in range(400)]
+    landed: dict[str, list[float]] = {}
+    for person in people:
+        role = traits_mod.suggest_role(person, rng, sharpness=emergent.role_fit_sharpness)
+        landed.setdefault(role, []).append(person.honour)
+
+    def mean(role: str) -> float:
+        values = landed.get(role) or [0.5]
+        return sum(values) / len(values)
+
+    check("roles: NO prior applied at all", emergent.role_prior_weight == 0.0)
+    check("roles: yet thieves are less honourable than priests",
+          mean("thief") < mean("priest") - 0.1,
+          f"thief {mean('thief'):.3f} vs priest {mean('priest'):.3f}")
+    check("roles: the stereotype is a distribution, not a rule",
+          any(h > 0.6 for h in landed.get("thief", [])),
+          "no honest thief exists in 400 people")
+    check("roles: several trades are represented", len(landed) >= 6)
+
+    # Fit reads the same table backwards and must never flatten anyone.
+    honest = Traits(honour=0.9)
+    crooked = Traits(honour=0.1)
+    check("roles: fit notices an odd thief",
+          traits_mod.fit(honest, "thief") < traits_mod.fit(crooked, "thief"))
+    check("roles: and says so in words",
+          "thief" in traits_mod.describe_fit(traits_mod.fit(honest, "thief"), "thief"))
+
+    # And the top-down path is still available for populating a world fast.
+    stamped = GenerationTuning(role_prior_weight=1.0)
+    rng2 = Random(5)
+    typical = [derive_traits(rng2, role="thief", tuning=stamped).honour for _ in range(60)]
+    free = [derive_traits(rng2, role="thief", tuning=emergent).honour for _ in range(60)]
+    check("roles: archetype mode still available for fast worlds",
+          sum(typical) / len(typical) < sum(free) / len(free))
+
+
 def test_end_to_end() -> None:
     campaign, store = _campaign(9301, "Minds")
 
@@ -656,6 +706,7 @@ def main() -> int:
         test_everything_tunable,
         test_relationships,
         test_stakes,
+        test_roles_emerge,
         test_end_to_end,
     ):
         test()
