@@ -178,8 +178,57 @@ The cube is the whole trick. Linear needs produce NPCs who constantly fidget
 about being slightly peckish; cubed, hunger is invisible at 0.4 and dominates at
 0.9. That is how needs feel real without being annoying.
 
-Unmet needs above threshold also generate **impulses** (`05-MEMORY.md` §6) and
-apply ruleset conditions (exhaustion, etc.).
+Unmet needs above threshold also generate **impulses** (`05-MEMORY.md` §6).
+
+### 5a. Deprivation changes the person, not just the choice
+
+Urgency alone only makes a hungry NPC *pick eating*. That is a vending machine
+with a personality attached. Deprivation has to reach three further places, or
+needs stay a number on an inspector page:
+
+**Mood — the appraisal shift.** Sustained deprivation modulates the traits that
+`06-DECISION-ENGINE.md` §4 appraises with: volatility up, warmth down, patience
+down, and risk tolerance *up* — desperate people take chances a fed version of
+themselves would not. This is a **temporary modulation applied at the
+orchestration edge**, never a write to the stored trait. Traits are who someone
+is and are stable (§4); this is what a bad week does to them, and it lifts when
+they eat. `mind/needs.py` returns the modifier; `minds.py` composes it with the
+base traits before handing an `EntityView` to the engine.
+
+**Stats — ruleset conditions.** Crossing a deprivation threshold applies a
+mechanical penalty *through the ruleset*, never directly: `freeform` adds to the
+harm track (which already subtracts from everything you attempt), `srd5e` adds
+levels of exhaustion. The engine says "this entity is at severity 3"; the
+ruleset decides what that costs.
+
+**Catastrophe — optional, and off by default.** With `need_lethal` enabled,
+sustained maximum deprivation escalates on a per-need clock rather than all at
+once: *impaired → incapacitated → dying → dead*. Thirst runs fastest, then
+exhaustion, then hunger, with warmth conditional on climate. Death emits a
+`WorldEvent` like anything else, so witnesses encode it, relationships shift and
+rumours propagate — an NPC starving in a siege is a story beat the world already
+knows how to carry.
+
+**The interlock that matters:** lethality must stay off until the decision
+engine can actually *satisfy* a need. At P2 nothing can eat, so needs peg at
+1.00 within a day and stay there — turning this on would empty the world in a
+week for no narrative reason. Ship the switch defaulted off, and gate the panel
+control behind a warning that says exactly this.
+
+Tunables, all layered default → server → campaign like everything else, and each
+able to go to zero:
+
+| Key | Does | Off means |
+| --- | --- | --- |
+| `need_mood_reach` | how far deprivation bends disposition | needs never colour mood |
+| `need_condition_reach` | how hard thresholds hit the ruleset track | no mechanical penalty |
+| `need_lethal` | whether deprivation can kill (**default off**) | NPCs suffer but never die |
+| `need_days_to_death_{thirst,hunger,cold}` | the per-need clock once dying starts | — |
+| `need_recovery_rate` | how fast satisfaction unwinds the above | — |
+
+A campaign that wants none of this sets `need_mood_reach` and
+`need_condition_reach` to 0 and leaves `need_lethal` off; needs then do nothing
+but rank actions, which is the P2 behaviour preserved exactly.
 
 ## 6. Beliefs — what this entity thinks is true
 

@@ -119,6 +119,10 @@ that proves it worked.
 *Playable as: a world that keeps turning while you sleep.*
 
 - Appraisal, impulses
+- **Deprivation effects** (`04-ENTITIES.md` §5a) — needs bend mood and apply
+  ruleset conditions, not just rank actions. Optional lethality, **default off**
+  and interlocked: it stays off until NPCs can act to feed themselves, or a
+  campaign left alone empties itself in a week.
 - Utility scoring, softmax selection, decision traces
 - Behaviour packs in the global KB
 - Simulation tiers, dormant extrapolation
