@@ -111,7 +111,21 @@ class Entity:
 
     # 0..1. Drives memory budget and tier promotion (docs/dnd/05-MEMORY.md §5).
     # A nameless guard and a named questgiver should not cost the same to run.
+    # **This is a simulation-cost knob and nothing else.** PCs sit at 1.0 because
+    # they are always fully simulated, which says nothing about their standing in
+    # the world — see `standing` below, which is the field that used to be
+    # missing and got substituted for, making every PC immune to every event.
     importance: float = 0.5
+
+    # 0..1. What they have to absorb a shock with: money, rank, security, people
+    # who owe them. A merchant lord shrugs off a debt that ends a dock hand's
+    # life, and that difference is what `mind/stakes.py` reads. Deliberately
+    # separate from `importance`: a beloved pauper matters enormously to the
+    # story and can still be ruined by four marks.
+    #
+    # Middling by default, because most people are. Rulesets that model wealth
+    # can derive it; until one does, it is set per entity.
+    standing: float = 0.5
 
     # Declared for P2; nothing writes them yet.
     traits: dict | None = None
@@ -139,6 +153,7 @@ class Entity:
             "inventory": list(self.inventory),
             "position": self.position.to_doc(),
             "importance": float(self.importance),
+            "standing": float(self.standing),
             "traits": self.traits,
             "inheritance": self.inheritance,
             "needs": self.needs,
@@ -165,6 +180,7 @@ class Entity:
             inventory=list(doc.get("inventory") or []),
             position=Position.from_doc(doc.get("position")),
             importance=float(doc.get("importance", 0.5)),
+            standing=float(doc.get("standing", 0.5)),
             traits=doc.get("traits"),
             inheritance=doc.get("inheritance"),
             needs=doc.get("needs"),

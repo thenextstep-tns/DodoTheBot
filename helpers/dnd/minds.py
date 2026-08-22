@@ -431,7 +431,7 @@ def interact(
         pressure = need_pressure(holder, world_time, tuning)
         stake = stakes.stake_for(
             size * share,
-            stakes.capacity_of(holder.importance, traits_of(holder), tuning=stake_tuning),
+            stakes.capacity_of(holder.standing, traits_of(holder), tuning=stake_tuning),
             awareness=awareness,
             need_pressure=pressure,
             tuning=stake_tuning,
@@ -482,6 +482,7 @@ def spawn_npc(
     culture: str = "",
     pronouns: str = "they/them",
     importance: float | None = None,
+    standing: float | None = None,
     world_time: int = 0,
     rng: Random,
     ruleset=None,
@@ -536,6 +537,7 @@ def spawn_npc(
                 "derived": True,
             },
             importance=max(0.0, min(1.0, importance)),
+            standing=0.5 if standing is None else max(0.0, min(1.0, standing)),
         )
     )
 

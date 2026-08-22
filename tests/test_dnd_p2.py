@@ -527,11 +527,11 @@ def test_stakes() -> None:
     """
     campaign, store = _campaign(9401, "Stakes")
     lord = minds.spawn_npc(store, name="Vashen", role="merchant lord",
-                           world_time=0, rng=Random(2), importance=0.95)
+                           world_time=0, rng=Random(2), importance=0.95, standing=0.95)
     debtor = minds.spawn_npc(store, name="Teo", role="dock hand",
-                             world_time=0, rng=Random(5), importance=0.15)
+                             world_time=0, rng=Random(5), importance=0.15, standing=0.12)
     crowd = minds.spawn_npc(store, name="Fishwife", role="fishwife",
-                            world_time=0, rng=Random(8), importance=0.3)
+                            world_time=0, rng=Random(8), importance=0.3, standing=0.3)
 
     result = minds.interact(
         store, lord, debtor, "helped", world_time=0, rng=Random(1),
@@ -554,7 +554,7 @@ def test_stakes() -> None:
     # --- station must not decide character ------------------------------- #
     def as_lord(name, warmth, honour, belonging):
         entity = minds.spawn_npc(store, name=name, role="lord", world_time=0,
-                                 rng=Random(3), importance=0.95)
+                                 rng=Random(3), importance=0.95, standing=0.95)
         doc = dict(entity.traits)
         doc.update(warmth=warmth, honour=honour, belonging=belonging)
         entity.traits = doc
@@ -564,7 +564,7 @@ def test_stakes() -> None:
     cold = as_lord("Cold", -0.6, 0.2, 0.2)
     warm = as_lord("Warm", 0.8, 0.85, 0.8)
     servant = minds.spawn_npc(store, name="Nurse", role="servant", world_time=0,
-                              rng=Random(6), importance=0.15)
+                              rng=Random(6), importance=0.15, standing=0.12)
     cold_result = minds.interact(store, servant, cold, "helped", world_time=0,
                                  rng=Random(1), description="nursed them through a fever")
     warm_result = minds.interact(store, servant, warm, "helped", world_time=0,
@@ -583,7 +583,7 @@ def test_stakes() -> None:
     check("stakes: but it is worth less than one they can credit",
           hidden["stakes"][debtor.id].weight
           < stakes.stake_for(stakes.default_magnitude("saved"),
-                             stakes.capacity_of(debtor.importance,
+                             stakes.capacity_of(debtor.standing,
                                                 minds.traits_of(debtor))).weight)
 
     # --- and all of it switches off -------------------------------------- #
@@ -592,6 +592,33 @@ def test_stakes() -> None:
     poor = stakes.stake_for(0.5, stakes.capacity_of(0.15), tuning=flat)
     check("stakes: circumstances can be switched off entirely",
           abs(rich.weight - poor.weight) < 1e-9)
+
+    # --- standing is not importance -------------------------------------- #
+    # PCs are pinned at importance 1.0 because they are always fully simulated.
+    # Reading that as insulation made capacity exactly 1 and every stake exactly
+    # zero, so nothing that happened to a player character ever cost them
+    # anything — a bug wearing the merchant lord's clothes.
+    from helpers.dnd.world.entity import KIND_PC, Entity, Identity
+    pc = store.entities.create(Entity(
+        guild_id=store.guild_id, campaign_id=store.campaign_id, kind=KIND_PC,
+        owner_id=42, identity=Identity(name="Player", role="thief"),
+        importance=1.0,
+    ))
+    check("stakes: a PC keeps importance 1.0 for simulation depth",
+          pc.importance == 1.0)
+    check("stakes: but standing is its own, middling field", pc.standing == 0.5)
+    hit = minds.interact(store, debtor, pc, "betrayed", world_time=0, rng=Random(2),
+                         description="sold them to the Compact")
+    check("stakes: SOMETHING CAN HAPPEN TO A PLAYER CHARACTER",
+          not hit["stakes"][pc.id].negligible and pc.id in hit["memories"],
+          f"stake {hit['stakes'][pc.id].weight:.3f}")
+
+    pc.standing = 0.95
+    store.entities.save(pc)
+    rich_hit = minds.interact(store, debtor, pc, "betrayed", world_time=0, rng=Random(2),
+                              description="sold them to the Compact")
+    check("stakes: and standing alone decides how much",
+          rich_hit["stakes"][pc.id].weight < hit["stakes"][pc.id].weight)
 
 
 def test_roles_emerge() -> None:

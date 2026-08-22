@@ -429,11 +429,16 @@ Each party's **stake** scales both how far their relationship moves and how
 firmly they remember, and a stake beneath noticing forms **no memory at all**.
 Three inputs:
 
-- **Capacity** — how insulated they are. Standing (`importance`) sets the
-  ceiling; **disposition decides how much of it applies.** A warm, honourable
+- **Capacity** — how insulated they are. `standing` sets the ceiling; **disposition decides how much of it applies.** A warm, honourable
   lord notices what his household does for him; a cold one of identical rank
   does not. Deriving insulation from rank alone would hardcode *"the powerful
   never care"*, which is a cliché, not a rule.
+  **`standing` is its own field, not `importance`.** Importance is a
+  simulation-cost knob and PCs are pinned at 1.0 on it because they are
+  always fully simulated — reading it as insulation made capacity exactly
+  1 for every player character, so nothing that happened to a PC could
+  ever cost them anything. A beloved pauper matters enormously to the
+  story and can still be ruined by four marks.
 - **Need pressure** — what it relieved. Bread means more to the starving.
   Deliberately *not* folded into capacity: being thirsty this afternoon should
   not lower a man's station, and with nothing yet able to satisfy a need (§5a)

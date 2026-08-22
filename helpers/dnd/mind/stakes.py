@@ -130,7 +130,7 @@ KIND_MAGNITUDE: dict[str, float] = {
 # --------------------------------------------------------------------------- #
 #  Capacity
 # --------------------------------------------------------------------------- #
-def capacity_of(importance: float, traits=None,
+def capacity_of(standing: float, traits=None,
                 *, tuning: StakesTuning = DEFAULT_STAKES) -> float:
     """How insulated someone is from an event — standing, tempered by character.
 
@@ -147,9 +147,12 @@ def capacity_of(importance: float, traits=None,
     intact or worse. At ``disposition_reach: 0`` this collapses back to standing
     alone, for a table that wants the simple version.
 
-    ``importance`` is the closest thing the entity model has to standing, and it
-    already scales memory budget and simulation depth, so it does double duty
-    honestly: a figure who matters has more to fall back on.
+    ``standing`` is what the world has given them to absorb a shock with. It is
+    **not** ``importance``: that field is a simulation-cost knob, and PCs are
+    pinned at 1.0 on it because they are always fully simulated. Reading it here
+    made ``room`` exactly zero for every player character, so no event could
+    cost a PC anything, ever — a bug that looked exactly like the intended
+    merchant-lord behaviour and hid inside it.
 
     **Need pressure deliberately does not enter here.** It was tempting — a
     starving lord is less insulated than a fed one — but capacity is a standing
@@ -164,7 +167,6 @@ def capacity_of(importance: float, traits=None,
     right channel: being desperate makes help matter more; it does not make you
     less of a lord.
     """
-    standing = clamp01(importance)
     if traits is None or tuning.disposition_reach <= 0:
         return standing
     return clamp01(standing * (1.0 - tuning.disposition_reach * attentiveness(traits)))

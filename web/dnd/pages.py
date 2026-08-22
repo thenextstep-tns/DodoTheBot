@@ -949,6 +949,20 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <table class="ranktable"><tbody>{trait_rows}</tbody></table>
   {override_rows}
 
+  <h2>Circumstances</h2>
+  <p class="muted small">What they can absorb a loss with — money, rank, security,
+  people who owe them. This decides whether an event costs them anything: a debt
+  that ends a dock hand's life is a shrug to a merchant lord. Unlike disposition
+  it is <b>meant</b> to be set and changed — someone comes into money, someone
+  is ruined.</p>
+  <table class="ranktable"><tbody>
+    <tr><td>Standing</td><td>{_meter(entity.standing)}
+      <input type="number" class="dndtrait" data-axis="standing"
+             step="0.05" min="0" max="1" value="{entity.standing:.2f}"></td></tr>
+    <tr><td>Importance <span class="muted small">(simulation cost only)</span></td>
+      <td>{_axis_cell(entity.importance)}</td></tr>
+  </tbody></table>
+
   <h2>Body</h2>
   <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
   <table class="ranktable"><tbody>{need_rows}</tbody></table>

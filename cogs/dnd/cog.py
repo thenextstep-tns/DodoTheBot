@@ -299,6 +299,8 @@ class Tabletop(commands.Cog, name="dnd"):
                 ),
                 stats=stats,
                 importance=1.0,          # PCs are always fully simulated
+                # ...which says nothing about what they can afford to lose.
+                # standing stays at its middling default; edit it in the panel.
                 position=Position(),
             )
         )
@@ -813,6 +815,7 @@ class Tabletop(commands.Cog, name="dnd"):
         species="Optional.",
         pronouns="Optional. Defaults to they/them.",
         importance="0-1. How much they matter: drives memory capacity and simulation depth.",
+        standing="0-1. What they can absorb a loss with — money, rank, security.",
     )
     async def npc_create(
         self,
@@ -823,6 +826,7 @@ class Tabletop(commands.Cog, name="dnd"):
         species: str = "",
         pronouns: str = "they/them",
         importance: float | None = None,
+        standing: float | None = None,
     ) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -850,6 +854,7 @@ class Tabletop(commands.Cog, name="dnd"):
             culture=culture.strip(),
             pronouns=(pronouns or "they/them").strip(),
             importance=importance,
+            standing=standing,
             world_time=found.campaign.world_time,
             rng=rng,
             ruleset=rules.get(found.campaign.ruleset),

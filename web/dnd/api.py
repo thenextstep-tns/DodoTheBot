@@ -315,7 +315,10 @@ async def api_dnd_entity_traits(request: web.Request):
         return error
 
     axis = str(data.get("axis", ""))
-    if axis not in TEMPERAMENT + DRIVES + FACULTIES:
+    # `standing` is not a trait. It is a circumstance — what the world has given
+    # them to absorb a loss with — and unlike disposition it is *supposed* to be
+    # set and changed by the GM: someone comes into money, someone is ruined.
+    if axis != "standing" and axis not in TEMPERAMENT + DRIVES + FACULTIES:
         return _bad("Unknown trait axis.")
 
     raw_id = str(data.get("entity_id", ""))
@@ -334,10 +337,14 @@ async def api_dnd_entity_traits(request: web.Request):
     low = -1.0 if axis in TEMPERAMENT else 0.0
     value = round(max(low, min(1.0, value)), 3)
 
-    doc = dict(entity.traits or {})
-    was = doc.get(axis)
-    doc[axis] = value
-    entity.traits = doc
+    if axis == "standing":
+        was = entity.standing
+        entity.standing = max(0.0, min(1.0, value))
+    else:
+        doc = dict(entity.traits or {})
+        was = doc.get(axis)
+        doc[axis] = value
+        entity.traits = doc
     store.entities.save(entity)
 
     await _record_change(
