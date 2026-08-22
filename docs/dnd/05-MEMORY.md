@@ -142,6 +142,31 @@ too. The two compound — what you notice more, you also keep longer.
 Every memory carries a one-line reason a GM can read: *"holds onto this (greed)"*,
 *"nothing in their values holds this"*.
 
+### It follows what they believe, too
+
+Drives are what someone *wants*; beliefs are what they hold to be *true*, and
+those bear on memory separately. A memory that speaks to a live belief is
+handled differently from one that says nothing about anything they think:
+
+- **Confirming** a held belief reinforces the memory *and* the belief. This is
+  the engine of a grudge. Every remembered slight that fits "nobody here is
+  honest" makes both the memory and the conviction harder to shift, which is
+  why people become more sure of things over time rather than less.
+- **Contradicting** one goes two ways, and **which way is a matter of
+  disposition** — this is where `openness` earns its place. A rigid character
+  suppresses the memory that will not fit: it decays faster, motivated
+  forgetting, and the belief survives intact. An open one is *arrested* by it:
+  the memory sticks hard, and the belief takes the damage instead.
+
+That second bullet is the whole reason to build this. Two NPCs shown identical
+disproving evidence should end up in opposite places — one of them remembers it
+and changes their mind, the other genuinely does not remember it — and both
+are behaving correctly.
+
+`mind/memory/values.py` computes the drive half today; the belief half is the
+same shape and needs the belief kinds in `03-KNOWLEDGE-BASE.md` §4, since only
+`value`-kind beliefs should exert this pull hard enough to bend a decade.
+
 ### Fields rot in order
 
 Per-field base stability, longest-lived first:

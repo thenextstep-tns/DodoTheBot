@@ -131,6 +131,12 @@ that proves it worked.
   extrapolated in closed form for dormant entities. Nothing writes traits after
   creation today, so §3's "temperament shifts when an imprint forms" is
   specified and unbuilt.
+- **Rupture** (`04-ENTITIES.md` §3b) — sustained extreme exposure breaks one axis
+  past the drift ceiling, permanently and narrowly. Default off and gated by the
+  campaign's lines (`11-SAFETY.md`), not merely tunable.
+- **Beliefs bend memory** (`05-MEMORY.md` §4) — confirming a belief reinforces
+  the memory, contradicting it either sticks or is suppressed depending on
+  `openness`. Only the drive half of that is built.
 - Utility scoring, softmax selection, decision traces
 - Behaviour packs in the global KB
 - Simulation tiers, dormant extrapolation
