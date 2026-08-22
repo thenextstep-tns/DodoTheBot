@@ -750,13 +750,35 @@ _TIER_LABELS = {
 
 
 def _meter(value: float, low: float = 0.0, high: float = 1.0) -> str:
-    """A proportional bar. Rendered with a plain div so it needs no new CSS."""
-    pct = max(0, min(100, round((value - low) / (high - low) * 100)))
+    """A bar for one axis, drawn from the centre when the axis is signed.
+
+    Two things were wrong with the previous version. It hardcoded a dark track
+    (``#3a3a3a``) and filled it with ``currentColor``, which on the light panel
+    was black on charcoal. And it filled every bar from the left — so warmth
+    −0.33 drew a third of a bar, reading as *a bit warm* when it means the
+    opposite. A signed axis has to diverge from its zero or it is telling the
+    reader the wrong thing.
+    """
+    span = (high - low) or 1.0
+    if low < 0:
+        # Signed: zero is the middle, and the fill grows out toward its sign.
+        amount = max(-1.0, min(1.0, value / max(abs(low), abs(high))))
+        width = abs(amount) * 50.0
+        left = 50.0 if amount >= 0 else 50.0 - width
+        sign = "pos" if amount >= 0 else "neg"
+        return (
+            f'<span class="meter signed"><i class="{sign}" '
+            f'style="left:{left:.1f}%;width:{width:.1f}%"></i></span>'
+        )
+    width = max(0.0, min(100.0, (value - low) / span * 100.0))
+    return f'<span class="meter"><i class="pos" style="left:0;width:{width:.1f}%"></i></span>'
+
+
+def _axis_cell(value: float, low: float = 0.0, high: float = 1.0) -> str:
+    """Meter plus its number, aligned so a column of them can be read down."""
     return (
-        f'<span style="display:inline-block;width:90px;height:8px;background:#3a3a3a;'
-        f'border-radius:4px;vertical-align:middle">'
-        f'<span style="display:block;width:{pct}%;height:100%;background:currentColor;'
-        f'border-radius:4px"></span></span>'
+        f'<span class="metrow">{_meter(value, low, high)}'
+        f'<span class="metval">{value:+.2f}</span></span>'
     )
 
 
@@ -820,7 +842,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
         label = _escape(TRAIT_LABELS.get(axis, axis))
         trait_rows += (
             f'<tr><td>{label}</td>'
-            f'<td>{_meter(value, low, 1.0)} {value:+.2f}</td></tr>'
+            f'<td>{_axis_cell(value, low, 1.0)}</td></tr>'
         )
         override_rows += (
             f'<tr><td>{label}</td><td>'
@@ -850,7 +872,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
         urgency = needs.urgency(name, tuning.needs())
         need_rows += (
             f'<tr><td>{_escape(label)}</td>'
-            f'<td>{_meter(value)} {value:.2f} <span class="muted small">'
+            f'<td>{_axis_cell(value)} <span class="muted small">'
             f'(urgency {urgency:.3f})</span></td></tr>'
         )
 

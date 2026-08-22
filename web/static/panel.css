@@ -1080,3 +1080,19 @@ body.board { background: var(--color-surface-soft); }
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .warnbox p { margin: 0 0 6px; }
 .warnbox p:last-child { margin-bottom: 0; }
+
+/* Axis meters. Signed axes diverge from the centre: warmth −0.33 must not draw
+   a third of a bar from the left, which reads as mildly warm and means the
+   opposite. Colours are tokens, not the hardcoded charcoal that used to render
+   as black-on-black in the light theme. */
+.metrow { display: inline-flex; align-items: center; gap: 10px; }
+.metval { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted);
+  font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+.meter { position: relative; display: inline-block; width: 132px; height: 9px;
+  background: var(--color-surface-soft); border: 1px solid var(--color-hairline);
+  border-radius: 5px; vertical-align: middle; overflow: hidden; flex: none; }
+.meter > i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.meter > i.pos { background: var(--color-primary); }
+.meter > i.neg { background: var(--color-ink); opacity: .55; }
+.meter.signed::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 1px; background: var(--color-hairline); z-index: 1; }
