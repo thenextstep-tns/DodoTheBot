@@ -454,43 +454,11 @@ async def on_message(message: discord.Message) -> None:
     except Exception as error:
         bot.logger.error(f"Failed to archive message: {error}")
 
-    content = message.content.lower()
-
-    if "no u" in content or "no you" in content:
-        channel = bot.get_channel(message.channel.id)
-        nou_answers = [
-            "no u", "no you", "No, you", "No You!", "NO YOU!", "NO YOUUU!!",
-            "No, Tomtem!", "no, Ducky.", "no, this time it's definitely you", "nope, you all the way",
-        ]
-        taunted_answers = [
-            "Ah sh*t, here we go again.", "Don't make me angy. You wouldn't like me when I'm angy",
-            "...", "it's time to stop", "http://dodos.fun/wp-content/uploads/2021/05/angy.jpg",
-            "a trolling is happening",
-        ]
-        await channel.send(random.choice(taunted_answers if random.randint(0, 10) < 5 else nou_answers))
-
-    elif (
-        any(kw in content for kw in ("schedule", "trials", "chappelles-tyrone-tyrone-biggums-gif", "raids", "happening"))
-        and not message.author.bot
-    ):
-        for reaction in config_py.addons:
-            await message.add_reaction(reaction)
-
-        def check(reaction, user):
-            return str(reaction) in config_py.addons and user.id == message.author.id
-
-        try:
-            reaction, _user = await bot.wait_for("reaction_add", timeout=15, check=check)
-            if config_py.addons[reaction.emoji] == 0:
-                context = await bot.get_context(message)
-                await _invoke_command(context, "schedule123")
-                await message.clear_reactions()
-        except asyncio.TimeoutError:
-            await message.clear_reactions()
-
-    elif any(phrase in content for phrase in ("support cat", "goodnight cat", "good night cat")):
-        context = await bot.get_context(message)
-        await _invoke_command(context, "cat")
+    # The phrase listeners that used to live here — "no u", the raid-signup
+    # keywords, "support cat" — are chat triggers now (helpers/chat/triggers.py,
+    # edited on the panel's Events page). They were unconditional, invisible and
+    # unreachable from the panel, and the "no u" one fired *ahead* of the chat
+    # cog's own banter trigger, so the tunable version never got a word in.
 
     if message.author.id in config_py.DODOLOVE:
         await message.add_reaction(random.choice(["❤️", "💖", "💕", "💞", "💘", "❣️"]))
@@ -521,19 +489,6 @@ async def _dispatch_chat(message: discord.Message) -> None:
         await cog.handle_message(message)
     except Exception as error:  # noqa: BLE001 - never break the gateway over chat
         bot.logger.exception(f"chat listener failed: {error}")
-
-
-async def _invoke_command(context: commands.Context, name: str, **kwargs) -> None:
-    """Invoke a registered command by name, no-op (with a log) if it isn't loaded.
-
-    Guards the on_message hooks while cogs are being migrated to discord.py — a
-    not-yet-loaded command simply does nothing instead of raising.
-    """
-    command = bot.get_command(name)
-    if command is None:
-        bot.logger.debug(f"Command '{name}' is not loaded; skipping invoke.")
-        return
-    await context.invoke(command, **kwargs)
 
 
 @bot.event

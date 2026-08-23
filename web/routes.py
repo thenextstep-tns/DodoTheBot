@@ -1150,6 +1150,19 @@ def _trigger_card(trigger: dict) -> str:
       {"checked" if trigger.get(chat_triggers.K_FORGIVES) else ""}> clears every grudge</label>
   </div>
   <div class="muted small">Canned lines cost nothing and keep working after the daily API cap is spent.</div>
+  <div class="rulegrid">
+    <label>Or run this command instead
+      <input type="text" class="trigcommand" placeholder="e.g. cat — blank means she talks"
+        value="{html.escape(trigger.get(chat_triggers.K_COMMAND) or "")}"></label>
+    <label>Ask first with this emoji
+      <input type="text" class="trigconfirm" placeholder="blank = run it straight away"
+        value="{html.escape(trigger.get(chat_triggers.K_CONFIRM) or "")}"></label>
+    <label>Seconds to answer
+      <input type="number" class="trigconfirmsecs" step="1" min="3" max="120"
+        value="{int(trigger.get(chat_triggers.K_CONFIRM_SECONDS, 15) or 15)}"></label>
+  </div>
+  <div class="muted small">A command trigger never reaches the language model and needs no API key.
+  With an emoji set she offers it and only runs it if the person who spoke clicks.</div>
   <div class="rulebtns"><button class="trigsave">Save</button></div>
 </div>"""
 
@@ -3752,9 +3765,13 @@ async def api_guild_chat_trigger(request: web.Request):
                     data.get(key) if isinstance(data.get(key), str) else "\n".join(data.get(key) or []),
                     field=key, max_length=validate.MAX_TEXT)
         for key in (chat_triggers.K_SPICE, chat_triggers.K_AFFINITY, chat_triggers.K_GRUDGE,
-                    chat_triggers.K_CHANCE, chat_triggers.K_REFLEX_CHANCE):
+                    chat_triggers.K_CHANCE, chat_triggers.K_REFLEX_CHANCE,
+                    chat_triggers.K_CONFIRM_SECONDS):
             if key in data:
                 clean[key] = data[key]
+        for key in (chat_triggers.K_COMMAND, chat_triggers.K_CONFIRM):
+            if key in data:
+                clean[key] = validate.text(data.get(key) or "", field=key, max_length=60)
         for key in (chat_triggers.K_FORGIVES, chat_triggers.K_ENABLED):
             if key in data:
                 clean[key] = validate.boolean(data.get(key), field=key)

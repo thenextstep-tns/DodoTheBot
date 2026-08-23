@@ -89,6 +89,24 @@ Two buttons on the page:
 * **Reset to defaults** — deletes everything and re-seeds. The only way to pull
   in *improved wording* for a trigger that already exists, and it discards edits.
 
+## Triggers that run a command
+
+A trigger can name a **command** instead of talking. It skips the router, the
+dial and the model entirely, and needs no API key — it is an action, not speech.
+With a **confirm emoji** set she offers the command and runs it only if the
+person who spoke clicks, which is the difference between offering a signup sheet
+and dumping one in the channel every time somebody says "trials".
+
+This exists because `bot.py`'s `on_message` used to carry its own hardcoded
+phrase listeners — `"no u"`, the raid-signup keywords, `"support cat"` — with no
+route to the panel and no way to turn them off. The `"no u"` one was the worst of
+it: unconditional, and positioned *ahead* of the chat cog, so the tunable
+`banter` trigger it duplicated never got a word in. Its lines were good, so they
+live in that trigger's canned pool now.
+
+If a phrase makes Dodo do something, it belongs in this table. There is no
+second place for it.
+
 ## Reading what she is actually told
 
 `py -3.13 tests/preview_chat.py` prints the real assembled prompt for thirteen

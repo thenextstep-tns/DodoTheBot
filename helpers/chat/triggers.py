@@ -44,6 +44,9 @@ K_FORGIVES = "forgives"
 K_CHANCE = "chance"
 K_REFLEX = "reflex"
 K_REFLEX_CHANCE = "reflex_chance"
+K_COMMAND = "command"
+K_CONFIRM = "confirm"
+K_CONFIRM_SECONDS = "confirm_seconds"
 K_WHOLE_WORD = "whole_word"
 K_ENABLED = "enabled"
 K_ORDER = "order"
@@ -97,6 +100,9 @@ DEFAULT_TRIGGERS: list[dict] = [
                 "invent a bigger number than theirs, and concede nothing under any circumstances. "
                 "If they are repeating you, that is worse and you should say so.",
         K_SPICE: 2, K_AFFINITY: -1, K_GRUDGE: 0.0, K_CHANCE: 0.4, K_REFLEX_CHANCE: 0.65,
+        # The bottom third came from the hardcoded "no u" listener that used to
+        # live in bot.py and fire unconditionally, ahead of this trigger. The
+        # lines were good; the always-on, unconfigurable delivery was not.
         K_REFLEX: [
             "NO U. times infinity. plus one hundred. i win, do not look at me.",
             "no u but louder and with a beak",
@@ -107,6 +113,13 @@ DEFAULT_TRIGGERS: list[dict] = [
             "i am rubber and you are also rubber but worse rubber",
             "this is my server and in my server i am right",
             "you have LOST and you do not even KNOW it yet",
+            "no, this time it's definitely you",
+            "nope, you all the way",
+            "Ah sh*t, here we go again.",
+            "Don't make me angy. You wouldn't like me when I'm angy",
+            "it's time to stop",
+            "a trolling is happening",
+            "...",
         ],
     },
     {
@@ -197,6 +210,32 @@ DEFAULT_TRIGGERS: list[dict] = [
         K_SPICE: 2, K_AFFINITY: 4, K_GRUDGE: 0.0, K_CHANCE: 0.2, K_REFLEX_CHANCE: 0.0,
         K_REFLEX: [],
     },
+    # --- triggers that run a command rather than talk --------------------- #
+    # These two were hardcoded phrase lists in bot.py's on_message. They belong
+    # here: same shape, same page, and now a server can change the words, the
+    # command, or turn them off without a deploy.
+    {
+        K_NAME: "cat",
+        K_PATTERNS: ["support cat", "goodnight cat", "good night cat"],
+        K_NOTE: "",
+        K_COMMAND: "cat",
+        K_SPICE: 0, K_AFFINITY: 0, K_GRUDGE: 0.0, K_CHANCE: 1.0, K_REFLEX_CHANCE: 0.0,
+        K_REFLEX: [],
+    },
+    {
+        K_NAME: "raid-signup",
+        K_PATTERNS: ["schedule", "trials", "raids", "happening",
+                     "chappelles-tyrone-tyrone-biggums-gif"],
+        K_NOTE: "",
+        K_COMMAND: "schedule123",
+        # Offered rather than run: she adds the eye and waits for the person who
+        # said it to click. Nobody wants a signup sheet every time the word
+        # "trials" appears.
+        K_CONFIRM: "\U0001F440",
+        K_CONFIRM_SECONDS: 15,
+        K_SPICE: 0, K_AFFINITY: 0, K_GRUDGE: 0.0, K_CHANCE: 1.0, K_REFLEX_CHANCE: 0.0,
+        K_REFLEX: [],
+    },
 ]
 
 
@@ -207,7 +246,8 @@ class Trigger:
     """A stored trigger with its patterns compiled once."""
 
     __slots__ = ("id", "name", "note", "spice", "affinity", "grudge", "forgives",
-                 "chance", "reflex", "reflex_chance", "enabled", "patterns", "_regex")
+                 "chance", "reflex", "reflex_chance", "enabled", "patterns", "_regex",
+                 "command", "confirm", "confirm_seconds")
 
     def __init__(self, document: dict) -> None:
         self.id = str(document.get(K_ID, ""))
@@ -221,6 +261,12 @@ class Trigger:
         self.reflex = [line for line in document.get(K_REFLEX) or [] if str(line).strip()]
         self.reflex_chance = float(document.get(K_REFLEX_CHANCE, 0.0))
         self.enabled = bool(document.get(K_ENABLED, True))
+        # A trigger can run a command instead of talking. That is what the
+        # hardcoded phrase listeners in bot.py were doing, badly: unconditional,
+        # invisible, and unreachable from the panel.
+        self.command = str(document.get(K_COMMAND) or "").strip()
+        self.confirm = str(document.get(K_CONFIRM) or "").strip()
+        self.confirm_seconds = int(document.get(K_CONFIRM_SECONDS, 15) or 15)
         self.patterns = [str(p) for p in document.get(K_PATTERNS) or [] if str(p).strip()]
         whole_word = bool(document.get(K_WHOLE_WORD, True))
         self._regex = _compile(self.patterns, whole_word)
@@ -412,6 +458,12 @@ def _clean(data: dict, *, partial: bool = False) -> dict[str, Any]:
         out[K_CHANCE] = _clamp_float(data.get(K_CHANCE), 0.0, 1.0, 0.0)
     if want(K_REFLEX_CHANCE):
         out[K_REFLEX_CHANCE] = _clamp_float(data.get(K_REFLEX_CHANCE), 0.0, 1.0, 0.0)
+    if want(K_COMMAND):
+        out[K_COMMAND] = str(data.get(K_COMMAND) or "").strip()[:60]
+    if want(K_CONFIRM):
+        out[K_CONFIRM] = str(data.get(K_CONFIRM) or "").strip()[:8]
+    if want(K_CONFIRM_SECONDS):
+        out[K_CONFIRM_SECONDS] = _clamp_int(data.get(K_CONFIRM_SECONDS), 3, 120, 15)
     if want(K_FORGIVES):
         out[K_FORGIVES] = bool(data.get(K_FORGIVES, False))
     if want(K_WHOLE_WORD):

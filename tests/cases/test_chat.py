@@ -213,7 +213,9 @@ assert "short" in persona and "nobody in a chat wants" in persona, \
     "brevity has to be stated, not only enforced by the dial"
 print("persona         brevity is stated, and inventing an answer is forbidden outright")
 
-for spec in trigger_model.DEFAULT_TRIGGERS:
+speakers = [spec for spec in trigger_model.DEFAULT_TRIGGERS
+            if not spec.get(trigger_model.K_COMMAND)]
+for spec in speakers:
     note = spec.get(trigger_model.K_NOTE, "")
     assert note and not note.isupper(), f"{spec[trigger_model.K_NAME]}: a shouted note"
     assert not note.lstrip().lower().startswith(("be ", "act ", "respond ")), \
@@ -221,8 +223,18 @@ for spec in trigger_model.DEFAULT_TRIGGERS:
          "Describe what happened; the dial handles intensity.")
 print("triggers        every default note describes a situation, not a performance")
 
+# A trigger that runs a command is an action, not speech: it must not carry a
+# note or a flourish budget, because neither reaches anything.
+for spec in trigger_model.DEFAULT_TRIGGERS:
+    if not spec.get(trigger_model.K_COMMAND):
+        continue
+    assert not spec.get(trigger_model.K_NOTE), \
+        f"{spec[trigger_model.K_NAME]}: a command trigger never reaches the model"
+    assert not spec.get(trigger_model.K_REFLEX), f"{spec[trigger_model.K_NAME]}: unreachable lines"
+print("triggers        command triggers carry no prompt text they could never use")
+
 pools = {spec[trigger_model.K_NAME]: spec.get(trigger_model.K_REFLEX) or []
-         for spec in trigger_model.DEFAULT_TRIGGERS}
+         for spec in speakers}
 for name, lines in pools.items():
     assert len(lines) != 1, f"{name}: a one-line pool repeats itself immediately"
     assert len(set(lines)) == len(lines), f"{name}: duplicate canned lines"

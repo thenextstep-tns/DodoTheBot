@@ -31,6 +31,7 @@ SILENT = "silent"          # noticed, said nothing
 JOINED = "joined"          # walked into a conversation uninvited
 ABSTAINED = "abstained"    # joined in and then decided it had nothing to add
 FAILED = "failed"          # the model call errored
+RAN = "ran"                # a trigger ran a command instead of talking
 
 # How each outcome reads in the panel, and the colour class it gets.
 OUTCOMES = {
@@ -40,6 +41,7 @@ OUTCOMES = {
     JOINED: ("joined in", "warn"),
     ABSTAINED: ("nothing to add", "muted"),
     FAILED: ("failed", "bad"),
+    RAN: ("ran a command", "ok"),
 }
 
 MAX_TEXT = 140

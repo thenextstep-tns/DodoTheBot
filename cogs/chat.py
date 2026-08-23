@@ -18,7 +18,9 @@ in-memory state, and the model is only reached once a decision to speak has
 already been made.
 """
 
+import asyncio
 import json
+import random
 import time
 
 from openai import OpenAI, OpenAIError
@@ -203,6 +205,13 @@ class Chat(commands.Cog, name=COG_NAME):
         listening = self.bot.visibility.feature_active(guild_id, FEATURE_LISTEN, COG_NAME)
         trigger = self.bot.chat_triggers.match(guild_id, text) if (listening and guild_id) else None
 
+        # A trigger that runs a command is an action, not speech: it skips the
+        # router, the dial and the model entirely, and needs no API key.
+        if trigger is not None and trigger.command:
+            await self._run_command(message, trigger)
+            self._absorb(message, trigger)
+            return
+
         decision = self.router.decide(
             addressed=addressed,
             trigger=trigger,
@@ -231,6 +240,54 @@ class Chat(commands.Cog, name=COG_NAME):
             return
 
         await self._speak(message, decision)
+
+    async def _run_command(self, message: discord.Message, trigger) -> None:
+        """Run the command a trigger names, optionally offering it first.
+
+        With ``confirm`` set she reacts with that emoji and runs the command only
+        if the person who spoke clicks it — the difference between offering a
+        signup sheet and dumping one in the channel every time somebody says
+        "trials".
+        """
+        command = self.bot.get_command(trigger.command)
+        if command is None:
+            self.bot.logger.debug(f"chat: trigger {trigger.name} names unknown command "
+                                  f"{trigger.command!r}")
+            return
+        if random.random() >= trigger.chance * self._param(message.guild, "chat_ambient_multiplier"):
+            self._record(message, trigger, activity_model.SILENT, router_model.R_CHANCE)
+            return
+
+        context = await self.bot.get_context(message)
+        if trigger.confirm:
+            if not await self._confirmed(message, trigger):
+                self._record(message, trigger, activity_model.SILENT, "not confirmed")
+                return
+        self._record(message, trigger, activity_model.RAN, f"/{trigger.command}")
+        await context.invoke(command)
+
+    async def _confirmed(self, message: discord.Message, trigger) -> bool:
+        """Offer the command with a reaction; True if the author takes it up."""
+        try:
+            await message.add_reaction(trigger.confirm)
+        except (discord.HTTPException, discord.Forbidden):
+            return False
+
+        def taken(reaction, user):
+            return (str(reaction.emoji) == trigger.confirm
+                    and user.id == message.author.id
+                    and reaction.message.id == message.id)
+
+        try:
+            await self.bot.wait_for("reaction_add", timeout=trigger.confirm_seconds, check=taken)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            try:
+                await message.remove_reaction(trigger.confirm, self.bot.user)
+            except (discord.HTTPException, discord.Forbidden):
+                pass
 
     def _record(self, message, trigger, outcome: str, reason: str,
                 said: str = "", spice=None) -> None:

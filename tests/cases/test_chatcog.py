@@ -128,6 +128,13 @@ run = asyncio.run
 NOTHING = {"say": "", "felt": 0, "learned": None, "rumour": None}
 
 
+def _async(fn):
+    """Wrap a plain function so it can stand in for an awaited bot method."""
+    async def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return wrapper
+
+
 # --------------------------------------------------------------------------- #
 #  Being addressed
 # --------------------------------------------------------------------------- #
@@ -218,6 +225,42 @@ assert spoke is not None and spoke["said"] == "hello", spoke
 assert spoke["spice"] is not None, "a reply should log the budget it was given"
 assert bot.chat_activity.fires(GUILD_ID).get("insult") == 1, bot.chat_activity.fires(GUILD_ID)
 print("cog             every decision lands in the activity log, silent ones included")
+
+
+# --------------------------------------------------------------------------- #
+#  Triggers that run a command instead of talking
+# --------------------------------------------------------------------------- #
+# These were hardcoded phrase lists in bot.py's on_message. Moving them here is
+# only a win if they still fire — and if they still do it without an API key,
+# since none of them ever needed one.
+RAN = []
+
+cog, bot, guild, channel, dodo_role = build()
+bot.get_command = lambda name: name
+bot.get_context = _async(lambda message: type("Ctx", (), {
+    "invoke": staticmethod(_async(lambda cmd: RAN.append(cmd)))})())
+bot.chat_triggers.create(GUILD_ID, {
+    trigger_model.K_NAME: "cat", trigger_model.K_PATTERNS: ["support cat"],
+    trigger_model.K_COMMAND: "cat", trigger_model.K_CHANCE: 1.0,
+})
+cog._client_for = lambda guild, author: None   # no API key anywhere
+run(cog.handle_message(Message(ada, "support cat pls", guild=guild, channel=channel)))
+assert RAN == ["cat"], f"the command trigger did not run its command: {RAN}"
+assert CALLS == [], "a command trigger must never reach the model"
+ran = bot.chat_activity.recent(GUILD_ID)[0]
+assert ran["outcome"] == activity_model.RAN and ran["reason"] == "/cat", ran
+print("cog             a command trigger runs its command, with no API key and no model call")
+
+RAN.clear()
+cog, bot, guild, channel, dodo_role = build()
+bot.get_command = lambda name: None            # command not loaded
+bot.chat_triggers.create(GUILD_ID, {
+    trigger_model.K_NAME: "cat", trigger_model.K_PATTERNS: ["support cat"],
+    trigger_model.K_COMMAND: "cat", trigger_model.K_CHANCE: 1.0,
+})
+run(cog.handle_message(Message(ada, "support cat", guild=guild, channel=channel)))
+assert RAN == [] and channel.sent == [], "an unloaded command should be a quiet no-op"
+print("cog             a trigger naming a missing command fails quietly")
 
 
 # --------------------------------------------------------------------------- #

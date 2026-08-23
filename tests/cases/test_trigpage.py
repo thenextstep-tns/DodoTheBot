@@ -70,7 +70,8 @@ print("page            the chat cog links to the triggers, and the page signpost
 script = pathlib.Path("web/static/panel.js").read_text(encoding="utf-8")
 for selector in (".trigname", ".trigpatterns", ".trignote", ".trigreflex", ".trigspice",
                  ".trigaffinity", ".triggrudge", ".trigchance", ".trigreflexchance",
-                 ".trigforgives", ".trigsave", ".trigtoggle", ".trigdelete"):
+                 ".trigforgives", ".trigsave", ".trigtoggle", ".trigdelete",
+                 ".trigcommand", ".trigconfirm", ".trigconfirmsecs"):
     assert f'class="{selector[1:]}' in html or selector[1:] in html, \
         f"the page never renders {selector}"
     assert selector in script, f"nothing in panel.js binds {selector}"
@@ -159,5 +160,25 @@ for expected in ("Ada", "no u", "said nothing", "chance", "canned line", "say it
 assert bot.chat_activity.fires(guild.id) == {"banter": 1, "praise": 1},     bot.chat_activity.fires(guild.id)
 assert "banter" in live and "praise" in live
 print("page            silent matches are visible, with the reason they stayed silent")
+
+# The hardcoded phrase listeners that used to live in bot.py are triggers now.
+# The "no u" one in particular fired unconditionally and ahead of the tunable
+# banter trigger, so the configurable version never got a word in.
+source = "\n".join(line for line in pathlib.Path("bot.py").read_text(encoding="utf-8").splitlines()
+                   if not line.lstrip().startswith("#"))
+for gone in ('"no u" in content', "support cat", "goodnight cat",
+             "chappelles-tyrone-tyrone-biggums-gif", "nou_answers", "taunted_answers"):
+    assert gone not in source, f"bot.py still hardcodes a phrase listener: {gone!r}"
+print("page            bot.py no longer hardcodes any phrase listener")
+
+names = {spec[trigger_model.K_NAME] for spec in trigger_model.DEFAULT_TRIGGERS}
+assert {"cat", "raid-signup"} <= names, "the command triggers did not survive the move"
+banter = next(spec for spec in trigger_model.DEFAULT_TRIGGERS
+              if spec[trigger_model.K_NAME] == "banter")
+assert "a trolling is happening" in banter[trigger_model.K_REFLEX],     "the old hardcoded lines were dropped rather than moved"
+raid = next(spec for spec in trigger_model.DEFAULT_TRIGGERS
+            if spec[trigger_model.K_NAME] == "raid-signup")
+assert raid[trigger_model.K_COMMAND] == "schedule123" and raid[trigger_model.K_CONFIRM],     "the raid signup should still be offered rather than dumped in the channel"
+print("page            their phrases and lines moved intact, and are now editable")
 
 print("PASS")

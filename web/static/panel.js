@@ -451,6 +451,9 @@ if (_trigPage) {
         grudge: val(".triggrudge"),
         chance: val(".trigchance"),
         reflex_chance: val(".trigreflexchance"),
+        command: val(".trigcommand"),
+        confirm: val(".trigconfirm"),
+        confirm_seconds: val(".trigconfirmsecs"),
         forgives: card.querySelector(".trigforgives").checked,
       });
       flash(res.ok ? "trigger saved ✓" : (res.error || "Failed"), res.ok);
