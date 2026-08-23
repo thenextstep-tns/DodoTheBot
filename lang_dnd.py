@@ -148,8 +148,7 @@ TT_NPC_CREATED = ("**{name}** exists now — {traits}. {fit}"
 TT_NPC_FIT = "*{fit}.* "
 TT_NPC_EXISTS = "There's already someone called **{name}** in this campaign."
 TT_NPC_ARCHETYPE_UNKNOWN = (
-    "There is no **{given}** archetype in this campaign. There is: {known}.
-"
+    "There is no **{given}** archetype in this campaign. There is: {known}.\n"
     "Add your own on the campaign page, under Archetypes."
 )
 TT_NPC_NOT_FOUND = "No one called **{name}** in this campaign."
