@@ -410,6 +410,27 @@ TUNABLES: list[dict] = [
           "to their first. At 1 they are equally both; low and the first one is "
           "who they are with the rest as shading.",
           0.45, minimum=0.05, maximum=1.0),
+    _spec("pack_shaping", "Behaviour", "Asking for one shapes them",
+          "How far *asking* for an archetype pulls the character you get toward "
+          "it. This is the quick way to make a coward: name one when you create "
+          "an NPC and their disposition is drawn toward it. A pull, not a stamp — "
+          "two cowards are still two people. **0 gives you the label and whoever "
+          "the dice produced.**",
+          0.6, minimum=0.0, maximum=1.0),
+    _spec("pack_drift", "Behaviour", "People become what they do",
+          "How fast the mixture someone is drifts. Nobody is one archetype and "
+          "nobody stays the same blend: a stretch of being frightened pulls them "
+          "toward the archetypes that answer fear, and what they actually do "
+          "pulls hardest of all. Over a campaign a coward who keeps having to "
+          "fight stops being one. **0 freezes who everybody is**, which is right "
+          "for a one-shot.",
+          0.05, minimum=0.0, maximum=1.0),
+    _spec("pack_drift_from_action", "Behaviour", "Doing it makes you it",
+          "How much one committed action counts toward who somebody is becoming, "
+          "against the slower pull of what they are living through. High and a "
+          "single act redefines them; **0 and only circumstance shapes anyone**, "
+          "never their own choices.",
+          0.5, minimum=0.0, maximum=2.0),
     _spec("candidate_cap", "Behaviour", "Options weighed at once",
           "The most actions a character will consider in one decision, the ones "
           "they lean toward most kept. This is what stops a crowded room costing "
@@ -631,6 +652,9 @@ class Tuning:
             count=int(self.get("pack_count")),
             fit_sharpness=self.get("pack_fit_sharpness"),
             falloff=self.get("pack_falloff"),
+            shaping=self.get("pack_shaping"),
+            drift=self.get("pack_drift"),
+            drift_from_action=self.get("pack_drift_from_action"),
             candidate_cap=int(self.get("candidate_cap")),
         )
 
@@ -813,12 +837,20 @@ class BehaviourTuning:
     count: int = 2
     fit_sharpness: float = 3.0
     falloff: float = 0.45
+    shaping: float = 0.6            # how far asking for an archetype pulls traits
+    drift: float = 0.05             # how fast the mixture someone is moves
+    drift_from_action: float = 0.5  # how much what they did counts toward it
     candidate_cap: int = 24
 
     @property
     def off(self) -> bool:
         """Whether archetypes shape anything at all."""
         return self.count <= 0
+
+    @property
+    def fixed(self) -> bool:
+        """Whether who somebody is can change at all."""
+        return self.drift <= 0
 
 
 @dataclass(frozen=True)

@@ -339,6 +339,21 @@ class Tabletop(commands.Cog, name="dnd"):
             found.store.campaigns.add_player(found.campaign.id, interaction.user.id)
 
         ruleset = rules.get(found.campaign.ruleset)
+        # Both directions. Blank rolls a person and *notices* what they are;
+        # named pulls them toward it before anything else happens.
+        wanted = archetype.strip().lower()
+        if wanted:
+            available = minds.packs_for(found.store, found.campaign).available()
+            if wanted not in available:
+                await interaction.response.send_message(
+                    lang_dnd.TT_NPC_ARCHETYPE_UNKNOWN.format(
+                        given=archetype.strip(),
+                        known=", ".join(sorted(available)),
+                    ),
+                    ephemeral=True,
+                )
+                return
+
         seq = found.store.campaigns.next_seq(found.campaign.id)
         stats = ruleset.blank_sheet(
             {"name": name, "role": role, "species": species or ""},
@@ -893,6 +908,7 @@ class Tabletop(commands.Cog, name="dnd"):
         pronouns="Optional. Defaults to they/them.",
         importance="0-1. How much they matter: drives memory capacity and simulation depth.",
         standing="0-1. What they can absorb a loss with — money, rank, security.",
+        archetype="Optional. coward, predator, merchant… shapes who you get. Leave blank to roll.",
     )
     async def npc_create(
         self,
@@ -904,6 +920,7 @@ class Tabletop(commands.Cog, name="dnd"):
         pronouns: str = "they/them",
         importance: float | None = None,
         standing: float | None = None,
+        archetype: str = "",
     ) -> None:
         found = context.resolve(interaction)
         if not found:
@@ -935,6 +952,7 @@ class Tabletop(commands.Cog, name="dnd"):
             world_time=found.campaign.world_time,
             rng=rng,
             ruleset=rules.get(found.campaign.ruleset),
+            archetype=wanted,
         )
         found.store.events.append(
             events.NPC_SPAWNED,

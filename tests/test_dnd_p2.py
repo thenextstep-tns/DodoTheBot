@@ -55,7 +55,7 @@ from helpers.dnd.mind import stakes  # noqa: E402
 from helpers.dnd.mind import traits as traits_mod  # noqa: E402
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall  # noqa: E402
 from helpers.dnd.mind.memory import values as value_model  # noqa: E402
-from helpers.dnd.mind.traits import Traits, derive_traits  # noqa: E402
+from helpers.dnd.mind.traits import DRIVES, TEMPERAMENT, Traits, derive_traits  # noqa: E402
 from helpers.dnd.store import campaign_store, campaigns_for  # noqa: E402
 from helpers.dnd.store import beliefs as beliefs_module  # noqa: E402
 from helpers.dnd.store import campaigns as campaigns_module  # noqa: E402
@@ -1708,6 +1708,18 @@ def test_packs() -> None:
           pack_registry.validate({"key": "ghost", "weights": {}})[0] is None)
     check("packs: and one with no name",
           pack_registry.validate({"key": "  ", "weights": {"flee": 1}})[0] is None)
+    # Renaming an archetype edits it; naming a new one makes a new one. Getting
+    # this backwards would leave the coward untouched and add a second beside it.
+    check("packs: renaming an existing archetype keeps its key",
+          pack_registry.validate({"key": "coward", "label": "Coward (retuned)",
+                                  "weights": {"flee": 1}})[0]["key"] == "coward")
+    check("packs: and keeps the new name",
+          pack_registry.validate({"key": "coward", "label": "Coward (retuned)",
+                                  "weights": {"flee": 1}})[0]["label"] == "Coward (retuned)")
+    check("packs: a new one is slugged from the only name it was given",
+          pack_registry.validate({"label": "Zealot of the Drowned Court",
+                                  "weights": {"speak": 0.9}})[0]["key"]
+          == "zealot-of-the-drowned-court")
 
     # --- 2. Priors are read backwards ------------------------------------- #
     timid = Traits(boldness=-0.8, fear_of_death=0.9)
@@ -1799,6 +1811,119 @@ def test_packs() -> None:
               if s["key"].startswith("pack_") or s["key"] == "candidate_cap"))
 
 
+# --------------------------------------------------------------------------- #
+#  23. Archetypes work both ways, and nobody stays the same mixture
+# --------------------------------------------------------------------------- #
+def test_archetypes_both_ways() -> None:
+    available = pack_registry.reload()
+    tuning = Tuning().behaviour()
+    base = Traits(boldness=0.4, warmth=0.2, fear_of_death=0.4)
+
+    # --- 1. Forwards: ask for one and it shapes the person you get -------- #
+    shaped = behaviour.shaped_by(base, available["coward"], tuning)
+    check("both ways: ASKING FOR A COWARD MAKES A TIMID PERSON",
+          shaped.boldness < base.boldness and shaped.fear_of_death > base.fear_of_death,
+          f"boldness {base.boldness:+.2f}→{shaped.boldness:+.2f}")
+    check("both ways: it is a pull, not a stamp — they keep some of themselves",
+          shaped.boldness > available["coward"].priors["boldness"])
+    check("both ways: axes the archetype says nothing about are untouched",
+          shaped.warmth == base.warmth)
+    check("both ways: SHAPING SWITCHES OFF ENTIRELY",
+          behaviour.shaped_by(base, available["coward"],
+                              Tuning(campaign={"pack_shaping": 0}).behaviour()) == base)
+    check("both ways: and traits stay in range",
+          all(-1 <= shaped.axis(a) <= 1 for a in TEMPERAMENT)
+          and all(0 <= shaped.axis(a) <= 1 for a in DRIVES))
+
+    # --- 2. Backwards still works, and the two meet ----------------------- #
+    campaign, store = _campaign(9318, "Both Ways")
+    asked = [minds.spawn_npc(store, name=f"Coward {i}", archetype="coward",
+                             world_time=0, rng=Random(i)) for i in range(3)]
+    rolled = [minds.spawn_npc(store, name=f"Rolled {i}", world_time=0, rng=Random(i))
+              for i in range(3)]
+    check("both ways: an asked-for archetype leads the mixture",
+          all(minds.packs_of(e)[0].key == "coward" for e in asked),
+          str([minds.packs_of(e)[0].key for e in asked]))
+    check("both ways: THREE COWARDS ARE STILL THREE PEOPLE",
+          len({minds.packs_of(e)[1].key for e in asked}) > 1
+          or len({round(minds.traits_of(e).boldness, 2) for e in asked}) > 1)
+    check("both ways: and rolling one still notices what they are",
+          all(minds.packs_of(e) for e in rolled))
+    check("both ways: an unknown archetype is ignored rather than fatal",
+          minds.spawn_npc(store, name="Nobody", archetype="wyrmherd",
+                          world_time=0, rng=Random(9)) is not None)
+
+    # --- 3. Everyone is a weighted mixture, not a type -------------------- #
+    someone = minds.packs_of(asked[0])
+    check("both ways: a character is several archetypes at once", len(someone) >= 2)
+    check("both ways: weighted, and adding up to one person",
+          abs(sum(a.weight for a in someone) - 1.0) < 0.02)
+
+    # Which one is in force depends on what is being considered: the part of
+    # them that flees is not the part of them that bargains.
+    packs = minds.packs_for(store, campaign).available()
+    mixed = [pack_model.Assignment("coward", 0.6), pack_model.Assignment("predator", 0.4)]
+    fleeing, _ = behaviour.leaning(mixed, packs, "flee")
+    taking, source = behaviour.leaning(mixed, packs, "take")
+    check("both ways: THE ARCHETYPE IN FORCE DEPENDS ON THE SITUATION",
+          behaviour.leaning(mixed, packs, "flee")[1] == "coward" and source == "predator",
+          f"flee via {behaviour.leaning(mixed, packs, 'flee')[1]}, take via {source}")
+
+    # --- 4. The mixture moves with what they live through ----------------- #
+    frightened = minds.needs_mod.Needs(safety=0.9, pain=0.3)
+    scared_self = behaviour.momentary(base, frightened)
+    check("both ways: being frightened makes somebody momentarily more timid",
+          scared_self.boldness < base.boldness
+          and scared_self.fear_of_death > base.fear_of_death)
+    check("both ways: and the record itself is untouched", base.boldness == 0.4)
+
+    predator = [pack_model.Assignment("predator", 0.8), pack_model.Assignment("zealot", 0.2)]
+    after = predator
+    for _ in range(60):
+        after = behaviour.drifted(after, available, base, needs=frightened, tuning=tuning)
+    keys = [a.key for a in after]
+    check("both ways: A BAD ENOUGH MONTH TURNS A PREDATOR INTO A COWARD",
+          keys[0] == "coward", str([(a.key, a.weight) for a in after]))
+    check("both ways: without erasing who they were", "predator" in keys)
+
+    # And what they *do* pulls hardest of all.
+    coward = [pack_model.Assignment("coward", 0.7), pack_model.Assignment("merchant", 0.3)]
+    fought = coward
+    for _ in range(60):
+        fought = behaviour.drifted(fought, available, base, verb="attack", tuning=tuning)
+    check("both ways: A COWARD WHO KEEPS FIGHTING STOPS BEING ONE",
+          [a.key for a in fought][0] != "coward", str([(a.key, a.weight) for a in fought]))
+    check("both ways: an archetype nobody started with can be arrived at",
+          "predator" in [a.key for a in fought])
+    check("both ways: DRIFT FREEZES ENTIRELY",
+          behaviour.drifted(coward, available, base, needs=frightened, verb="attack",
+                            tuning=Tuning(campaign={"pack_drift": 0}).behaviour())
+          == coward)
+    check("both ways: and the mixture stays normalised as it moves",
+          abs(sum(a.weight for a in fought) - 1.0) < 0.02)
+
+    # --- 5. Through the store, on real events ----------------------------- #
+    marla = _npc(store, campaign, "Marla", boldness=0.3)
+    ondry = _npc(store, campaign, "Ondry")
+    minds.assign_packs(store, marla, Random(2))
+    marla = store.entities.get(marla.id)
+    before = [(a.key, a.weight) for a in minds.packs_of(marla)]
+    for _ in range(20):
+        marla = store.entities.get(marla.id)
+        minds.relate(store, marla, ondry, "threatened", world_time=100)
+    after_events = [(a.key, a.weight) for a in minds.packs_of(store.entities.get(marla.id))]
+    check("both ways: EVENTS MOVE WHO SOMEBODY IS, THROUGH THE STORE",
+          after_events != before, f"{before} → {after_events}")
+
+    # --- 6. Tunables ------------------------------------------------------ #
+    keys = {s["key"] for s in TUNABLES}
+    check("both ways: every knob is registered",
+          {"pack_shaping", "pack_drift", "pack_drift_from_action"} <= keys)
+    check("both ways: grouped for the panel",
+          all(s["group"] == "Behaviour" for s in TUNABLES
+              if s["key"].startswith("pack_")))
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1824,6 +1949,7 @@ def main() -> int:
         test_entity_round_trip,
         test_attention,
         test_packs,
+        test_archetypes_both_ways,
         test_end_to_end,
     ):
         test()

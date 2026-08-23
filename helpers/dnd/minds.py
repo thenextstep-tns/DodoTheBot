@@ -321,7 +321,7 @@ def packs_of(entity: Entity) -> list:
 
 
 def assign_packs(store, entity: Entity, rng: Random, *, campaign=None,
-                 tuning: Tuning | None = None) -> list:
+                 tuning: Tuning | None = None, first=None) -> list:
     """Draw this entity's archetypes from who they already are, and store them.
 
     Called at generation. Separate from ``spawn_npc`` so a GM can re-roll
@@ -331,11 +331,40 @@ def assign_packs(store, entity: Entity, rng: Random, *, campaign=None,
     tuning = tuning or tuning_for(store, campaign)
     available = packs_for(store, campaign).available().values()
     assignments = behaviour.assign(
-        traits_of(entity), available, rng, tuning.behaviour()
+        traits_of(entity), available, rng, tuning.behaviour(), first=first
     )
     entity.packs = pack_model.assignments_to(assignments) or None
     store.entities.save(entity)
     return assignments
+
+
+def drift_packs(store, entity: Entity, *, world_time: int, verb: str = "",
+                campaign=None, tuning: Tuning | None = None) -> list:
+    """Move the mixture this entity is, one step.
+
+    Called after events. ``verb`` is what they actually committed to, when there
+    was one — that is the strongest pull, because people become what they do.
+    Without it only what they are living through moves them, which is the slower
+    half and still real.
+
+    Returns the new assignments when they changed, or ``[]`` when nothing moved,
+    so a caller can report a person turning into somebody else.
+    """
+    tuning = tuning or tuning_for(store, campaign)
+    behaviour_tuning = tuning.behaviour()
+    if behaviour_tuning.fixed or behaviour_tuning.off:
+        return []
+
+    before = packs_of(entity)
+    after = behaviour.drifted(
+        before, packs_for(store, campaign).available(), traits_of(entity),
+        needs=needs_of(entity, world_time, tuning), verb=verb,
+        tuning=behaviour_tuning,
+    )
+    if [(a.key, a.weight) for a in after] == [(b.key, b.weight) for b in before]:
+        return []
+    set_packs(store, entity, after)
+    return after
 
 
 def set_packs(store, entity: Entity, assignments) -> Entity:
@@ -999,6 +1028,9 @@ def relate(
     # here rather than on the tick because a grudge should cool when the thing
     # that cooled it happened, not on the next quarter hour.
     reweigh_goals(store, from_entity, subject_id=to_entity.id, tuning=tuning)
+    # And who they are follows what they live through. Nobody is one archetype
+    # and nobody stays the same mixture.
+    drift_packs(store, from_entity, world_time=world_time, tuning=tuning)
     return saved
 
 
@@ -1160,6 +1192,7 @@ def spawn_npc(
     rng: Random,
     ruleset=None,
     parents: list[Entity] | None = None,
+    archetype: str = "",
     tuning: Tuning | None = None,
 ) -> Entity:
     """Create an NPC with a personality, a body, and a past.
@@ -1178,6 +1211,16 @@ def spawn_npc(
     entity_traits = traits_mod.derive_traits(
         rng, culture=culture, parents=parent_traits, role=role, tuning=generation
     )
+
+    # Both directions, as asked. Left alone, an archetype is *noticed* in whoever
+    # the dice produced. Named, it pulls them toward it first — the quick way to
+    # get a coward when a coward is what the scene needs, and the one place in
+    # this engine where a prior is read forwards.
+    wanted = packs_for(store).get(archetype) if archetype else None
+    if wanted is not None:
+        entity_traits = behaviour.shaped_by(
+            entity_traits, wanted, tuning.behaviour()
+        )
     # No role given: roll the person first and ask what someone like that became.
     # This is the bottom-up path — over a population the trades sort themselves
     # by disposition, so the stereotype emerges as a distribution instead of
@@ -1217,7 +1260,7 @@ def spawn_npc(
     # Archetypes drawn from who they turned out to be, not from the label on
     # them — the same backwards read as the role, one line later so it can see
     # the finished disposition.
-    assign_packs(store, entity, rng, campaign=None, tuning=tuning)
+    assign_packs(store, entity, rng, campaign=None, tuning=tuning, first=wanted)
 
     for gist, valence, arousal in _seed_history(entity_traits, role, culture, rng):
         remember(

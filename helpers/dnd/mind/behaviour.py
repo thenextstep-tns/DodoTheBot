@@ -89,12 +89,16 @@ def describe_fit(value: float, label: str) -> str:
 
 
 def assign(traits: Traits, packs, rng: Random,
-           tuning: BehaviourTuning = DEFAULT_BEHAVIOUR) -> list[Assignment]:
+           tuning: BehaviourTuning = DEFAULT_BEHAVIOUR, first=None) -> list[Assignment]:
     """Which archetypes this person carries, and how much of them each accounts for.
 
     Weighted by fit rather than argmax, so the population sorts itself without
     any individual being forced into type. ``count`` of 0 returns nothing, which
     is packs switched off — the engine then proposes every affordance evenly.
+
+    ``first`` is the archetype a GM asked for: it takes the leading share and the
+    rest are drawn around it, so *give me a coward* gives you somebody who is
+    mostly a coward and still their own person.
     """
     candidates = [p for p in (packs or ()) if p.key]
     count = min(int(tuning.count), len(candidates))
@@ -103,7 +107,13 @@ def assign(traits: Traits, packs, rng: Random,
 
     pool = list(candidates)
     chosen: list[BehaviourPack] = []
-    for _ in range(count):
+    if first is not None:
+        named = next((p for p in pool if p.key == first.key), None)
+        if named is not None:
+            chosen.append(named)
+            pool.remove(named)
+
+    for _ in range(count - len(chosen)):
         if not pool:
             break
         weights = [
@@ -120,6 +130,115 @@ def assign(traits: Traits, packs, rng: Random,
     total = sum(raw) or 1.0
     return [Assignment(key=pack.key, weight=round(share / total, 4))
             for pack, share in zip(chosen, raw)]
+
+
+def shaped_by(traits: Traits, pack: BehaviourPack,
+              tuning: BehaviourTuning = DEFAULT_BEHAVIOUR) -> Traits:
+    """The table read **forwards**, on purpose and only when asked.
+
+    Everything else here reads priors backwards, because generating a population
+    top-down flattens it. But a GM saying *give me a coward* is not generating a
+    population, they are authoring one person, and refusing them the shortcut on
+    statistical grounds would be pedantry. So: asked for explicitly, applied
+    once, at creation.
+
+    A pull rather than a stamp — ``shaping`` of the way toward the archetype's
+    priors — so two cowards are still two people. At 0 asking for an archetype
+    gets you the label and whoever the dice produced.
+    """
+    if pack is None or not pack.priors or tuning.shaping <= 0:
+        return traits
+
+    doc = traits.to_doc()
+    for axis, offset in pack.priors.items():
+        if axis not in doc or not isinstance(doc[axis], (int, float)):
+            continue
+        drive = axis in DRIVES or axis in FACULTIES
+        # Priors are written on a −1..1 scale; drives live 0..1 around 0.5.
+        target = (0.5 + offset / 2.0) if drive else offset
+        low = 0.0 if drive else -1.0
+        moved = doc[axis] + tuning.shaping * (target - doc[axis])
+        doc[axis] = max(low, min(1.0, moved))
+    return Traits.from_doc(doc)
+
+
+def momentary(traits: Traits, needs=None) -> Traits:
+    """Who somebody is *right now*, as opposed to who they are.
+
+    A person who has been frightened and hurt for a month is a more cautious
+    person that month, and drift measured against their settled disposition
+    would never notice. Only the two axes that state plausibly bends are moved,
+    and the record itself is untouched — this is a lens, not a write.
+    """
+    if needs is None:
+        return traits
+    pressure = clamp01(max(float(getattr(needs, "safety", 0.0)),
+                           float(getattr(needs, "pain", 0.0))))
+    if pressure <= 0:
+        return traits
+    doc = traits.to_doc()
+    doc["boldness"] = max(-1.0, min(1.0, doc.get("boldness", 0.0) - pressure))
+    doc["fear_of_death"] = clamp01(doc.get("fear_of_death", 0.5) + pressure * 0.5)
+    return Traits.from_doc(doc)
+
+
+def drifted(assignments, packs: dict, traits: Traits, *, needs=None, verb: str = "",
+            tuning: BehaviourTuning = DEFAULT_BEHAVIOUR) -> list[Assignment]:
+    """Who somebody is becoming, one small step at a time.
+
+    Nobody is one archetype and nobody stays the same mixture. Two things move
+    the balance:
+
+    * **What they are living through.** Fit is measured against
+      :func:`momentary` rather than their settled disposition, so a stretch of
+      being frightened pulls them toward the archetypes that answer fear.
+    * **What they actually did.** Pass the ``verb`` they committed to and the
+      archetype that most reaches for it gains ground. Behaviour becomes
+      identity, slowly, which is the loop that makes a long campaign feel like
+      it happened to somebody.
+
+    Archetypes they do not currently carry are in the running too, so a person
+    can *become* an opportunist rather than only becoming more of one. The set
+    is trimmed back to ``count`` afterwards, so the mixture stays legible.
+
+    ``drift = 0`` freezes it: who someone is never changes, which is the right
+    setting for a one-shot.
+    """
+    live = {a.key: a.weight for a in (assignments or ())}
+    if tuning.drift <= 0 or not packs:
+        return [Assignment(key=k, weight=w) for k, w in live.items()]
+
+    self_now = momentary(traits, needs)
+    target: dict[str, float] = {}
+    for key, pack in packs.items():
+        # Sharpened the same way assignment is. A flat target is no target: six
+        # archetypes fitting middlingly well produce six near-equal shares, and
+        # renormalising afterwards then cancels the entire step — which is what
+        # this did until somebody watched a frightened month change nothing.
+        suits = max(0.0, (fit(self_now, pack) + 1.0) / 2.0) ** max(0.0, tuning.fit_sharpness)
+        target[key] = suits
+        if verb:
+            target[key] += pack.weight_for(verb) * tuning.drift_from_action
+
+    total = sum(target.values())
+    if total <= 0:
+        return [Assignment(key=k, weight=w) for k, w in live.items()]
+    target = {k: v / total for k, v in target.items()}
+
+    moved = {
+        key: live.get(key, 0.0) + tuning.drift * (target.get(key, 0.0) - live.get(key, 0.0))
+        for key in set(live) | set(target)
+    }
+    kept = sorted(moved.items(), key=lambda p: (-p[1], p[0]))
+    # One slot more than they are "made of", so an archetype that is growing has
+    # somewhere to grow. Trimming to exactly ``count`` each step discards the
+    # newcomer's progress every time, and the mixture then cannot change at all
+    # — it only shuffles the two you started with, which is not what anybody
+    # means by becoming something.
+    count = int(tuning.count) or len(kept)
+    kept = [(k, w) for k, w in kept[:count + 1] if w > 0.001]
+    share = sum(w for _, w in kept) or 1.0
+    return [Assignment(key=k, weight=round(w / share, 4)) for k, w in kept]
 
 
 # --------------------------------------------------------------------------- #

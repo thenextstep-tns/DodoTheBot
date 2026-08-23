@@ -54,7 +54,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**545 tests** across five suites, all passing:
+**578 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -239,14 +239,39 @@ checkable on its own:
    **A GM can add a smuggler from the panel**, which is precisely what the role
    and culture tables still cannot do (§7).
 
-   * **Priors are read backwards**, as with roles: `fit(traits, pack)` asks how
-     predator-shaped this person already is rather than stamping a temperament
-     on anyone labelled one. Assignment is weighted, not argmax, so the timid
-     soldier still happens — and the inspector says so out loud.
+   * **Both directions, by request.** Backwards is the default:
+     `fit(traits, pack)` asks how predator-shaped this person already is, and
+     assignment is weighted rather than argmax so the timid soldier still
+     happens. Forwards is opt-in — `/npc create archetype:coward` or
+     `spawn_npc(archetype=)` runs `shaped_by`, pulling the rolled disposition
+     toward the archetype's priors before anything else. `04-ENTITIES.md`
+     §3a-pre argues against forwards priors and is right *about generating a
+     population*; naming one for one NPC is authoring, not generation, and the
+     owner asked for both. `pack_shaping = 0` gives the label and whoever the
+     dice produced.
+   * **Nobody is one archetype and nobody stays the same mixture.** Everyone
+     carries `pack_count` of them, weighted, and `leaning()` takes the strongest
+     per verb rather than blending — so the part of someone that flees is not
+     the part that bargains, and which archetype is in force depends on what is
+     being considered. `behaviour.drifted` then moves the blend: fit is measured
+     against `momentary(traits, needs)` (a frightened month makes somebody
+     momentarily timid) and against **what they actually did**, so a coward who
+     keeps having to fight becomes a predator over ~60 events and a predator
+     having a terrible month becomes a coward. `minds.relate` drifts them on
+     every event. `pack_drift = 0` freezes everyone.
+     * The drift step keeps **one slot more** than `count`, because trimming to
+       exactly `count` discards a newcomer's progress every step and the mixture
+       can then only reshuffle what it started with.
+     * The drift *target* is sharpened by `fit_sharpness` for the same reason a
+       flat target is no target: six middling fits produce six near-equal shares
+       and renormalising cancels the whole step.
    * **A pack weights verbs, it never adds one.** Candidates are archetypes
      ∩ affordances, so nothing can propose what the scene forbids and adding an
      archetype can never widen what is possible. Weights for unknown verbs are
      dropped on load.
+   * **Editing:** a card sends its `key`, so renaming edits in place; the add
+     form sends only a name and the server slugs it. Sending the name as the key
+     from both would fork an archetype every time somebody renamed one.
    * `pack_count = 0` switches archetypes off **for people who already have
      them**, not merely for the next NPC generated — a setting that only affects
      future entities is a setting that looks broken.

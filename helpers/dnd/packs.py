@@ -136,6 +136,12 @@ class Packs:
         ]
 
 
+def _slug(text: str) -> str:
+    """A key from a name: lowercase, alphanumerics, dashes between words."""
+    parts = ["".join(c for c in word if c.isalnum()) for word in str(text).lower().split()]
+    return "-".join(part for part in parts if part)
+
+
 def validate(doc: dict) -> tuple[Optional[dict], str]:
     """Check a GM-authored pack. Returns ``(clean_doc, error)``.
 
@@ -144,11 +150,20 @@ def validate(doc: dict) -> tuple[Optional[dict], str]:
     verbs no ruleset grants are dropped quietly, because that is a definition
     getting tidier rather than a GM being wrong.
     """
-    key = str((doc or {}).get("key", "")).strip().lower().replace(" ", "-")
-    if not key or not all(c.isalnum() or c == "-" for c in key):
-        return None, "An archetype needs a short name: letters, numbers and dashes."
+    # A GM names an archetype once; the key is this module's business. Derived
+    # from the name only when there is no key already — an existing archetype
+    # keeps its key when it is renamed, or renaming the coward would quietly
+    # leave the coward alone and add a second archetype beside it.
+    doc = doc or {}
+    label = str(doc.get("label") or "").strip()
+    key = _slug(str(doc.get("key") or "") or label)
+    if not key:
+        return None, "An archetype needs a name."
 
-    pack = restricted_to(BehaviourPack.from_doc({**doc, "key": key}), AFFORDANCES)
+    pack = restricted_to(
+        BehaviourPack.from_doc({**doc, "key": key, "label": label or key}),
+        AFFORDANCES,
+    )
     if not any(v > 0 for v in pack.weights.values()):
         return None, (
             "An archetype that reaches for nothing would never propose anything. "

@@ -640,7 +640,8 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       const card = el.closest(".packcard");
       const data = await post(`/api/guild/${{gid}}/dnd/pack`, {{
         campaign_id: cid, action: "save", key: el.dataset.key,
-        label: (card.querySelector(".packlabel") || {{}}).value || el.dataset.key,
+        label: (card.querySelector(".packname") || {{}}).value || el.dataset.key,
+        description: (card.querySelector(".packdesc") || {{}}).value || "",
         weights: packWeights(card),
       }});
       if (data.ok) location.reload();
@@ -656,9 +657,12 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
   const packAdd = document.getElementById("packadd");
   if (packAdd) {{
     packAdd.addEventListener("click", async () => {{
+      // One name, not two. The short key is derived from it — asking for both
+      // and then only letting one be edited afterwards is a form that lies.
+      // No key: a new archetype is named once and the server slugs it. An
+      // existing one sends its key, so renaming edits it instead of forking it.
       const data = await post(`/api/guild/${{gid}}/dnd/pack`, {{
         campaign_id: cid, action: "save",
-        key: document.getElementById("packkey").value,
         label: document.getElementById("packlabel").value,
         description: document.getElementById("packdesc").value,
         weights: packWeights(document.getElementById("packnewweights")),
@@ -1135,6 +1139,24 @@ def _goals_section(entity, store, tuning, world_time: int) -> str:
   </div>"""
 
 
+def _pack_sliders(pack, lead=()) -> str:
+    """Nine leanings as sliders. Nine number boxes is a spreadsheet, and reading
+    an archetype off one is exactly as pleasant as it sounds."""
+    out = ""
+    for verb in AFFORDANCES:
+        value = pack.weight_for(verb) if pack is not None else 0.0
+        strong = " lead" if verb in lead else ""
+        out += (
+            f'<label class="packweight{strong}">'
+            f'<span>{_escape(AFFORDANCE_LABELS.get(verb, verb))}</span>'
+            f'<input type="range" step="0.05" min="0" max="1" data-verb="{verb}" '
+            f'value="{value:.2f}" oninput="this.nextElementSibling.value = '
+            f'(+this.value).toFixed(2)">'
+            f'<output>{value:.2f}</output></label>'
+        )
+    return out
+
+
 def _packs_section(guild, campaign, store, is_gm: bool) -> str:
     """The behaviour archetypes this campaign can draw on, and a way to add one.
 
@@ -1143,6 +1165,9 @@ def _packs_section(guild, campaign, store, is_gm: bool) -> str:
     the first of those tables to ship as data a GM can actually edit, which is
     the whole reason they are not a dict in a module.
     """
+    if not is_gm:
+        return ""
+
     registry = pack_registry.Packs.for_campaign(guild.id, campaign)
     available = registry.available()
     counts: dict = {}
@@ -1153,20 +1178,20 @@ def _packs_section(guild, campaign, store, is_gm: bool) -> str:
     cards = ""
     for key, pack in available.items():
         source = registry.source_of(key)
+        # Name the campaign rather than saying "this campaign": the page you are
+        # on is a campaign, and a badge that assumes you remember that reads like
+        # a claim about the whole server.
         badge = (
-            '<span class="chip">this campaign</span>' if source == "campaign"
-            else f'<span class="muted small">{_escape(source)}</span>'
+            f'<span class="chip">only in {_escape(campaign.name)}</span>'
+            if source == "campaign"
+            else '<span class="muted small">ships with the bot</span>'
+            if source == "builtin"
+            else '<span class="muted small">set for this server</span>'
         )
         reset = (
             f'<button class="dndpack-remove ghost" data-key="{_escape(key)}">'
-            'Back to the shipped one</button>'
+            f'Back to the shipped one</button>'
             if source == "campaign" and key in pack_registry.built_in() else ""
-        )
-        weights = "".join(
-            f'<label class="packweight">{_escape(AFFORDANCE_LABELS.get(verb, verb))}'
-            f'<input type="number" step="0.05" min="0" max="1" data-verb="{verb}"'
-            f' value="{pack.weight_for(verb):.2f}"></label>'
-            for verb in AFFORDANCES
         )
         used = counts.get(key, 0)
         cards += f"""
@@ -1174,38 +1199,33 @@ def _packs_section(guild, campaign, store, is_gm: bool) -> str:
   <summary><b>{_escape(pack.label)}</b> {badge}
     <span class="muted small">reaches for {_escape(', '.join(pack.reaches_for))}
     · {used} character{'' if used == 1 else 's'}</span></summary>
-  <p class="muted small">{_escape(pack.description)}</p>
-  <input type="text" class="packlabel" value="{_escape(pack.label)}" maxlength="40">
-  <div class="packweights">{weights}</div>
+  <input type="text" class="packname" value="{_escape(pack.label)}" maxlength="40"
+         placeholder="what to call it">
+  <input type="text" class="packdesc" value="{_escape(pack.description)}" maxlength="200"
+         placeholder="who this is, in a sentence">
+  <div class="packweights">{_pack_sliders(pack, pack.reaches_for)}</div>
   <button class="dndpack-save" data-key="{_escape(key)}">Save for this campaign</button>
   {reset}
 </details>"""
 
-    if not is_gm:
-        return ""
-    blank = "".join(
-        f'<label class="packweight">{_escape(AFFORDANCE_LABELS.get(verb, verb))}'
-        f'<input type="number" step="0.05" min="0" max="1" data-verb="{verb}" value="0.00">'
-        '</label>'
-        for verb in AFFORDANCES
-    )
     return f"""
   <p class="muted small">An archetype is a set of leanings across the things a
   scene can offer — a coward reaches for the door, a merchant reaches for a
-  conversation. Characters are drawn from one or two of these at generation,
-  by how well each fits the person they turned out to be, and the engine
-  proposes what their archetypes reach for <i>and the scene allows</i>. An
-  archetype can never widen what is possible, only weight it.</p>
-  <p class="muted small">The six that ship are a starting point. <b>Add your
-  own</b> — a smuggler, a zealot of a particular church — or save over a shipped
-  one to retune it for this campaign only.</p>
+  conversation. It works <b>both ways</b>: ask for one when you create an NPC and
+  it shapes the person you get, or let one be recognised in somebody you rolled
+  and it shapes what they consider doing. An archetype can never widen what is
+  possible, only weight it.</p>
+  <p class="packlayer">You are editing <b>{_escape(campaign.name)}</b>. Saving here
+  changes an archetype for this campaign only; the six that ship are untouched
+  everywhere else, and <i>Back to the shipped one</i> undoes an override.</p>
   {cards}
   <details class="packcard packnew">
     <summary><b>Add an archetype</b></summary>
-    <input type="text" id="packkey" placeholder="short name, e.g. smuggler" maxlength="24">
-    <input type="text" id="packlabel" placeholder="what to call it" maxlength="40">
-    <input type="text" id="packdesc" placeholder="who this is, in a sentence" maxlength="200">
-    <div class="packweights" id="packnewweights">{blank}</div>
+    <input type="text" class="packname" id="packlabel" maxlength="40"
+           placeholder="what to call it — Smuggler, Zealot of the Drowned Court">
+    <input type="text" class="packdesc" id="packdesc" maxlength="200"
+           placeholder="who this is, in a sentence">
+    <div class="packweights" id="packnewweights">{_pack_sliders(None)}</div>
     <button id="packadd">Add it</button>
   </details>"""
 
