@@ -98,8 +98,49 @@ def collect(app_only: bool = False) -> dict[str, list[str]]:
     return names
 
 
+SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".preview"}
+
+
+def unparseable() -> list[str]:
+    """Every Python file in the project that the interpreter cannot read.
+
+    The third outage this project has had was a strings module with a broken
+    literal in it: the cog imports it at load time, so the *whole tabletop cog*
+    went offline, and every suite stayed green because none of them import it.
+    The command checks below are deliberately static analysis of ``cogs/``, the
+    engine suites import ``helpers/`` and ``web/``, and nothing at all had ever
+    asked whether the rest of the repository still parses.
+
+    It is a cheap question. Ask it about everything.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    broken = []
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                ast.parse(open(path, encoding="utf-8").read())
+            except (SyntaxError, ValueError) as error:
+                broken.append(f"{os.path.relpath(path, root)}: {error}")
+    return broken
+
+
 def main() -> int:
     failed = False
+
+    # --- 0. everything the bot imports has to be readable ------------------ #
+    broken = unparseable()
+    for line in broken:
+        print(f"  FAIL {line}")
+    if broken:
+        print("       A module that will not parse takes every cog that imports "
+              "it offline at load time.")
+        failed = True
+    else:
+        print("  ok   every Python file in the project parses")
 
     # --- 1. no two cogs may claim the same top-level name ----------------- #
     names = collect()

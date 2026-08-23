@@ -39,6 +39,7 @@ the shape of them is the most useful thing in this file:
 | Disposition could insulate someone past their own station | Nothing asserted the documented ceiling |
 | Nothing ever left the `working` memory tier | `consolidate_scene` was written and called from nowhere |
 | **`standing` had never been persisted** — the inspector control posted, the endpoint set it, `EntityRepo.save` dropped it, the panel said "Saved." | `save()` named the fields it wrote, and `standing` was added for stakes without being added there. Nothing asserted a field survives a round trip |
+| **`lang_dnd.py` shipped unparseable and took the whole tabletop cog offline** | `test_command_names.py` is deliberately *static* — it `ast.parse`s `cogs/` and imports nothing; the engine suites import `helpers/` and `web/`. **Nothing had ever asked whether the rest of the repo parses.** It does now, first check in that suite |
 | A typo in any numeric tunable silently reset it to inherited, flashing "Saved." | The panel suite asserts on HTML; nothing types into a control. An unparseable number reads back as `""`, and `""` is this API's *clear the override* |
 
 **The human verdict on P0–P2: the mechanics are there and it is not playable.**
@@ -54,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**578 tests** across five suites, all passing:
+**579 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -90,7 +91,7 @@ each stated more than once, so treat them as settled:
 | `os.walk` yields `cogs.dnd`, not `cogs.dnd.` | DnD modules listed as cogs with dead Load buttons | `registry.is_dnd_extension` matches both |
 | Bash heredocs choke on this codebase's content | Silent truncation or parse errors | Write a `.py` patch script to the scratchpad and run it with `py` |
 | A `
-` inside a patch script's replacement string | Becomes a real newline and splits the target's source string in two — cost three separate repairs in one session | Escape it (`\n`), or use the Edit tool for anything containing escapes or `"""` |
+` inside a patch script's replacement string | Becomes a real newline and splits the target's source string in two — cost three separate repairs in one session, and later **a production outage**: `lang_dnd.py` shipped unparseable and the cog would not load | **Use the Edit tool** for any replacement containing an escape or `"""`. This trap was already written down and got walked into anyway, which is why the guard is now a test rather than a paragraph |
 | `python` ≠ `py` on this machine | `ModuleNotFoundError: discord` | Always use `py` |
 
 **A cog that loads fine in isolation can still fail in production.** Both outages
