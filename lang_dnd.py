@@ -193,6 +193,22 @@ TT_RELATE_UNKNOWN = "I don't know what `{kind}` means. Try one of: {kinds}"
 TT_RELATE_TITLE = "{a} → {b}"
 
 TT_ADVANCE_DONE = "**{days} day(s)** pass. {entities} mind(s) aged: {imprints} new imprint(s), {confab} misremembering, {pruned} memory/memories let go."
+# What the people in the world did with the time. Without this the whole
+# decision engine is invisible at the table: NPCs choose, act, move their goals
+# and change who they are, and the only report is how many minds aged.
+TT_ADVANCE_TURN = "\n\n**While that happened:**\n{lines}"
+TT_ADVANCE_TURN_LINE = "· {name} {verb}{target}{note}"
+TT_ADVANCE_TURN_MORE = "\n· …and {count} other(s)."
+TT_ADVANCE_TURN_QUIET = "\n\nNobody did anything worth reporting."
+# Why somebody did what they did — the decision trace, at the table rather than
+# only in the panel.
+TT_WHY_TITLE = "Why {name} {verb}"
+TT_WHY_NONE = "**{name}** has not acted of their own accord yet. Let some time pass with `/gm advance`."
+TT_WHY_CHOICE = "They chose **{verb}{target}** (score {utility:+.2f})."
+TT_WHY_OVER = "\nOver **{verb}** ({utility:+.2f}), drawn at temperature {temperature:.2f}."
+TT_WHY_CLOSE = " It was close — they could easily have done something else."
+TT_WHY_TERMS = "\n\n**What decided it**\n{lines}"
+TT_WHY_TERM_LINE = "· {label} **{value:+.2f}**"
 TT_ADVANCE_FROZEN = "**{days} day(s)** pass — but forgetting is switched off for this campaign, so nothing faded."
 # Timeless is not the same as frozen: nothing moved at all, on purpose.
 TT_ADVANCE_TIMELESS = ("This campaign is **timeless** — the clock is not part of it, so nothing aged. Change it under *This game's rules → How time works here*.")

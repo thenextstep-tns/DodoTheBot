@@ -758,6 +758,47 @@ def act(
     return report
 
 
+# What an action reads as when nothing narrates it. Deterministic, no model:
+# `08-LLM-LAYER.md` §5's non-AI path, and the difference between a decision
+# engine that runs and one anybody can tell is running.
+ACTED_PHRASES = {
+    "attack": "went for", "take": "took from", "give": "gave something to",
+    "speak": "spoke to", "flee": "got out", "hide": "went to ground",
+    "move": "moved off", "use": "used what they had", "wait": "did nothing",
+    "watch": "hung back and watched",
+}
+
+
+def describe_act(report: dict, names: dict | None = None) -> tuple[str, str, str]:
+    """One committed action as ``(name, verb, target)``, ready for a message.
+
+    Lives here rather than in the cog because the panel wants the same words:
+    two renderings of one event that disagree is how a GM stops trusting either.
+    """
+    names = names or {}
+    verb = ACTED_PHRASES.get(report.get("verb", ""), report.get("verb") or "acted")
+    target_id = report.get("target_id")
+    target = ""
+    if target_id is not None:
+        who = (names.get(target_id) or {}).get("name") or ""
+        target = f" **{who}**" if who else ""
+    return report.get("name", ""), verb, target
+
+
+def last_choice(store, entity: Entity):
+    """The most recent thing this entity chose of their own accord, with its
+    reasoning. ``None`` if they have never acted.
+
+    Read back from the **event log** rather than from anything on the entity,
+    which is the point of having put the trace there: weeks later, when nothing
+    remembers the state that produced a decision, the log still does.
+    """
+    for event in store.events.recent(200):
+        if event.kind == events.ACTED and event.actor_id == entity.id:
+            return event
+    return None
+
+
 def run_turn(store, campaign, *, world_time: int, rng: Random,
              tuning: Tuning | None = None) -> dict:
     """Let the world's people take a turn.

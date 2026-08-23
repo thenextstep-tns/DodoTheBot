@@ -153,6 +153,16 @@ TUNABLES: list[dict] = [
           "In-world hours from fed to desperate.", 48, kind="int", minimum=1, maximum=500),
     _spec("need_hours_thirst", "Needs", "Hours to parched",
           "In-world hours from watered to desperate.", 24, kind="int", minimum=1, maximum=500),
+    _spec("need_upkeep", "Needs", "Ordinary living covers it",
+          "How much of a day's hunger, thirst, cold and tiredness people simply "
+          "*handle* — eating, sleeping, finding a fire — between the moments a "
+          "campaign is actually about. The spans above are for somebody getting "
+          "**nothing**; this is how much of that ordinary life normally answers. "
+          "**0 means nobody ever eats or sleeps unless the simulation makes "
+          "them**, which sounds rigorous and plays as a world where every "
+          "character is permanently exhausted and does nothing but rest. Lower "
+          "it when you want a siege.",
+          0.85, minimum=0.0, maximum=1.0),
     _spec("need_desire", "Needs", "Desire as a body need",
           "Whether characters carry sexual desire as a physiological drive "
           "alongside hunger, cold and loneliness \u2014 a slow pressure that makes "
@@ -750,6 +760,7 @@ class Tuning:
         return NeedsTuning(
             urgency_power=self.get("need_urgency_power"),
             impulse_threshold=self.get("need_impulse_threshold"),
+            upkeep=self.get("need_upkeep"),
             hours={
                 "hunger": self.get("need_hours_hunger"),
                 "thirst": self.get("need_hours_thirst"),
@@ -925,6 +936,7 @@ class SalienceTuning:
 class NeedsTuning:
     urgency_power: float = 3.0
     impulse_threshold: float = 0.55
+    upkeep: float = 0.85           # how much of ordinary need ordinary life covers
     hours: dict = field(default_factory=lambda: {"hunger": 48, "thirst": 24, "fatigue": 20})
     # Which of ``mind/needs.OPTIONAL`` this campaign is actually running. Empty
     # by default: an optional need has to be asked for.

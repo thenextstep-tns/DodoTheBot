@@ -55,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**775 tests** across five suites, all passing:
+**779 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -63,6 +63,32 @@ py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
 in-memory fake, so nothing touches the real database.
+
+## 2b. The next thing to do: play it
+
+`docs/dnd/PLAYTEST-P3.md` is written and unrun. It covers what `PLAYTEST.md`
+does not — people deciding things, and a human pushing on them: archetypes both
+ways, stakes, attention split across goals, a turn that reports itself, `/npc
+why`, a belief that is acted on after being marked false, and a week left alone.
+
+**Nothing built in P3 has been touched by a human.** The first playtest found
+seven bugs that 305 tests missed and produced the verdict that shaped six
+increments. This session's own work is the same argument: clicking things found
+that `standing` had never persisted, that `pack_count: 0` did not switch packs
+off, that a renamed archetype forked instead of editing, and that the world went
+inert after a day. None of those had a failing test.
+
+Two things were built *for* that playtest, because without them it would have
+been blind:
+
+* **`/gm advance` now reports what people did** — `_turn_summary` in
+  `cogs/dnd/cog.py`, deterministic and model-free. Before it, NPCs decided,
+  acted, moved goals and changed who they were, and the message said "3 minds
+  aged". A decision engine nobody can see the output of is, at the table,
+  identical to no decision engine.
+* **`/npc why <name>`** — the decision trace where the game is played rather
+  than only in the panel. Reads it back from the **event log**, which is what
+  putting the trace there was for.
 
 ## 3. Standing rules that are easy to violate
 
@@ -475,6 +501,14 @@ Clocks page and the decision-trace view.
   only trait access in the codebase is a read. The mechanic is specified in
   `04-ENTITIES.md` §3a and unbuilt — an NPC is the person they were rolled as,
   permanently.
+- **Needs settle at a baseline, they do not accumulate.** Found while preparing
+  the playtest: a day of world time added +0.8 fatigue, so every NPC in the
+  campaign chose to rest and **the world went inert after one advance**. Ordinary
+  living now covers ordinary needs (`need_upkeep`, 0.85) and a need approaches
+  `1 - upkeep` exponentially instead of climbing to 1. `HOURS_TO_DESPERATE` is
+  therefore the span for somebody getting *nothing*, which is what deprivation
+  will take away. At `need_upkeep = 0` a besieged character still starves on the
+  documented schedule — hunger 0.51 by day one, 0.82 by day three.
 - **Beliefs never decay.** Confidence is set from `source_kind` and never moves
   again, so a rumour assumed once sits at 0.35 a decade later. Spec is
   `03-KNOWLEDGE-BASE.md` §4; both land in P3.

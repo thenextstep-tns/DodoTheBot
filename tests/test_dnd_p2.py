@@ -178,7 +178,21 @@ def test_needs() -> None:
     day = needs_mod.advanced(fresh, 24 * 60)
     check("needs: rise with time", day.hunger > fresh.hunger)
     check("needs: pure — the original is untouched", fresh.hunger == 0.0)
-    check("needs: clamp at 1.0", needs_mod.advanced(fresh, 100 * 24 * 60).hunger == 1.0)
+    # Under ordinary living a need settles at a baseline rather than climbing
+    # to desperation — nobody starves by simply existing for a hundred days.
+    settled = needs_mod.advanced(fresh, 100 * 24 * 60)
+    check("needs: ordinary living settles at a baseline, it does not starve anyone",
+          0.1 < settled.hunger < 0.25, f"{settled.hunger:.2f} after 100 days")
+    # Take the living away and the documented span is what it always was.
+    starving = Tuning(campaign={"need_upkeep": 0}).needs()
+    check("needs: DEPRIVATION STILL REACHES DESPERATION ON SCHEDULE",
+          needs_mod.advanced(fresh, 100 * 24 * 60, starving).hunger == 1.0)
+    check("needs: and gets most of the way there in the documented span",
+          needs_mod.advanced(fresh, 48 * 60, starving).hunger > 0.6,
+          f"{needs_mod.advanced(fresh, 48 * 60, starving).hunger:.2f} at 48h")
+    check("needs: a rescued person recovers toward the baseline",
+          needs_mod.advanced(needs_mod.Needs(hunger=0.95, ticked_at=0),
+                             5 * 24 * 60).hunger < 0.3)
 
     # The cube is what stops NPCs fretting about being slightly peckish.
     mild, severe = needs_mod.Needs(hunger=0.4), needs_mod.Needs(hunger=0.9)

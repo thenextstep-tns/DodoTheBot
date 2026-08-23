@@ -234,3 +234,61 @@ def tuning_view(entries: list[dict], campaign_name: str) -> discord.Embed:
         embed.add_field(name=group, value="\n".join(lines)[:1024], inline=False)
     embed.set_footer(text="Change these on the panel, or with /tune set")
     return embed
+
+
+# --------------------------------------------------------------------------- #
+#  Why somebody did what they did
+# --------------------------------------------------------------------------- #
+# The nine terms, in words rather than in field names. The panel says the same
+# things; two renderings of one decision that disagree is how a GM stops
+# trusting either.
+TERM_LABELS = {
+    "need": "their body wanted it",
+    "impulse": "an urge they kept coming back to",
+    "goal": "it served what they are after",
+    "relation": "how they feel about them",
+    "risk": "what it might cost",
+    "trait": "the sort of thing they do",
+    "imprint": "something they cannot forget",
+    "norm": "what it would look like",
+    "archetype": "the sort of person they are",
+}
+
+
+def decision_view(entity, event) -> discord.Embed:
+    """One committed decision, with its working. Read from the event log."""
+    payload = event.payload or {}
+    trace = payload.get("trace") or {}
+    verb = payload.get("verb", "acted")
+    target = f" \u2192 **{payload.get('target')}**" if payload.get("target") else ""
+
+    embed = discord.Embed(
+        title=lang_dnd.TT_WHY_TITLE.format(name=entity.identity.name, verb=verb),
+        description=lang_dnd.TT_WHY_CHOICE.format(
+            verb=verb, target=target, utility=float(trace.get("utility", 0.0))
+        ),
+        colour=discord.Colour.blurple(),
+    )
+
+    considered = trace.get("considered") or []
+    runner_up = next((c for c in considered if c.get("verb") != verb), None)
+    if runner_up is not None:
+        line = lang_dnd.TT_WHY_OVER.format(
+            verb=runner_up.get("verb", ""),
+            utility=float(runner_up.get("utility", 0.0)),
+            temperature=float(trace.get("temperature", 0.0)),
+        )
+        if abs(float(trace.get("margin", 1.0))) < 0.1:
+            line += lang_dnd.TT_WHY_CLOSE
+        embed.description += line
+
+    terms = sorted((trace.get("terms") or {}).items(), key=lambda pair: -abs(pair[1]))
+    lines = [
+        lang_dnd.TT_WHY_TERM_LINE.format(
+            label=TERM_LABELS.get(name, name), value=value
+        )
+        for name, value in terms if abs(value) >= 0.005
+    ]
+    if lines:
+        embed.description += lang_dnd.TT_WHY_TERMS.format(lines="\n".join(lines))
+    return embed

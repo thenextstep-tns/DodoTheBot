@@ -22,6 +22,7 @@ where character lives.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 from helpers.dnd.tuning import DEFAULT_NEEDS, NeedsTuning
@@ -178,7 +179,30 @@ def advanced(needs: Needs, world_time: int,
             continue
         hours = tuning.hours.get(name)
         rate = (1 / (hours * 60)) if hours else RATES[name]
-        moved = needs.value(name) + rate * elapsed
+        # **Ordinary living covers ordinary needs.** People eat and sleep between
+        # the moments a campaign cares about, and a model where they do not makes
+        # everybody permanently starving and exhausted — which in practice means
+        # every NPC rests forever and the world goes inert. `HOURS_TO_DESPERATE`
+        # is therefore the span for somebody who is getting *nothing*, and upkeep
+        # is how much of that ordinary life normally answers. Deprivation
+        # (`04-ENTITIES.md` §5a) is what will take it away again.
+        #
+        # Only the needs that rise: pain and fear ebb on their own and are not
+        # something upkeep helps with.
+        if rate > 0:
+            # Needs settle toward a baseline rather than climbing forever. A
+            # person getting on with ordinary life is *slightly* hungry
+            # perpetually and never starving; take that living away and the
+            # baseline goes to 1 and they climb to it at the documented rate.
+            #
+            # Monotonic accumulation was the alternative and it does not work:
+            # a week of world time maxed everybody out, so every NPC in the
+            # campaign chose to rest and the world went inert. Nobody is
+            # exhausted by ordinary weeks. Deprivation is what exhausts people.
+            target = max(0.0, 1.0 - tuning.upkeep)
+            moved = target + (needs.value(name) - target) * math.exp(-rate * elapsed)
+        else:
+            moved = needs.value(name) + rate * elapsed
         values[name] = round(max(0.0, min(1.0, moved)), 4)
     return Needs(**values, ticked_at=int(world_time))
 

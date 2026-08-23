@@ -67,6 +67,48 @@ def _seeded(campaign: Campaign, seq: int) -> Random:
     return Random(event_seed(campaign.seed, seq))
 
 
+# How many of a turn's actions a message lists before it says "and others".
+# A turn can run to the campaign's actor cap, and a wall of forty lines is not
+# a report, it is a log dump.
+TURN_LINES = 8
+
+
+def _turn_summary(store, turn: dict) -> str:
+    """What the people in the world did, in a line each.
+
+    The smallest possible narration layer, and deliberately deterministic: no
+    model is consulted, the words come from the verb. It exists because a
+    decision engine nobody can see the output of is, at the table, exactly the
+    same as no decision engine.
+    """
+    acted = [a for a in (turn.get("acted") or []) if a.get("verb")]
+    if not acted:
+        return lang_dnd.TT_ADVANCE_TURN_QUIET if turn.get("actors") is not None else ""
+
+    names = store.entities.identities_of(
+        [a.get("target_id") for a in acted if a.get("target_id") is not None]
+    )
+    lines = []
+    for report in acted[:TURN_LINES]:
+        name, verb, target = minds.describe_act(report, names)
+        # Say when something actually moved, so a turn reads as consequence
+        # rather than as a list of gestures.
+        finished = [g for g in (report.get("goals") or []) if g.get("done")]
+        moved = report.get("goals") or []
+        note = ""
+        if finished:
+            note = f" — and got what they wanted: *{finished[0].get('text') or 'it'}*"
+        elif moved:
+            note = f" — closer to *{moved[0].get('text') or 'something'}*"
+        lines.append(lang_dnd.TT_ADVANCE_TURN_LINE.format(
+            name=f"**{name}**", verb=verb, target=target, note=note))
+
+    body = lang_dnd.TT_ADVANCE_TURN.format(lines="\n".join(lines))
+    if len(acted) > TURN_LINES:
+        body += lang_dnd.TT_ADVANCE_TURN_MORE.format(count=len(acted) - TURN_LINES)
+    return body
+
+
 class Tabletop(commands.Cog, name="dnd"):
     """Campaigns, characters, scenes and dice — the P0 spine."""
 
@@ -990,6 +1032,45 @@ class Tabletop(commands.Cog, name="dnd"):
             ephemeral=True,
         )
 
+    @npc.command(name="why", description="Why someone did the last thing they did. (GM)")
+    @app_commands.describe(who="Whose reasoning to read.")
+    async def npc_why(self, interaction: discord.Interaction, who: str) -> None:
+        """The decision trace, at the table.
+
+        The same numbers the panel shows, in the place the game is actually
+        played. A GM who can read *why* an NPC did something is collaborating
+        with the simulation; one who cannot is suspicious of it, and that
+        difference is most of whether any of this was worth building.
+        """
+        found = context.resolve(interaction)
+        if not found:
+            await interaction.response.send_message(found.error, ephemeral=True)
+            return
+        refusal = context.require_gm(
+            found.campaign, interaction.user, is_admin=context.is_guild_admin(interaction)
+        )
+        if refusal:
+            await interaction.response.send_message(refusal, ephemeral=True)
+            return
+
+        entity = found.store.entities.by_name(who)
+        if entity is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_NPC_NOT_FOUND.format(name=who), ephemeral=True
+            )
+            return
+
+        event = minds.last_choice(found.store, entity)
+        if event is None:
+            await interaction.response.send_message(
+                lang_dnd.TT_WHY_NONE.format(name=entity.identity.name), ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=minds_ui.decision_view(entity, event), ephemeral=True
+        )
+
     @npc.command(name="mind", description="Look inside someone's head. (GM)")
     @app_commands.describe(who="Whose mind to inspect.")
     async def npc_mind(self, interaction: discord.Interaction, who: str) -> None:
@@ -1451,6 +1532,12 @@ class Tabletop(commands.Cog, name="dnd"):
                 pruned=report["pruned"],
             )
         )
+        # And what the people in it did with the time. Without this the whole
+        # decision engine is invisible at the table: NPCs choose, act, move
+        # their goals and change who they are, and the only report was how many
+        # minds aged.
+        if not report.get("timeless"):
+            message += _turn_summary(found.store, report.get("turn") or {})
         await interaction.followup.send(message)
 
     # ------------------------------------------------------------------ #
