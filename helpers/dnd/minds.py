@@ -16,6 +16,7 @@ from __future__ import annotations
 from random import Random
 from typing import Any
 
+from helpers.dnd import rules
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
 from helpers.dnd.mind import rumour
@@ -34,6 +35,7 @@ from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world import view as view_model
+from helpers.dnd.rules import ruleset as ruleset_model
 from helpers.dnd.world.memory import TIER_WORKING, Memory
 from helpers.dnd.world.relationship import Relationship
 
@@ -293,6 +295,82 @@ def view_for(
         include=tuple(include),
         perception=perception,
     )
+
+
+# --------------------------------------------------------------------------- #
+#  What the scene physically permits
+# --------------------------------------------------------------------------- #
+def situation_for(
+    store,
+    entity: Entity,
+    scene,
+    *,
+    features=(),
+    sealed: bool = False,
+) -> ruleset_model.Situation:
+    """Flatten a scene into the handful of facts a ruleset can rule on.
+
+    The rules layer sits below ``world/`` and must not import the entity model,
+    so the occupants arrive as :class:`~helpers.dnd.rules.ruleset.Presence` —
+    three facts each, which is all a physical possibility can turn on.
+
+    ``features`` and ``sealed`` are arguments rather than scene fields because a
+    scene does not carry objects or exits yet. Taking and using therefore ride on
+    what people are *carrying*, which is real today; the seam is here so that
+    when scenes gain contents this becomes a fill rather than a rewrite.
+    """
+    others = []
+    for other_id in (scene.present if scene is not None else []):
+        if other_id == entity.id:
+            continue
+        other = store.entities.get(other_id)
+        if other is None or other.retired:
+            continue
+        others.append(ruleset_model.Presence(
+            entity_id=other.id,
+            kind=other.kind,
+            carrying=bool(other.inventory),
+            # Everyone on stage is within reach: no ruleset here models distance
+            # yet, and pretending otherwise would silently disable half of this.
+            reachable=True,
+        ))
+
+    return ruleset_model.Situation(
+        others=tuple(others),
+        conditions=tuple(str(c).lower() for c in entity.conditions),
+        carrying=bool(entity.inventory),
+        lighting=(scene.lighting if scene is not None else ""),
+        features=tuple(features),
+        sealed=bool(sealed),
+    )
+
+
+def affordances_for(
+    store,
+    entity: Entity,
+    scene,
+    *,
+    campaign=None,
+    tuning: Tuning | None = None,
+    features=(),
+    sealed: bool = False,
+) -> frozenset:
+    """What this entity could choose to do here, after the campaign has its say.
+
+    Two questions, kept apart on purpose. The ruleset answers *what is physically
+    possible*, knowing nothing about this table; the campaign then answers *what
+    it is willing to have happen*, which is a lines-and-veils decision and has no
+    business inside the physics. Waiting survives both.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+
+    situation = situation_for(store, entity, scene, features=features, sealed=sealed)
+    allowed = rules.get(campaign.ruleset if campaign else "freeform").affordances(
+        entity.stats or {}, situation
+    )
+    return tuning.affordances().filter(allowed)
 
 
 # --------------------------------------------------------------------------- #

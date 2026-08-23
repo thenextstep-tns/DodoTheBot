@@ -21,6 +21,7 @@ from __future__ import annotations
 from random import Random
 
 from helpers.dnd.rules import dice
+from helpers.dnd.rules import ruleset
 from helpers.dnd.rules.ruleset import (
     COST,
     FAIL,
@@ -48,6 +49,15 @@ ABILITY_LABELS = {
 STANDARD_ARRAY = (15, 14, 13, 12, 10, 8)
 
 DEFAULT_DC = 15
+
+# SRD conditions, split by what they take away. The first group removes actions
+# and reactions entirely; the second sets speed to 0 and leaves the hands free.
+# ``prone`` is in neither on purpose — a prone creature fights and crawls.
+INCAPACITATING = frozenset({
+    "incapacitated", "paralyzed", "paralysed", "petrified", "stunned",
+    "unconscious",
+})
+IMMOBILISING = frozenset({"grappled", "restrained"})
 
 # Ability priority per SRD class, best first. A class not listed falls back to
 # DEFAULT_PRIORITY, so a homebrew class still gets a coherent, non-uniform block.
@@ -147,6 +157,54 @@ class Srd5e:
     def approaches(self, stats: dict) -> list[str]:
         """Abilities plus skills — a check may be either in 5e."""
         return list(ABILITIES) + sorted(SKILL_ABILITY)
+
+    def affordances(self, actor_stats: dict, situation) -> frozenset:
+        """What the SRD's conditions and action economy permit.
+
+        Where freeform reads the GM's words, this reads the condition list, and
+        the differences are the point — a *prone* creature can still fight and
+        can still crawl away, a *grappled* one has speed 0 but full use of its
+        hands, and a creature at 0 hit points is unconscious whatever anyone has
+        written in ``conditions``. Two rulesets that agreed here would mean the
+        abstraction had collapsed into one.
+        """
+        conditions = situation.conditions
+        # 0 HP is unconsciousness in the SRD, and it is a fact about the sheet
+        # rather than a condition someone remembered to add.
+        down = int((actor_stats.get("hp") or {}).get("current", 1)) <= 0
+        if down or any(c in INCAPACITATING for c in conditions):
+            return frozenset({ruleset.WAIT})
+
+        allowed = {ruleset.WAIT}
+        if situation.others:
+            allowed.add(ruleset.SPEAK)
+
+        # Speed 0. You keep your action; you do not get to leave.
+        immobile = any(c in IMMOBILISING for c in conditions)
+        if not immobile:
+            allowed.add(ruleset.MOVE)          # prone still counts — you crawl
+            if not situation.sealed:
+                allowed.add(ruleset.FLEE)
+
+        # Attacks, and anything else needing a free hand, survive being prone or
+        # grappled; blindness costs accuracy, not the option.
+        if situation.reachable:
+            allowed.add(ruleset.ATTACK)
+            if situation.carrying:
+                allowed.add(ruleset.GIVE)
+            if situation.anyone_carrying:
+                allowed.add(ruleset.TAKE)
+        if situation.features:
+            allowed.add(ruleset.TAKE)
+        if situation.carrying or situation.features:
+            allowed.add(ruleset.USE)
+
+        # Hiding needs to be unseen: heavy obscurement, cover, or already
+        # invisible. Being invisible is the one condition that *adds* an option.
+        if "invisible" in conditions or situation.obscured or situation.features:
+            allowed.add(ruleset.HIDE)
+
+        return frozenset(allowed)
 
     def resolve(
         self, action: Action, actor_stats: dict, target_stats: dict | None, rng: Random

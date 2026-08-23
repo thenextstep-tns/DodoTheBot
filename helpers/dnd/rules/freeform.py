@@ -23,6 +23,7 @@ from __future__ import annotations
 from random import Random
 
 from helpers.dnd.rules import dice
+from helpers.dnd.rules import ruleset
 from helpers.dnd.rules.ruleset import (
     COST,
     FAIL,
@@ -49,6 +50,17 @@ APPROACH_LABELS = {
 STANDARD_SPREAD = (2, 1, 0, -1)
 
 DEFAULT_DC = 7
+
+# Conditions a GM might actually type, rather than a system's closed list. The
+# first group takes everything away, the second only takes away leaving.
+INCAPACITATED_WORDS = (
+    "unconscious", "out cold", "asleep", "sleeping", "paralys", "paraly",
+    "petrified", "stunned", "senseless", "comatose", "dead",
+)
+PINNED_WORDS = (
+    "bound", "tied", "chained", "pinned", "grappled", "restrained", "trapped",
+    "held fast", "stuck",
+)
 
 # Keywords that pull a concept toward an approach, so "a stubborn dockhand" and
 # "a sly archivist" don't come out identical. Matched against the whole concept
@@ -114,6 +126,43 @@ class Freeform:
 
     def approaches(self, stats: dict) -> list[str]:
         return list(APPROACHES)
+
+    def affordances(self, actor_stats: dict, situation) -> frozenset:
+        """What the fiction allows. Permissive by temperament.
+
+        Freeform has no condition list to consult, so it reads the words a GM
+        actually types. ``"bound to a chair"`` stops you leaving; ``"out cold"``
+        stops everything. The matching is deliberately generous — a ruleset whose
+        whole promise is that you can write what you like should not require you
+        to write it in its vocabulary.
+        """
+        if situation.has_condition(*INCAPACITATED_WORDS):
+            return frozenset({ruleset.WAIT})
+
+        allowed = {ruleset.WAIT}
+        pinned = situation.has_condition(*PINNED_WORDS)
+
+        if not pinned:
+            allowed.add(ruleset.MOVE)
+            if not situation.sealed:
+                allowed.add(ruleset.FLEE)
+            # Hiding wants somewhere to do it: the dark, or something to get
+            # behind. Being watched by half the room is the scorer's problem.
+            if situation.obscured or situation.features:
+                allowed.add(ruleset.HIDE)
+
+        if situation.others:
+            allowed.add(ruleset.SPEAK)
+        if situation.reachable:
+            allowed.add(ruleset.ATTACK)
+            if situation.carrying:
+                allowed.add(ruleset.GIVE)
+        if situation.anyone_carrying or situation.features:
+            allowed.add(ruleset.TAKE)
+        if situation.carrying or situation.features:
+            allowed.add(ruleset.USE)
+
+        return frozenset(allowed)
 
     def resolve(
         self, action: Action, actor_stats: dict, target_stats: dict | None, rng: Random

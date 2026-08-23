@@ -468,6 +468,9 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
     status.className = "status show " + (ok ? "ok" : "err");
     setTimeout(() => {{ status.className = "status"; }}, 3000);
   }}
+  // A checkbox's .value is "on" whether or not it is ticked, so reading it
+  // would make every switch permanently on and look like the save was ignored.
+  const tuneValue = (el) => el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
   async function post(url, body) {{
     let res, raw = "", data = {{}};
     try {{
@@ -524,7 +527,8 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
   }});
   document.querySelectorAll(".dndtune-server").forEach((el) => {{
     el.addEventListener("change", () => {{
-      post(`/api/guild/${{gid}}/dnd/tune-server`, {{key: el.dataset.key, value: el.value}});
+      post(`/api/guild/${{gid}}/dnd/tune-server`,
+        {{key: el.dataset.key, value: tuneValue(el)}});
     }});
   }});
   document.querySelectorAll(".dndtune-server-clear").forEach((el) => {{
@@ -537,7 +541,7 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
   document.querySelectorAll(".dndtune").forEach((el) => {{
     el.addEventListener("change", () => {{
       post(`/api/guild/${{gid}}/dnd/tune`,
-        {{campaign_id: cid, key: el.dataset.key, value: el.value}});
+        {{campaign_id: cid, key: el.dataset.key, value: tuneValue(el)}});
     }});
   }});
   document.querySelectorAll(".dndtune-clear").forEach((el) => {{
@@ -614,6 +618,7 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
 _GROUP_EMOJI = {
     "Memory": "🧠", "Forgetting": "🌫️", "Salience": "⚡", "Needs": "🍞",
     "Relationships": "🤝", "Stakes": "⚖️", "Perception": "👁️",
+    "Actions": "🎬",
     "Continuity": "⏳", "Knowledge": "📚", "Generation": "🎲",
 }
 
@@ -630,6 +635,41 @@ def _emphasise(escaped: str) -> str:
     return re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<i>\1</i>", out)
 
 
+def _tune_control(item: dict, css_class: str) -> str:
+    """The control itself, matched to the tunable's type.
+
+    Every row used to be a number input. That is fine for the thirty-odd numeric
+    settings and wrong for the others: ``time_mode`` shipped as an empty number
+    box with ``min=0 max=1``, so the one setting that decides whether a campaign
+    ages at all could not be changed from the panel at all. A control that cannot
+    express its own value is the same defect as a control wired to nothing.
+    """
+    key, kind, value = item["key"], item["type"], item["value"]
+    common = f'class="{css_class}" data-key="{key}" data-type="{kind}"'
+    if kind == "choice":
+        options = "".join(
+            f'<option value="{_escape(choice)}"{" selected" if choice == value else ""}>'
+            f'{_escape(choice)}</option>'
+            for choice in (item.get("choices") or ())
+        )
+        return f"<select {common}>{options}</select>"
+    if kind == "bool":
+        return (f'<input type="checkbox" {common}'
+                f'{" checked" if value else ""}>')
+    step = "1" if kind == "int" else "any"
+    return (f'<input type="number" step="{step}" {common} '
+            f'value="{_escape(value)}" min="{item["min"]}" max="{item["max"]}">')
+
+
+def _tune_range(item: dict) -> str:
+    """What the value may be, said the way that type says it."""
+    if item["type"] == "choice":
+        return " / ".join(_escape(c) for c in (item.get("choices") or ()))
+    if item["type"] == "bool":
+        return "on / off"
+    return f"{item['min']}–{item['max']}"
+
+
 def _tune_row(item: dict, css_class: str, own_label: str) -> str:
     """One setting: a wide label column, a narrow control, and where it came from."""
     source = item["source"]
@@ -638,18 +678,16 @@ def _tune_row(item: dict, css_class: str, own_label: str) -> str:
         if source == item.get("own_source")
         else f'<span class="muted small">from {_escape(source)}</span>'
     )
-    step = "1" if item["type"] == "int" else "any"
     return f"""
 <div class="paramrow tunerow">
   <div class="tunelabel">
     <b>{_escape(item['label'])}</b> {badge}
     <div class="muted small tunedesc">{_emphasise(_escape(item['description']))}</div>
     <div class="muted small tunemeta"><code>{item['key']}</code>
-      <span>{item['min']}–{item['max']}</span></div>
+      <span>{_tune_range(item)}</span></div>
   </div>
   <div class="tunectl">
-    <input type="number" step="{step}" class="{css_class}" data-key="{item['key']}"
-           value="{item['value']}" min="{item['min']}" max="{item['max']}">
+    {_tune_control(item, css_class)}
     <button class="{css_class}-clear tuneclear" data-key="{item['key']}"
             title="Back to inherited">↺</button>
   </div>

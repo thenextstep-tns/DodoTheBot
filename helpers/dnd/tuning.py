@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from helpers.dnd.rules import ruleset as ruleset_model
 from helpers.dnd.world import memory as memory_model
 from helpers.dnd.world import view as view_model
 
@@ -43,7 +44,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Perception", "Continuity", "Knowledge", "Generation",
+    "Perception", "Actions", "Continuity", "Knowledge", "Generation",
 )
 
 
@@ -295,6 +296,36 @@ TUNABLES: list[dict] = [
           "ruins a city.",
           view_model.STRANGER_FLOOR, minimum=0.0, maximum=1.0),
 
+    # --- Actions (P3) ------------------------------------------------------ #
+    # What the simulation will let a character *choose*. These gate the decision
+    # engine's candidate list, not a player's commands: switching Attacking off
+    # means no NPC ever starts violence, while a player who types an attack still
+    # gets one resolved. A campaign's lines belong in the campaign's settings.
+    _spec("affordance_attack", "Actions", "Attacking",
+          "Whether a character may choose violence. **Off** and no NPC will ever start a fight, however cornered or furious — the option is not on the table for them to weigh. Players are unaffected.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_flee", "Actions", "Fleeing",
+          "Whether a character may choose to leave a scene outright. Off makes everyone stand their ground, which suits a courtroom and ruins a chase.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_speak", "Actions", "Speaking",
+          "Whether a character may choose to talk to somebody. Off is a very quiet world; it exists because everything here switches off.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_give", "Actions", "Giving",
+          "Whether a character may hand over something they are carrying.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_take", "Actions", "Taking",
+          "Whether a character may take something — from the room, or from somebody within reach. Off and nothing in your campaign gets stolen.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_hide", "Actions", "Hiding",
+          "Whether a character may try to go unseen. Needs the dark or something to get behind before it is offered at all.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_use", "Actions", "Using things",
+          "Whether a character may use what they are carrying or what is in the room.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_move", "Actions", "Moving",
+          "Whether a character may reposition inside a scene. Off pins everyone where they stand.",
+          True, kind="bool", minimum=0, maximum=1),
+
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
           "How much campaign knowledge a scene may draw on.",
@@ -481,6 +512,14 @@ class Tuning:
             stranger_floor=self.get("view_stranger_floor"),
         )
 
+    def affordances(self) -> "AffordanceTuning":
+        return AffordanceTuning(frozenset(
+            name for name in ruleset_model.AFFORDANCES
+            # Waiting has no switch. It is the null action the engine falls back
+            # to, and a campaign where nobody may do nothing has no floor.
+            if name == ruleset_model.WAIT or bool(self.get(f"affordance_{name}"))
+        ))
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -602,6 +641,29 @@ class PerceptionTuning:
 
 
 @dataclass(frozen=True)
+class AffordanceTuning:
+    """Which of a ruleset's affordances this campaign allows anyone to choose.
+
+    Applied at the orchestration edge, never inside ``rules/``: a ruleset says
+    what is physically possible, and a campaign says what it is willing to have
+    happen. Conflating the two would put a table's lines inside the physics.
+    """
+
+    permitted: frozenset = frozenset(ruleset_model.AFFORDANCES)
+
+    def permits(self, name: str) -> bool:
+        return name in self.permitted
+
+    def filter(self, allowed) -> frozenset:
+        """Narrow what a ruleset offered. Waiting always survives."""
+        return frozenset(a for a in allowed if self.permits(a)) | {ruleset_model.WAIT}
+
+    @property
+    def withheld(self) -> frozenset:
+        return frozenset(ruleset_model.AFFORDANCES) - self.permitted
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -621,4 +683,5 @@ DEFAULT_RELATIONSHIPS = RelationshipTuning()
 DEFAULT_STAKES = StakesTuning()
 DEFAULT_RUMOURS = RumourTuning()
 DEFAULT_PERCEPTION = PerceptionTuning()
+DEFAULT_AFFORDANCES = AffordanceTuning()
 DEFAULT_GENERATION = GenerationTuning()

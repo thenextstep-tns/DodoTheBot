@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — step 1 of 6 (`EntityView`) is built |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–2 of 6 built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -52,7 +52,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**385 tests** across five suites, all passing:
+**430 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -125,7 +125,7 @@ query cannot be written.
 | Piece | Where | What to know |
 | --- | --- | --- |
 | **World tick** | `minds.tick`, `due_for_tick`; the `world_tick` loop in `cogs/dnd/cog.py` | A 15-minute scheduler asks each campaign whether *it* is due. The campaign owns the pace: `tick_hours`, `tick_days`, both campaign-scoped |
-| **Time modes** | `time_mode` tunable | `manual` (default) / `automatic` / `timeless`. Timeless is not "off": nothing ages on a tick *or* on command, for dungeon crawls |
+| **Time modes** | `time_mode` tunable | `manual` (default) / `automatic` / `timeless`. Timeless is not "off": nothing ages on a tick *or* on command, for dungeon crawls. **Its panel control only started working in the affordance increment** — every tunable used to render as a number box, so the one setting deciding whether a campaign ages could not be changed from the panel at all |
 | **Faction clocks** | `world/clock.py`, `store/clocks.py`, `minds.advance_clocks`; `/gm clock add|list|nudge` | Fronts fill on their own, fire `on_complete` as data, can start successors, and stop dead while `blocked_by` is non-empty |
 | **Rumours** | `mind/rumour.py`, `minds.spread_rumours` | Claims walk the relationship graph, degrade by listener→teller trust, and drift one word per hop |
 
@@ -164,10 +164,28 @@ checkable on its own:
    walks every object reachable from a view and fails if an `Entity`, `Memory`,
    `Belief` or `Relationship` is among them. **If a later step needs something
    the view does not carry, add it to the projection — do not pass the record.**
-2. **`ruleset.affordances(actor, scene)`** — add to the protocol and both
-   rulesets. What a scene physically permits: attack, flee, speak, give, take,
-   hide, wait, use, move. `04-ENTITIES.md` §2 says it was deferred until a Scene
-   existed; it exists.
+2. **`ruleset.affordances`** — ✅ **built** (`rules/ruleset.py`,
+   `minds.affordances_for`, panel group *Actions*). The nine verbs, plus:
+   * The signature is **not** the one the spec sketched. `rules/` sits below
+     `world/` and may not import the entity model, so it takes
+     `(actor_stats, Situation)` — a flattened scene, occupants reduced to
+     `Presence(entity_id, kind, carrying, reachable)`. `minds.situation_for`
+     does the flattening.
+   * `WAIT` is always returned and has **no switch**. It is the null action the
+     engine falls back to; a campaign where nobody may do nothing has no floor.
+   * The two rulesets deliberately disagree, which is the abstraction's whole
+     proof: freeform reads the words a GM actually types (`"tied to a chair"`
+     stops you leaving), srd5e reads the SRD condition list and knows 0 HP is
+     unconsciousness whatever `conditions` says.
+   * **Physics and lines are kept apart.** The ruleset says what is possible;
+     the campaign's eight *Actions* switches say what it is willing to have
+     happen, applied at the edge in `affordances_for`. Switching Attacking off
+     means no NPC ever starts violence — players are unaffected, because a
+     player's command goes through `resolve`, not through here.
+   * **Scenes do not carry objects or exits yet**, so `features` and `sealed`
+     are arguments to `situation_for` that nothing passes; taking and using ride
+     on what people are carrying, which is real today. The seam is there so a
+     scene contents model lands as a fill.
 3. **Goals on `Entity`** plus **behaviour packs**. The roadmap says packs come
    from the global KB — note that the prior tables are still Python
    (§7), so decide deliberately whether packs repeat that mistake.
@@ -209,13 +227,6 @@ Clocks page and the decision-trace view.
 
 ## 7. Known gaps, honestly
 
-- **`time_mode` has no working panel control.** It is the one `choice` tunable,
-  and `_tune_row` in `web/dnd/pages.py` renders every tunable as
-  `<input type="number" min="0.0" max="1.0">` — so the row shows an empty number
-  box and a GM cannot select `automatic` or `timeless` from the panel at all.
-  `_dnd_param_input` a few hundred lines above already knows how to render a
-  choice; `_tune_row` needs the same three lines. Found while adding the
-  Perception group; left alone to keep that increment clean.
 - **`tests/fake_mongo.py` has no `$unset`**, so *clearing* a server-level tunable
   back to inherited is the one leg of the tuning round trip no test can exercise.
   The campaign layer clears fine (it rewrites the whole settings document).

@@ -67,8 +67,11 @@ from helpers.dnd.store import knowledge as knowledge_module  # noqa: E402
 from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd.store import scenes as scenes_module  # noqa: E402
+from helpers.dnd import rules  # noqa: E402
+from helpers.dnd.rules import ruleset as rs  # noqa: E402
 from helpers.dnd.tuning import TUNABLES, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
+from helpers.dnd.world.scene import Scene  # noqa: E402
 from helpers.dnd.world.entity import KIND_NPC, Entity, Identity  # noqa: E402
 from helpers.dnd.world.belief import Belief, adopt  # noqa: E402
 from helpers.dnd.world.memory import TIER_IMPRINT, TIER_MID, Memory  # noqa: E402
@@ -1182,6 +1185,141 @@ def test_entity_view() -> None:
                  campaign={"view_memory_limit": 9}).perception().memory_limit == 9)
 
 
+# --------------------------------------------------------------------------- #
+#  19. Affordances — what a scene physically permits
+#
+#  The other half of the decision engine's propose step: candidates are the
+#  behaviour packs *intersected* with these, so what a scene forbids never even
+#  gets scored.
+# --------------------------------------------------------------------------- #
+def test_affordances() -> None:
+    ff = rules.get("freeform")
+    srd = rules.get("srd5e")
+    healthy = {"hp": {"current": 9, "max": 9}}
+    company = (rs.Presence(entity_id="x", kind="npc", carrying=True),)
+
+    # --- 1. Waiting is the floor, in every ruleset and every state -------- #
+    for name, ruleset_impl, stats in (("freeform", ff, {}), ("srd5e", srd, healthy)):
+        for situation in (
+            rs.Situation(),
+            rs.Situation(conditions=("unconscious",)),
+            rs.Situation(others=company, carrying=True, lighting="dark"),
+            rs.Situation(sealed=True, conditions=("restrained",)),
+        ):
+            allowed = ruleset_impl.affordances(stats, situation)
+            check(f"affordances: {name} always leaves waiting on the table",
+                  rs.WAIT in allowed)
+            check(f"affordances: {name} answers only in the closed vocabulary",
+                  allowed <= set(rs.AFFORDANCES), str(allowed - set(rs.AFFORDANCES)))
+
+    # --- 2. An empty room offers nothing social --------------------------- #
+    alone = ff.affordances({}, rs.Situation())
+    check("affordances: nobody to talk to means no speaking", rs.SPEAK not in alone)
+    check("affordances: and nobody to hit", rs.ATTACK not in alone)
+    check("affordances: you can still leave", rs.FLEE in alone)
+    check("affordances: a sealed room cannot be fled",
+          rs.FLEE not in ff.affordances({}, rs.Situation(sealed=True)))
+
+    # --- 3. Being unable to act removes everything but waiting ------------ #
+    check("affordances: someone out cold has one option",
+          ff.affordances({}, rs.Situation(others=company, conditions=("out cold",)))
+          == frozenset({rs.WAIT}))
+    check("affordances: 5e reads the same from its own condition list",
+          srd.affordances(healthy, rs.Situation(others=company, conditions=("stunned",)))
+          == frozenset({rs.WAIT}))
+    # And 5e knows a thing the condition list does not say out loud.
+    check("affordances: at 0 hit points you are not deciding anything",
+          srd.affordances({"hp": {"current": 0}}, rs.Situation(others=company))
+          == frozenset({rs.WAIT}))
+
+    # --- 4. The two rulesets genuinely disagree --------------------------- #
+    # A grappled 5e creature keeps its hands and loses its speed; freeform reads
+    # the same word off a GM's free text and reaches the same place its own way.
+    grappled = rs.Situation(others=company, conditions=("grappled",), carrying=True)
+    five = srd.affordances(healthy, grappled)
+    check("affordances: 5e speed 0 removes moving and fleeing",
+          rs.MOVE not in five and rs.FLEE not in five)
+    check("affordances: but not attacking or giving",
+          rs.ATTACK in five and rs.GIVE in five)
+
+    prone = rs.Situation(others=company, conditions=("prone",))
+    check("affordances: a prone 5e creature still fights and still crawls",
+          {rs.ATTACK, rs.MOVE} <= srd.affordances(healthy, prone))
+    check("affordances: invisibility is the condition that adds an option",
+          rs.HIDE in srd.affordances(healthy, rs.Situation(conditions=("invisible",))))
+    check("affordances: freeform has no such rule",
+          rs.HIDE not in ff.affordances({}, rs.Situation(conditions=("invisible",))))
+
+    # Freeform reads what a GM actually types; 5e's closed list does not.
+    tied = rs.Situation(others=company, conditions=("tied to a chair",))
+    check("affordances: freeform understands 'tied to a chair'",
+          rs.FLEE not in ff.affordances({}, tied))
+    check("affordances: 5e does not, and says so by allowing it",
+          rs.FLEE in srd.affordances(healthy, tied))
+
+    # --- 5. Hiding wants somewhere to do it ------------------------------- #
+    check("affordances: no hiding in a bare lit room",
+          rs.HIDE not in ff.affordances({}, rs.Situation(lighting="bright")))
+    check("affordances: the dark will do",
+          rs.HIDE in ff.affordances({}, rs.Situation(lighting="dim and smoky")))
+    check("affordances: so will something to get behind",
+          rs.HIDE in ff.affordances({}, rs.Situation(features=("overturned cart",))))
+
+    # --- 6. Giving and taking need something to give and take ------------- #
+    empty_handed = rs.Situation(others=(rs.Presence(entity_id="y"),))
+    check("affordances: you cannot give what you do not have",
+          rs.GIVE not in ff.affordances({}, empty_handed))
+    check("affordances: nor take from someone carrying nothing",
+          rs.TAKE not in ff.affordances({}, empty_handed))
+    check("affordances: a full pocket changes both",
+          {rs.GIVE, rs.TAKE, rs.USE} <= ff.affordances({}, rs.Situation(
+              others=company, carrying=True)))
+
+    # --- 7. A campaign narrows what a ruleset offered --------------------- #
+    campaign, store = _campaign(9312, "Lines and Veils")
+    marla = _npc(store, campaign, "Marla")
+    ondry = _npc(store, campaign, "Ondry")
+    ondry.inventory = [{"name": "a purse"}]
+    store.entities.save(ondry)
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, title="The tap room",
+        present=[marla.id, ondry.id], lighting="dim",
+    ))
+
+    everything = minds.affordances_for(store, marla, scene)
+    check("affordances: through the store, a scene offers real options",
+          {rs.SPEAK, rs.ATTACK, rs.TAKE, rs.HIDE} <= everything, str(sorted(everything)))
+
+    peaceful = minds.affordances_for(store, marla, scene, tuning=Tuning(
+        campaign={"affordance_attack": False, "affordance_take": False}))
+    check("affordances: A CAMPAIGN CAN SWITCH VIOLENCE OFF ENTIRELY",
+          rs.ATTACK not in peaceful and rs.TAKE not in peaceful)
+    check("affordances: without taking away everything else",
+          {rs.SPEAK, rs.HIDE} <= peaceful)
+    check("affordances: and waiting has no switch to find",
+          rs.WAIT in minds.affordances_for(store, marla, scene, tuning=Tuning(
+              campaign={f"affordance_{a}": False for a in rs.AFFORDANCES})))
+
+    # The physics are not where a table's lines live: the ruleset still says
+    # violence is possible, and the campaign is what declines it.
+    situation = minds.situation_for(store, marla, scene)
+    check("affordances: the ruleset itself is untouched by the campaign's choice",
+          rs.ATTACK in rules.get(campaign.ruleset).affordances(marla.stats or {}, situation))
+
+    # --- 8. The switches are real tunables with a panel control ----------- #
+    keys = {s["key"]: s for s in TUNABLES}
+    check("affordances: every switch but waiting is registered",
+          all(f"affordance_{a}" in keys for a in rs.AFFORDANCES if a != rs.WAIT))
+    check("affordances: waiting deliberately has none",
+          "affordance_wait" not in keys)
+    check("affordances: they are booleans, grouped for the panel",
+          all(keys[f"affordance_{a}"]["type"] == "bool"
+              and keys[f"affordance_{a}"]["group"] == "Actions"
+              for a in rs.AFFORDANCES if a != rs.WAIT))
+    check("affordances: and layered like everything else",
+          Tuning(server={"affordance_hide": False}).affordances().permits("hide") is False)
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1202,6 +1340,7 @@ def main() -> int:
         test_stakes,
         test_roles_emerge,
         test_entity_view,
+        test_affordances,
         test_end_to_end,
     ):
         test()
