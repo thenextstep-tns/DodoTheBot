@@ -1,7 +1,13 @@
 # Handoff — start here in a new session
 
-Everything through **P2 is built, tested and live**. This file is what a fresh
-session needs to pick up at P3 without re-deriving anything.
+Everything through **P3 is built, tested and live** — the whole simulation:
+memory, belief, needs, goals, archetypes, decisions, and a world that moves when
+nobody is watching. This file is what a fresh session needs to pick up **after**
+that without re-deriving anything.
+
+**The next thing is not code.** `docs/dnd/PLAYTEST-P3.md` is written and unrun,
+and nothing built in P3 has been touched by a human. Read §2b before starting
+anything.
 
 ---
 
@@ -10,7 +16,7 @@ session needs to pick up at P3 without re-deriving anything.
 1. **`README.md`** — the thesis and the file index. Two minutes.
 2. **`14-CONVENTIONS.md`** — how to work here. The twelve invariants are not
    suggestions; two of them exist because production broke.
-3. **`12-ROADMAP.md`** — what is done, what P3 is, and the acceptance criteria.
+3. **`12-ROADMAP.md`** — what is done, what P4 is, and the acceptance criteria.
 4. The design file for whatever you are actually touching.
 
 Do **not** read all sixteen documents. They are reference, not onboarding.
@@ -23,7 +29,8 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ✅ **complete** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — **all six steps built** |
+| P3 | ✅ **complete** | World tick, faction clocks, rumours — and the whole decision engine: what an NPC may see, what a scene permits, what they want, who they are, how they choose, what happens when they do, and the cheap paths for everybody nobody is watching |
+| P4 | ◻ next | Voice. **Its first half needs no model at all** — see §9 |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -55,7 +62,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**779 tests** across five suites, all passing:
+**739 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -128,17 +135,20 @@ that adds a command, check:
 ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min' --no-pager | grep -iE \"loaded cog 'cogs.dnd|failed to load\""
 ```
 
-## 5. The architecture in six lines
+## 5. The architecture, in one screen
 
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/mind/       minds: traits, needs, memory, relationships,
-                        stakes — what an act was worth to each party
+helpers/dnd/tuning.py   107 tunables, resolved default → server → campaign
+helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
+helpers/dnd/data/       what ships as data rather than as code (packs.json)
+helpers/dnd/mind/       traits, needs, memory, relationships, stakes,
+                        goals, behaviour (propose), decide (score + select)
                                                              (pure, seeded)
-helpers/dnd/world/      what exists: entity, memory, belief, event    (dataclasses)
+helpers/dnd/world/      what exists: entity, memory, belief, goal, pack, event
                         — and view.py, the only thing a decision may see
-helpers/dnd/rules/      dice and rulesets                             (pure, seeded)
+helpers/dnd/rules/      dice, rulesets, affordances                   (pure, seeded)
 helpers/dnd/store/      repositories — every query carries its tenant
 ```
 
@@ -167,11 +177,11 @@ a rumour reaches someone who never met its subject, and an NPC carried a goal
 from 0.00 to 0.46 through choices nobody made for them. `test_acting` is that
 run. What P3 does *not* have is the four things below.
 
-### What remains: the decision engine
+### The decision engine, as built
 
-`06-DECISION-ENGINE.md` is the spec and is unchanged. This is the largest single
-piece in P3 — do **not** attempt it in one increment. Suggested split, each
-checkable on its own:
+`06-DECISION-ENGINE.md` is the spec. It was built in six increments and this is
+what each one settled — **read the notes before changing any of it**, because
+most of them are decisions that cost something to reach:
 
 1. **`EntityView`** — ✅ **built** (`world/view.py`, `minds.view_for`, panel group
    *Perception*). The projection an NPC decides from, and the only door between
@@ -474,8 +484,12 @@ Each has a spec section and no code. None blocks the decision engine, and all
 four want the tick that now exists:
 
 - **Deprivation effects** (`04-ENTITIES.md` §5a) — needs bend mood and apply
-  ruleset conditions. Lethality default off and **interlocked**: nothing can
-  satisfy a need until NPCs can act, so switching it on now empties the world.
+  ruleset conditions. Lethality default off. **The interlock that blocked this
+  is now closed**: NPCs can act, acting relieves the need it answered
+  (`act_need_relief`), and ordinary living holds needs at a baseline
+  (`need_upkeep`) instead of climbing to desperation. Switching deprivation on
+  no longer empties the world, and `need_upkeep = 0` is already the siege
+  setting it wants. **This is the readiest of the four.**
 - **Trait drift and rupture** (§3a, §3b) — an exposure ledger; sustained extreme
   exposure breaks one axis past the ceiling. Rupture is gated by the campaign's
   lines, not merely tunable.
@@ -484,8 +498,11 @@ four want the tick that now exists:
 - **Standing and importance emerge** (§2b) — standing rides the same ledger;
   importance recomputed from story entanglement.
 
-**Everything in P3 must be tunable and must have a panel control.** Expect a
-Clocks page and the decision-trace view.
+**Everything in P3 is tunable and has a panel control.** The decision-trace view
+landed with the scorer (*What they would do next* in the inspector). **A Clocks
+page never did** — clocks are still `/gm clock` only, which is the one place in
+tabletop where Discord is the configuration surface and the panel is not. That
+is a standing-rule violation looking for an owner.
 
 ## 7. Known gaps, honestly
 
@@ -493,10 +510,15 @@ Clocks page and the decision-trace view.
   back to inherited is the one leg of the tuning round trip no test can exercise.
   The campaign layer clears fine (it rewrites the whole settings document).
 - **`/canon` is empty and stays empty until P4.** Nothing invents facts yet.
-- **Nothing narrates.** Every message is mechanical output, by design.
+- **Almost nothing narrates.** Every message is mechanical output, by design.
+  The exception is `_turn_summary` and `/npc why`, added for the playtest: both
+  are deterministic templates over state that already exists, and they are the
+  proof that the non-AI half of P4 is worth doing first.
 - **The legacy cog is still loaded** as `dnd_legacy`. It goes one release after
   the migration has actually been run (`13-MIGRATION.md` §6).
-- **Nothing ever writes `entity.traits` after creation.** `04-ENTITIES.md` §3
+- **Nothing ever writes `entity.traits` after creation.** *(Note: `entity.packs`
+  now does drift — who somebody is, in archetype terms, moves with what happens
+  to them. Disposition itself still does not.)* `04-ENTITIES.md` §3
   says temperament shifts on an imprint and drives drift with experience; the
   only trait access in the codebase is a read. The mechanic is specified in
   `04-ENTITIES.md` §3a and unbuilt — an NPC is the person they were rolled as,
@@ -511,7 +533,8 @@ Clocks page and the decision-trace view.
   documented schedule — hunger 0.51 by day one, 0.82 by day three.
 - **Beliefs never decay.** Confidence is set from `source_kind` and never moves
   again, so a rumour assumed once sits at 0.35 a decade later. Spec is
-  `03-KNOWLEDGE-BASE.md` §4; both land in P3.
+  `03-KNOWLEDGE-BASE.md` §4. **It did not land in P3** — the decision engine
+  reads beliefs but nothing ages them.
 - **Value keywords are English-only** (`mind/memory/values.py`). Fine for now;
   it would need attention before a non-English campaign.
 - **`web/routes.py` is ~3300 lines.** Tabletop stays out of it; anything new goes
@@ -536,7 +559,77 @@ Clocks page and the decision-trace view.
 - **Rulesets do not model wealth**, so `standing` is set by hand. Deriving it
   from the sheet is the natural next step (`04-ENTITIES.md` §2b).
 
-## 8. Working preferences
+## 8. P4 — what is actually next
+
+`12-ROADMAP.md` calls it *Voice*, and the roadmap's own ordering is the
+important part: **the non-AI paths land first**, and a good deal of P4 is
+reachable with no model installed at all.
+
+**Do the playtest first (§2b).** What follows assumes it changed nothing; if it
+does, it outranks this list.
+
+### The half that needs no model
+
+1. **More of `_turn_summary`.** It exists and it is thirty lines. Every NPC
+   action, memory formed, relationship moved and goal advanced is already
+   structured data with a trace attached — the templates are the cheap part and
+   the payoff is the whole reason anybody would notice the engine is running.
+2. **Templated episode gists** (`08-LLM-LAYER.md` §5). Memory currently stores
+   the GM's words or a phrase from `mind/relationships.PHRASES`. A richer
+   deterministic templater makes recall read like recollection.
+3. **The verb parser.** `/check` takes an approach and free text; P4 wants
+   *"I put myself between Rook and Ondry"* to resolve to an action. Deterministic
+   first, and the ten affordance verbs are the vocabulary it maps onto.
+4. **Name and culture tables as data** — the same treatment archetypes got
+   (`helpers/dnd/data/`, layered through `campaign.settings`). This is the
+   long-standing "a GM cannot add a trade" gap and the machinery now exists.
+
+### The half that needs one
+
+Backend interface with `null` first, then Ollama. **No hosted API, ever** —
+invariant 10, and it is not negotiable. `render_scene` and `render_dialogue`
+only, each with a schema, retries and a template fallback, and the null suite is
+part of every run.
+
+**Acceptance (`12-ROADMAP.md`):** the null-backend suite passes the whole turn
+loop; an NPC never speaks a fact it does not believe; closing the laptop
+mid-scene degrades to templates without interrupting play.
+
+### Before you start P4, two housekeeping items
+
+* **Six command slots left** (94/100). Discord's cap is hard and hitting it takes
+  the *whole cog* offline — it has happened twice. P4 wants commands. Group new
+  ones under `/gm` or an existing group, where a whole group costs one slot.
+* **107 tunables in 14 groups.** Every one is justified and "everything
+  tweakable" is settled — this is not a case for removing any. But the panel
+  could fold the ones nobody should ever touch behind an *advanced* disclosure,
+  the way the trait override already is, before the number doubles.
+
+## 9. Keeping this file honest
+
+It was updated in **twelve separate commits** on the day P3 was built, once per
+increment, and it still drifted — because each update patched the paragraph it
+was touching and left the surrounding text disagreeing with it. By the end the
+header said a fresh session was picking up P3, the phase table said P3 was
+complete *and* that the decision engine was all that remained, a heading read
+"What remains" above six things that were built, and the architecture diagram
+was missing four modules that had been added that day.
+
+Worst of it: **the test count was wrong by forty**, because it was being
+incremented rather than measured. A number nobody checked, in the one document
+whose whole job is to be trusted without checking.
+
+So, when updating this file:
+
+* **Measure, do not increment.** The count is
+  `py tests/test_command_names.py` plus the four suite totals. Run them.
+* **Read §1, §2 and §5 after changing anything.** They describe the whole, so
+  they go stale when a part changes, and nothing about editing §6 makes you look
+  at them.
+* **Grep for the claim you are invalidating**, not just the sentence you are
+  rewriting: "all that remains", "still unbuilt", "read by nothing", "P3".
+
+## 10. Working preferences
 
 - **Ship one complete, checkable thing at a time.** Not a phase, not a batch —
   the smallest increment the user can actually exercise. Then stop, say plainly
