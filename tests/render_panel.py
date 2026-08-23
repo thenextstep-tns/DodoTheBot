@@ -65,7 +65,23 @@ def main() -> None:
         store, marla, "Ondry never paid what he owed at the north dock",
         world_time=0, rng=Random(1), valence=-0.6, details=["a green lantern"],
     )
+    # One real ambition beside a scatter of half-wants, so the attention split
+    # in the inspector has something to show and the priority controls have
+    # something to be clicked on.
+    ondry = minds.spawn_npc(
+        store, name="Ondry Kass", role="dockhand", culture="tidewater",
+        world_time=0, rng=Random(11),
+    )
+    marla = store.entities.get(marla.id)
+    minds.add_goal(store, marla, "harm", world_time=0, priority=1.0,
+                   text="see Ondry answer for the north dock", subject_id=ondry.id)
+    for index, errand in enumerate(("get the ledgers back", "find out who lit it")):
+        marla = store.entities.get(marla.id)
+        minds.add_goal(store, marla, "learn" if index else "acquire",
+                       world_time=0, text=errand, priority=0.25)
+
     minds.advance(store, campaign, 900, Random(3))
+    marla = store.entities.get(marla.id)
     _write("inspector.html", pages._inspector_html(bot, guild, campaign, marla, store))
 
     print(f"\nguild id in the pages: {guild.id} (a real snowflake, on purpose)")

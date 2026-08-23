@@ -16,11 +16,16 @@ cheap half of GOAP, and it is why `06-DECISION-ENGINE.md` §1 could rule search
 out. It also means a goal can only ever ask for something a ruleset actually
 affords (``rules/ruleset.py``), so a goal cannot quietly become unreachable.
 
-**Goals live on the entity, not in their own collection.** They are bounded —
-a handful per person, capped by a tunable — and never read without the entity
-they belong to, which is the opposite of memory and beliefs. The rule this layer
-follows is that unbounded or independently queried components get a collection;
-these are neither.
+**Goals live on the entity, not in their own collection.** They are never read
+without the person whose goals they are, which is the opposite of memory and
+beliefs — the rule this layer follows is that unbounded or independently queried
+components get a collection, and these are neither.
+
+Anybody may want any number of things. What limits them is **attention**, which
+is divided across everything they are carrying by how much they care about each
+(``mind/goals.py``) — so a long list is not refused, it is simply unproductive.
+That is why ``priority`` is the load-bearing field on this record: it is not a
+sort order, it is the share of a person a goal gets.
 
 Frozen, like everything the decision engine may see: advancing a goal returns a
 new one. The pure arithmetic lives in ``mind/goals.py``.
@@ -160,6 +165,12 @@ class Goal:
     def with_progress(self, progress: float, world_time: int) -> "Goal":
         return replace(self, progress=max(0.0, min(1.0, progress)),
                        touched_at=int(world_time))
+
+    def with_priority(self, priority: float) -> "Goal":
+        """How much they care, changed. Not a touch: wanting something more is
+        not the same as having done anything about it, and the decay clock keys
+        on the latter."""
+        return replace(self, priority=max(0.0, min(1.0, float(priority))))
 
     def with_status(self, status: str) -> "Goal":
         return replace(self, status=status if status in STATUSES else self.status)

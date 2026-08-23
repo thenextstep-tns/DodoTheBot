@@ -54,7 +54,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**480 tests** across five suites, all passing:
+**508 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -200,8 +200,23 @@ checkable on its own:
      (from when it last *moved*, so pursuit costs nothing), a **deadline
      presses** convexly inside its window, and **progress raises** what the next
      step is worth. `pressure()` is bounded 0..1 like every scorer term.
-   * The cap **refuses** rather than evicting — which ambition to drop is not a
-     decision to make behind a GM's back.
+   * **Attention is the limit, not slots.** Anybody may hold any number of
+     goals; each one costs `goal_attention_overhead` just to be carried, so
+     usable attention *falls* as the list grows — 1 goal gets 0.92 of a person,
+     6 get 0.09 each, 12 get 0.003, and 13 leaves nothing at all. The relentless
+     character and the one who never finishes anything are the same subtraction
+     with a different number in it; nobody scripted either. Overhead at 0 turns
+     it back into plain division.
+   * **The split follows priority, not head count**, so one real ambition beside
+     a scatter of half-wants still gets somewhere. `priority` is therefore the
+     load-bearing field: it is a share of a person, not a sort order.
+   * **Priorities move.** `SUPPORTED_BY` maps relationship axes onto goal kinds,
+     and `minds.relate` re-weighs any goal about the other party after every
+     event — a grudge cools when the feeling behind it does. Always a pull,
+     never a jump; `goal_reweigh = 0` freezes them. A GM still overrides.
+   * `goal_cap` survives as a blunt backstop, **off by default**. It refuses
+     rather than evicting — which ambition to drop is not a decision to make
+     behind a GM's back.
    * Goals are embedded on the entity, not given a collection: bounded, and
      never read without the person. Finished and abandoned ones stay on the
      record; what somebody gave up on is a fact about them.

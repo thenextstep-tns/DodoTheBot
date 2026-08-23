@@ -311,13 +311,90 @@ def goals_of(entity: Entity, world_time: int, tuning: Tuning | None = None) -> l
     out — :func:`all_goals_of` is what the inspector uses to show those.
     """
     view = tuning.goals() if tuning else DEFAULT_GOALS
-    return goal_math.active(goal_model.from_docs(entity.goals), world_time, view)
+    return goal_math.active(goal_model.from_docs(entity.goals), world_time, view,
+                            traits=traits_of(entity))
 
 
 def all_goals_of(entity: Entity) -> list:
     """Every goal on the record, finished and abandoned ones included. For the
     inspector, which has to be able to show what someone gave up on."""
     return goal_model.from_docs(entity.goals)
+
+
+def attention_of(entity: Entity, world_time: int, tuning: Tuning | None = None) -> dict:
+    """How this entity's attention is actually divided, plus the arithmetic.
+
+    ``{shares: {key: 0..1}, budget, usable, overhead, carrying}`` — everything the
+    inspector needs to show *why* somebody who wants nine things is getting none
+    of them done, which is the whole reason the mechanic is worth having.
+    """
+    goal_tuning = tuning.goals() if tuning else DEFAULT_GOALS
+    live = goals_of(entity, world_time, tuning)
+    traits = traits_of(entity)
+    total = goal_math.budget(traits, goal_tuning)
+    return {
+        "shares": goal_math.focus(live, world_time, traits, goal_tuning),
+        "budget": total,
+        "usable": goal_math.usable(len(live), traits, goal_tuning),
+        "overhead": len(live) * max(0.0, goal_tuning.attention_overhead),
+        "carrying": len(live),
+    }
+
+
+def set_goal_priority(store, entity: Entity, key: str, priority: float):
+    """What a GM says this is worth to them. Returns the updated goal, or ``None``.
+
+    Priority is the share of a person a goal gets, so this is the most
+    consequential control on the page — it is how you say *this one matters and
+    the rest are noise*, which is the difference between someone relentless and
+    someone scattered.
+    """
+    goals, found = goal_model.from_docs(entity.goals), None
+    out = []
+    for goal in goals:
+        if goal.key == key:
+            found = goal.with_priority(priority)
+            out.append(found)
+        else:
+            out.append(goal)
+    if found is None:
+        return None
+    save_goals(store, entity, out)
+    return found
+
+
+def reweigh_goals(store, entity: Entity, *, subject_id=None,
+                  tuning: Tuning | None = None) -> list:
+    """Let how they feel about people pull what they want about those people.
+
+    Called after anything that moves a relationship, so a grudge that cools takes
+    the wanting with it. ``subject_id`` narrows it to goals about one person,
+    which is what an event between two entities wants; without it every goal they
+    hold is re-weighed, which is what a tick wants.
+
+    Returns the goals that actually moved, so a caller can report it.
+    """
+    tuning = tuning or tuning_for(store)
+    goal_tuning = tuning.goals()
+    if goal_tuning.reweigh <= 0:
+        return []
+
+    goals, out, moved = goal_model.from_docs(entity.goals), [], []
+    for goal in goals:
+        if not goal.open or goal.subject_id is None or (
+            subject_id is not None and goal.subject_id != subject_id
+        ):
+            out.append(goal)
+            continue
+        relationship = store.relations.between(entity.id, goal.subject_id)
+        shifted = goal_math.reweighed(goal, relationship, goal_tuning)
+        out.append(shifted)
+        if shifted.priority != goal.priority:
+            moved.append(shifted)
+
+    if moved:
+        save_goals(store, entity, out)
+    return moved
 
 
 def save_goals(store, entity: Entity, goals) -> Entity:
@@ -351,6 +428,10 @@ def add_goal(
     goal_tuning = tuning.goals()
     existing = goal_model.from_docs(entity.goals)
 
+    # Attention is what limits anyone: a long list is not refused, it is simply
+    # unproductive, because carrying each goal costs something before any of it
+    # is spent. The cap is off by default and is a blunt backstop for a table
+    # that would rather have a flat rule.
     live = [g for g in existing if g.open and not g.expired(world_time)]
     if goal_tuning.cap > 0 and len(live) >= goal_tuning.cap:
         return None
@@ -827,6 +908,12 @@ def relate(
     if familiarity_bonus:
         rel_mod.deepen(relationship, familiarity_bonus)
     saved = store.relations.save(relationship)
+
+    # What they want about this person follows how they now feel about them.
+    # Here rather than in the pure layer because it needs the stored goals, and
+    # here rather than on the tick because a grudge should cool when the thing
+    # that cooled it happened, not on the next quarter hour.
+    reweigh_goals(store, from_entity, subject_id=to_entity.id, tuning=tuning)
     return saved
 
 

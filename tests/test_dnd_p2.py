@@ -1518,6 +1518,146 @@ def test_entity_round_trip() -> None:
           fixed.guild_id == campaign.guild_id and fixed.campaign_id == campaign.id)
 
 
+# --------------------------------------------------------------------------- #
+#  21. Attention — the scarce thing, and what moves a priority
+#
+#  Anybody may want any number of things. What they cannot do is pursue them all
+#  at once, and the two characters that falls out of — the relentless one and the
+#  one who never finishes anything — are the point of the whole mechanic.
+# --------------------------------------------------------------------------- #
+def test_attention() -> None:
+    tuning = Tuning().goals()
+
+    def carrying(n, priority=0.6):
+        return [goal_model.Goal(key=f"reach-{i}", kind=goal_model.REACH,
+                                priority=priority) for i in range(n)]
+
+    # --- 1. Carrying a goal costs something before any of it is spent ----- #
+    one = goal_math.focus(carrying(1), 0, None, tuning)["reach-0"]
+    six = goal_math.focus(carrying(6), 0, None, tuning)["reach-0"]
+    twelve = goal_math.focus(carrying(12), 0, None, tuning)["reach-0"]
+    check("attention: one goal gets nearly the whole person", one > 0.9, f"{one:.3f}")
+    check("attention: six goals get much less than a sixth each",
+          six < (one / 6), f"{six:.3f} vs {one / 6:.3f}")
+    check("attention: TWELVE GOALS IS A PERSON WHO FINISHES NOTHING",
+          twelve < 0.01, f"{twelve:.4f}")
+    check("attention: and past that there is nothing left at all",
+          goal_math.usable(13, None, tuning) == 0.0)
+    check("attention: the shares never exceed the person",
+          sum(goal_math.focus(carrying(6), 0, None, tuning).values()) <= 1.0)
+
+    # The overhead is what makes a long list worse rather than merely slower.
+    flat = Tuning(campaign={"goal_attention_overhead": 0}).goals()
+    check("attention: OVERHEAD SWITCHES OFF INTO PLAIN DIVISION",
+          abs(goal_math.focus(carrying(12), 0, None, flat)["reach-0"] - 1 / 12) < 1e-9
+          and flat.divides_evenly)
+
+    # --- 2. The split follows how much they care, not head count ---------- #
+    mixed = [goal_model.Goal(key="harm-1", kind=goal_model.HARM, priority=1.0)]
+    mixed += [goal_model.Goal(key=f"reach-{i}", kind=goal_model.REACH, priority=0.1)
+              for i in range(5)]
+    split = goal_math.focus(mixed, 0, None, tuning)
+    check("attention: ONE REAL AMBITION KEEPS MOST OF THE PERSON",
+          split["harm-1"] > 6 * split["reach-0"],
+          f"{split['harm-1']:.3f} vs {split['reach-0']:.3f}")
+    even = goal_math.focus(carrying(6), 0, None, tuning)
+    check("attention: equal wanting splits equally",
+          len(set(round(v, 6) for v in even.values())) == 1)
+
+    # --- 3. Doggedness decides how much there is to spend ----------------- #
+    dogged = goal_math.budget(Traits(diligence=1.0), tuning)
+    feckless = goal_math.budget(Traits(diligence=-1.0), tuning)
+    check("attention: a dogged person has more of it", dogged > feckless,
+          f"{dogged:.2f} vs {feckless:.2f}")
+    same = Tuning(campaign={"goal_attention_reach": 0}).goals()
+    check("attention: and that can be switched off",
+          goal_math.budget(Traits(diligence=1.0), same)
+          == goal_math.budget(Traits(diligence=-1.0), same))
+
+    # --- 4. Being spread thin costs progress, not just speed -------------- #
+    goal = goal_model.Goal(key="reach-0", priority=0.6)
+    focused = goal_math.progressed(goal, 0.4, 0, tuning, share=0.92)
+    scattered = goal_math.progressed(goal, 0.4, 0, tuning, share=0.09)
+    check("attention: the same effort gets less done when divided",
+          focused.progress > 4 * scattered.progress,
+          f"{focused.progress:.3f} vs {scattered.progress:.3f}")
+    check("attention: but a GM saying it moved means it moved",
+          goal_math.progressed(goal, 0.4, 0, tuning).progress == 0.4)
+
+    # --- 5. Two people, same six goals ------------------------------------ #
+    campaign, store = _campaign(9316, "Two Ways To Want")
+    relentless = _npc(store, campaign, "Relentless", diligence=0.8)
+    scattered_npc = _npc(store, campaign, "Scattered", diligence=-0.4)
+    for i, priority in enumerate([1.0] + [0.1] * 5):
+        minds.add_goal(store, store.entities.get(relentless.id), goal_model.REACH,
+                       world_time=0, text=f"thing {i}", priority=priority)
+    for i in range(6):
+        minds.add_goal(store, store.entities.get(scattered_npc.id), goal_model.REACH,
+                       world_time=0, text=f"thing {i}", priority=0.6)
+
+    a = minds.attention_of(store.entities.get(relentless.id), 0)
+    b = minds.attention_of(store.entities.get(scattered_npc.id), 0)
+    check("attention: NOBODY WAS REFUSED A GOAL", a["carrying"] == 6 and b["carrying"] == 6)
+    check("attention: the relentless one is still getting somewhere",
+          max(a["shares"].values()) > 0.4, f"{max(a['shares'].values()):.3f}")
+    check("attention: the scattered one is not",
+          max(b["shares"].values()) < 0.1, f"{max(b['shares'].values()):.3f}")
+    check("attention: and the panel can say why",
+          b["overhead"] > 0 and b["usable"] < b["budget"])
+
+    # --- 6. Priorities move with how they feel about people --------------- #
+    hated = Relationship(affinity=-0.9, respect=-0.6, fear=0.3)
+    liked = Relationship(affinity=0.8, trust=0.6)
+    grudge = goal_model.Goal(key="harm-1", kind=goal_model.HARM,
+                             subject_id="x", priority=0.5)
+    check("attention: hating someone argues for wanting them ruined",
+          goal_math.support(grudge, hated) > 0.5)
+    check("attention: liking them argues against it",
+          goal_math.support(grudge, liked) < 0)
+    check("attention: a goal about nobody is moved by no feeling",
+          goal_math.support(goal_model.Goal(key="a-1", kind=goal_model.ACQUIRE), hated) == 0)
+
+    warmer = goal_math.reweighed(grudge, hated, tuning)
+    cooler = goal_math.reweighed(grudge, liked, tuning)
+    check("attention: a grudge grows where the feeling supports it",
+          warmer.priority > grudge.priority)
+    check("attention: AND COOLS WHERE IT DOES NOT", cooler.priority < grudge.priority)
+    check("attention: it is a pull, never a jump",
+          abs(warmer.priority - grudge.priority) < 0.2)
+    check("attention: reweighing leaves the decay clock alone",
+          warmer.touched_at == grudge.touched_at)
+    frozen = Tuning(campaign={"goal_reweigh": 0}).goals()
+    check("attention: PRIORITIES CAN BE FROZEN ENTIRELY",
+          goal_math.reweighed(grudge, hated, frozen) == grudge)
+
+    # --- 7. And it happens when the event happens ------------------------- #
+    marla = _npc(store, campaign, "Marla")
+    ondry = _npc(store, campaign, "Ondry")
+    goal = minds.add_goal(store, store.entities.get(marla.id), goal_model.BEFRIEND,
+                          world_time=0, text="win Ondry over", subject_id=ondry.id,
+                          priority=0.5)
+    marla = store.entities.get(marla.id)
+    minds.relate(store, marla, ondry, "betrayed", world_time=10)
+    after = [g for g in minds.all_goals_of(store.entities.get(marla.id))
+             if g.key == goal.key][0]
+    check("attention: BEING BETRAYED COOLS THE WISH TO BE CLOSER",
+          after.priority < goal.priority, f"{goal.priority:.2f} → {after.priority:.2f}")
+
+    # A GM still has the last word, and it reaches the split.
+    minds.set_goal_priority(store, store.entities.get(marla.id), goal.key, 0.95)
+    marla = store.entities.get(marla.id)
+    check("attention: a GM can set what someone cares about",
+          [g.priority for g in minds.all_goals_of(marla) if g.key == goal.key] == [0.95])
+
+    # --- 8. Tunables ------------------------------------------------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("attention: every knob is registered",
+          {"goal_attention", "goal_attention_overhead", "goal_attention_reach",
+           "goal_reweigh"} <= keys)
+    check("attention: the hard cap is off by default, since it is not the mechanism",
+          Tuning().goals().cap == 0)
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1541,6 +1681,7 @@ def main() -> int:
         test_affordances,
         test_goals,
         test_entity_round_trip,
+        test_attention,
         test_end_to_end,
     ):
         test()

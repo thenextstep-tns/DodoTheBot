@@ -633,6 +633,16 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       if (data.ok) location.reload();
     }});
   }}
+  document.querySelectorAll(".dndgoal-priority").forEach((el) => {{
+    el.addEventListener("change", async () => {{
+      if (el.value === "" || el.validity.badInput) return;
+      const data = await post(`/api/guild/${{gid}}/dnd/entity-goals`, {{
+        campaign_id: cid, entity_id: eid, key: el.dataset.key,
+        action: "priority", priority: el.value,
+      }});
+      if (data.ok) location.reload();   // every other goal's share moves too
+    }});
+  }});
   document.querySelectorAll(".dndgoal-advance, .dndgoal-drop").forEach((el) => {{
     el.addEventListener("click", async () => {{
       const drop = el.classList.contains("dndgoal-drop");
@@ -919,10 +929,15 @@ def _goals_section(entity, store, tuning, world_time: int) -> str:
     goal_tuning = tuning.goals()
     everything = minds.all_goals_of(entity)
     live = {g.key for g in minds.goals_of(entity, world_time, tuning)}
+    attention = minds.attention_of(entity, world_time, tuning)
+    shares = attention["shares"]
 
     rows = ""
     for goal in sorted(everything, key=lambda g: (g.status != "open", g.key)):
-        pressing = goal_math.pressure(goal, world_time, goal_tuning)
+        # With their share applied, so this column is the number the scorer
+        # actually multiplies by — the Attention column beside it explains why.
+        pressing = goal_math.pressure(goal, world_time, goal_tuning,
+                                      shares.get(goal.key, 0.0))
         caring = goal_math.faded(goal, world_time, goal_tuning)
         when = ""
         if goal.deadline is not None:
@@ -939,19 +954,31 @@ def _goals_section(entity, store, tuning, world_time: int) -> str:
             f'<button class="dndgoal-advance ghost" data-key="{_escape(goal.key)}">+25%</button> '
             f'<button class="dndgoal-drop ghost" data-key="{_escape(goal.key)}">Give up</button>'
         )
+        share = shares.get(goal.key, 0.0)
+        attends = (
+            f'{_meter(share)}<span class="muted small">{share * 100:.0f}% of them</span>'
+            if goal.status == "open"
+            else '<span class="muted small">—</span>'
+        )
+        cares = (
+            f'<input type="number" class="dndgoal-priority" data-key="{_escape(goal.key)}" '
+            f'step="0.05" min="0" max="1" value="{goal.priority:.2f}">'
+            if goal.status == "open" else f'<span class="muted small">{goal.priority:.2f}</span>'
+        )
         rows += f"""
 <tr>
   <td><b>{_escape(GOAL_KIND_LABELS.get(goal.kind, goal.kind))}</b>
     <div>{_escape(goal.text) or '<span class="muted">no words yet</span>'}</div>
     <div class="muted small">{_escape(state)} · from {_escape(goal.origin)}
       {(" · " + _escape(when)) if when else ""}</div></td>
-  <td>{_meter(caring)}<span class="muted small">cares {caring:.2f}</span></td>
+  <td>{cares}<div class="muted small">now worth {caring:.2f}</div></td>
+  <td>{attends}</td>
   <td>{_meter(goal.progress)}<span class="muted small">{int(goal.progress * 100)}% done</span></td>
   <td>{_meter(pressing)}<span class="muted small">pressing {pressing:.2f}</span></td>
   <td>{controls}</td>
 </tr>"""
     if not rows:
-        rows = ('<tr><td class="muted" colspan="5">Wants nothing in particular. '
+        rows = ('<tr><td class="muted" colspan="6">Wants nothing in particular. '
                 'An NPC with no goal only ever reacts.</td></tr>')
 
     kinds = "".join(
@@ -968,9 +995,20 @@ def _goals_section(entity, store, tuning, world_time: int) -> str:
   <i>person</i> is after, and it outlives the scene it was formed in. Each kind
   names the actions that serve it, so the engine can weigh a choice against a
   goal without planning a route to it. <b>Wanting fades</b> when nothing moves —
-  the clock runs from the last time the goal advanced, and every part of that is
-  tunable under Goals.</p>
-  <table class="ranktable"><tbody>{rows}</tbody></table>
+  the clock runs from the last time the goal advanced.</p>
+  <p class="muted small"><b>There is no limit on goals; there is a limit on
+  attention.</b> {_escape(entity.identity.name)} has
+  <b>{attention['budget']:.2f}</b> to give, carrying
+  {attention['carrying']} goal{'' if attention['carrying'] == 1 else 's'} costs
+  <b>{attention['overhead']:.2f}</b> of it before anything is pursued, and
+  <b>{attention['usable']:.2f}</b> is left to actually get things done with. That
+  is split by <i>how much they care</i>, so one real ambition beside a scatter of
+  half-wants still gets somewhere — and enough half-wants leaves nothing for
+  anything. Every part of it is tunable under Goals.</p>
+  <table class="ranktable"><thead><tr>
+    <th>Goal</th><th>Cares</th><th>Attention</th><th>Progress</th>
+    <th>Pressing</th><th></th></tr></thead>
+    <tbody>{rows}</tbody></table>
   <div class="paramrow goaladd">
     <select id="goalkind">{kinds}</select>
     <input type="text" id="goaltext" placeholder="what they are after, in your words" maxlength="200">

@@ -327,11 +327,42 @@ TUNABLES: list[dict] = [
           True, kind="bool", minimum=0, maximum=1),
 
     # --- Goals (P3) -------------------------------------------------------- #
-    _spec("goal_cap", "Goals", "Goals at once",
-          "How many things a character can be pursuing at the same time, the ones "
-          "they care about most first. People with a dozen active ambitions read "
-          "as scatterbrained rather than driven. **0 lifts the cap entirely.**",
-          4, kind="int", minimum=0, maximum=50),
+    _spec("goal_attention", "Goals", "Attention to spend",
+          "How much a character has to give to everything they are pursuing, "
+          "*in total*. This is the real limit on ambition — not how many goals "
+          "somebody may hold, but how thin they are prepared to spread "
+          "themselves. It is divided across their goals by how much they care "
+          "about each.",
+          1.0, minimum=0.1, maximum=5.0),
+    _spec("goal_attention_overhead", "Goals", "Cost of carrying one",
+          "What each goal takes just to be kept in mind, before any of it is "
+          "spent on actually pursuing it. This is what makes a long list worse "
+          "than a short one rather than merely slower: carry enough and there is "
+          "nothing left over, and nothing moves at all. **0 removes the penalty** "
+          "— attention is then simply divided, and twelve goals is twelve times "
+          "slower and never quite hopeless.",
+          0.08, minimum=0.0, maximum=1.0),
+    _spec("goal_attention_reach", "Goals", "Dogged people manage more",
+          "How much **diligence** moves someone's attention budget. At 0.5 the "
+          "most dogged character in the world carries half again what an average "
+          "one does, and the most feckless half as much. **0 gives everybody the "
+          "same attention**, whoever they are.",
+          0.5, minimum=0.0, maximum=2.0),
+    _spec("goal_reweigh", "Goals", "Feelings move what they want",
+          "How far a character's goals about a person drift toward what they now "
+          "feel about them. A grudge that cools takes the wanting with it; "
+          "somebody you have come to fear makes getting away matter more. Always "
+          "a pull, never a jump — a character who still wants something after "
+          "the feeling behind it has gone is the interesting one. **0 freezes "
+          "priorities**, so they change only when you say so.",
+          0.15, minimum=0.0, maximum=1.0),
+    _spec("goal_cap", "Goals", "Hard limit on goals",
+          "A blunt ceiling on how many things somebody may pursue at once. "
+          "**Off by default, and it is not the mechanism** — attention above is "
+          "what actually limits anyone, and it does it by making a long list "
+          "unproductive rather than by refusing the next entry. Set it only if "
+          "you want a flat rule instead.",
+          0, kind="int", minimum=0, maximum=50),
     _spec("goal_decay", "Goals", "Wanting fades",
           "How much of a want is lost each day nobody acts on it. A goal being "
           "actively pursued does not fade at all — the clock runs from the last "
@@ -556,6 +587,10 @@ class Tuning:
     def goals(self) -> "GoalTuning":
         return GoalTuning(
             cap=int(self.get("goal_cap")),
+            attention=self.get("goal_attention"),
+            attention_overhead=self.get("goal_attention_overhead"),
+            attention_reach=self.get("goal_attention_reach"),
+            reweigh=self.get("goal_reweigh"),
             decay=self.get("goal_decay"),
             abandon_below=self.get("goal_abandon_below"),
             deadline_reach=self.get("goal_deadline_reach"),
@@ -711,7 +746,11 @@ class AffordanceTuning:
 class GoalTuning:
     """What time and progress do to a want (``mind/goals.py``)."""
 
-    cap: int = 4
+    cap: int = 0                   # off: attention is the real limit, not slots
+    attention: float = 1.0         # total, split across everything they carry
+    attention_overhead: float = 0.08   # what one goal costs just to be held
+    attention_reach: float = 0.5   # how much diligence moves the budget
+    reweigh: float = 0.15          # how far feelings pull a goal's priority
     decay: float = 0.02            # fraction of the wanting lost per idle day
     abandon_below: float = 0.08
     deadline_reach: float = 1.0
@@ -723,6 +762,12 @@ class GoalTuning:
     def eternal(self) -> bool:
         """Whether wanting fades at all."""
         return self.decay <= 0
+
+    @property
+    def divides_evenly(self) -> bool:
+        """Whether carrying a goal is free — attention merely divided, so a long
+        list is slower and never hopeless."""
+        return self.attention_overhead <= 0
 
 
 @dataclass(frozen=True)

@@ -372,6 +372,21 @@ async def api_dnd_entity_goals(request: web.Request):
         return web.json_response({"ok": True, "key": goal.key})
 
     key = str(data.get("key", ""))
+    if action == "priority":
+        try:
+            priority = float(data.get("priority"))
+        except (TypeError, ValueError):
+            return _bad("Priority must be a number.")
+        moved = minds.set_goal_priority(store, entity, key, priority)
+        if moved is None:
+            return _bad("No such goal.")
+        await _record_change(
+            request, "dnd_goal", f"{entity.identity.name}.{key}", None, moved.priority,
+            f"set how much **{entity.identity.name}** cares about "
+            f"{moved.text or moved.kind} to {moved.priority:.2f}",
+        )
+        return web.json_response({"ok": True, "key": key, "priority": moved.priority})
+
     if action == "drop":
         dropped = minds.drop_goal(store, entity, key)
         if dropped is None:
