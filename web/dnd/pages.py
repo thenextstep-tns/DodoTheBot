@@ -471,6 +471,24 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
   // A checkbox's .value is "on" whether or not it is ticked, so reading it
   // would make every switch permanently on and look like the save was ignored.
   const tuneValue = (el) => el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+  // A number input that cannot parse what was typed reports "" — and "" is how
+  // this API says *clear the override*. So a typo used to silently revert a
+  // setting to inherited and flash "Saved." while doing it. Refuse instead; the
+  // reset arrow stays the only way to clear something.
+  const unusable = (el) =>
+    el.type === "number" && (el.value === "" || el.validity.badInput);
+  // What to put back when it is refused. Seeded from the rendered value and
+  // moved forward only by a save that actually landed.
+  document.querySelectorAll(".dndtune, .dndtune-server").forEach((el) => {{
+    el.dataset.was = el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value;
+  }});
+  function restore(el) {{
+    el.value = el.dataset.was;
+    flash("That is not a number — use the arrow to clear a setting.", false);
+  }}
+  function remember(el) {{
+    el.dataset.was = tuneValue(el);
+  }}
   async function post(url, body) {{
     let res, raw = "", data = {{}};
     try {{
@@ -526,9 +544,11 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
     }});
   }});
   document.querySelectorAll(".dndtune-server").forEach((el) => {{
-    el.addEventListener("change", () => {{
-      post(`/api/guild/${{gid}}/dnd/tune-server`,
+    el.addEventListener("change", async () => {{
+      if (unusable(el)) return restore(el);
+      const data = await post(`/api/guild/${{gid}}/dnd/tune-server`,
         {{key: el.dataset.key, value: tuneValue(el)}});
+      if (data.ok) remember(el);
     }});
   }});
   document.querySelectorAll(".dndtune-server-clear").forEach((el) => {{
@@ -539,9 +559,11 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
     }});
   }});
   document.querySelectorAll(".dndtune").forEach((el) => {{
-    el.addEventListener("change", () => {{
-      post(`/api/guild/${{gid}}/dnd/tune`,
+    el.addEventListener("change", async () => {{
+      if (unusable(el)) return restore(el);
+      const data = await post(`/api/guild/${{gid}}/dnd/tune`,
         {{campaign_id: cid, key: el.dataset.key, value: tuneValue(el)}});
+      if (data.ok) remember(el);
     }});
   }});
   document.querySelectorAll(".dndtune-clear").forEach((el) => {{

@@ -38,6 +38,7 @@ the shape of them is the most useful thing in this file:
 | Every PC was immune to every event | `importance` (a CPU knob, pinned at 1.0 for PCs) was read as standing |
 | Disposition could insulate someone past their own station | Nothing asserted the documented ceiling |
 | Nothing ever left the `working` memory tier | `consolidate_scene` was written and called from nowhere |
+| A typo in any numeric tunable silently reset it to inherited, flashing "Saved." | The panel suite asserts on HTML; nothing types into a control. An unparseable number reads back as `""`, and `""` is this API's *clear the override* |
 
 **The human verdict on P0–P2: the mechanics are there and it is not playable.**
 Verbatim, so it does not get softened: *"the syntax is way too complicated, the
@@ -52,7 +53,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**430 tests** across five suites, all passing:
+**433 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py

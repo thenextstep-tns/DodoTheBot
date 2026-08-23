@@ -239,6 +239,27 @@ def test_script_wiring() -> None:
           0 <= script.find('id="status"') < body,
           "emitted after the script, so getElementById returns null")
 
+    # A third one, found by typing into the panel rather than by reading it.
+    # A checkbox's .value is "on" whether ticked or not, and a number input that
+    # cannot parse what was typed reports "" — which this API reads as *clear
+    # the override*. Posting el.value directly therefore made every switch
+    # permanently on, and turned a typo into a silent reset to inherited.
+    # Scoped to the tuning endpoints on purpose: they are the ones where "" is
+    # *meaningful*. The trait editor posts a raw value to an endpoint that
+    # rejects a non-number outright, which is a worse message and not a silent
+    # loss.
+    tune_posts = [line for line in script.splitlines() if "dnd/tune" in line]
+    check("script: both tuning endpoints are reachable from the page",
+          len(tune_posts) == 4, str(len(tune_posts)))
+    check("script: tuning controls are never posted as a raw .value",
+          all("el.value" not in line for line in script.splitlines()
+              if "key: el.dataset.key" in line),
+          "a checkbox posts \"on\" and a bad number posts \"\" — which means clear")
+    check("script: unparseable numbers are refused rather than sent",
+          "el.validity.badInput" in script and "unusable(el)" in script)
+    check("script: a switch posts its state",
+          'el.checked ? "1" : "0"' in script)
+
 
 def test_tuning_section() -> None:
     guild, campaign, store = build()
