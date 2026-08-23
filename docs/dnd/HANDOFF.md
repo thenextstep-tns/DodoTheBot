@@ -55,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**656 tests** across five suites, all passing:
+**717 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -367,6 +367,39 @@ is too slow the fix is `CANDIDATE_CAP` or fewer terms — **never** caching
 decisions, which would break replay.
 
 `boldness` is read by nothing today; step 4 is where it starts mattering.
+
+### Optional needs, and the safety gate that came with them
+
+`desire` is the first **optional need** (`mind/needs.OPTIONAL`) — off unless a
+campaign asks for it, and the shape any future one should copy:
+
+* **Two gates that must agree.** The `need_desire` tunable *and* the campaign's
+  **lines** (`docs/dnd/11-SAFETY.md` §1). A fresh campaign already ships with
+  `sexual content` on its lines, so switching the setting on alone does nothing
+  — deliberately two acts, because a table agreeing to play something and a GM
+  enabling the machinery are different decisions.
+* That gate was invisible at first: the setting looked broken. Now the tuning
+  row carries a `blocked` note saying which line overrules it, and there is a
+  **Lines** section on the campaign page to clear one. `Tuning.entries()` is
+  where the note is attached.
+* **Off means off now.** `advanced()` pins an optional need to 0 every time it
+  is read, so switching it off zeroes values entities were already carrying —
+  the lesson from behaviour packs, where a setting that only affected new
+  entities looked exactly like a setting that did not work.
+* **It is not a scalar in a vacuum.** The body need is a general pressure; the
+  *directed* pull is `Relationship.desire`, fed by `attraction()` from the
+  target's `Entity.allure`, affinity, familiarity, trust and respect — weighted
+  so a plain, trusted, familiar person is wanted **more** than a striking
+  stranger (0.34 vs 0.32), and fear puts it out almost entirely. Standing
+  pressure amplifies an existing pull and **cannot manufacture one**.
+* **The negative half is repulsion**, not the absence of wanting — it briefly
+  ran 0…1 here, which confused *neutral* with *repelled*. Repulsion **bleeds**
+  into affinity and respect on every contact (`bleed()`, `desire_bleed`), so an
+  acquaintance curdles the more you see of them. One direction only: letting
+  attraction feed back would loop through affinity and infatuate the campaign.
+* Five interactions carry it — `flirted`, `courted`, `rebuffed`, `lay_with`,
+  `repelled` — and `minds.relate` **refuses all of them** in a campaign that did
+  not opt in, so one cannot half-happen.
 
 ### Four things designed during the playtest, still unbuilt
 

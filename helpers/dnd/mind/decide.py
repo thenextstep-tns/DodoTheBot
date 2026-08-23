@@ -84,8 +84,8 @@ NEEDS_SERVED = {
     "flee":   ("safety",),
     "hide":   ("safety",),
     "move":   ("warmth", "safety"),
-    "speak":  ("belonging",),
-    "give":   ("belonging",),
+    "speak":  ("belonging", "desire"),
+    "give":   ("belonging", "desire"),
     "attack": ("safety",),
     "wait":   ("fatigue",),
     "watch":  ("safety",),
@@ -137,8 +137,10 @@ TRAIT_AFFINITY = {
 RELATION_READS = {
     "attack": {"affinity": -0.6, "trust": -0.3, "fear": 0.3, "respect": -0.2},
     "take":   {"affinity": -0.4, "trust": -0.3, "respect": -0.3},
-    "speak":  {"affinity": 0.5, "familiarity": 0.3, "trust": 0.2},
-    "give":   {"affinity": 0.6, "trust": 0.3, "debt": 0.4},
+    # `desire` sits at 0 in every campaign that has not switched it on, so it
+    # contributes exactly nothing there rather than needing a branch here.
+    "speak":  {"affinity": 0.5, "familiarity": 0.3, "trust": 0.2, "desire": 0.4},
+    "give":   {"affinity": 0.6, "trust": 0.3, "debt": 0.4, "desire": 0.3},
     "flee":   {"fear": 0.6, "trust": -0.2},
     "hide":   {"fear": 0.5},
     # You watch the people you have not made your mind up about: unfamiliar,
@@ -287,6 +289,10 @@ def relation_term(view, verb: str, target_id) -> float:
         if axis == "debt":
             # Positive debt means the viewer owes them, which argues for giving.
             value = clamp(float(other.debt) / DEBT_SCALE)
+        elif axis == "desire":
+            # Wanting somebody is 0..1 — its absence is nothing, not the
+            # opposite — and how much they strike this person raises it.
+            value = clamp01(float(other.desire)) * (0.6 + 0.8 * clamp01(other.allure))
         else:
             value = clamp(float(getattr(other, axis, 0.0)))
         total += weight * value

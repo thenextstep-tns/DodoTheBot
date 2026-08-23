@@ -27,6 +27,7 @@ def dnd_routes() -> list:
         api_dnd_entity_traits,
         api_dnd_lore,
         api_dnd_pack,
+        api_dnd_safety,
         api_dnd_param,
         api_dnd_tune,
         api_dnd_tune_server,
@@ -59,6 +60,8 @@ def dnd_routes() -> list:
         # Behaviour archetypes are campaign data a GM authors, not a table that
         # ships in a Python module and can never be added to.
         web.post("/api/guild/{gid}/dnd/pack", view(api_dnd_pack)),
+        # A campaign's lines. Not tuning: a line outranks a setting.
+        web.post("/api/guild/{gid}/dnd/safety", view(api_dnd_safety)),
         # Server-level tuning is server configuration, so it needs the same
         # scope the general settings page does.
         web.post("/api/guild/{gid}/dnd/tune-server", configure(api_dnd_tune_server)),

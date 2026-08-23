@@ -127,6 +127,15 @@ class Entity:
     # can derive it; until one does, it is set per entity.
     standing: float = 0.5
 
+    # 0..1. How strongly people tend to be drawn to them — bearing, presence,
+    # whatever the fiction wants it to be. Deliberately *not* a beauty score
+    # handed down by the engine: it is one input to a **directed** attraction
+    # that mostly turns on what the two of them are to each other, so a plain
+    # person who is trusted and familiar can be wanted far more than a striking
+    # stranger. Middling by default, set per entity like `standing`, and only
+    # read at all when a campaign has switched desire on.
+    allure: float = 0.5
+
     # Declared for P2; nothing writes them yet.
     traits: dict | None = None
     inheritance: dict | None = None
@@ -166,6 +175,7 @@ class Entity:
             "position": self.position.to_doc(),
             "importance": float(self.importance),
             "standing": float(self.standing),
+            "allure": float(self.allure),
             "traits": self.traits,
             "inheritance": self.inheritance,
             "needs": self.needs,
@@ -195,6 +205,7 @@ class Entity:
             position=Position.from_doc(doc.get("position")),
             importance=float(doc.get("importance", 0.5)),
             standing=float(doc.get("standing", 0.5)),
+            allure=float(doc.get("allure", 0.5)),
             traits=doc.get("traits"),
             inheritance=doc.get("inheritance"),
             needs=doc.get("needs"),

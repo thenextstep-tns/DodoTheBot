@@ -89,6 +89,13 @@ def main() -> None:
         channel_id=1, present=[marla.id, ondry.id], lighting="dim",
     ))
 
+    # Switch the optional need on but leave the line in place, so the preview
+    # shows the two-act gate rather than only one half of it.
+    settings = dict(store.campaigns.get(campaign.id).settings or {})
+    settings["tuning"] = {**(settings.get("tuning") or {}), "need_desire": True}
+    store.campaigns.save_settings(campaign.id, settings)
+    campaign = store.campaigns.get(campaign.id)
+
     minds.advance(store, campaign, 900, Random(3))
     marla = store.entities.get(marla.id)
     _write("inspector.html", pages._inspector_html(bot, guild, campaign, marla, store))

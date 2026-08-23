@@ -32,6 +32,7 @@ from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
 from helpers.dnd.mind import behaviour as behaviour_math
 from helpers.dnd.mind import decide as decide_math
 from helpers.dnd.mind import goals as goal_math
+from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind.needs import NEED_LABELS
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT, TRAIT_LABELS
 from helpers.dnd.world.goal import KIND_LABELS as GOAL_KIND_LABELS, KINDS as GOAL_KINDS
@@ -275,6 +276,10 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
         sections.append(
             ("packs", "🧭", "Archetypes", "what people reach for",
              _packs_section(guild, campaign, store, is_gm))
+        )
+        sections.append(
+            ("safety", "🛑", "Lines", "what never appears",
+             _safety_section(campaign, minds.tuning_for(store, campaign)))
         )
         sections.append(
             ("tuning", "🎛️", "This game's rules", "campaign only",
@@ -647,6 +652,25 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       if (data.ok) location.reload();   // the meters and the read-line follow
     }});
   }});
+  // Lines. Separate endpoint from the tuning on purpose: a line is not a
+  // setting, and it outranks one.
+  document.querySelectorAll(".dndline-remove").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/safety`,
+        {{campaign_id: cid, action: "remove", line: el.dataset.line}});
+      if (data.ok) location.reload();
+    }});
+  }});
+  const lineAdd = document.getElementById("safetyadd");
+  if (lineAdd) {{
+    lineAdd.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/safety`, {{
+        campaign_id: cid, action: "add",
+        line: document.getElementById("safetyline").value,
+      }});
+      if (data.ok) location.reload();
+    }});
+  }}
   // Archetypes. A card's weights live in the card, so one handler serves them
   // all and adding an archetype needs no new wiring.
   const packWeights = (root) => {{
@@ -817,6 +841,7 @@ def _tune_row(item: dict, css_class: str, own_label: str) -> str:
   <div class="tunelabel">
     <b>{_escape(item['label'])}</b> {badge}
     <div class="muted small tunedesc">{_emphasise(_escape(item['description']))}</div>
+    {f'<div class="tuneblocked">{_escape(item["blocked"])}</div>' if item.get("blocked") else ""}
     <div class="muted small tunemeta"><code>{item['key']}</code>
       <span>{_tune_range(item)}</span></div>
   </div>
@@ -1078,6 +1103,24 @@ def _decision_section(campaign, entity, store, world_time: int) -> str:
   NPCs with their own weights would be untunable.</p>"""
 
 
+def _allure_row(entity, tuning) -> str:
+    """How strongly people tend to be drawn to them. Only for campaigns that
+    switched desire on — a table that did not opt in should not find a beauty
+    slider on their harbourmaster."""
+    if not minds.romance_allowed(tuning):
+        return ""
+    return f"""
+    <tr><td>Allure <span class="muted small">(how they strike people)</span></td>
+      <td>{_meter(entity.allure)}
+        <input type="number" class="dndtrait" data-axis="allure"
+               step="0.05" min="0" max="1" value="{entity.allure:.2f}">
+        <div class="muted small">One input among several, and the smallest.
+        Whether somebody is drawn to them turns mostly on what the two of them
+        already are to each other — a plain, trusted, familiar person is wanted
+        more than a striking stranger, and fear puts it out altogether.</div>
+      </td></tr>"""
+
+
 def _archetype_section(guild, campaign, entity, tuning) -> str:
     """What this person reaches for, and how well the archetype actually suits them.
 
@@ -1264,6 +1307,50 @@ def _pack_sliders(pack, lead=()) -> str:
     return out
 
 
+def _safety_section(campaign, tuning) -> str:
+    """The campaign's lines, and what they are currently switching off.
+
+    Small, and load-bearing. A line outranks a tunable, so without somewhere to
+    see and clear one a GM can switch an optional need on and watch nothing
+    happen with no explanation anywhere — which is how a working feature reads
+    as a broken one.
+    """
+    safety = (campaign.settings or {}).get("safety") or {}
+    lines = [str(item) for item in (safety.get("lines") or [])]
+
+    rows = ""
+    for line in lines:
+        blocking = [
+            name for name, words in tuning_registry.Tuning.OPTIONAL_NEED_LINES.items()
+            if any(word in line.lower() for word in words)
+        ]
+        note = (f'<div class="muted small">Currently switching off: '
+                f'<b>{_escape(", ".join(blocking))}</b>, whatever the tuning says.</div>'
+                if blocking else "")
+        rows += f"""
+<tr><td>{_escape(line)}{note}</td>
+  <td><button class="dndline-remove ghost" data-line="{_escape(line)}">Clear</button></td></tr>"""
+    if not rows:
+        rows = ('<tr><td class="muted" colspan="2">No lines set. Everything this '
+                'engine can do, it will.</td></tr>')
+
+    return f"""
+  <p class="muted small">A <b>line</b> is something that never appears in this
+  game. Set at session zero, editable by anyone at the table, and it
+  <b>outranks the settings</b> — while a line covers something, the machinery for
+  it stays off however <i>This game's rules</i> is configured. A fresh campaign
+  starts with the conservative ones already on.</p>
+  <p class="muted small">Clearing a line and switching the matching feature on
+  are deliberately two separate acts. A table agreeing to play something and a
+  GM enabling the machinery for it are different decisions.</p>
+  <table class="ranktable"><tbody>{rows}</tbody></table>
+  <div class="paramrow">
+    <input type="text" id="safetyline" maxlength="120"
+           placeholder="something that never appears in this game">
+    <button id="safetyadd">Add a line</button>
+  </div>"""
+
+
 def _packs_section(guild, campaign, store, is_gm: bool) -> str:
     """The behaviour archetypes this campaign can draw on, and a way to add one.
 
@@ -1397,7 +1484,12 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
 
     # --- body ---
     need_rows = ""
+    need_view = tuning.needs()
     for name, label in NEED_LABELS.items():
+        # An optional need a campaign never asked for is not shown as a row of
+        # zeroes; it is not part of this game.
+        if not needs_mod.enabled(name, need_view):
+            continue
         value = needs.value(name)
         urgency = needs.urgency(name, tuning.needs())
         need_rows += (
@@ -1491,6 +1583,7 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
              step="0.05" min="0" max="1" value="{entity.standing:.2f}"></td></tr>
     <tr><td>Importance <span class="muted small">(simulation cost only)</span></td>
       <td>{_axis_cell(entity.importance)}</td></tr>
+    {_allure_row(entity, tuning)}
   </tbody></table>
 
   <h2>Body</h2>

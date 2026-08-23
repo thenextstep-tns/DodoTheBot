@@ -153,6 +153,22 @@ TUNABLES: list[dict] = [
           "In-world hours from fed to desperate.", 48, kind="int", minimum=1, maximum=500),
     _spec("need_hours_thirst", "Needs", "Hours to parched",
           "In-world hours from watered to desperate.", 24, kind="int", minimum=1, maximum=500),
+    _spec("need_desire", "Needs", "Desire as a body need",
+          "Whether characters carry sexual desire as a physiological drive "
+          "alongside hunger, cold and loneliness \u2014 a slow pressure that makes "
+          "them seek people out. **Off by default.** An adult drive belongs in "
+          "an adult game and this engine has no opinion about that, but a need "
+          "that shapes behaviour has to be asked for: nobody should have to work "
+          "out why their NPCs are behaving unexpectedly.\n\n"
+          "It also honours the campaign's **lines**: while sexual content is on "
+          "them, this stays off whatever this setting says. Clear the line first "
+          "if the table has agreed to it.",
+          False, kind="bool", minimum=0, maximum=1),
+    _spec("need_hours_desire", "Needs", "Desire builds over (hours)",
+          "How long from settled to pressing, doing ordinary things. Cubed like "
+          "every other need, so it is barely felt for most of that span. Only "
+          "does anything when the need above is switched on.",
+          168.0, minimum=1.0, maximum=2000.0),
     _spec("need_hours_fatigue", "Needs", "Hours to exhausted",
           "In-world hours awake before collapse.", 20, kind="int", minimum=1, maximum=500),
     _spec("need_impulse_threshold", "Needs", "Impulse threshold",
@@ -162,6 +178,15 @@ TUNABLES: list[dict] = [
     _spec("relationship_scale", "Relationships", "Relationship swing",
           "Multiplier on how far a single event moves a relationship. Lower makes "
           "opinions slow and hard-won.", 1.0, minimum=0.1, maximum=5.0),
+    _spec("desire_bleed", "Relationships", "Repulsion sours everything",
+          "How much finding somebody physically repellent drags down what you "
+          "think of them generally. It does not stay in its own column: you like "
+          "them less and respect them less, and neither of you could say quite "
+          "why. Only attraction's negative half does this \u2014 letting the positive "
+          "half feed back would end with every fond acquaintance infatuated. "
+          "**0 keeps repulsion to itself.** Only does anything in a campaign "
+          "that switched desire on.",
+          0.25, minimum=0.0, maximum=1.0),
     _spec("faction_prior", "Relationships", "Faction prior",
           "How strongly whose-side-you're-on seeds a first impression, before "
           "anything personal has happened.", 0.6),
@@ -603,9 +628,14 @@ class Tuning:
     lookup.
     """
 
-    def __init__(self, server: Optional[dict] = None, campaign: Optional[dict] = None):
+    def __init__(self, server: Optional[dict] = None, campaign: Optional[dict] = None,
+                 lines: Optional[list] = None):
         self._server = server or {}
         self._campaign = campaign or {}
+        # The campaign's safety lines (docs/dnd/11-SAFETY.md §1). Read here
+        # rather than anywhere downstream because an optional need has to be
+        # gated by them, and a line is not something a tunable may overrule.
+        self._lines = list(lines or [])
 
     @classmethod
     def for_campaign(cls, guild_id: Optional[int], campaign=None) -> "Tuning":
@@ -613,10 +643,12 @@ class Tuning:
         from helpers.dnd import parameters as dnd_parameters
 
         server = dnd_parameters.tuning_overrides(guild_id)
-        campaign_overrides = {}
+        campaign_overrides, lines = {}, []
         if campaign is not None:
-            campaign_overrides = (campaign.settings or {}).get("tuning") or {}
-        return cls(server, campaign_overrides)
+            settings = campaign.settings or {}
+            campaign_overrides = settings.get("tuning") or {}
+            lines = (settings.get("safety") or {}).get("lines") or []
+        return cls(server, campaign_overrides, lines)
 
     def get(self, key: str) -> Any:
         """Most specific wins: campaign, then server, then the built-in default."""
@@ -671,6 +703,34 @@ class Tuning:
             value_weight=self.get("salience_value_weight"),
         )
 
+    # The optional needs, and the words on a campaign's lines that mean "not
+    # this one". Substring-matched, because a table writes their lines in their
+    # own words and "no sexual content" should count exactly as much as "sex".
+    #
+    # The keys mirror ``mind/needs.OPTIONAL``, which is the source of truth;
+    # they are repeated rather than imported because ``mind/needs`` imports this
+    # module for its typed view and the cycle would not close. A test asserts
+    # the two lists agree.
+    OPTIONAL_NEED_LINES = {"desire": ("sex", "sexual", "romance", "intimacy")}
+
+    def permits_need(self, name: str) -> bool:
+        """Whether an optional need is both asked for and not on a line.
+
+        Two gates that must agree, and the line is the one a setting cannot
+        overrule (``docs/dnd/11-SAFETY.md`` §1). A fresh campaign starts with
+        sexual content on its lines, so this stays off until a table has
+        deliberately cleared it *and* switched the need on \u2014 which is two acts,
+        on purpose.
+        """
+        if not bool(self.get(f"need_{name}")):
+            return False
+        words = self.OPTIONAL_NEED_LINES.get(name, ())
+        for line in self._lines:
+            text = str(line).strip().lower()
+            if any(word in text for word in words):
+                return False
+        return True
+
     def needs(self) -> "NeedsTuning":
         return NeedsTuning(
             urgency_power=self.get("need_urgency_power"),
@@ -679,13 +739,18 @@ class Tuning:
                 "hunger": self.get("need_hours_hunger"),
                 "thirst": self.get("need_hours_thirst"),
                 "fatigue": self.get("need_hours_fatigue"),
+                "desire": self.get("need_hours_desire"),
             },
+            optional=frozenset(
+                name for name in self.OPTIONAL_NEED_LINES if self.permits_need(name)
+            ),
         )
 
     def relationships(self) -> "RelationshipTuning":
         return RelationshipTuning(
             scale=self.get("relationship_scale"),
             faction_prior=self.get("faction_prior"),
+            desire_bleed=self.get("desire_bleed"),
         )
 
     def continuity(self) -> "ContinuityTuning":
@@ -791,8 +856,18 @@ class Tuning:
         for spec in TUNABLES:
             if scope == SCOPE_CAMPAIGN and spec["scope"] == SCOPE_SERVER:
                 continue
-            out.append({**spec, "value": self.get(spec["key"]),
-                        "source": self.source_of(spec["key"])})
+            entry = {**spec, "value": self.get(spec["key"]),
+                     "source": self.source_of(spec["key"])}
+            # A setting a line is currently overruling has to say so here, or it
+            # reads as a switch that does nothing.
+            name = spec["key"][len("need_"):] if spec["key"].startswith("need_") else ""
+            if name in self.OPTIONAL_NEED_LINES and self.get(spec["key"]) \
+                    and not self.permits_need(name):
+                entry["blocked"] = (
+                    "One of this campaign's lines covers this, so it stays off "
+                    "whatever this says. Clear the line under Lines first."
+                )
+            out.append(entry)
         return out
 
 
@@ -834,12 +909,16 @@ class NeedsTuning:
     urgency_power: float = 3.0
     impulse_threshold: float = 0.55
     hours: dict = field(default_factory=lambda: {"hunger": 48, "thirst": 24, "fatigue": 20})
+    # Which of ``mind/needs.OPTIONAL`` this campaign is actually running. Empty
+    # by default: an optional need has to be asked for.
+    optional: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
 class RelationshipTuning:
     scale: float = 1.0
     faction_prior: float = 0.6
+    desire_bleed: float = 0.25   # how far repulsion spreads into the rest
 
 
 @dataclass(frozen=True)

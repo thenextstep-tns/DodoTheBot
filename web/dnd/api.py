@@ -298,6 +298,59 @@ async def api_dnd_tune_server(request: web.Request):
 # --------------------------------------------------------------------------- #
 #  Entity traits
 # --------------------------------------------------------------------------- #
+async def api_dnd_safety(request: web.Request):
+    """Add or clear one of a campaign's lines. ``{campaign_id, action, line}``.
+
+    Lines are the table's *never appears* list (``docs/dnd/11-SAFETY.md`` §1),
+    and a fresh campaign starts with sexual content and harm to children on
+    them. They are not tunables and they do not live with the tunables: a line
+    outranks a setting, which is why an optional need stays off while one covers
+    it however the tuning is configured.
+
+    Clearing one is deliberately a separate, audited act from switching the
+    matching feature on. Two acts, on purpose — a table agreeing to play
+    something and a GM enabling the machinery for it are different decisions and
+    should not be one click.
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    action = str(data.get("action", "")).strip().lower()
+    line = str(data.get("line", "")).strip()[:120]
+    if not line:
+        return _bad("Say what the line is.")
+
+    settings = dict(campaign.settings or {})
+    safety = dict(settings.get("safety") or {})
+    lines = [str(item) for item in (safety.get("lines") or [])]
+
+    if action == "add":
+        if any(line.lower() == item.lower() for item in lines):
+            return _bad("That line is already set.")
+        lines.append(line)
+    elif action == "remove":
+        remaining = [item for item in lines if item.lower() != line.lower()]
+        if len(remaining) == len(lines):
+            return _bad("That line is not set.")
+        lines = remaining
+    else:
+        return _bad("Unknown action.")
+
+    safety["lines"] = lines
+    settings["safety"] = safety
+    store.campaigns.save_settings(campaign.id, settings)
+    await _record_change(
+        request, "dnd_safety", "lines", None, ", ".join(lines) or "(none)",
+        f"{'added' if action == 'add' else 'cleared'} the line **{line}** "
+        f"on {campaign.name}",
+    )
+    return web.json_response({"ok": True, "lines": lines})
+
+
 async def api_dnd_pack(request: web.Request):
     """Add, edit or remove one behaviour archetype for a campaign.
 
@@ -501,7 +554,10 @@ async def api_dnd_entity_traits(request: web.Request):
     # `standing` is not a trait. It is a circumstance — what the world has given
     # them to absorb a loss with — and unlike disposition it is *supposed* to be
     # set and changed by the GM: someone comes into money, someone is ruined.
-    if axis != "standing" and axis not in TEMPERAMENT + DRIVES + FACULTIES:
+    # `standing` and `allure` are not traits. They are circumstances — what the
+    # world has given somebody to absorb a loss with, and how they strike people
+    # — and unlike disposition both are *supposed* to be set by the GM.
+    if axis not in ("standing", "allure") and axis not in TEMPERAMENT + DRIVES + FACULTIES:
         return _bad("Unknown trait axis.")
 
     raw_id = str(data.get("entity_id", ""))
@@ -518,11 +574,13 @@ async def api_dnd_entity_traits(request: web.Request):
     except (TypeError, ValueError):
         return _bad("Trait value must be a number.")
     low = -1.0 if axis in TEMPERAMENT else 0.0
+    if axis == "allure" and not minds.romance_allowed(minds.tuning_for(store, campaign)):
+        return _bad("This campaign has not switched desire on.")
     value = round(max(low, min(1.0, value)), 3)
 
-    if axis == "standing":
-        was = entity.standing
-        entity.standing = max(0.0, min(1.0, value))
+    if axis in ("standing", "allure"):
+        was = getattr(entity, axis)
+        setattr(entity, axis, max(0.0, min(1.0, value)))
     else:
         doc = dict(entity.traits or {})
         was = doc.get(axis)

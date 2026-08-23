@@ -26,11 +26,26 @@ from dataclasses import asdict, dataclass
 
 from helpers.dnd.tuning import DEFAULT_NEEDS, NeedsTuning
 
-NEEDS = ("hunger", "thirst", "fatigue", "pain", "warmth", "safety", "belonging")
+NEEDS = ("hunger", "thirst", "fatigue", "pain", "warmth", "safety", "belonging",
+         "desire")
+
+# Needs that are **off unless a campaign asks for them**. Not a judgement about
+# what a table should play — an adult drive belongs in an adult game and this
+# engine has no opinion about that — but a default. A need that shapes behaviour
+# has to be opted into, because a GM who did not choose it should never have to
+# work out why their NPCs are behaving unexpectedly.
+#
+# Gated in two places, and both must agree (see :func:`enabled`):
+#   * the ``need_desire`` tunable, per server and per campaign;
+#   * the campaign's **lines** (``docs/dnd/11-SAFETY.md`` §1), which start with
+#     sexual content on them for a fresh campaign. A line is not a preference a
+#     tunable may override.
+OPTIONAL = ("desire",)
 
 NEED_LABELS = {
     "hunger": "Hunger", "thirst": "Thirst", "fatigue": "Fatigue", "pain": "Pain",
     "warmth": "Cold", "safety": "Fear for safety", "belonging": "Loneliness",
+    "desire": "Desire",
 }
 
 # Hours from satisfied to desperate, doing ordinary things. These are spans to
@@ -42,6 +57,9 @@ HOURS_TO_DESPERATE = {
     "fatigue": 20,      # a waking day
     "warmth": 72,
     "belonging": 120,
+    # Slow, and slower than loneliness. Cubed like the rest, so it is invisible
+    # for most of its span and only ever one pressure among eight.
+    "desire": 168,
 }
 # Pain and safety are not on a clock — events set them and they ebb.
 HOURS_TO_CALM = {"pain": 12, "safety": 6}
@@ -56,6 +74,7 @@ IMPULSE_THRESHOLD = 0.55
 NEED_IMPULSE = {
     "hunger": "eat", "thirst": "drink", "fatigue": "rest", "pain": "tend wound",
     "warmth": "get warm", "safety": "get to safety", "belonging": "seek company",
+    "desire": "seek intimacy",
 }
 
 
@@ -70,6 +89,7 @@ class Needs:
     warmth: float = 0.2
     safety: float = 0.1
     belonging: float = 0.3
+    desire: float = 0.0     # off unless the campaign asks for it; see OPTIONAL
     ticked_at: int = 0      # world time this was last brought up to date
 
     def to_doc(self) -> dict:
@@ -86,8 +106,23 @@ class Needs:
     def value(self, name: str) -> float:
         return float(getattr(self, name, 0.0))
 
+    def without(self, names) -> "Needs":
+        """A copy with some needs pinned to nothing.
+
+        How an optional need is switched off *for people who already have one* —
+        the lesson from behaviour packs, where a setting that only affected
+        entities created afterwards looked exactly like a setting that did not
+        work. Turning desire off must mean off now, not off for the next NPC.
+        """
+        blanked = {name: 0.0 for name in names if hasattr(self, name)}
+        if not blanked:
+            return self
+        return Needs(**{**self.to_doc(), **blanked})
+
     def urgency(self, name: str, tuning: NeedsTuning = DEFAULT_NEEDS) -> float:
         """Cubed by default. Ignorable until it very much isn't."""
+        if not enabled(name, tuning):
+            return 0.0
         return self.value(name) ** tuning.urgency_power
 
     def pressing(self, tuning: NeedsTuning = DEFAULT_NEEDS) -> list[tuple[str, float]]:
@@ -95,7 +130,7 @@ class Needs:
         out = [
             (n, self.urgency(n, tuning))
             for n in NEEDS
-            if self.value(n) >= tuning.impulse_threshold
+            if enabled(n, tuning) and self.value(n) >= tuning.impulse_threshold
         ]
         out.sort(key=lambda pair: -pair[1])
         return out
@@ -107,6 +142,17 @@ class Needs:
         return ", ".join(NEED_LABELS[n].lower() for n, _ in pressing[:3])
 
 
+def enabled(name: str, tuning: NeedsTuning = DEFAULT_NEEDS) -> bool:
+    """Whether this need is in play at all.
+
+    Everything but :data:`OPTIONAL` always is. An optional one needs the
+    campaign to have asked for it *and* the campaign's lines to permit it, and
+    the caller resolving those two into one flag is
+    ``helpers/dnd/tuning.py``.
+    """
+    return name not in OPTIONAL or name in tuning.optional
+
+
 def advanced(needs: Needs, world_time: int,
              tuning: NeedsTuning = DEFAULT_NEEDS) -> Needs:
     """Needs brought forward to ``world_time``, in closed form.
@@ -115,12 +161,21 @@ def advanced(needs: Needs, world_time: int,
     same function used for a live tick and for extrapolating a dormant entity
     when something finally looks at it, so the two can never disagree.
     """
+    # A need the campaign has not asked for is pinned to nothing every time
+    # anybody looks, rather than merely stopped from rising. Switching it off
+    # has to mean off *now*, including for entities that were carrying a value
+    # while it was on.
+    off = tuple(name for name in OPTIONAL if not enabled(name, tuning))
+
     elapsed = max(0, int(world_time) - int(needs.ticked_at))
     if not elapsed:
-        return needs
+        return needs.without(off)
 
     values = {}
     for name in NEEDS:
+        if name in off:
+            values[name] = 0.0
+            continue
         hours = tuning.hours.get(name)
         rate = (1 / (hours * 60)) if hours else RATES[name]
         moved = needs.value(name) + rate * elapsed

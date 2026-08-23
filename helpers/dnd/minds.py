@@ -1331,6 +1331,12 @@ def relate(
     it only the relationship moves, which is what the pure-arithmetic tests want.
     """
     tuning = tuning or tuning_for(store)
+    # A table that did not switch desire on cannot have a romance recorded
+    # between its characters, by a command or by the engine. Refusing here
+    # rather than filtering the deltas means it never half-happens.
+    if kind in rel_mod.ROMANTIC and not romance_allowed(tuning):
+        return store.relations.between(from_entity.id, to_entity.id)
+
     relationship = store.relations.between(from_entity.id, to_entity.id)
     rel_mod.apply(
         relationship,
@@ -1355,6 +1361,32 @@ def relate(
     # and nobody stays the same mixture.
     drift_packs(store, from_entity, world_time=world_time, tuning=tuning)
     return saved
+
+
+def romance_allowed(tuning: Tuning | None = None) -> bool:
+    """Whether this campaign has opted into desire at all.
+
+    One question, asked in one place, so the need, the relationship axis, the
+    interactions and the panel can never disagree about whether a table said
+    yes — and so that adding the next optional need is one entry rather than a
+    hunt through four modules.
+    """
+    view = tuning.needs() if tuning else needs_mod.DEFAULT_NEEDS
+    return "desire" in view.optional
+
+
+def attraction_of(store, entity: Entity, other_id, *, world_time: int,
+                  tuning: Tuning | None = None) -> float:
+    """How drawn this entity is to that one, 0..1. Zero unless asked for."""
+    tuning = tuning or tuning_for(store)
+    if not romance_allowed(tuning):
+        return 0.0
+    other = store.entities.get(other_id)
+    return rel_mod.attraction(
+        store.relations.between(entity.id, other_id),
+        allure=other.allure if other else 0.5,
+        pressure=needs_of(entity, world_time, tuning).value("desire"),
+    )
 
 
 def need_pressure(entity: Entity, world_time: int, tuning: Tuning | None = None) -> float:

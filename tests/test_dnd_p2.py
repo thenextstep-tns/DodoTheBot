@@ -50,6 +50,7 @@ pymongo.errors.DuplicateKeyError = DuplicateKeyError
 
 from helpers.dnd import minds  # noqa: E402
 from helpers.dnd.mind import needs as needs_mod  # noqa: E402
+from helpers.dnd.world import relationship as rel_module  # noqa: E402
 from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
 from helpers.dnd.mind import stakes  # noqa: E402
 from helpers.dnd.mind import traits as traits_mod  # noqa: E402
@@ -2430,6 +2431,209 @@ def test_uncommitted_and_inertia() -> None:
           max(path) - min(path) > 0.3, f"{min(path):.2f} to {max(path):.2f}")
 
 
+# --------------------------------------------------------------------------- #
+#  27. An optional need: off unless a campaign asks, and never in a vacuum
+# --------------------------------------------------------------------------- #
+def test_desire() -> None:
+    off = Tuning()
+    on = Tuning(campaign={"need_desire": True})
+
+    # --- 1. Off by default, and off means off ----------------------------- #
+    check("desire: it is a need like the others", "desire" in needs_mod.NEEDS)
+    check("desire: DECLARED OPTIONAL", needs_mod.OPTIONAL == ("desire",))
+    check("desire: OFF BY DEFAULT",
+          not needs_mod.enabled("desire", off.needs()) and not off.needs().optional)
+    check("desire: and on when a campaign asks", needs_mod.enabled("desire", on.needs()))
+    check("desire: every other need is unconditional",
+          all(needs_mod.enabled(n, off.needs()) for n in needs_mod.NEEDS if n != "desire"))
+
+    carried = needs_mod.Needs(desire=0.9, ticked_at=0)
+    check("desire: SWITCHING IT OFF PINS A VALUE SOMEBODY ALREADY HAD",
+          needs_mod.advanced(carried, 0, off.needs()).desire == 0.0,
+          "off must mean off now, not off for the next NPC")
+    check("desire: and it does not rise while off",
+          needs_mod.advanced(carried, 500_000, off.needs()).desire == 0.0)
+    check("desire: it does when asked for",
+          needs_mod.advanced(needs_mod.Needs(ticked_at=0), 500_000, on.needs()).desire > 0)
+    check("desire: it presses nothing while off",
+          carried.urgency("desire", off.needs()) == 0.0
+          and not [n for n, _ in carried.pressing(off.needs()) if n == "desire"])
+    check("desire: and rises slower than loneliness even when on",
+          needs_mod.HOURS_TO_DESPERATE["desire"] > needs_mod.HOURS_TO_DESPERATE["belonging"])
+
+    # --- 2. A line the tunable cannot overrule ---------------------------- #
+    lined = Tuning(campaign={"need_desire": True}, lines=["no sexual content"])
+    check("desire: A CAMPAIGN'S LINE BEATS THE SETTING",
+          not needs_mod.enabled("desire", lined.needs()),
+          "docs/dnd/11-SAFETY.md §1 — a line is not a preference")
+    check("desire: however the table worded it",
+          all(not Tuning(campaign={"need_desire": True}, lines=[phrase]).needs().optional
+              for phrase in ("sex", "Romance", "no intimacy please", "SEXUAL THEMES")))
+    check("desire: an unrelated line does not block it",
+          Tuning(campaign={"need_desire": True}, lines=["harm to children"]).needs().optional)
+    check("desire: the two lists of optional needs agree",
+          set(Tuning.OPTIONAL_NEED_LINES) == set(needs_mod.OPTIONAL))
+
+    # --- 3. Not a scalar in a vacuum: it is toward somebody --------------- #
+    check("desire: there is a directed axis for it",
+          "desire" in rel_module.AXES and "desire" in rel_module.OPTIONAL_AXES)
+    check("desire: and it runs the full range, negative half included",
+          rel_mod._clamp(-0.7, "desire") == -0.7)
+    striking = Relationship(familiarity=0.0, affinity=0.0, trust=0.0)
+    close = Relationship(affinity=0.7, trust=0.6, familiarity=0.8, respect=0.4)
+    feared = Relationship(affinity=0.5, trust=0.2, familiarity=0.7, fear=0.8)
+    check("desire: A PLAIN FAMILIAR FRIEND BEATS A STRIKING STRANGER",
+          rel_mod.attraction(close, 0.35) > rel_mod.attraction(striking, 0.95),
+          f"{rel_mod.attraction(close, 0.35):.3f} vs {rel_mod.attraction(striking, 0.95):.3f}")
+    check("desire: looks still count for something",
+          rel_mod.attraction(close, 0.9) > rel_mod.attraction(close, 0.1))
+    check("desire: FEAR PUTS IT OUT", rel_mod.attraction(feared, 0.9) < 0.05,
+          f"{rel_mod.attraction(feared, 0.9):.3f}")
+    check("desire: it is asymmetric like every other axis",
+          rel_mod.attraction(close, 0.5) != rel_mod.attraction(striking, 0.5))
+    check("desire: bodily pressure raises an existing pull",
+          rel_mod.attraction(close, 0.5, pressure=0.9)
+          > rel_mod.attraction(close, 0.5, pressure=0.0))
+    check("desire: BUT CANNOT INVENT ONE FOR SOMEBODY FEARED",
+          rel_mod.attraction(feared, 0.9, pressure=1.0) < 0.05)
+    check("desire: nor for a stranger nobody has any feeling about",
+          rel_mod.attraction(Relationship(), 0.5, pressure=1.0) < 0.5)
+
+    # --- 4. The interactions exist, and are gated ------------------------- #
+    check("desire: there are romance-shaped interactions",
+          set(rel_mod.ROMANTIC)
+          == {"flirted", "courted", "rebuffed", "lay_with", "repelled"})
+    check("desire: each has deltas and a phrase",
+          all(k in rel_mod.DELTAS and k in rel_mod.PHRASES for k in rel_mod.ROMANTIC))
+
+    campaign, store = _campaign(9327, "Courtship")
+    alder = _npc(store, campaign, "Alder")
+    bry = _npc(store, campaign, "Bry")
+
+    refused = minds.relate(store, alder, bry, "flirted", world_time=0)
+    check("desire: A ROMANCE CANNOT BE RECORDED IN A CAMPAIGN THAT DID NOT ASK",
+          refused.desire == 0.0 and refused.affinity == 0.0)
+
+    flirted = minds.relate(store, alder, bry, "flirted", world_time=0, tuning=on)
+    check("desire: and can when it did", flirted.desire > 0)
+    courted = minds.relate(store, alder, bry, "courted", world_time=0, tuning=on)
+    check("desire: courting builds on it", courted.desire > flirted.desire)
+    turned_down = minds.relate(store, alder, bry, "rebuffed", world_time=0, tuning=on)
+    check("desire: being turned down cools it", turned_down.desire < courted.desire)
+    for _ in range(3):
+        turned_down = minds.relate(store, alder, bry, "rebuffed", world_time=0, tuning=on)
+    check("desire: AND ENOUGH OF IT CURDLES INTO REPULSION",
+          turned_down.desire < 0, f"{turned_down.desire:+.3f}")
+
+    # --- 4b. Repulsion is a state, and it does not stay in its column ----- #
+    repelled_campaign, repelled_store = _campaign(9328, "Repellent")
+    one = _npc(repelled_store, repelled_campaign, "One")
+    two = _npc(repelled_store, repelled_campaign, "Two")
+    minds.relate(repelled_store, one, two, "helped", world_time=0, tuning=on)
+    warm = repelled_store.relations.between(one.id, two.id)
+    check("desire: they started out on good terms", warm.affinity > 0)
+
+    soured = minds.relate(repelled_store, one, two, "repelled", world_time=0, tuning=on)
+    check("desire: REPULSION IS A REAL STATE, NOT THE ABSENCE OF WANTING",
+          soured.desire < 0, f"{soured.desire:+.3f}")
+    check("desire: AND IT BLEEDS INTO WHAT THEY THINK OF THEM",
+          soured.affinity < warm.affinity and soured.respect < warm.respect,
+          f"affinity {warm.affinity:+.3f} to {soured.affinity:+.3f}")
+
+    before = soured.affinity
+    for _ in range(3):
+        soured = minds.relate(repelled_store, one, two, "talked", world_time=0, tuning=on)
+    check("desire: so ordinary contact makes it worse, not better",
+          soured.affinity < before, f"{before:+.3f} to {soured.affinity:+.3f}")
+    check("desire: nobody is drawn to somebody they find repellent",
+          rel_mod.attraction(soured, 0.95) == 0.0)
+
+    quarantined = Relationship(affinity=0.5, desire=-0.8)
+    rel_mod.bleed(quarantined, Tuning(campaign={"desire_bleed": 0}).relationships())
+    check("desire: and the bleeding switches off", quarantined.affinity == 0.5)
+    check("desire: attraction never bleeds the other way",
+          "one direction" in (rel_mod.bleed.__doc__ or "").lower()
+          or "One direction" in (rel_mod.bleed.__doc__ or ""))
+
+    # --- 5. Allure is an attribute of a person, stored and gated ---------- #
+    bry.allure = 0.85
+    store.entities.save(bry)
+    check("desire: allure survives a save", store.entities.get(bry.id).allure == 0.85)
+    check("desire: attraction is zero while the campaign has it off",
+          minds.attraction_of(store, store.entities.get(alder.id), bry.id, world_time=0) == 0.0)
+    # Alder was rebuffed into repulsion above, so zero here is the right answer.
+    # Somebody who has *not* been is drawn to her.
+    check("desire: somebody repelled is drawn to nobody",
+          minds.attraction_of(store, store.entities.get(alder.id), bry.id,
+                              world_time=0, tuning=on) == 0.0)
+    admirer = _npc(store, campaign, "Admirer")
+    minds.relate(store, admirer, bry, "courted", world_time=0, tuning=on)
+    check("desire: and real for somebody who is",
+          minds.attraction_of(store, store.entities.get(admirer.id), bry.id,
+                              world_time=0, tuning=on) > 0)
+
+    # --- 6. It reaches a decision, and only when asked for ---------------- #
+    check("desire: seeking people out is what answers it",
+          "desire" in decide_math.NEEDS_SERVED["speak"])
+    check("desire: and it argues for approaching the person wanted",
+          decide_math.RELATION_READS["speak"]["desire"] > 0)
+
+    view = minds.view_for(store, store.entities.get(alder.id), world_time=0,
+                          include=(bry.id,))
+    check("desire: the view carries how somebody strikes them",
+          view.of(bry.id).allure == 0.85)
+    check("desire: WITH IT OFF, IT CONTRIBUTES NOTHING TO ANY CHOICE",
+          decide_math.relation_term(view, "speak", bry.id)
+          == decide_math.relation_term(view, "speak", bry.id),
+          "the axis sits at 0, so there is no branch to get wrong")
+
+    # --- 7. Tunables ------------------------------------------------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("desire: both knobs are registered", {"need_desire", "need_hours_desire"} <= keys)
+    check("desire: the switch is a boolean in Needs, defaulting to off",
+          all(s["type"] == "bool" and s["group"] == "Needs" and s["default"] is False
+              for s in TUNABLES if s["key"] == "need_desire"))
+    check("desire: and layered like everything else",
+          Tuning(server={"need_desire": True}).needs().optional
+          and not Tuning(server={"need_desire": True},
+                         campaign={"need_desire": False}).needs().optional)
+
+
+def test_lines_outrank_settings() -> None:
+    """A line is not a preference, and a setting it overrules has to say so."""
+    campaign, store = _campaign(9329, "Two Acts")
+    fresh = (campaign.settings or {}).get("safety", {}).get("lines", [])
+    check("lines: a fresh campaign starts conservative",
+          any("sex" in line.lower() for line in fresh), str(fresh))
+
+    def resolved():
+        return minds.tuning_for(store, store.campaigns.get(campaign.id))
+
+    settings = dict(store.campaigns.get(campaign.id).settings or {})
+    settings["tuning"] = {"need_desire": True}
+    store.campaigns.save_settings(campaign.id, settings)
+    check("lines: SWITCHING THE SETTING ON IS NOT ENOUGH",
+          not minds.romance_allowed(resolved()))
+
+    entry = [e for e in resolved().entries() if e["key"] == "need_desire"][0]
+    check("lines: AND THE PANEL SAYS WHY, RATHER THAN LOOKING BROKEN",
+          "line" in entry.get("blocked", "").lower(), entry.get("blocked", "(nothing)"))
+
+    settings = dict(store.campaigns.get(campaign.id).settings or {})
+    safety = dict(settings.get("safety") or {})
+    safety["lines"] = [l for l in safety["lines"] if "sex" not in l.lower()]
+    settings["safety"] = safety
+    store.campaigns.save_settings(campaign.id, settings)
+    check("lines: clearing the line is the second act",
+          minds.romance_allowed(resolved()))
+    check("lines: and the warning goes away",
+          not [e for e in resolved().entries()
+               if e["key"] == "need_desire"][0].get("blocked"))
+    check("lines: an unrelated line is untouched",
+          any("children" in l.lower()
+              for l in store.campaigns.get(campaign.id).settings["safety"]["lines"]))
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -2459,6 +2663,8 @@ def main() -> int:
         test_deciding,
         test_acting,
         test_uncommitted_and_inertia,
+        test_desire,
+        test_lines_outrank_settings,
         test_end_to_end,
     ):
         test()

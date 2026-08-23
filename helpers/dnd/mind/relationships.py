@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from helpers.dnd.mind.traits import Traits
 from helpers.dnd.tuning import DEFAULT_RELATIONSHIPS, RelationshipTuning
-from helpers.dnd.world.relationship import AXES, Relationship
+from helpers.dnd.world.relationship import AXES, OPTIONAL_AXES, Relationship
 
 # Base deltas per event kind. Tuned so a single act moves a relationship
 # noticeably but not decisively — except betrayal, which should.
@@ -23,6 +23,9 @@ from helpers.dnd.world.relationship import AXES, Relationship
 # positive when *this* person owes the other: being helped puts you in someone's
 # debt. It read -1 before, which `summary()` renders as "is owed", so the man
 # whose debt had just been cleared was recorded as the creditor.
+# The acts that only exist in a campaign that asked for them.
+ROMANTIC = ("flirted", "courted", "rebuffed", "lay_with", "repelled")
+
 DELTAS: dict[str, dict] = {
     "helped":     {"affinity": +0.15, "trust": +0.10, "debt": +1},
     "saved":      {"affinity": +0.35, "trust": +0.25, "respect": +0.20, "debt": +2},
@@ -31,13 +34,26 @@ DELTAS: dict[str, dict] = {
     "praised":    {"affinity": +0.10, "respect": +0.05},
     "kept_word":  {"trust": +0.20, "respect": +0.10},
 
-    "betrayed":   {"affinity": -0.50, "trust": -0.70, "fear": +0.20},
+    "betrayed":   {"affinity": -0.50, "trust": -0.70, "fear": +0.20, "desire": -0.25},
     "attacked":   {"affinity": -0.35, "fear": +0.35, "trust": -0.25},
     "threatened": {"fear": +0.30, "respect": +0.10, "affinity": -0.20},
     "stole":      {"affinity": -0.25, "trust": -0.40},
     "lied":       {"trust": -0.30},
     "insulted":   {"affinity": -0.15, "respect": -0.10},
     "bested":     {"respect": +0.20, "fear": +0.15, "affinity": -0.05},
+
+    # Romance-shaped acts. Only usable when the campaign has switched desire on
+    # (`mind/needs.OPTIONAL`); `helpers/dnd/minds.py` refuses them otherwise, so
+    # a table that did not opt in cannot have one recorded by accident.
+    "flirted":    {"affinity": +0.08, "familiarity": +0.05, "desire": +0.12},
+    "courted":    {"affinity": +0.15, "trust": +0.05, "desire": +0.20},
+    "rebuffed":   {"affinity": -0.10, "respect": -0.05, "desire": -0.30},
+    # Repulsion proper: not a courtship that failed, but somebody who turns your
+    # stomach. Reachable by being turned down often enough — sour grapes are
+    # real — and directly, when a GM says so or a character does something vile.
+    "repelled":   {"affinity": -0.20, "respect": -0.10, "desire": -0.50},
+    "lay_with":   {"affinity": +0.20, "trust": +0.10, "familiarity": +0.30,
+                   "desire": -0.25},
 
     "met":        {"familiarity": +0.10},
     "talked":     {"familiarity": +0.05, "affinity": +0.02},
@@ -53,6 +69,9 @@ PHRASES: dict[str, str] = {
     "betrayed": "betrayed", "attacked": "attacked", "threatened": "threatened",
     "stole": "stole from", "lied": "lied to", "insulted": "insulted",
     "bested": "bested", "met": "met", "talked": "talked with",
+    "flirted": "flirted with", "courted": "made their interest plain to",
+    "rebuffed": "turned down", "lay_with": "spent the night with",
+    "repelled": "was repelled by",
     "travelled": "travelled with",
 }
 
@@ -135,7 +154,15 @@ TRAIT_MODIFIERS = {
 # server and per campaign (helpers/dnd/tuning.py).
 
 
-def _clamp(value: float) -> float:
+def _clamp(value: float, axis: str = "") -> float:
+    """Hold an axis inside −1…1, where the negative half is a real state.
+
+    Desire included. It briefly ran 0…1 here on the theory that the absence of
+    wanting somebody is nothing rather than its opposite — which confused
+    *neutral* with *repelled*. Indifference is 0. Finding somebody repellent is
+    its own condition, it is not the lack of anything, and a model that cannot
+    say it cannot say why two people who ought to get along never will.
+    """
     return max(-1.0, min(1.0, value))
 
 
@@ -171,10 +198,12 @@ def apply(
             centred = traits.axis(trait_name) - 0.5
             change *= 1.0 + weight * centred * 2
 
-        setattr(relationship, axis, round(_clamp(getattr(relationship, axis) + change), 4))
+        setattr(relationship, axis,
+                round(_clamp(getattr(relationship, axis) + change, axis), 4))
 
     # Anything happening at all means you know them a little better.
     relationship.familiarity = round(_clamp(relationship.familiarity + 0.02 * scale), 4)
+    bleed(relationship, tuning)
     relationship.updated_at = int(world_time)
     return relationship
 
@@ -209,3 +238,79 @@ def affinity_map(relationships: list[Relationship]) -> dict:
 
 def kinds() -> list[str]:
     return sorted(DELTAS)
+
+
+# --------------------------------------------------------------------------- #
+#  Attraction — a fact about a pair, not a score on a person
+# --------------------------------------------------------------------------- #
+# What decides how drawn one person is to another. `allure` is deliberately the
+# smallest term: how much somebody wants a particular person is mostly about
+# what the two of them already are to each other, and a model where the
+# best-looking NPC is universally the most wanted is both duller and wronger.
+ATTRACTION_WEIGHTS = {
+    "allure": 0.30,        # how they strike people, generally
+    "affinity": 0.30,      # whether they are liked
+    "familiarity": 0.15,   # whether they are known at all
+    "trust": 0.15,         # whether they are safe to want
+    "respect": 0.10,
+}
+# And what puts it out entirely. Fear is not a complication here; it is a stop.
+FEAR_SUPPRESSES = 1.2
+
+
+def attraction(relationship, allure: float = 0.5, *, pressure: float = 0.0) -> float:
+    """How drawn this person is to that one, 0..1.
+
+    ``relationship`` is the viewer's own ``A → B``, so this is asymmetric like
+    everything else here — being wanted is not the same as wanting, and the gap
+    is most of what makes it a story rather than a statistic.
+
+    ``pressure`` is the viewer's standing bodily desire (``mind/needs.py``),
+    which raises what is already there. It cannot *create* attraction to
+    somebody: a need with nowhere to go is a need, not an interest in whoever
+    happens to be nearby, and modelling it the other way round produces exactly
+    the NPC nobody wants at their table.
+    """
+    if relationship is None:
+        return 0.0
+    scored = 0.0
+    for axis, weight in ATTRACTION_WEIGHTS.items():
+        value = float(allure) if axis == "allure" else float(getattr(relationship, axis, 0.0))
+        scored += weight * max(0.0, min(1.0, value if axis == "allure" else (value + 1.0) / 2.0))
+
+    # Standing desire amplifies an existing pull rather than manufacturing one —
+    # and when it is negative it is repulsion, which cancels a pull outright
+    # rather than merely failing to add to one.
+    standing = float(getattr(relationship, "desire", 0.0))
+    if standing < 0:
+        return 0.0
+    base = max(0.0, min(1.0, 0.5 * scored + 0.5 * standing))
+    afraid = max(0.0, min(1.0, float(getattr(relationship, "fear", 0.0))))
+    return max(0.0, min(1.0, base * (1.0 + 0.4 * max(0.0, pressure))
+                        * (1.0 - FEAR_SUPPRESSES * afraid)))
+
+
+def bleed(relationship, tuning: RelationshipTuning = DEFAULT_RELATIONSHIPS) -> None:
+    """Let repulsion colour everything else about how they see somebody.
+
+    Finding a person physically repellent does not sit in its own column. It
+    sours the whole acquaintance — you like them less, you respect them less,
+    and neither of you could tell you exactly why. Applied whenever anything at
+    all happens between the two of them, so it accumulates through contact
+    rather than on a clock.
+
+    **One direction only.** Attraction deliberately does *not* bleed the other
+    way: wanting somebody would raise affinity, which raises attraction
+    (:func:`attraction` reads affinity), which raises affinity — a loop that
+    ends with every fond acquaintance in the campaign infatuated. Repulsion has
+    no such path back, so it is safe to let it spread and it is the half that
+    was asked for.
+
+    ``bleed = 0`` keeps it in its column.
+    """
+    repulsion = min(0.0, float(getattr(relationship, "desire", 0.0)))
+    if not repulsion or tuning.desire_bleed <= 0:
+        return
+    seep = tuning.desire_bleed * repulsion
+    relationship.affinity = round(_clamp(relationship.affinity + seep), 4)
+    relationship.respect = round(_clamp(relationship.respect + seep * 0.5), 4)

@@ -1167,3 +1167,9 @@ body.board { background: var(--color-surface-soft); }
 .decisiontable tr.chosenrow .utilcell { color: var(--color-primary); }
 .decisiontable .chips { gap: 4px; }
 .decisiontable .chip { font-size: 11px; padding: 2px 8px; }
+
+/* A setting a safety line is currently overruling: it is not broken, it is
+   outranked, and the row has to say which. */
+.tuneblocked { margin-top: 6px; padding: 6px 10px; font-size: 12px;
+  background: rgba(179, 83, 9, .08); color: var(--color-warning);
+  border-radius: var(--radius-sm); }

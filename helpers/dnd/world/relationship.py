@@ -20,7 +20,12 @@ from dataclasses import dataclass
 from typing import Any
 
 # The axes. All -1..1 except debt, which is a count.
-AXES = ("affinity", "trust", "fear", "respect", "familiarity")
+AXES = ("affinity", "trust", "fear", "respect", "familiarity", "desire")
+
+# Axes that only exist when a campaign has asked for them. Stored and carried
+# like any other, always 0 while switched off, and hidden from the panel rather
+# than shown as a row of zeroes to tables that never opted in.
+OPTIONAL_AXES = ("desire",)
 
 AXIS_LABELS = {
     "affinity": "Affinity",       # dislike ↔ like
@@ -28,6 +33,11 @@ AXIS_LABELS = {
     "fear": "Fear",               # unafraid ↔ afraid
     "respect": "Respect",         # contempt ↔ regard
     "familiarity": "Familiarity",  # stranger ↔ well known
+    # 0..1 rather than −1..1: the absence of wanting somebody is nothing, not
+    # its opposite. Directed like everything here, which is the whole point —
+    # being drawn to one person and not another is a fact about the pair, not a
+    # setting on either of them.
+    "desire": "Desire",
 }
 
 
@@ -47,6 +57,7 @@ class Relationship:
     fear: float = 0.0
     respect: float = 0.0
     familiarity: float = 0.0
+    desire: float = 0.0
     # Negative means *they* owe *you*. Kept as a count rather than a -1..1 axis
     # because a debt is a discrete thing people tally, not a feeling they have.
     debt: int = 0
@@ -80,6 +91,7 @@ class Relationship:
             trust=float(doc.get("trust", 0.0)),
             fear=float(doc.get("fear", 0.0)),
             respect=float(doc.get("respect", 0.0)),
+            desire=float(doc.get("desire", 0.0)),
             familiarity=float(doc.get("familiarity", 0.0)),
             debt=int(doc.get("debt", 0)),
             updated_at=int(doc.get("updated_at", 0)),

@@ -230,7 +230,12 @@ class PerceivedEntity:
     fear: float = 0.0
     respect: float = 0.0
     familiarity: float = 0.0
+    desire: float = 0.0
     debt: int = 0
+
+    # How this person strikes them. Observable — you can see somebody — and only
+    # ever non-default in a campaign that switched desire on.
+    allure: float = 0.5
 
     beliefs: tuple[HeldBelief, ...] = ()
 
@@ -277,6 +282,7 @@ def _perceive(relationship: Relationship | None, entity_id: Any,
         kind=str(identity.get("kind") or ""),
         known=known,
         debt=int(getattr(relationship, "debt", 0) or 0),
+        allure=float(identity.get("allure", 0.5)),
         beliefs=beliefs,
         **axes,
     )

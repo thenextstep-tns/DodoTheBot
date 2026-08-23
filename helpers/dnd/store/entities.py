@@ -87,6 +87,7 @@ class EntityRepo(ScopedRepo):
             doc.get("_id"): {
                 "name": ((doc.get("identity") or {}).get("name") or ""),
                 "kind": doc.get("kind", ""),
+                "allure": float(doc.get("allure", 0.5)),
             }
             for doc in self.find({"_id": {"$in": wanted}})
         }
