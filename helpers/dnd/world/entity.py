@@ -153,6 +153,12 @@ class Entity:
     # what* is a fact about this person.
     packs: list | None = None
 
+    # World time this entity's memories were last decayed. A ``dormant`` one is
+    # not ticked at all (``06-DECISION-ENGINE.md`` §9), so it falls behind on
+    # purpose and the arrears are paid when something finally looks at it —
+    # which is what makes a world of five hundred people cost nothing to keep.
+    aged_at: int = 0
+
     retired: bool = False
     legacy_id: Any = None                # set by the importer, for idempotency
 
@@ -180,6 +186,7 @@ class Entity:
             "inheritance": self.inheritance,
             "needs": self.needs,
             "goals": list(self.goals) if self.goals else [],
+            "aged_at": int(self.aged_at),
             "packs": list(self.packs) if self.packs else [],
             "retired": bool(self.retired),
         }
@@ -210,6 +217,7 @@ class Entity:
             inheritance=doc.get("inheritance"),
             needs=doc.get("needs"),
             goals=list(doc.get("goals") or []) or None,
+            aged_at=int(doc.get("aged_at", 0)),
             packs=list(doc.get("packs") or []) or None,
             retired=bool(doc.get("retired", False)),
             legacy_id=doc.get("legacy_id"),

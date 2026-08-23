@@ -425,6 +425,51 @@ def temperature(view, tuning: DecisionTuning = DEFAULT_DECISION) -> float:
     return max(0.01, tuning.temperature + spread)
 
 
+# The terms a decision made outside a scene can honestly compute. Everything
+# left out needs somebody to be *there*: how you feel about the person in front
+# of you, what a formative memory of them says, who is watching. Scoring those
+# against an empty room would not be cheaper, it would be wrong.
+COARSE_TERMS = ("need", "impulse", "goal", "trait", "archetype")
+
+
+def decide_coarse(view, candidates, *, tuning: DecisionTuning = DEFAULT_DECISION,
+                  goals: GoalTuning = DEFAULT_GOALS,
+                  needs: NeedsTuning = DEFAULT_NEEDS) -> Decision:
+    """The cheap path, for somebody nobody is watching (``§9``).
+
+    No perception, no social terms, and **argmax rather than softmax** — the
+    surprise a weighted draw buys is worth paying for on screen and worth
+    nothing off it, where the only observer is the event log.
+
+    No RNG at all, which is the point: this runs for every ``active`` character
+    every time the world moves, so it has to be arithmetic and nothing else.
+    """
+    pool = list(candidates or ())
+    if not pool:
+        return Decision(entity_id=getattr(view, "entity_id", None))
+
+    shares = goal_math.focus(view.goals, view.world_time, view.traits, goals)
+    weights = tuning.weights
+    scored = []
+    for candidate in pool:
+        raw = {
+            "need": need_term(view, candidate.verb, needs),
+            "impulse": impulse_term(view, candidate.verb, needs),
+            "goal": goal_term(view, candidate.verb, shares, goals),
+            "trait": trait_term(view, candidate.verb),
+            "archetype": archetype_term(candidate.weight),
+        }
+        terms = {name: round(clamp(value) * weights.get(name, 0.0), 6)
+                 for name, value in raw.items()}
+        scored.append(Scored(verb=candidate.verb, target_id=candidate.target_id,
+                             utility=sum(terms.values()), terms=terms,
+                             pack=candidate.pack))
+
+    scored.sort(key=lambda s: (-s.utility, s.verb, str(s.target_id)))
+    return Decision(chosen=scored[0], considered=tuple(scored), temperature=0.0,
+                    entity_id=getattr(view, "entity_id", None))
+
+
 def decide(view, candidates, rng: Random, *,
            onlookers: int | None = None,
            tuning: DecisionTuning = DEFAULT_DECISION,

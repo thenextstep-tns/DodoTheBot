@@ -40,6 +40,30 @@ from helpers.dnd.mind.traits import DRIVES, FACULTIES, Traits
 from helpers.dnd.tuning import DEFAULT_BEHAVIOUR, BehaviourTuning
 from helpers.dnd.world.pack import Assignment, BehaviourPack
 
+# Which verbs serve which goal, and which answer which need. Imported rather
+# than restated: the coarse path has to reach the same conclusions as the full
+# one about what a goal is for, or an NPC would want different things off-screen
+# than on it.
+from helpers.dnd.world.goal import SERVED_BY as SERVED  # noqa: E402
+
+NEEDS_ANSWERED_BY: dict[str, tuple] = {}
+
+
+def _index_needs() -> None:
+    """Invert the scorer's needs table once, at import.
+
+    ``mind/decide`` maps verb → needs; the coarse proposer wants need → verbs.
+    Built from the same table rather than written out again, so the two can
+    never disagree about what eating is.
+    """
+    from helpers.dnd.mind import decide as decide_math
+
+    for verb, names in decide_math.NEEDS_SERVED.items():
+        for name in names:
+            NEEDS_ANSWERED_BY.setdefault(name, ())
+            NEEDS_ANSWERED_BY[name] = NEEDS_ANSWERED_BY[name] + (verb,)
+
+
 # Verbs that are done *to* somebody. A candidate for one of these without a
 # target is not an action, it is a category — so these fan out over whoever the
 # actor can actually see, and the rest get a single target-less candidate.
@@ -281,6 +305,62 @@ def leaning(assignments, packs: dict, verb: str) -> tuple[float, str]:
     return best, source
 
 
+def propose_coarse(view, assignments, packs: dict,
+                   tuning: BehaviourTuning = DEFAULT_BEHAVIOUR) -> list[Candidate]:
+    """What somebody off-screen would think of doing, cheaply.
+
+    ``06-DECISION-ENGINE.md`` §9: an ``active``-tier character is not in a scene,
+    so there is no room to read affordances from and nobody present to aim at.
+    Candidates come from **what they want and what their body wants** — the
+    verbs their live goals are served by, aimed at whoever the goal is about, and
+    the verbs that answer a pressing need.
+
+    That is the whole saving, and it is a large one: no scene, no perception, no
+    social projection, and a candidate list of three or four instead of twenty.
+    """
+    wanted: dict = {}
+
+    for goal in getattr(view, "goals", ()):
+        for verb, served in SERVED.get(goal.kind, {}).items():
+            if served <= 0:
+                continue
+            # Off-screen, a directed verb aims at whoever the goal is about —
+            # seeking somebody out is exactly what pursuing a goal about them
+            # looks like when nobody is watching.
+            key = (verb, goal.subject_id if verb in DIRECTED else None)
+            wanted[key] = max(wanted.get(key, 0.0), served)
+
+    for need, value in getattr(view, "needs", {}).items():
+        if value < tuning.coarse_need_floor:
+            continue
+        for verb in NEEDS_ANSWERED_BY.get(need, ()):
+            if verb in DIRECTED:
+                continue
+            key = (verb, None)
+            wanted[key] = max(wanted.get(key, 0.0), clamp01(value))
+
+    shaped = bool(assignments) and not tuning.off
+    out = []
+    for (verb, target), pull in wanted.items():
+        weight, source = leaning(assignments, packs, verb)
+        if not shaped:
+            weight, source = 1.0, ""
+        elif weight <= 0:
+            continue
+        out.append(Candidate(verb=verb, target_id=target, weight=weight, pack=source))
+
+    out.sort(key=lambda c: (-c.weight, c.verb, str(c.target_id)))
+    cap = int(tuning.candidate_cap)
+    if cap > 0:
+        out = out[:max(0, cap - 1)]
+
+    wait_weight, wait_source = leaning(assignments, packs, WAIT)
+    out.append(Candidate(verb=WAIT, target_id=None,
+                         weight=wait_weight if shaped else 1.0,
+                         pack=wait_source if shaped else ""))
+    return out
+
+
 def propose(view, affordances, assignments, packs: dict,
             tuning: BehaviourTuning = DEFAULT_BEHAVIOUR) -> list[Candidate]:
     """The things this person would think of doing here.
@@ -335,3 +415,6 @@ def propose(view, affordances, assignments, packs: dict,
                          weight=wait_weight if shaped else 1.0,
                          pack=wait_source if shaped else ""))
     return out
+
+
+_index_needs()

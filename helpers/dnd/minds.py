@@ -32,6 +32,7 @@ from helpers.dnd.tuning import DEFAULT_GOALS, Tuning
 from helpers.dnd.world.entity import (
     KIND_NPC,
     TIER_ACTIVE,
+    TIER_DORMANT,
     Entity,
     Identity,
 )
@@ -340,7 +341,7 @@ def assign_packs(store, entity: Entity, rng: Random, *, campaign=None,
 
 
 def drift_packs(store, entity: Entity, *, world_time: int, verb: str = "",
-                campaign=None, tuning: Tuning | None = None) -> list:
+                campaign=None, tuning: Tuning | None = None, available=None) -> list:
     """Move the mixture this entity is, one step.
 
     Called after events. ``verb`` is what they actually committed to, when there
@@ -356,9 +357,11 @@ def drift_packs(store, entity: Entity, *, world_time: int, verb: str = "",
     if behaviour_tuning.fixed or behaviour_tuning.off:
         return []
 
+    if available is None:
+        available = packs_for(store, campaign).available()
     before = packs_of(entity)
     after = behaviour.drifted(
-        before, packs_for(store, campaign).available(), traits_of(entity),
+        before, available, traits_of(entity),
         needs=needs_of(entity, world_time, tuning), verb=verb,
         tuning=behaviour_tuning,
     )
@@ -385,6 +388,7 @@ def candidates_for(
     campaign=None,
     tuning: Tuning | None = None,
     view=None,
+    available=None,
     features=(),
     sealed: bool = False,
 ) -> list:
@@ -409,9 +413,56 @@ def candidates_for(
 
     allowed = affordances_for(store, entity, scene, campaign=campaign, tuning=tuning,
                               features=features, sealed=sealed)
+    if available is None:
+        available = packs_for(store, campaign).available()
     return behaviour.propose(
-        view, allowed, packs_of(entity),
-        packs_for(store, campaign).available(), tuning.behaviour(),
+        view, allowed, packs_of(entity), available, tuning.behaviour(),
+    )
+
+
+def coarse_view_for(store, entity: Entity, *, world_time: int,
+                    tuning: Tuning | None = None) -> view_model.EntityView:
+    """A view built from the entity alone — **no queries at all**.
+
+    No memories, no beliefs, no relationships, nobody else. That is the whole
+    saving: the full view costs three round trips and a social projection, and a
+    character nobody is watching needs none of it to know they are hungry and
+    what they are trying to do.
+    """
+    tuning = tuning or tuning_for(store)
+    return view_model.project(
+        entity,
+        world_time=world_time,
+        needs=needs_of(entity, world_time, tuning).to_doc(),
+        traits=entity.traits,
+        goals=tuple(goals_of(entity, world_time, tuning)),
+        packs=tuple(packs_of(entity)),
+        perception=tuning.perception(),
+    )
+
+
+def decide_coarsely(store, entity: Entity, *, world_time: int, campaign=None,
+                    tuning: Tuning | None = None, available=None):
+    """What somebody off-screen does, without a scene and without an RNG.
+
+    ``available`` is the campaign's resolved archetypes. Passed in by a caller
+    running a whole turn, because resolving them costs a query and doing it once
+    per NPC was the entire difference between this path making its budget and
+    missing it.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+    if available is None:
+        available = packs_for(store, campaign).available()
+
+    view = coarse_view_for(store, entity, world_time=world_time, tuning=tuning)
+    candidates = behaviour.propose_coarse(
+        view, packs_of(entity), available, tuning.behaviour(),
+    )
+    return decide_math.decide_coarse(
+        view, candidates, tuning=tuning.decision(), goals=tuning.goals(),
+        needs=tuning.needs(),
     )
 
 
@@ -441,6 +492,11 @@ def decide_for(
     if campaign is None:
         campaign = store.campaigns.get(store.campaign_id)
     tuning = tuning or tuning_for(store, campaign)
+
+    # Somebody about to decide has to be up to date first. `view_for` stays
+    # read-only — that is a promise the inspector depends on — so the arrears
+    # are settled here, by a caller that is allowed to write.
+    catch_up(store, entity, world_time, rng, tuning=tuning)
 
     present = tuple(getattr(scene, "present", ()) or ())
     view = view_for(store, entity, world_time=world_time, tuning=tuning,
@@ -491,6 +547,7 @@ def commit_decision(
     campaign=None,
     tuning: Tuning | None = None,
     caused_by: int | None = None,
+    available=None,
 ) -> dict:
     """Make a decision *happen*: the only function here that writes a choice.
 
@@ -549,15 +606,28 @@ def commit_decision(
         # Nobody had it done to them, but people saw it. An NPC slipping out of
         # a room is exactly the sort of thing a witness remembers and the person
         # who left never thinks about again.
-        gist = ACT_PHRASES.get(verb, "{name} acted").format(name=entity.identity.name)
-        formed = witness_event(
-            store,
-            [(entity, 1.0)] + [(other, 0.85) for other in onlookers],
-            gist,
-            world_time=world_time, rng=rng,
-            participants=[entity.id], source_event_seq=seq, tuning=tuning,
-        )
-        report["memories"] = sum(1 for m in formed.values() if m is not None)
+        #
+        # Unless nothing happened: waiting and watching, alone, off-screen, is
+        # not an event anybody carries. Forming a memory of it would be noise
+        # the budget prunes anyway, and it is the commonest thing a character
+        # nobody is watching does — so it is also most of what the coarse path
+        # would otherwise cost.
+        idle = verb in ruleset_model.UNCOMMITTED and not onlookers
+        if idle and not tuning.decision().remember_idle:
+            report["memories"] = 0
+            report["idle"] = True
+            gist = ""
+        else:
+            gist = ACT_PHRASES.get(verb, "{name} acted").format(name=entity.identity.name)
+        if gist:
+            formed = witness_event(
+                store,
+                [(entity, 1.0)] + [(other, 0.85) for other in onlookers],
+                gist,
+                world_time=world_time, rng=rng,
+                participants=[entity.id], source_event_seq=seq, tuning=tuning,
+            )
+            report["memories"] = sum(1 for m in formed.values() if m is not None)
 
     # --- what it served ---------------------------------------------------- #
     report["goals"] = advance_goals_by(
@@ -570,7 +640,7 @@ def commit_decision(
     # --- and who it made them ---------------------------------------------- #
     entity = store.entities.get(entity.id) or entity
     drifted = drift_packs(store, entity, world_time=world_time, verb=verb,
-                          campaign=campaign, tuning=tuning)
+                          campaign=campaign, tuning=tuning, available=available)
     report["became"] = [(a.key, a.weight) for a in drifted]
     report["event_seq"] = event.seq if event is not None else seq
     return report
@@ -717,13 +787,34 @@ def run_turn(store, campaign, *, world_time: int, rng: Random,
         if entity.id not in seen:
             off_stage.append((entity, scenes.get(entity.position.scene_id)))
 
-    acted = []
-    for entity, scene in (on_stage + off_stage)[:limit]:
+    # Resolved once for the whole turn rather than once per character: it is a
+    # query, and the coarse path exists precisely to not be doing queries.
+    available = packs_for(store, campaign).available()
+
+    acted, coarse = [], 0
+    for entity, scene in on_stage[:limit]:
         outcome = act(store, entity, scene, world_time=world_time, rng=rng,
                       campaign=campaign, tuning=tuning)
         if outcome.get("acted"):
             acted.append({"name": entity.identity.name, **outcome})
-    return {"actors": len(acted), "acted": acted}
+
+    # Everybody else runs the cheap path: no scene to perceive, no softmax, and
+    # the social terms left out rather than scored against an empty room. This
+    # is what the 200-NPC budget in §11 is for.
+    for entity, _scene in off_stage[:max(0, limit - len(acted))]:
+        decision = decide_coarsely(store, entity, world_time=world_time,
+                                   campaign=campaign, tuning=tuning,
+                                   available=available)
+        if not decision.considered:
+            continue
+        report = commit_decision(store, entity, None, decision,
+                                 world_time=world_time, rng=rng,
+                                 campaign=campaign, tuning=tuning,
+                                 available=available)
+        coarse += 1
+        acted.append({"name": entity.identity.name, "coarse": True, **report})
+
+    return {"actors": len(acted), "acted": acted, "coarse": coarse}
 
 
 # --------------------------------------------------------------------------- #
@@ -1034,6 +1125,45 @@ def age_entity(store, entity: Entity, days: float, *, world_time: int, rng: Rand
     }
 
 
+def catch_up(store, entity: Entity, world_time: int, rng: Random,
+             tuning: Tuning | None = None) -> dict:
+    """Pay the arrears on an entity nobody has been simulating.
+
+    A ``dormant`` character is skipped by every tick, so their memories are as
+    old as the last time anything happened to them. This applies the whole gap
+    in one pass, the moment somebody looks — the closed-form extrapolation
+    ``06-DECISION-ENGINE.md`` §9 asks for, and the reason five hundred NPCs cost
+    nothing to keep.
+
+    Needs and goal pressure need no catching up at all: both are already
+    functions of ``world_time`` rather than of having been ticked, so a dormant
+    character's hunger is exactly right the instant it is read.
+
+    **How faithful is one big step?** The forgetting curve is a function of
+    total elapsed time, so the deterministic part lands where it would have. The
+    *confabulation* draws do not: N days in one pass rolls once where N passes
+    would roll N times, so a long-dormant character misremembers slightly less
+    than a watched one. That is a real difference and the honest trade for the
+    cost — noted here rather than claimed away.
+    """
+    tuning = tuning or tuning_for(store)
+    behind = max(0, int(world_time) - int(entity.aged_at))
+    if behind <= 0:
+        return {"days": 0.0, "caught_up": False}
+
+    days = behind / MINUTES_PER_DAY
+    report = age_entity(store, entity, days, world_time=world_time, rng=rng,
+                        tuning=tuning)
+    entity.aged_at = int(world_time)
+    store.entities.save(entity)
+    return {**report, "days": days, "caught_up": True}
+
+
+def days_behind(entity: Entity, world_time: int) -> float:
+    """How far this entity's memories are from where the world is."""
+    return max(0, int(world_time) - int(entity.aged_at)) / MINUTES_PER_DAY
+
+
 def enforce_budget(store, entity: Entity, world_time: int,
                    tuning: Tuning | None = None) -> int:
     """Bring an entity back inside its memory budget. Returns how many went.
@@ -1148,13 +1278,21 @@ def advance(store, campaign, days: float, rng: Random) -> dict:
     world_time = store.campaigns.advance_time(campaign.id, minutes)
 
     report = {"days": days, "world_time": world_time, "entities": 0,
-              "new_imprints": 0, "pruned": 0, "confabulated": 0,
+              "dormant": 0, "new_imprints": 0, "pruned": 0, "confabulated": 0,
               "frozen": tuning.memory().frozen}
 
     for entity in store.entities.list(include_retired=False):
+        # Dormant characters are not ticked at all. They fall behind on purpose
+        # and `catch_up` settles it the moment anything looks at them, which is
+        # what turns a world of five hundred people from a recurring bill into
+        # a one-off cost paid only for the ones who matter.
+        if entity.tier == TIER_DORMANT:
+            report["dormant"] = report.get("dormant", 0) + 1
+            continue
         outcome = age_entity(
             store, entity, days, world_time=world_time, rng=rng, tuning=tuning
         )
+        entity.aged_at = world_time
         report["entities"] += 1
         report["new_imprints"] += max(0, outcome["new_imprints"])
         report["pruned"] += outcome["pruned"]

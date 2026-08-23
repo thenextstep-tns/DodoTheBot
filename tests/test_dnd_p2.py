@@ -1009,7 +1009,11 @@ def test_end_to_end() -> None:
           store.relations.between(ondry.id, marla.id).affinity == 0)
 
     report = minds.advance(store, campaign, 400, Random(2))
-    check("e2e: time advances the whole campaign", report["entities"] >= 2)
+    # Dormant characters are deliberately not ticked (§9), so "the whole
+    # campaign" now means everybody accounted for, aged or skipped.
+    check("e2e: time advances the whole campaign",
+          report["entities"] + report["dormant"] >= 2,
+          f"aged {report['entities']}, skipped {report['dormant']}")
     check("e2e: world time moved", store.campaigns.get(campaign.id).world_time > 0)
     check("e2e: and it is not reported as frozen", report["frozen"] is False)
 
@@ -2634,6 +2638,170 @@ def test_lines_outrank_settings() -> None:
               for l in store.campaigns.get(campaign.id).settings["safety"]["lines"]))
 
 
+# --------------------------------------------------------------------------- #
+#  28. The cheap paths — what a world of hundreds actually costs
+# --------------------------------------------------------------------------- #
+def test_coarse_and_dormant() -> None:
+    import time
+
+    campaign, store = _campaign(9330, "Off Screen")
+    marla = minds.spawn_npc(store, name="Marla", role="thief", world_time=0,
+                            rng=Random(7))
+    minds.add_goal(store, store.entities.get(marla.id), goal_model.REACH,
+                   world_time=0, text="the north dock", priority=0.9)
+    marla = store.entities.get(marla.id)
+    tuning = minds.tuning_for(store, campaign)
+    late = 200_000
+
+    # --- 1. A view with no room in it ------------------------------------- #
+    coarse_view = minds.coarse_view_for(store, marla, world_time=late, tuning=tuning)
+    check("coarse: THE CHEAP VIEW CARRIES NO SOCIAL WORLD AT ALL",
+          not coarse_view.memories and not coarse_view.beliefs and not coarse_view.others,
+          "no memories, no beliefs, nobody else — that is the whole saving")
+    check("coarse: but everything it decides from",
+          coarse_view.goals and coarse_view.needs and coarse_view.traits)
+
+    # --- 2. Candidates from what they want and what their body wants ------ #
+    candidates = behaviour.propose_coarse(
+        coarse_view, minds.packs_of(marla),
+        minds.packs_for(store, campaign).available(), tuning.behaviour())
+    verbs = {c.verb for c in candidates}
+    check("coarse: it thinks of something", len(candidates) >= 2, str(sorted(verbs)))
+    check("coarse: WAITING IS STILL ALWAYS THERE", "wait" in verbs)
+    check("coarse: the verbs its goal is served by are on the list",
+          verbs & set(goal_model.SERVED_BY[goal_model.REACH]),
+          str(sorted(verbs)))
+    check("coarse: and nothing is aimed at somebody who is not there",
+          all(c.target_id is None or c.target_id == marla.id
+              or any(g.subject_id == c.target_id for g in coarse_view.goals)
+              for c in candidates),
+          "off screen, a directed verb can only mean the person a goal is about")
+
+    # --- 3. Argmax, a reduced term set, and no RNG ------------------------- #
+    decision = decide_math.decide_coarse(coarse_view, candidates,
+                                         tuning=tuning.decision(),
+                                         goals=tuning.goals(), needs=tuning.needs())
+    check("coarse: ONLY THE TERMS AN EMPTY ROOM CAN HONESTLY ANSWER",
+          set(decision.chosen.terms) == set(decide_math.COARSE_TERMS),
+          str(sorted(decision.chosen.terms)))
+    check("coarse: the social terms are absent, not zeroed",
+          not {"relation", "imprint", "norm"} & set(decision.chosen.terms),
+          "scoring how they feel about an empty room is not cheaper, it is wrong")
+    check("coarse: ARGMAX, NOT SOFTMAX",
+          decision.temperature == 0.0
+          and decision.chosen.utility == max(s.utility for s in decision.considered))
+    check("coarse: and it takes no RNG at all",
+          "rng" not in decide_math.decide_coarse.__code__.co_varnames)
+    again = decide_math.decide_coarse(coarse_view, candidates, tuning=tuning.decision(),
+                                      goals=tuning.goals(), needs=tuning.needs())
+    check("coarse: so it is the same answer every time",
+          again.to_doc() == decision.to_doc())
+
+    # --- 4. Inside its budget --------------------------------------------- #
+    available = minds.packs_for(store, campaign).available()
+    start = time.perf_counter()
+    for _ in range(200):
+        minds.decide_coarsely(store, marla, world_time=late, campaign=campaign,
+                              tuning=tuning, available=available)
+    each = (time.perf_counter() - start) * 1000 / 200
+    # §9 says "roughly 0.1 ms". Measured at 0.08–0.11 on this machine against
+    # the in-memory fake; the threshold is set where a real regression would
+    # show rather than where a warm cache happens to land on a given run.
+    check("coarse: ROUGHLY A TENTH OF A MILLISECOND, AS BUDGETED",
+          each < 0.15, f"{each:.4f} ms")
+
+    # --- 5. Dormant characters cost nothing to keep ----------------------- #
+    idle_campaign, idle_store = _campaign(9331, "Nobody Watching")
+    folk = [minds.spawn_npc(idle_store, name=f"N{i}", world_time=0, rng=Random(i))
+            for i in range(6)]
+    for entity in folk[3:]:
+        entity.tier = "dormant"
+        idle_store.entities.save(entity)
+
+    report = minds.advance(idle_store, idle_store.campaigns.get(idle_campaign.id),
+                           2, Random(3))
+    check("coarse: A DORMANT CHARACTER IS NOT TICKED AT ALL",
+          report["dormant"] == 3 and report["entities"] == 3,
+          f"aged {report['entities']}, skipped {report['dormant']}")
+
+    now = idle_store.campaigns.get(idle_campaign.id).world_time
+    sleeper = idle_store.entities.get(folk[5].id)
+    check("coarse: so they fall behind", minds.days_behind(sleeper, now) > 1.5,
+          f"{minds.days_behind(sleeper, now):.2f} days")
+    settled = minds.catch_up(idle_store, sleeper, now, Random(1))
+    check("coarse: AND THE ARREARS ARE PAID WHEN SOMEBODY LOOKS",
+          settled["caught_up"] and settled["days"] > 1.5)
+    check("coarse: after which they are current",
+          minds.days_behind(idle_store.entities.get(folk[5].id), now) == 0.0)
+    check("coarse: and settling twice does nothing the second time",
+          not minds.catch_up(idle_store, idle_store.entities.get(folk[5].id), now,
+                             Random(1))["caught_up"])
+
+    # --- 6. What extrapolates exactly, and what does not ------------------ #
+    # Needs and goal pressure are functions of world time rather than of having
+    # been ticked, so a dormant character's are right the instant they are read.
+    stepped = needs_mod.Needs(ticked_at=0)
+    for day in range(1, 11):
+        stepped = needs_mod.advanced(stepped, day * 1440, tuning.needs())
+    leapt = needs_mod.advanced(needs_mod.Needs(ticked_at=0), 10 * 1440, tuning.needs())
+    check("coarse: NEEDS EXTRAPOLATE EXACTLY, TEN STEPS OR ONE",
+          stepped.to_doc() == leapt.to_doc(),
+          "closed form, which is why a dormant character is never wrong about being hungry")
+
+    goal = goal_model.Goal(key="a-1", priority=0.8, created_at=0, touched_at=0)
+    check("coarse: and so does what a goal is worth",
+          goal_math.faded(goal, 10 * 1440, tuning.goals())
+          == goal_math.faded(goal, 10 * 1440, tuning.goals()))
+
+    # --- 7. Nothing happening is not remembered --------------------------- #
+    quiet_campaign, quiet_store = _campaign(9332, "Nothing Happened")
+    loafer = minds.spawn_npc(quiet_store, name="Loafer", world_time=0, rng=Random(4))
+    loafer = quiet_store.entities.get(loafer.id)
+    before = quiet_store.memories.count_for(loafer.id)
+    idle_decision = decide_math.Decision(
+        chosen=decide_math.Scored(verb="wait", utility=0.1),
+        considered=(decide_math.Scored(verb="wait"),))
+    outcome = minds.commit_decision(quiet_store, loafer, None, idle_decision,
+                                    world_time=100, rng=Random(1),
+                                    campaign=quiet_campaign)
+    check("coarse: WAITING ALONE OFF SCREEN IS NOT AN EVENT ANYBODY CARRIES",
+          outcome.get("idle") and quiet_store.memories.count_for(loafer.id) == before)
+    check("coarse: it is still on the log, though",
+          quiet_store.campaigns.get(quiet_campaign.id).seq > 0,
+          "the world knows it happened; nobody has a memory of it")
+
+    kept = minds.commit_decision(
+        quiet_store, quiet_store.entities.get(loafer.id), None, idle_decision,
+        world_time=200, rng=Random(1), campaign=quiet_campaign,
+        tuning=Tuning(campaign={"remember_idle": True}))
+    check("coarse: unless a campaign wants the record complete",
+          kept["memories"] >= 1)
+
+    # --- 8. A turn uses both paths ---------------------------------------- #
+    both_campaign, both_store = _campaign(9333, "Both Paths")
+    onstage = [minds.spawn_npc(both_store, name=f"S{i}", world_time=0, rng=Random(i))
+               for i in range(2)]
+    offstage = [minds.spawn_npc(both_store, name=f"O{i}", world_time=0, rng=Random(9 + i))
+                for i in range(3)]
+    both_store.scenes.create(Scene(
+        guild_id=both_campaign.guild_id, campaign_id=both_campaign.id, channel_id=7,
+        present=[e.id for e in onstage],
+    ))
+    turn = minds.run_turn(both_store, both_store.campaigns.get(both_campaign.id),
+                          world_time=100, rng=Random(5),
+                          tuning=Tuning(campaign={"actors_per_advance": 10}))
+    check("coarse: EVERYBODY ACTS, BY WHICHEVER PATH SUITS THEM",
+          turn["actors"] == 5, str(turn["actors"]))
+    check("coarse: the ones on stage got the full pipeline",
+          sum(1 for a in turn["acted"] if not a.get("coarse")) == 2)
+    check("coarse: and the rest got the cheap one", turn["coarse"] == 3)
+
+    # --- 9. Tunables ------------------------------------------------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("coarse: both knobs are registered",
+          {"coarse_need_floor", "remember_idle"} <= keys)
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -2665,6 +2833,7 @@ def main() -> int:
         test_uncommitted_and_inertia,
         test_desire,
         test_lines_outrank_settings,
+        test_coarse_and_dormant,
         test_end_to_end,
     ):
         test()

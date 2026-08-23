@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **acceptance met** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–5 of 6 built |
+| P3 | ✅ **complete** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — **all six steps built** |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -55,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**717 tests** across five suites, all passing:
+**775 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -121,7 +121,7 @@ configuration** (tuning is resolved at the orchestration edge and passed in as
 typed dataclasses), and **every repository requires a `Scope`**, so an unscoped
 query cannot be written.
 
-## 6. P3 — three increments landed, one remains
+## 6. P3 — complete
 
 ### Already built and live
 
@@ -136,8 +136,10 @@ query cannot be written.
 the tick loop**, so `/gm advance` moves them too. A world that ages differently
 when nobody is watching is a world with two rulesets.
 
-Acceptance is half-met: clocks advance and a rumour reaches someone who never
-met its subject. What is missing is *an NPC pursuing a goal*.
+**Acceptance is met in full.** Left alone for a simulated week: clocks advance,
+a rumour reaches someone who never met its subject, and an NPC carried a goal
+from 0.00 to 0.46 through choices nobody made for them. `test_acting` is that
+run. What P3 does *not* have is the four things below.
 
 ### What remains: the decision engine
 
@@ -339,11 +341,50 @@ checkable on its own:
      (deciding alone is 0.18 ms). The default cap of 8 actors keeps one advance
      near 11 ms. The 25 ms / 200-NPC budget in §11 is for the **coarse** path,
      which is step 6 — do not read the current number against it.
-6. **Coarse and dormant paths** — `active` NPCs run argmax with no perception;
-   `dormant` are extrapolated in closed form. Follow the shape of
-   `needs.advanced()`, which is already written that way. **This is the only
-   step left**, and it is what the 25 ms / 200-NPC budget is waiting on: the
-   full pipeline costs ~1.4 ms a head, so 200 of them need the cheap path.
+6. **Coarse and dormant paths** — ✅ **built** (`minds.coarse_view_for`,
+   `minds.decide_coarsely`, `decide.decide_coarse`, `behaviour.propose_coarse`,
+   `minds.catch_up`).
+   * **The coarse view does no queries at all.** No memories, no beliefs, no
+     relationships, nobody else — built from the entity document alone. That is
+     the whole saving; the full view costs three round trips and a social
+     projection.
+   * Candidates come from **goals and needs only**, directed verbs aimed at
+     whoever the goal is about. Scoring uses `COARSE_TERMS` — the five an empty
+     room can honestly answer. The social three are **absent, not zeroed**:
+     scoring how somebody feels about nobody is not cheaper, it is wrong.
+   * **Argmax, and no RNG in the signature.** The surprise a weighted draw buys
+     is worth paying for on screen and worth nothing off it.
+   * **Dormant characters are not ticked at all.** `advance` skips them and they
+     carry `aged_at`; `catch_up` pays the arrears the moment anything looks.
+     Needs and goal pressure need no catching up — both are closed-form in
+     `world_time`, and there is a test that ten steps and one leap agree
+     exactly. Memory decay's *deterministic* part lands the same; the
+     confabulation **draws do not**, so a long-dormant character misremembers
+     slightly less than a watched one. Real difference, honest trade, written
+     down in `catch_up`'s docstring rather than claimed away.
+   * **Waiting alone off-screen forms no memory** (`remember_idle`, off). It is
+     the commonest thing an unwatched character does and therefore most of what
+     a big world costs. Still logged — the world knows, nobody remembers.
+
+### What the performance actually is, measured
+
+| Path | Measured | §11 budget |
+| --- | --- | --- |
+| Coarse decide, one NPC | **0.08–0.11 ms** | ~0.1 ms ✅ |
+| Full decide (score + select), ~17 candidates | **0.06–0.18 ms** | < 1 ms ✅ |
+| Full decide **+ commit** | **~1.2–1.4 ms** | — |
+| `run_turn`, default cap of 8 | **~4.6 ms** | — |
+| `run_turn`, 200 NPCs | **61 ms** idle / **242 ms** acting | < 25 ms ❌ |
+
+**The 25 ms figure is a budget for deciding, and it is met. It is not a budget
+for writing, and writing is what the rest is.** Two hundred characters each
+appending an event, forming memories and saving cannot be arithmetic-optimised
+below the cost of the writes; `actors_per_advance` (default 8) is the lever, and
+is why it exists. Note also that these numbers are taken against
+`tests/fake_mongo.py`, whose collections are **linear scans** — a profile of the
+200-NPC turn is dominated by `_matches` running 82,000 times. Against indexed
+Mongo the memory reads are point lookups, so treat the absolute figures as an
+upper bound and the *ratios* as the real signal.
 
 ### Two things the owner asked for during step 5, and where they live
 

@@ -494,6 +494,13 @@ TUNABLES: list[dict] = [
           "single act redefines them; **0 and only circumstance shapes anyone**, "
           "never their own choices.",
           0.5, minimum=0.0, maximum=2.0),
+    _spec("coarse_need_floor", "Behaviour", "Off-screen, only what presses",
+          "How pressing a need has to be before somebody nobody is watching does "
+          "anything about it. Characters off screen think about very little on "
+          "purpose \u2014 that is what makes a world of hundreds affordable \u2014 and "
+          "this is where the line sits. **0 and they weigh everything**, which "
+          "is correct and costs what it costs.",
+          0.35, minimum=0.0, maximum=1.0),
     _spec("candidate_cap", "Behaviour", "Options weighed at once",
           "The most actions a character will consider in one decision, the ones "
           "they lean toward most kept. This is what stops a crowded room costing "
@@ -557,6 +564,14 @@ TUNABLES: list[dict] = [
           "naming what. **0 and nothing anybody does relieves anything**, which "
           "is a world that only ever gets hungrier.",
           0.2, minimum=0.0, maximum=1.0),
+    _spec("remember_idle", "Deciding", "Remember doing nothing",
+          "Whether a character forms a memory of having waited or watched while "
+          "alone and off screen. **Off by default**: nothing happened, nobody "
+          "saw it, and the memory budget would prune it anyway. It is also the "
+          "commonest thing an unwatched character does, so this is most of what "
+          "a big world costs to run. On, for a campaign that wants the record "
+          "complete.",
+          False, kind="bool", minimum=0, maximum=1),
     _spec("decide_risk_curve", "Deciding", "Cowardice curve",
           "How sharply fear of death bends what risk costs somebody. Higher "
           "makes the frightened far more frightened without making the brave "
@@ -825,6 +840,7 @@ class Tuning:
             drift=self.get("pack_drift"),
             drift_from_action=self.get("pack_drift_from_action"),
             candidate_cap=int(self.get("candidate_cap")),
+            coarse_need_floor=self.get("coarse_need_floor"),
         )
 
     def decision(self) -> "DecisionTuning":
@@ -837,6 +853,7 @@ class Tuning:
             risk_curve=self.get("decide_risk_curve"),
             goal_progress=self.get("act_goal_progress"),
             need_relief=self.get("act_need_relief"),
+            remember_idle=bool(self.get("remember_idle")),
         )
 
     def generation(self) -> "GenerationTuning":
@@ -1040,6 +1057,7 @@ class BehaviourTuning:
     drift: float = 0.05             # how fast the mixture someone is moves
     drift_from_action: float = 0.5  # how much what they did counts toward it
     candidate_cap: int = 24
+    coarse_need_floor: float = 0.35   # off-screen, only what actually presses
 
     @property
     def off(self) -> bool:
@@ -1068,6 +1086,7 @@ class DecisionTuning:
     risk_curve: float = 2.0
     goal_progress: float = 0.1     # how far one action moves a goal it serves
     need_relief: float = 0.2       # how much acting on a need settles it
+    remember_idle: bool = False    # whether doing nothing, alone, is remembered
 
 
 @dataclass(frozen=True)
