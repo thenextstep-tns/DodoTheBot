@@ -68,11 +68,12 @@ KIND_LABELS = {
 # a test that says so.
 SERVED_BY: dict[str, dict[str, float]] = {
     ACQUIRE:  {"take": 1.0, "use": 0.4, "speak": 0.3},
-    AVOID:    {"flee": 1.0, "hide": 0.8, "move": 0.5},
+    AVOID:    {"flee": 1.0, "hide": 0.8, "move": 0.5, "watch": 0.2},
     HARM:     {"attack": 1.0, "take": 0.3},
-    PROTECT:  {"attack": 0.6, "move": 0.5, "give": 0.4, "speak": 0.3},
+    PROTECT:  {"attack": 0.6, "move": 0.5, "give": 0.4, "speak": 0.3,
+               "watch": 0.5},
     REACH:    {"move": 1.0, "flee": 0.5},
-    LEARN:    {"speak": 1.0, "use": 0.4, "hide": 0.3},
+    LEARN:    {"watch": 1.0, "speak": 0.9, "use": 0.4, "hide": 0.3},
     BEFRIEND: {"speak": 1.0, "give": 0.9},
 }
 

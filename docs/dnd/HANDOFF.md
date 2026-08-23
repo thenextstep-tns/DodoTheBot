@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–4 of 6 built |
+| P3 | ◑ **acceptance met** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–5 of 6 built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -55,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**599 tests** across five suites, all passing:
+**656 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -313,14 +313,54 @@ checkable on its own:
    * Measured at **0.06–0.18 ms** to score and select ~17 candidates, against a
      1 ms budget. The lever if that ever changes is `candidate_cap` or the term
      count — **never caching**, which would break replay.
-5. **Commit** — what remains of this step is the *writing*: emit the
-   `WorldEvent` with `Decision.to_doc()` on it (already shaped for that),
-   witnesses encode, relationship deltas apply, beliefs propagate
-   (§8). The trace **view** landed with step 4. This is the explainability
-   feature and the debugger; it is not optional polish.
+5. **Commit** — ✅ **built** (`minds.commit_decision`, `minds.act`,
+   `minds.run_turn`, an `acted` event kind, and NPC actions rendered with their
+   reasoning in the campaign's event log).
+   * **The P3 acceptance criterion is met.** Left alone for a simulated week a
+     campaign now runs itself: clocks fill, rumours travel, and an NPC pursued a
+     goal from 0.00 to 0.46 through their own choices, logging 28 events on the
+     way. `tests/test_dnd_p2.py::test_acting` is that run, as a test.
+   * `run_turn` is called from **`advance`**, not the tick loop — the rule that
+     has held all of P3 together. A world that behaves differently when nobody
+     is watching is a world with two rulesets.
+   * `commit_decision` reuses **`interact`** for directed verbs rather than
+     reimplementing it, so stakes, per-party memories, witness memories,
+     relationship deltas, goal re-weighing and drift all come for free and
+     cannot drift out of step with the rest of the engine.
+   * **Acting relieves the need it answered** (`act_need_relief`). That closes
+     the interlock `04-ENTITIES.md` §5a named: deprivation could not be switched
+     on while nothing could satisfy a need, because needs only ever rose. Blunt
+     on purpose — there is no item model, so it says *they did something about
+     it*, not *they ate a specific loaf*.
+   * **Deciding is still read-only.** `decide_for` writes nothing; only
+     `commit_decision` does. A GM asking what somebody would do must not make
+     them do it, and there is a test.
+   * **Cost:** ~1.4 ms per NPC for the full pipeline *including* the writes
+     (deciding alone is 0.18 ms). The default cap of 8 actors keeps one advance
+     near 11 ms. The 25 ms / 200-NPC budget in §11 is for the **coarse** path,
+     which is step 6 — do not read the current number against it.
 6. **Coarse and dormant paths** — `active` NPCs run argmax with no perception;
    `dormant` are extrapolated in closed form. Follow the shape of
-   `needs.advanced()`, which is already written that way.
+   `needs.advanced()`, which is already written that way. **This is the only
+   step left**, and it is what the 25 ms / 200-NPC budget is waiting on: the
+   full pipeline costs ~1.4 ms a head, so 200 of them need the cheap path.
+
+### Two things the owner asked for during step 5, and where they live
+
+* **A middle band between doing nothing and committing.** There is now a tenth
+  affordance, `watch` — hanging back, listening, working out who these people
+  are. `rules.ruleset.UNCOMMITTED` is the pair `(wait, watch)`, and both are
+  granted to anyone who is not incapacitated, in *both* rulesets. Without it
+  every NPC either froze or lunged, which is not what people do in a room.
+  `wait` alone has no switch; `watch` has one like every other verb.
+* **People change their minds incrementally.** `goal_reweigh_step` caps what one
+  event may do to a priority, and the move itself scales by the event's
+  **magnitude**, the person's **volatility** (the impulsive swing further — the
+  exception that makes the rule readable) and `inertia()`, which resists change
+  in proportion to how long a goal has been *carried*. A want formed today moves
+  0.054 on a shattering event; the same want held a year moves 0.008. Forty
+  events still take somebody from 0.26 to 0.85 — it travels, it never lurches.
+  Inertia slows fading too, so old wants survive quiet stretches.
 
 Budget: < 1 ms per focus NPC, < 25 ms for a 200-NPC tick. If the full pipeline
 is too slow the fix is `CANDIDATE_CAP` or fewer terms — **never** caching

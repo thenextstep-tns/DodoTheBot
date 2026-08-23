@@ -62,17 +62,43 @@ def clamp01(value: float) -> float:
 # --------------------------------------------------------------------------- #
 #  What time does to a goal
 # --------------------------------------------------------------------------- #
+def held_for(goal: Goal, world_time: int) -> float:
+    """Days since this goal was formed — how long they have carried it."""
+    return max(0, int(world_time) - int(goal.created_at)) / MINUTES_PER_DAY
+
+
+def inertia(goal: Goal, world_time: int, tuning: GoalTuning = DEFAULT_GOALS) -> float:
+    """How much a long-held goal resists change, 0…1 where 1 is no resistance.
+
+    **A ten-year vow does not turn over because of one bad afternoon.** Something
+    somebody formed last week is still soft and moves easily; something they have
+    carried for a year has become part of them, fades slower, and takes far more
+    to shift. That difference is most of what separates a character with a past
+    from a bundle of current opinions.
+
+    ``inertia_days`` is the half-life of malleability: at the default, a goal
+    held that long moves at half the rate a fresh one does. **0 switches it off**,
+    and every goal is as easy to change as any other.
+    """
+    if tuning.inertia_days <= 0:
+        return 1.0
+    return 1.0 / (1.0 + held_for(goal, world_time) / tuning.inertia_days)
+
+
 def faded(goal: Goal, world_time: int, tuning: GoalTuning = DEFAULT_GOALS) -> float:
     """How much they still care, after however long it has been.
 
-    Exponential in days since the goal last moved. At ``decay = 0`` this returns
-    the priority unchanged, which is the switch: goals that never fade, for a
+    Exponential in days since the goal last *moved*, slowed by how long it has
+    been carried — the things people have wanted for years are the things they
+    keep wanting through a quiet stretch. At ``decay = 0`` this returns the
+    priority unchanged, which is the switch: goals that never fade, for a
     campaign where a vow is a vow.
     """
     if tuning.decay <= 0:
         return clamp01(goal.priority)
     days = max(0, int(world_time) - int(goal.touched_at)) / MINUTES_PER_DAY
-    return clamp01(goal.priority * (1.0 - tuning.decay) ** days)
+    rate = tuning.decay * inertia(goal, world_time, tuning)
+    return clamp01(goal.priority * (1.0 - rate) ** days)
 
 
 def urgency(goal: Goal, world_time: int, tuning: GoalTuning = DEFAULT_GOALS) -> float:
@@ -298,24 +324,49 @@ def support(goal: Goal, relationship=None) -> float:
     return max(-1.0, min(1.0, total / max(1.0, sum(abs(w) for w in axes.values()))))
 
 
-def reweighed(goal: Goal, relationship=None,
-              tuning: GoalTuning = DEFAULT_GOALS) -> Goal:
+def reweighed(goal: Goal, relationship=None, tuning: GoalTuning = DEFAULT_GOALS,
+              *, world_time: int = 0, magnitude: float = 1.0,
+              volatility: float = 0.0) -> Goal:
     """Let how they feel about somebody pull what they want about them.
 
-    A nudge toward where the relationship points, never a jump: priorities that
-    snapped to the relationship would make goals a redundant view of it, and the
-    interesting characters are the ones who still want something after the
-    feeling behind it has gone. ``reweigh = 0`` freezes priorities entirely, so
-    they only ever change when a GM says so.
+    **Incremental, because people are.** Drastic change happens — it is just
+    rare, and it is what a genuinely large event buys. What must never happen is
+    a priority swinging 0 → 1 and back to 0.2 across a handful of events, which
+    is not a person changing their mind, it is a number with no memory. Three
+    things keep it honest:
+
+    * a **step ceiling** on how far one event may move a priority at all;
+    * **magnitude** — a shattering event moves several times what a slight does,
+      so the ceiling is earned rather than uniform;
+    * **volatility** — impulsive people swing further on the same event, which is
+      the one place a sweeping change should look normal.
+
+    On top of which a long-held goal resists all of it (:func:`inertia`).
+    ``reweigh = 0`` freezes priorities entirely.
     """
     if tuning.reweigh <= 0:
         return goal
     pull = support(goal, relationship)
     if pull == 0.0:
         return goal
+
     target = clamp01(0.5 + 0.5 * pull)
-    moved = goal.priority + tuning.reweigh * (target - goal.priority)
-    return goal.with_priority(moved)
+
+    # Scale the move itself rather than only capping it. A ceiling alone does
+    # nothing until it binds, which meant a slight event and a shattering one
+    # moved a priority by exactly the same amount right up until the clamp — and
+    # impulsiveness, which only widened the ceiling, did nothing at all.
+    force = 0.2 + 0.8 * clamp01(magnitude)
+    impulse = 1.0 + tuning.impulsive_reach * (clamp01((volatility + 1.0) / 2.0) - 0.5)
+    desired = (tuning.reweigh * (target - goal.priority)
+               * force * max(0.0, impulse) * inertia(goal, world_time, tuning))
+
+    # And then a hard ceiling anyway, as the backstop against one afternoon
+    # rewriting somebody however the factors multiply out.
+    if tuning.reweigh_step > 0:
+        desired = max(-tuning.reweigh_step, min(tuning.reweigh_step, desired))
+
+    return goal.with_priority(goal.priority + desired)
 
 
 def progressed(goal: Goal, amount: float, world_time: int,

@@ -175,7 +175,10 @@ class Srd5e:
         if down or any(c in INCAPACITATING for c in conditions):
             return frozenset({ruleset.WAIT})
 
-        allowed = {ruleset.WAIT}
+        # Watching costs no action worth the name and is available to anyone who
+        # is not incapacitated — including the prone and the grappled, who can
+        # still see perfectly well.
+        allowed = {ruleset.WAIT, ruleset.WATCH}
         if situation.others:
             allowed.add(ruleset.SPEAK)
 

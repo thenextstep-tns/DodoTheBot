@@ -139,7 +139,11 @@ class Freeform:
         if situation.has_condition(*INCAPACITATED_WORDS):
             return frozenset({ruleset.WAIT})
 
-        allowed = {ruleset.WAIT}
+        # Waiting and watching are both open to anyone still conscious: doing
+        # nothing and hanging back to work out what is going on are different
+        # answers, and a scene that only offers the first makes NPCs who either
+        # freeze or lunge.
+        allowed = {ruleset.WAIT, ruleset.WATCH}
         pinned = situation.has_condition(*PINNED_WORDS)
 
         if not pinned:

@@ -171,6 +171,26 @@ def _events_table(store, guild, limit: int = 15) -> str:
     rows = ""
     for event in recent:
         detail = ""
+        if event.kind == "acted":
+            # An NPC did something of their own accord, and the event carries
+            # the reasoning that produced it. Showing the top two terms turns a
+            # log line into an answer to "why did she do that", weeks later,
+            # when nothing else remembers the state she decided from.
+            payload = event.payload
+            trace = payload.get("trace") or {}
+            terms = sorted((trace.get("terms") or {}).items(), key=lambda p: -abs(p[1]))
+            why = " · ".join(f"{_TERM_LABELS.get(name, name)} {value:+.2f}"
+                             for name, value in terms[:2] if abs(value) >= 0.005)
+            target = f" → {_escape(payload.get('target'))}" if payload.get("target") else ""
+            detail = (f"{_escape(payload.get('name', ''))} "
+                      f"<b>{_escape(payload.get('verb', ''))}</b>{target}"
+                      + (f'<div class="muted small">{_escape(why)}</div>' if why else ""))
+            rows += (
+                f"<tr><td class='muted'>{event.seq}</td>"
+                f"<td>{_escape(event.kind)}</td>"
+                f"<td class='small'>{detail}</td></tr>"
+            )
+            continue
         if event.kind == "check":
             detail = (
                 f"{event.payload.get('approach', '')} → "
@@ -731,7 +751,8 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
 _GROUP_EMOJI = {
     "Memory": "🧠", "Forgetting": "🌫️", "Salience": "⚡", "Needs": "🍞",
     "Relationships": "🤝", "Stakes": "⚖️", "Perception": "👁️",
-    "Actions": "🎬",
+    "Actions": "🎬", "Goals": "🎯", "Behaviour": "🧭",
+    "Deciding": "🧮",
     "Continuity": "⏳", "Knowledge": "📚", "Generation": "🎲",
 }
 

@@ -1351,9 +1351,16 @@ def test_goals() -> None:
 
     # --- 2. Wanting fades, unless it is being pursued --------------------- #
     stale = goal_model.Goal(key="a-2", priority=0.8, touched_at=0)
+    # Slower than it used to be: a goal carried this long has dug in, and
+    # inertia slows fading as well as swinging. It still plainly fades.
     check("goals: a want nobody acts on fades",
-          goal_math.faded(stale, 200 * day) < 0.3,
-          f"{goal_math.faded(stale, 200 * day):.3f}")
+          goal_math.faded(stale, 200 * day) < 0.45,
+          f"0.80 to {goal_math.faded(stale, 200 * day):.3f}")
+    check("goals: and an old one fades slower than a fresh one",
+          goal_math.faded(stale, 200 * day)
+          > goal_math.faded(goal_model.Goal(key="a-2b", priority=0.8,
+                                            created_at=199 * day, touched_at=0),
+                            200 * day))
     fresh = stale.with_progress(0.1, 200 * day)
     check("goals: pursuing it resets the clock",
           goal_math.faded(fresh, 200 * day) == 0.8)
@@ -2112,6 +2119,317 @@ def test_deciding() -> None:
     check("deciding: under a millisecond per decision", each < 1.0, f"{each:.3f} ms")
 
 
+# --------------------------------------------------------------------------- #
+#  25. Committing — the world moves on its own
+#
+#  P3's acceptance criterion, in one test: leave a campaign alone for a
+#  simulated week and an NPC should have pursued a goal.
+# --------------------------------------------------------------------------- #
+def test_acting() -> None:
+    campaign, store = _campaign(9320, "Acting")
+    marla = minds.spawn_npc(store, name="Marla", role="thief", culture="city",
+                            world_time=0, rng=Random(7))
+    ondry = minds.spawn_npc(store, name="Ondry", role="guard", world_time=0,
+                            rng=Random(3))
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, title="The tap room",
+        channel_id=1, present=[marla.id, ondry.id], lighting="dim",
+    ))
+    marla = store.entities.get(marla.id)
+
+    # --- 1. One action, committed ----------------------------------------- #
+    before_events = store.campaigns.get(campaign.id).seq
+    report = minds.act(store, marla, scene, world_time=0, rng=Random(4),
+                       campaign=campaign)
+    check("acting: somebody did something", report["acted"] and report["verb"])
+    check("acting: it is on the event log",
+          store.campaigns.get(campaign.id).seq > before_events)
+
+    acted = [e for e in store.events.recent(10) if e.kind == events_module_kind()]
+    check("acting: THE EVENT CARRIES ITS OWN REASONING",
+          bool(acted) and set(acted[0].payload["trace"]) >= {"terms", "utility",
+                                                             "temperature", "margin"})
+    check("acting: and names who did what",
+          acted[0].payload["name"] == "Marla" and acted[0].payload["verb"] == report["verb"])
+    check("acting: the actor is recorded", acted[0].actor_id == marla.id)
+    check("acting: somebody remembered it", report["memories"] >= 1)
+
+    # --- 2. What it was done to, feels it --------------------------------- #
+    campaign2, store2 = _campaign(9321, "Violence")
+    a = minds.spawn_npc(store2, name="Alder", role="brute", world_time=0, rng=Random(5))
+    b = minds.spawn_npc(store2, name="Bry", role="scribe", world_time=0, rng=Random(6))
+    watcher = minds.spawn_npc(store2, name="Cass", world_time=0, rng=Random(8))
+    room = store2.scenes.create(Scene(
+        guild_id=campaign2.guild_id, campaign_id=campaign2.id, channel_id=2,
+        present=[a.id, b.id, watcher.id],
+    ))
+    a = store2.entities.get(a.id)
+    hostile = decide_math.Decision(
+        chosen=decide_math.Scored(verb="attack", target_id=b.id, utility=1.0,
+                                  terms={"trait": 1.0}),
+        considered=(decide_math.Scored(verb="attack", target_id=b.id),),
+    )
+    minds.commit_decision(store2, a, room, hostile, world_time=100, rng=Random(2),
+                          campaign=campaign2)
+    feeling = store2.relations.between(b.id, a.id)
+    check("acting: BEING ATTACKED MOVES HOW THE VICTIM FEELS",
+          feeling.fear > 0 and feeling.affinity < 0,
+          f"fear {feeling.fear:+.2f} affinity {feeling.affinity:+.2f}")
+    check("acting: and the victim remembers it", store2.memories.count_for(b.id) > 0)
+    check("acting: SO DOES SOMEBODY WHO ONLY WATCHED",
+          store2.memories.count_for(watcher.id) > 0)
+
+    # --- 3. An undirected act is still witnessed -------------------------- #
+    quiet = decide_math.Decision(
+        chosen=decide_math.Scored(verb="flee", utility=0.5),
+        considered=(decide_math.Scored(verb="flee"),),
+    )
+    watched_before = store2.memories.count_for(watcher.id)
+    minds.commit_decision(store2, store2.entities.get(a.id), room, quiet,
+                          world_time=200, rng=Random(3), campaign=campaign2)
+    check("acting: leaving a room is something other people notice",
+          store2.memories.count_for(watcher.id) > watched_before)
+
+    # --- 4. Acting serves goals, scaled by attention ---------------------- #
+    campaign3, store3 = _campaign(9322, "Pursuit")
+    seeker = _npc(store3, campaign3, "Seeker", diligence=0.5)
+    minds.add_goal(store3, seeker, goal_model.REACH, world_time=0,
+                   text="get to the north dock", priority=0.9)
+    seeker = store3.entities.get(seeker.id)
+    moved = minds.advance_goals_by(store3, seeker, "move", world_time=0)
+    check("acting: DOING SOMETHING THAT SERVES A GOAL ADVANCES IT",
+          moved and moved[0]["progress"] > 0, str(moved))
+    check("acting: and doing something unrelated does not",
+          not minds.advance_goals_by(store3, store3.entities.get(seeker.id),
+                                     "speak", world_time=0))
+
+    # Spread thin, the same action gets less done — attention is the difference.
+    focused, focused_store = _campaign(9323, "One Thing")
+    one = _npc(focused_store, focused, "One")
+    many = _npc(focused_store, focused, "Many")
+    minds.add_goal(focused_store, one, goal_model.REACH, world_time=0,
+                   text="the dock", priority=0.8)
+    for index in range(6):
+        many = focused_store.entities.get(many.id)
+        minds.add_goal(focused_store, many, goal_model.REACH, world_time=0,
+                       text=f"errand {index}", priority=0.8)
+    one_moved = minds.advance_goals_by(focused_store, focused_store.entities.get(one.id),
+                                       "move", world_time=0)
+    many_moved = minds.advance_goals_by(focused_store, focused_store.entities.get(many.id),
+                                        "move", world_time=0)
+    check("acting: THE SAME ACT GETS LESS DONE WHEN SOMEBODY IS SPREAD THIN",
+          one_moved[0]["progress"] > 3 * many_moved[0]["progress"],
+          f"{one_moved[0]['progress']:.3f} vs {many_moved[0]['progress']:.3f}")
+
+    off = Tuning(campaign={"act_goal_progress": 0})
+    check("acting: goal progress switches off entirely",
+          not minds.advance_goals_by(focused_store, focused_store.entities.get(one.id),
+                                     "move", world_time=0, tuning=off))
+
+    # --- 5. Acting on a need settles it ----------------------------------- #
+    hungry = _npc(store3, campaign3, "Hungry")
+    hungry.needs = dict(hungry.needs or {}, hunger=0.9, ticked_at=0)
+    store3.entities.save(hungry)
+    eased = minds.relieve_needs(store3, store3.entities.get(hungry.id), "take",
+                                world_time=0)
+    check("acting: DOING SOMETHING ABOUT A NEED SETTLES IT",
+          eased.get("hunger", 0) > 0
+          and minds.needs_of(store3.entities.get(hungry.id), 0).hunger < 0.9,
+          str(eased))
+    # Every verb answers *something* — speaking answers loneliness. What must
+    # not happen is one act quietly settling a need it has nothing to do with.
+    spoke = minds.relieve_needs(store3, store3.entities.get(hungry.id), "speak",
+                                world_time=0)
+    check("acting: an act settles only what it actually answers",
+          "hunger" not in spoke and "belonging" in spoke, str(spoke))
+    check("acting: and relief switches off, leaving a world that only gets hungrier",
+          not minds.relieve_needs(store3, store3.entities.get(hungry.id), "take",
+                                  world_time=0,
+                                  tuning=Tuning(campaign={"act_need_relief": 0})))
+
+    # --- 6. Doing it makes you the sort of person who does ---------------- #
+    became = report.get("became")
+    check("acting: what somebody did feeds back into who they are", became is not None)
+
+    # --- 7. A week alone, unattended -------------------------------------- #
+    week, week_store = _campaign(9324, "A Week Alone")
+    folk = [minds.spawn_npc(week_store, name=name, role=role, world_time=0,
+                            rng=Random(seed))
+            for seed, (name, role) in enumerate(
+                [("Marla", "thief"), ("Ondry", "guard"), ("Kesh", "merchant")])]
+    week_store.scenes.create(Scene(
+        guild_id=week.guild_id, campaign_id=week.id, title="The harbour office",
+        channel_id=3, present=[f.id for f in folk], lighting="dim",
+    ))
+    hero = week_store.entities.get(folk[0].id)
+    goal = minds.add_goal(week_store, hero, goal_model.BEFRIEND, world_time=0,
+                          text="get Ondry on side", subject_id=folk[1].id, priority=0.95)
+
+    rng = Random(21)
+    for _ in range(7):
+        minds.advance(week_store, week_store.campaigns.get(week.id), 1, rng)
+
+    after = [g for g in minds.all_goals_of(week_store.entities.get(folk[0].id))
+             if g.key == goal.key][0]
+    check("acting: LEFT ALONE FOR A WEEK, AN NPC PURSUED A GOAL",
+          after.progress > 0, f"{after.progress:.2f}")
+    check("acting: and the world logged what it did",
+          week_store.campaigns.get(week.id).seq > 7)
+    check("acting: everybody has memories of it",
+          all(week_store.memories.count_for(f.id) > 0 for f in folk))
+
+    # --- 8. The switch ----------------------------------------------------- #
+    still, still_store = _campaign(9325, "Nobody Moves")
+    quiet_folk = [minds.spawn_npc(still_store, name=f"Q{i}", world_time=0,
+                                  rng=Random(i)) for i in range(3)]
+    still_store.scenes.create(Scene(
+        guild_id=still.guild_id, campaign_id=still.id, channel_id=4,
+        present=[f.id for f in quiet_folk],
+    ))
+    settings = dict(still_store.campaigns.get(still.id).settings or {})
+    settings["tuning"] = {"actors_per_advance": 0}
+    still_store.campaigns.save_settings(still.id, settings)
+    before_seq = still_store.campaigns.get(still.id).seq
+    turn = minds.advance(still_store, still_store.campaigns.get(still.id), 3, Random(1))
+    check("acting: NPCS CAN BE STOPPED FROM ACTING ENTIRELY",
+          turn["turn"]["actors"] == 0 and turn["turn"].get("off"))
+    check("acting: but the world still ages around them",
+          turn["entities"] > 0)
+
+    # --- 9. Deciding is still read-only ------------------------------------ #
+    watcher_seq = store.campaigns.get(campaign.id).seq
+    minds.decide_for(store, store.entities.get(marla.id), scene, world_time=0,
+                     rng=Random(11), campaign=campaign)
+    check("acting: asking still changes nothing \u2014 only committing does",
+          store.campaigns.get(campaign.id).seq == watcher_seq)
+
+
+def events_module_kind() -> str:
+    from helpers.dnd.world import event as event_model
+
+    return event_model.ACTED
+
+
+# --------------------------------------------------------------------------- #
+#  26. The middle band, and people who change their minds like people
+# --------------------------------------------------------------------------- #
+def test_uncommitted_and_inertia() -> None:
+    # --- 1. Doing nothing and hanging back are both on the table ---------- #
+    check("middle: there is a passive option and a semi-active one",
+          set(rs.UNCOMMITTED) == {"wait", "watch"})
+    ff, srd = rules.get("freeform"), rules.get("srd5e")
+    healthy = {"hp": {"current": 9}}
+    for name, impl, stats in (("freeform", ff, {}), ("srd5e", srd, healthy)):
+        for situation in (rs.Situation(),
+                          rs.Situation(sealed=True),
+                          rs.Situation(others=(rs.Presence(),), conditions=("grappled",)),
+                          rs.Situation(others=(rs.Presence(),), conditions=("prone",))):
+            allowed = impl.affordances(stats, situation)
+            check(f"middle: {name} always offers BOTH doing nothing and watching",
+                  {"wait", "watch"} <= allowed, str(sorted(allowed)))
+    check("middle: except to somebody who cannot act at all",
+          srd.affordances({"hp": {"current": 0}}, rs.Situation()) == frozenset({"wait"}))
+    check("middle: freeform agrees about that",
+          ff.affordances({}, rs.Situation(conditions=("out cold",))) == frozenset({"wait"}))
+
+    # An empty room still gives somebody something to do that is not nothing.
+    alone = ff.affordances({}, rs.Situation())
+    check("middle: EVEN ALONE THERE IS MORE THAN NOTHING", "watch" in alone)
+
+    # --- 2. Watching is what finding things out is made of ---------------- #
+    check("middle: watching serves finding something out",
+          goal_model.SERVED_BY[goal_model.LEARN]["watch"] >= 0.9)
+    check("middle: it is neither friendly nor hostile",
+          decide_math.SOCIAL_SIGN["watch"] == 0.0)
+    check("middle: nobody minds you looking", decide_math.NORM["watch"] >= 0)
+    check("middle: and it costs almost nothing",
+          decide_math.RISK["watch"] < decide_math.RISK["speak"])
+    check("middle: the curious and the diligent do it",
+          decide_math.TRAIT_AFFINITY["watch"]["curiosity"] > 0
+          and decide_math.TRAIT_AFFINITY["watch"]["diligence"] > 0)
+    check("middle: every archetype has a stance on it",
+          all("watch" in p.weights for p in pack_registry.reload().values()))
+    check("middle: and it can be switched off like any other verb",
+          "affordance_watch" in {s["key"] for s in TUNABLES})
+
+    campaign, store = _campaign(9326, "The Middle")
+    marla = minds.spawn_npc(store, name="Marla", world_time=0, rng=Random(7))
+    ondry = minds.spawn_npc(store, name="Ondry", world_time=0, rng=Random(3))
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, channel_id=9,
+        present=[marla.id, ondry.id],
+    ))
+    marla = store.entities.get(marla.id)
+    offered = {c.verb for c in minds.candidates_for(store, marla, scene, world_time=0,
+                                                    campaign=campaign)}
+    check("middle: IT REACHES A REAL DECISION", "watch" in offered, str(sorted(offered)))
+    without = minds.affordances_for(store, marla, scene, campaign=campaign,
+                                    tuning=Tuning(campaign={"affordance_watch": False}))
+    check("middle: off, and doing nothing is the only uncommitted option left",
+          "watch" not in without and "wait" in without)
+
+    # --- 3. Priorities move like people, not like sliders ----------------- #
+    day = 1440
+    tuning = Tuning().goals()
+    hated = Relationship(affinity=-0.9, respect=-0.6, fear=0.3)
+    grudge = goal_model.Goal(key="harm-1", kind=goal_model.HARM, subject_id="x",
+                             priority=0.5, created_at=0)
+
+    def after(events_count, world_time=0, magnitude=1.0, volatility=0.0, tune=tuning):
+        goal = grudge
+        for _ in range(events_count):
+            goal = goal_math.reweighed(goal, hated, tune, world_time=world_time,
+                                       magnitude=magnitude, volatility=volatility)
+        return goal.priority
+
+    one = after(1)
+    check("middle: ONE EVENT MOVES A PRIORITY A LITTLE, NOT A LOT",
+          0 < one - 0.5 < 0.1, f"0.50 to {one:.3f}")
+    check("middle: a slight event moves less than a shattering one",
+          after(1, magnitude=0.1) < after(1, magnitude=1.0),
+          f"{after(1, magnitude=0.1):.3f} vs {after(1, magnitude=1.0):.3f}")
+    check("middle: A SHATTERING EVENT STILL CANNOT REWRITE SOMEBODY",
+          after(1, magnitude=1.0) - 0.5 <= tuning.reweigh_step + 1e-9)
+
+    check("middle: IMPULSIVE PEOPLE SWING FURTHER ON THE SAME EVENT",
+          after(1, volatility=1.0) > after(1, volatility=-1.0),
+          f"{after(1, volatility=-1.0):.3f} vs {after(1, volatility=1.0):.3f}")
+    check("middle: unless that is switched off",
+          after(1, volatility=1.0, tune=Tuning(campaign={"goal_impulsive_reach": 0}).goals())
+          == after(1, volatility=-1.0, tune=Tuning(campaign={"goal_impulsive_reach": 0}).goals()))
+
+    # --- 4. Long-held wants dig in ---------------------------------------- #
+    fresh_move = after(1, world_time=0) - 0.5
+    old_move = after(1, world_time=365 * day) - 0.5
+    check("middle: A TEN-YEAR VOW DOES NOT TURN OVER ON ONE BAD AFTERNOON",
+          old_move < fresh_move / 3, f"{fresh_move:.4f} vs {old_move:.4f}")
+    check("middle: over twenty such events it still moves, just less far",
+          after(20, world_time=365 * day) > 0.5
+          and after(20, world_time=365 * day) < after(20, world_time=0))
+    check("middle: and an old want fades slower than a fresh one",
+          goal_math.inertia(grudge, 365 * day, tuning) < 1.0)
+    loose = Tuning(campaign={"goal_inertia_days": 0}).goals()
+    check("middle: inertia switches off, and age stops mattering",
+          goal_math.inertia(grudge, 365 * day, loose) == 1.0)
+
+    # --- 5. No ping-pong --------------------------------------------------- #
+    # Twenty hostile events then twenty warm ones. It should travel and come
+    # back, never snap: nothing may cross the whole range in a handful of steps.
+    warm = Relationship(affinity=0.9, trust=0.7)
+    goal, path = grudge, [grudge.priority]
+    for _ in range(20):
+        goal = goal_math.reweighed(goal, hated, tuning, world_time=0, magnitude=1.0)
+        path.append(goal.priority)
+    for _ in range(20):
+        goal = goal_math.reweighed(goal, warm, tuning, world_time=0, magnitude=1.0)
+        path.append(goal.priority)
+    biggest = max(abs(b - a) for a, b in zip(path, path[1:]))
+    check("middle: NO SINGLE STEP EVER LURCHES",
+          biggest <= tuning.reweigh_step + 1e-9, f"largest step {biggest:.4f}")
+    check("middle: but over forty events they genuinely changed their mind",
+          max(path) - min(path) > 0.3, f"{min(path):.2f} to {max(path):.2f}")
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -2139,6 +2457,8 @@ def main() -> int:
         test_packs,
         test_archetypes_both_ways,
         test_deciding,
+        test_acting,
+        test_uncommitted_and_inertia,
         test_end_to_end,
     ):
         test()

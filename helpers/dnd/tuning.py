@@ -238,6 +238,14 @@ TUNABLES: list[dict] = [
           "How often the world moves while nobody is looking. Low values make a "
           "campaign feel alive and cost more; high ones are cheaper and calmer.",
           6.0, minimum=0.25, maximum=168.0),
+    _spec("actors_per_advance", "Continuity", "People who act each time",
+          "How many characters get to do something whenever the world moves. "
+          "Whoever is in an open scene goes first, then the rest of the closely "
+          "simulated ones. This is the cap that keeps a world of five hundred "
+          "people a fixed bill. **0 and NPCs never act on their own** \u2014 they "
+          "still age, remember, gossip and change their minds, they just never "
+          "do anything unprompted.",
+          8, kind="int", minimum=0, maximum=200),
     _spec("tick_days", "Continuity", "In-world days per tick",
           "How much time passes each time it turns. At 1 day per 6 hours, a week "
           "away is about a month in the world.",
@@ -320,6 +328,13 @@ TUNABLES: list[dict] = [
     _spec("affordance_hide", "Actions", "Hiding",
           "Whether a character may try to go unseen. Needs the dark or something to get behind before it is offered at all.",
           True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_watch", "Actions", "Watching",
+          "Whether a character may hang back, listen and work out what is going "
+          "on instead of committing to something. The middle ground between "
+          "doing nothing and acting, and most of what people really do in a "
+          "room. **Off and every character either acts or stands inert**, which "
+          "suits a duel and ruins a negotiation.",
+          True, kind="bool", minimum=0, maximum=1),
     _spec("affordance_use", "Actions", "Using things",
           "Whether a character may use what they are carrying or what is in the room.",
           True, kind="bool", minimum=0, maximum=1),
@@ -357,6 +372,29 @@ TUNABLES: list[dict] = [
           "the feeling behind it has gone is the interesting one. **0 freezes "
           "priorities**, so they change only when you say so.",
           0.15, minimum=0.0, maximum=1.0),
+    _spec("goal_reweigh_step", "Goals", "Most one event may change",
+          "A ceiling on how far a single event can move how much somebody cares "
+          "about something. Real change is **incremental**: a priority that goes "
+          "from nothing to everything and back over a few events is not a person "
+          "changing their mind, it is a number with no memory. A large event "
+          "moves several times what a slight one does, and impulsive people swing "
+          "further on both. **0 lifts the ceiling** and lets one afternoon "
+          "rewrite anybody.",
+          0.08, minimum=0.0, maximum=1.0),
+    _spec("goal_inertia_days", "Goals", "Old wants dig in (days)",
+          "How long somebody has to carry a goal before it becomes hard to shift. "
+          "At the default, something held this long moves at half the rate of a "
+          "want formed last week, and fades slower too \u2014 a ten-year vow does not "
+          "turn over because of one bad afternoon. **0 makes every goal as easy "
+          "to change as any other**, however long it has been carried.",
+          60.0, minimum=0.0, maximum=3650.0),
+    _spec("goal_impulsive_reach", "Goals", "Impulsive people swing",
+          "How much **volatility** widens what one event can do to somebody's "
+          "priorities. This is the exception that makes the rule readable: most "
+          "people change their minds by degrees, and the volatile are where a "
+          "sudden reversal looks like character rather than like a bug. **0 and "
+          "everybody changes at the same measured pace.**",
+          0.6, minimum=0.0, maximum=3.0),
     _spec("goal_cap", "Goals", "Hard limit on goals",
           "A blunt ceiling on how many things somebody may pursue at once. "
           "**Off by default, and it is not the mechanism** — attention above is "
@@ -482,6 +520,18 @@ TUNABLES: list[dict] = [
           "predictable whoever they are; higher and the explosive ones become "
           "genuinely hard to call while the steady ones stay steady.",
           0.5, minimum=0.0, maximum=3.0),
+    _spec("act_goal_progress", "Deciding", "Getting somewhere",
+          "How far one action moves a goal it serves, before attention divides "
+          "it. This is what turns wanting something into eventually having it. "
+          "**0 and goals never advance by themselves** \u2014 only a GM moves them.",
+          0.1, minimum=0.0, maximum=1.0),
+    _spec("act_need_relief", "Deciding", "Doing something about it",
+          "How much acting on a need settles it \u2014 eating when hungry, getting "
+          "somewhere safe when frightened. Blunt on purpose: there is no item "
+          "model yet, so this says *they did something about it* rather than "
+          "naming what. **0 and nothing anybody does relieves anything**, which "
+          "is a world that only ever gets hungrier.",
+          0.2, minimum=0.0, maximum=1.0),
     _spec("decide_risk_curve", "Deciding", "Cowardice curve",
           "How sharply fear of death bends what risk costs somebody. Higher "
           "makes the frightened far more frightened without making the brave "
@@ -643,6 +693,7 @@ class Tuning:
             mode=str(self.get("time_mode")),
             hours=self.get("tick_hours"),
             days=self.get("tick_days"),
+            actors=int(self.get("actors_per_advance")),
         )
 
     def rumours(self) -> "RumourTuning":
@@ -689,6 +740,9 @@ class Tuning:
             attention_overhead=self.get("goal_attention_overhead"),
             attention_reach=self.get("goal_attention_reach"),
             reweigh=self.get("goal_reweigh"),
+            reweigh_step=self.get("goal_reweigh_step"),
+            inertia_days=self.get("goal_inertia_days"),
+            impulsive_reach=self.get("goal_impulsive_reach"),
             decay=self.get("goal_decay"),
             abandon_below=self.get("goal_abandon_below"),
             deadline_reach=self.get("goal_deadline_reach"),
@@ -716,6 +770,8 @@ class Tuning:
             temperature=self.get("decide_temperature"),
             temperature_spread=self.get("decide_temperature_spread"),
             risk_curve=self.get("decide_risk_curve"),
+            goal_progress=self.get("act_goal_progress"),
+            need_relief=self.get("act_need_relief"),
         )
 
     def generation(self) -> "GenerationTuning":
@@ -791,6 +847,7 @@ class ContinuityTuning:
     mode: str = "manual"
     hours: float = 6.0
     days: float = 1.0
+    actors: int = 8        # how many people act each time the world moves
 
     @property
     def automatic(self) -> bool:
@@ -870,6 +927,9 @@ class GoalTuning:
     attention_overhead: float = 0.08   # what one goal costs just to be held
     attention_reach: float = 0.5   # how much diligence moves the budget
     reweigh: float = 0.15          # how far feelings pull a goal's priority
+    reweigh_step: float = 0.08     # ceiling on what one event may move
+    inertia_days: float = 60.0     # how long before a want digs in
+    impulsive_reach: float = 0.6   # how much volatility widens a single swing
     decay: float = 0.02            # fraction of the wanting lost per idle day
     abandon_below: float = 0.08
     deadline_reach: float = 1.0
@@ -927,6 +987,8 @@ class DecisionTuning:
     temperature: float = 0.25
     temperature_spread: float = 0.5
     risk_curve: float = 2.0
+    goal_progress: float = 0.1     # how far one action moves a goal it serves
+    need_relief: float = 0.2       # how much acting on a need settles it
 
 
 @dataclass(frozen=True)

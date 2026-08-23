@@ -55,15 +55,30 @@ GIVE = "give"
 TAKE = "take"
 HIDE = "hide"
 WAIT = "wait"
+WATCH = "watch"
 USE = "use"
 MOVE = "move"
 
-AFFORDANCES = (ATTACK, FLEE, SPEAK, GIVE, TAKE, HIDE, WAIT, USE, MOVE)
+AFFORDANCES = (ATTACK, FLEE, SPEAK, GIVE, TAKE, HIDE, WAIT, WATCH, USE, MOVE)
 
 AFFORDANCE_LABELS = {
     ATTACK: "Attack", FLEE: "Flee", SPEAK: "Speak", GIVE: "Give", TAKE: "Take",
-    HIDE: "Hide", WAIT: "Wait", USE: "Use", MOVE: "Move",
+    HIDE: "Hide", WAIT: "Wait", WATCH: "Watch", USE: "Use", MOVE: "Move",
 }
+
+# The two that are always on the table for anyone still conscious, and the
+# reason a decision never comes down to "commit or nothing":
+#
+#   WAIT   — the null action. Doing nothing is a real answer and an NPC with no
+#            good option should be able to give it.
+#   WATCH  — the semi-active one. Hanging back, listening, working out who these
+#            people are before deciding anything. Most of what people actually
+#            do in a room is this, and without it every NPC is either inert or
+#            committing to something.
+#
+# ``wait`` alone has no switch; ``watch`` has one like every other verb, because
+# a campaign may legitimately want everyone forced to act.
+UNCOMMITTED = (WAIT, WATCH)
 
 
 @dataclass(frozen=True)

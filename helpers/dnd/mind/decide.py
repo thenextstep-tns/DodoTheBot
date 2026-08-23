@@ -88,12 +88,13 @@ NEEDS_SERVED = {
     "give":   ("belonging",),
     "attack": ("safety",),
     "wait":   ("fatigue",),
+    "watch":  ("safety",),
 }
 
 # How much of a gamble each verb is, before anything about the person.
 RISK = {
     "attack": 0.9, "take": 0.6, "flee": 0.35, "hide": 0.2, "use": 0.2,
-    "move": 0.1, "speak": 0.1, "give": 0.1, "wait": 0.0,
+    "move": 0.1, "speak": 0.1, "give": 0.1, "watch": 0.05, "wait": 0.0,
 }
 
 # Which way an action points socially. Used twice: to read a formative memory
@@ -101,12 +102,18 @@ RISK = {
 SOCIAL_SIGN = {
     "attack": -1.0, "take": -0.8, "hide": -0.3, "flee": -0.3,
     "speak": 0.8, "give": 1.0, "use": 0.0, "move": 0.0, "wait": 0.0,
+    # Watching somebody is not friendly and not hostile. It is *appraisal*, and
+    # giving it a social sign either way would make it read as a move against
+    # them, which is precisely what it is not.
+    "watch": 0.0,
 }
 
 # What a room thinks of it. Negative is "not done here".
 NORM = {
     "attack": -0.85, "take": -0.6, "hide": -0.35, "flee": -0.25,
     "speak": 0.3, "give": 0.45, "use": 0.0, "move": 0.0, "wait": 0.05,
+    # Nobody minds you looking. That is why it is the thing people do.
+    "watch": 0.1,
 }
 
 # Which dispositions reach for which verb. **This is where `boldness` finally
@@ -122,6 +129,8 @@ TRAIT_AFFINITY = {
     "use":    {"diligence": 0.4, "curiosity": 0.3},
     "move":   {"curiosity": 0.2},
     "wait":   {"diligence": 0.3, "volatility": -0.4, "boldness": -0.2},
+    "watch":  {"diligence": 0.5, "curiosity": 0.5, "openness": 0.3,
+               "volatility": -0.3},
 }
 
 # How the axes of a relationship argue for an action about that person.
@@ -132,6 +141,9 @@ RELATION_READS = {
     "give":   {"affinity": 0.6, "trust": 0.3, "debt": 0.4},
     "flee":   {"fear": 0.6, "trust": -0.2},
     "hide":   {"fear": 0.5},
+    # You watch the people you have not made your mind up about: unfamiliar,
+    # and not yet trusted.
+    "watch":  {"familiarity": -0.4, "trust": -0.3, "fear": 0.2},
 }
 
 DEBT_SCALE = 5.0

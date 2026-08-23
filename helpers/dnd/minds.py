@@ -456,6 +456,277 @@ def decide_for(
 
 
 # --------------------------------------------------------------------------- #
+#  Doing it
+# --------------------------------------------------------------------------- #
+# Which of the nine verbs is a thing done *to* somebody, and what a relationship
+# calls it (``mind/relationships.py``). A verb absent here still happens and is
+# still remembered — it simply does not move how two people stand.
+ACT_AS_RELATION = {
+    "attack": "attacked",
+    "take": "stole",
+    "give": "gifted",
+    "speak": "talked",
+}
+
+# What an undirected act reads as, so something that nobody described still
+# forms a memory somebody could tell back.
+ACT_PHRASES = {
+    "flee": "{name} got out",
+    "hide": "{name} went to ground",
+    "move": "{name} moved off",
+    "use": "{name} used what they had",
+    "wait": "{name} did nothing",
+    "watch": "{name} hung back and watched",
+}
+
+
+def commit_decision(
+    store,
+    entity: Entity,
+    scene,
+    decision,
+    *,
+    world_time: int,
+    rng: Random,
+    campaign=None,
+    tuning: Tuning | None = None,
+    caused_by: int | None = None,
+) -> dict:
+    """Make a decision *happen*: the only function here that writes a choice.
+
+    The commit step of ``06-DECISION-ENGINE.md`` §8, and the line between a
+    simulation that can be asked what it thinks and one that gets on with it.
+    In order: the event is appended with its own reasoning attached, whoever it
+    was done to has it done to them, everyone who saw it remembers it, what it
+    served moves along, and doing it makes the actor a little more the sort of
+    person who does it.
+
+    **The trace rides on the event.** That is what makes an NPC's behaviour
+    answerable weeks later, when nobody remembers the state that produced it —
+    the event log is the only thing that still knows.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+
+    chosen = decision.chosen
+    verb, target_id = chosen.verb, chosen.target_id
+    target = store.entities.get(target_id) if target_id is not None else None
+
+    seq = store.campaigns.next_seq(campaign.id)
+    seed = events.event_seed(campaign.seed, seq)
+    event = store.events.append(
+        events.ACTED,
+        actor_id=entity.id,
+        targets=(target_id,) if target_id is not None else (),
+        payload={"name": entity.identity.name, "verb": verb,
+                 "target": target.identity.name if target else "",
+                 "trace": decision.to_doc()},
+        seed=seed,
+        seq=seq,
+        caused_by=caused_by,
+        world_time=world_time,
+    )
+
+    report = {"verb": verb, "target_id": target_id, "seq": seq,
+              "utility": chosen.utility, "memories": 0, "goals": []}
+
+    # --- who it was done to ------------------------------------------------ #
+    onlookers = [
+        other for other in _present_entities(store, scene)
+        if other.id not in (entity.id, target_id)
+    ]
+    kind = ACT_AS_RELATION.get(verb)
+    if target is not None and kind:
+        outcome = interact(
+            store, entity, target, kind,
+            world_time=world_time, rng=rng, witnesses=onlookers,
+            source_event_seq=seq, tuning=tuning,
+        )
+        report["memories"] = len(outcome["memories"])
+        report["stakes"] = {str(k): v.weight for k, v in outcome["stakes"].items()}
+    else:
+        # Nobody had it done to them, but people saw it. An NPC slipping out of
+        # a room is exactly the sort of thing a witness remembers and the person
+        # who left never thinks about again.
+        gist = ACT_PHRASES.get(verb, "{name} acted").format(name=entity.identity.name)
+        formed = witness_event(
+            store,
+            [(entity, 1.0)] + [(other, 0.85) for other in onlookers],
+            gist,
+            world_time=world_time, rng=rng,
+            participants=[entity.id], source_event_seq=seq, tuning=tuning,
+        )
+        report["memories"] = sum(1 for m in formed.values() if m is not None)
+
+    # --- what it served ---------------------------------------------------- #
+    report["goals"] = advance_goals_by(
+        store, entity, verb, world_time=world_time, tuning=tuning
+    )
+    report["relieved"] = relieve_needs(
+        store, entity, verb, world_time=world_time, tuning=tuning
+    )
+
+    # --- and who it made them ---------------------------------------------- #
+    entity = store.entities.get(entity.id) or entity
+    drifted = drift_packs(store, entity, world_time=world_time, verb=verb,
+                          campaign=campaign, tuning=tuning)
+    report["became"] = [(a.key, a.weight) for a in drifted]
+    report["event_seq"] = event.seq if event is not None else seq
+    return report
+
+
+def advance_goals_by(store, entity: Entity, verb: str, *, world_time: int,
+                     tuning: Tuning | None = None) -> list:
+    """Move every goal this action served, by what the actor could give it.
+
+    Scaled by attention: a goal getting a ninth of somebody moves a ninth as
+    far. This is where being spread thin stops being an abstraction and starts
+    costing people the things they wanted.
+    """
+    tuning = tuning or tuning_for(store)
+    goal_tuning = tuning.goals()
+    step = tuning.decision().goal_progress
+    if step <= 0:
+        return []
+
+    live = goals_of(entity, world_time, tuning)
+    if not live:
+        return []
+    shares = goal_math.focus(live, world_time, traits_of(entity), goal_tuning)
+
+    moved = []
+    stored = goal_model.from_docs(entity.goals)
+    out, changed = [], False
+    for goal in stored:
+        served = goal.served_by(verb) if goal.open else 0.0
+        if served <= 0 or goal.key not in shares:
+            out.append(goal)
+            continue
+        after = goal_math.progressed(goal, step * served, world_time, goal_tuning,
+                                     share=shares.get(goal.key, 1.0))
+        out.append(after)
+        changed = True
+        moved.append({"key": goal.key, "text": goal.text,
+                      "progress": after.progress, "done": not after.open})
+    if changed:
+        save_goals(store, entity, out)
+    return moved
+
+
+def relieve_needs(store, entity: Entity, verb: str, *, world_time: int,
+                  tuning: Tuning | None = None) -> dict:
+    """Doing something about a need makes it press a little less.
+
+    The interlock this closes is the one `04-ENTITIES.md` §5a warned about:
+    deprivation could not be switched on while **nothing could satisfy a need**,
+    because needs only ever rose and a world of NPCs would starve on a rail. Now
+    that they can act, eating is a thing that can happen.
+
+    Deliberately small and blunt — there is no item model yet, so this says
+    "they did something about it", not "they ate a specific loaf". At 0 nothing
+    anybody does relieves anything, which is the old behaviour exactly.
+    """
+    tuning = tuning or tuning_for(store)
+    relief = tuning.decision().need_relief
+    served = decide_math.NEEDS_SERVED.get(verb, ())
+    if relief <= 0 or not served or entity.needs is None:
+        return {}
+
+    current = needs_of(entity, world_time, tuning)
+    doc, eased = current.to_doc(), {}
+    for name in served:
+        was = float(doc.get(name, 0.0))
+        now = max(0.0, was - relief)
+        if now < was:
+            doc[name] = now
+            eased[name] = round(was - now, 4)
+    if not eased:
+        return {}
+    doc["ticked_at"] = int(world_time)
+    entity.needs = doc
+    store.entities.save(entity)
+    return eased
+
+
+def _present_entities(store, scene) -> list:
+    """Everyone on stage, as entities. Empty when there is no scene."""
+    out = []
+    for other_id in (getattr(scene, "present", ()) or ()):
+        other = store.entities.get(other_id)
+        if other is not None and not other.retired:
+            out.append(other)
+    return out
+
+
+def act(
+    store,
+    entity: Entity,
+    scene,
+    *,
+    world_time: int,
+    rng: Random,
+    campaign=None,
+    tuning: Tuning | None = None,
+) -> dict:
+    """Decide, and then do it. The whole pipeline, end to end.
+
+    Kept as two functions with this one on top, because *asking* what somebody
+    would do and *making them do it* are different questions and the panel needs
+    only the first.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+    decision = decide_for(store, entity, scene, world_time=world_time, rng=rng,
+                          campaign=campaign, tuning=tuning)
+    if not decision.considered:
+        return {"verb": "", "acted": False}
+    report = commit_decision(store, entity, scene, decision, world_time=world_time,
+                             rng=rng, campaign=campaign, tuning=tuning)
+    report["acted"] = True
+    return report
+
+
+def run_turn(store, campaign, *, world_time: int, rng: Random,
+             tuning: Tuning | None = None) -> dict:
+    """Let the world's people take a turn.
+
+    Everyone in an open scene first — those are the ones a table is watching —
+    then whoever else is simulated closely enough to be worth running, up to the
+    campaign's cap. The cap is what keeps a world of five hundred NPCs a fixed
+    bill rather than an unbounded one.
+
+    Called from ``advance``, not from the tick loop, for the reason that has held
+    all of P3 together: a world that behaves differently when nobody is watching
+    is a world with two rulesets.
+    """
+    tuning = tuning or tuning_for(store, campaign)
+    limit = int(tuning.continuity().actors)
+    if limit <= 0:
+        return {"actors": 0, "acted": [], "off": True}
+
+    scenes = {s.id: s for s in store.scenes.open_scenes()}
+    on_stage, off_stage, seen = [], [], set()
+    for scene in scenes.values():
+        for entity in _present_entities(store, scene):
+            if entity.kind == KIND_NPC and entity.id not in seen:
+                seen.add(entity.id)
+                on_stage.append((entity, scene))
+    for entity in store.entities.list(kind=KIND_NPC, tier=TIER_ACTIVE):
+        if entity.id not in seen:
+            off_stage.append((entity, scenes.get(entity.position.scene_id)))
+
+    acted = []
+    for entity, scene in (on_stage + off_stage)[:limit]:
+        outcome = act(store, entity, scene, world_time=world_time, rng=rng,
+                      campaign=campaign, tuning=tuning)
+        if outcome.get("acted"):
+            acted.append({"name": entity.identity.name, **outcome})
+    return {"actors": len(acted), "acted": acted}
+
+
+# --------------------------------------------------------------------------- #
 #  What somebody is after
 # --------------------------------------------------------------------------- #
 def goals_of(entity: Entity, world_time: int, tuning: Tuning | None = None) -> list:
@@ -518,8 +789,8 @@ def set_goal_priority(store, entity: Entity, key: str, priority: float):
     return found
 
 
-def reweigh_goals(store, entity: Entity, *, subject_id=None,
-                  tuning: Tuning | None = None) -> list:
+def reweigh_goals(store, entity: Entity, *, subject_id=None, world_time: int = 0,
+                  magnitude: float = 1.0, tuning: Tuning | None = None) -> list:
     """Let how they feel about people pull what they want about those people.
 
     Called after anything that moves a relationship, so a grudge that cools takes
@@ -534,6 +805,9 @@ def reweigh_goals(store, entity: Entity, *, subject_id=None,
     if goal_tuning.reweigh <= 0:
         return []
 
+    # How impulsive they are decides how far one event may swing them, so the
+    # sudden reversal stays available to the people it looks like character on.
+    volatility = traits_of(entity).volatility
     goals, out, moved = goal_model.from_docs(entity.goals), [], []
     for goal in goals:
         if not goal.open or goal.subject_id is None or (
@@ -542,7 +816,10 @@ def reweigh_goals(store, entity: Entity, *, subject_id=None,
             out.append(goal)
             continue
         relationship = store.relations.between(entity.id, goal.subject_id)
-        shifted = goal_math.reweighed(goal, relationship, goal_tuning)
+        shifted = goal_math.reweighed(
+            goal, relationship, goal_tuning,
+            world_time=world_time, magnitude=magnitude, volatility=volatility,
+        )
         out.append(shifted)
         if shifted.priority != goal.priority:
             moved.append(shifted)
@@ -892,6 +1169,10 @@ def advance(store, campaign, days: float, rng: Random) -> dict:
     # the tick loop so `/gm advance` moves them too — one body, as ever.
     report["clocks"] = advance_clocks(store, campaign, days, world_time)
     report["rumours"] = spread_rumours(store, world_time, rng, tuning)
+    # And the people in it do something. Last, so they act on a world that has
+    # already aged, filled its clocks and passed its rumours around.
+    report["turn"] = run_turn(store, campaign, world_time=world_time, rng=rng,
+                              tuning=tuning)
     return report
 
 
@@ -1068,7 +1349,8 @@ def relate(
     # Here rather than in the pure layer because it needs the stored goals, and
     # here rather than on the tick because a grudge should cool when the thing
     # that cooled it happened, not on the next quarter hour.
-    reweigh_goals(store, from_entity, subject_id=to_entity.id, tuning=tuning)
+    reweigh_goals(store, from_entity, subject_id=to_entity.id,
+                  world_time=world_time, magnitude=intensity, tuning=tuning)
     # And who they are follows what they live through. Nobody is one archetype
     # and nobody stays the same mixture.
     drift_packs(store, from_entity, world_time=world_time, tuning=tuning)
