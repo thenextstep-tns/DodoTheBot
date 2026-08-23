@@ -39,7 +39,7 @@ from discord.ext.commands import Context
 import lang_dnd
 from cogs.dnd import context, embeds, knowledge as kb, minds_ui
 from helpers import checks
-from helpers.dnd import migrate, minds, rules
+from helpers.dnd import migrate, minds, narrate, rules
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd import parameters as dnd_params
 from helpers.dnd.rules import dice
@@ -67,45 +67,54 @@ def _seeded(campaign: Campaign, seq: int) -> Random:
     return Random(event_seed(campaign.seed, seq))
 
 
-# How many of a turn's actions a message lists before it says "and others".
-# A turn can run to the campaign's actor cap, and a wall of forty lines is not
-# a report, it is a log dump.
-TURN_LINES = 8
-
-
-def _turn_summary(store, turn: dict) -> str:
+def _turn_summary(store, campaign, turn: dict, tuning=None) -> str:
     """What the people in the world did, in a line each.
 
-    The smallest possible narration layer, and deliberately deterministic: no
-    model is consulted, the words come from the verb. It exists because a
-    decision engine nobody can see the output of is, at the table, exactly the
-    same as no decision engine.
+    The orchestration half of `helpers/dnd/narrate.py`: this resolves the three
+    things the pure module cannot look up for itself — the tuning, the names of
+    everyone an act was aimed at, and what a campaign calls its archetypes — and
+    wraps the lines in the strings. No model is consulted anywhere in it; the
+    words come from the verb (`08-LLM-LAYER.md` §5).
+
+    It exists because a decision engine nobody can see the output of is, at the
+    table, exactly the same as no decision engine.
     """
-    acted = [a for a in (turn.get("acted") or []) if a.get("verb")]
-    if not acted:
+    tuning = tuning or minds.tuning_for(store, campaign)
+    view = tuning.report()
+    if view.off:
+        return ""
+
+    # One identity lookup for the whole turn, and one archetype resolution —
+    # both are queries, and the coarse path exists precisely to not be doing a
+    # query per character. Labels are only fetched when something asks for them.
+    names = store.entities.identities_of(narrate.target_ids(turn))
+    labels = {}
+    if view.drift:
+        labels = {
+            key: pack.label
+            for key, pack in minds.packs_for(store, campaign).available().items()
+        }
+
+    split = narrate.turn_lines(turn, names=names, packs=labels, tuning=view)
+    if not split["acted"]:
         return lang_dnd.TT_ADVANCE_TURN_QUIET if turn.get("actors") is not None else ""
 
-    names = store.entities.identities_of(
-        [a.get("target_id") for a in acted if a.get("target_id") is not None]
-    )
-    lines = []
-    for report in acted[:TURN_LINES]:
-        name, verb, target = minds.describe_act(report, names)
-        # Say when something actually moved, so a turn reads as consequence
-        # rather than as a list of gestures.
-        finished = [g for g in (report.get("goals") or []) if g.get("done")]
-        moved = report.get("goals") or []
-        note = ""
-        if finished:
-            note = f" — and got what they wanted: *{finished[0].get('text') or 'it'}*"
-        elif moved:
-            note = f" — closer to *{moved[0].get('text') or 'something'}*"
-        lines.append(lang_dnd.TT_ADVANCE_TURN_LINE.format(
-            name=f"**{name}**", verb=verb, target=target, note=note))
+    def _block(template: str, lines: list) -> str:
+        if not lines:
+            return ""
+        rendered = "\n".join(
+            lang_dnd.TT_ADVANCE_TURN_LINE.format(line=line) for line in lines
+        )
+        return template.format(lines=rendered)
 
-    body = lang_dnd.TT_ADVANCE_TURN.format(lines="\n".join(lines))
-    if len(acted) > TURN_LINES:
-        body += lang_dnd.TT_ADVANCE_TURN_MORE.format(count=len(acted) - TURN_LINES)
+    body = _block(lang_dnd.TT_ADVANCE_TURN, split["here"])
+    body += _block(lang_dnd.TT_ADVANCE_TURN_ELSEWHERE, split["elsewhere"])
+    # Everybody acted, and every one of them was off-screen with the off-screen
+    # band switched off: say the world moved rather than saying nothing at all.
+    if not body:
+        return lang_dnd.TT_ADVANCE_TURN_QUIET
+    if split["hidden"]:
+        body += lang_dnd.TT_ADVANCE_TURN_MORE.format(count=split["hidden"])
     return body
 
 
@@ -1537,7 +1546,9 @@ class Tabletop(commands.Cog, name="dnd"):
         # their goals and change who they are, and the only report was how many
         # minds aged.
         if not report.get("timeless"):
-            message += _turn_summary(found.store, report.get("turn") or {})
+            message += _turn_summary(
+                found.store, found.campaign, report.get("turn") or {}
+            )
         await interaction.followup.send(message)
 
     # ------------------------------------------------------------------ #

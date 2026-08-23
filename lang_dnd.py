@@ -197,7 +197,11 @@ TT_ADVANCE_DONE = "**{days} day(s)** pass. {entities} mind(s) aged: {imprints} n
 # decision engine is invisible at the table: NPCs choose, act, move their goals
 # and change who they are, and the only report is how many minds aged.
 TT_ADVANCE_TURN = "\n\n**While that happened:**\n{lines}"
-TT_ADVANCE_TURN_LINE = "· {name} {verb}{target}{note}"
+# The people nobody is watching, kept apart from the ones in an open scene:
+# "the world got on with it" and "the person across the table moved" are
+# different pieces of news, and one merged list cannot tell you which is which.
+TT_ADVANCE_TURN_ELSEWHERE = "\n\n**Elsewhere:**\n{lines}"
+TT_ADVANCE_TURN_LINE = "· {line}"
 TT_ADVANCE_TURN_MORE = "\n· …and {count} other(s)."
 TT_ADVANCE_TURN_QUIET = "\n\nNobody did anything worth reporting."
 # Why somebody did what they did — the decision trace, at the table rather than

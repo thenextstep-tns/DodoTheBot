@@ -5,9 +5,12 @@ memory, belief, needs, goals, archetypes, decisions, and a world that moves when
 nobody is watching. This file is what a fresh session needs to pick up **after**
 that without re-deriving anything.
 
-**The next thing is not code.** `docs/dnd/PLAYTEST-P3.md` is written and unrun,
-and nothing built in P3 has been touched by a human. Read §2b before starting
-anything.
+**`docs/dnd/PLAYTEST-P3.md` is written and unrun.** Nothing built in P3 has been
+touched by a human, and neither has anything in P4. The owner's decision, taken
+knowingly at the start of the P4 session, is to **build P4 first and then
+playtest P3 and P4 together** — so this is deferred, not dropped, and §2b is
+still the argument for why it matters. Whatever that playtest returns outranks
+the roadmap.
 
 ---
 
@@ -30,7 +33,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
 | P3 | ✅ **complete** | World tick, faction clocks, rumours — and the whole decision engine: what an NPC may see, what a scene permits, what they want, who they are, how they choose, what happens when they do, and the cheap paths for everybody nobody is watching |
-| P4 | ◻ next | Voice. **Its first half needs no model at all** — see §9 |
+| P4 | ◐ started | Voice. **Its first half needs no model at all**, and the first piece of that half — the turn report — is built and live. See §8a |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -62,11 +65,15 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**739 tests** across five suites, all passing:
+**802 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
+Voice phase has its own, and it is where the null-backend suite will go:
 
 ```bash
-py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
+py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py
 ```
+
+The count is 4 + 95 + 52 + 542 + 46 + 63, **measured** — `test_command_names.py`
+prints no total, so its four checks have to be counted by eye. See §9.
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
 in-memory fake, so nothing touches the real database.
@@ -89,10 +96,13 @@ Two things were built *for* that playtest, because without them it would have
 been blind:
 
 * **`/gm advance` now reports what people did** — `_turn_summary` in
-  `cogs/dnd/cog.py`, deterministic and model-free. Before it, NPCs decided,
-  acted, moved goals and changed who they were, and the message said "3 minds
-  aged". A decision engine nobody can see the output of is, at the table,
-  identical to no decision engine.
+  `cogs/dnd/cog.py`, deterministic and model-free. *(P4 grew this considerably
+  and moved the substance into `helpers/dnd/narrate.py`; see §8a. The function
+  in the cog is now the orchestration half — it resolves the tuning, the names
+  and the archetype labels and wraps the lines in the strings.)* Before it, NPCs
+  decided, acted, moved goals and changed who they were, and the message said
+  "3 minds aged". A decision engine nobody can see the output of is, at the
+  table, identical to no decision engine.
 * **`/npc why <name>`** — the decision trace where the game is played rather
   than only in the panel. Reads it back from the **event log**, which is what
   putting the trace there was for.
@@ -140,8 +150,9 @@ ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min'
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/tuning.py   107 tunables, resolved default → server → campaign
+helpers/dnd/tuning.py   116 tunables, resolved default → server → campaign
 helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
+helpers/dnd/narrate.py  saying what happened, with no model     (pure, no RNG)
 helpers/dnd/data/       what ships as data rather than as code (packs.json)
 helpers/dnd/mind/       traits, needs, memory, relationships, stakes,
                         goals, behaviour (propose), decide (score + select)
@@ -510,10 +521,11 @@ is a standing-rule violation looking for an owner.
   back to inherited is the one leg of the tuning round trip no test can exercise.
   The campaign layer clears fine (it rewrites the whole settings document).
 - **`/canon` is empty and stays empty until P4.** Nothing invents facts yet.
-- **Almost nothing narrates.** Every message is mechanical output, by design.
-  The exception is `_turn_summary` and `/npc why`, added for the playtest: both
-  are deterministic templates over state that already exists, and they are the
-  proof that the non-AI half of P4 is worth doing first.
+- **Almost nothing narrates**, and what does, does it without a model. Scenes,
+  checks and rolls are all mechanical output by design. The exceptions are
+  `helpers/dnd/narrate.py` (the turn report, §8a), `/npc why`, and the phrase
+  tables — every one of them a deterministic template over state that already
+  exists, which is the argument for doing the non-AI half of P4 first.
 - **The legacy cog is still loaded** as `dnd_legacy`. It goes one release after
   the migration has actually been run (`13-MIGRATION.md` §6).
 - **Nothing ever writes `entity.traits` after creation.** *(Note: `entity.packs`
@@ -565,15 +577,12 @@ is a standing-rule violation looking for an owner.
 important part: **the non-AI paths land first**, and a good deal of P4 is
 reachable with no model installed at all.
 
-**Do the playtest first (§2b).** What follows assumes it changed nothing; if it
-does, it outranks this list.
+The playtest is deferred by the owner's decision, not skipped — see the header
+and §2b. Anything it returns outranks this list.
 
 ### The half that needs no model
 
-1. **More of `_turn_summary`.** It exists and it is thirty lines. Every NPC
-   action, memory formed, relationship moved and goal advanced is already
-   structured data with a trace attached — the templates are the cheap part and
-   the payoff is the whole reason anybody would notice the engine is running.
+1. ~~**More of `_turn_summary`.**~~ ✅ **built** — see §8a.
 2. **Templated episode gists** (`08-LLM-LAYER.md` §5). Memory currently stores
    the GM's words or a phrase from `mind/relationships.PHRASES`. A richer
    deterministic templater makes recall read like recollection.
@@ -600,10 +609,82 @@ mid-scene degrades to templates without interrupting play.
 * **Six command slots left** (94/100). Discord's cap is hard and hitting it takes
   the *whole cog* offline — it has happened twice. P4 wants commands. Group new
   ones under `/gm` or an existing group, where a whole group costs one slot.
-* **107 tunables in 14 groups.** Every one is justified and "everything
+* **116 tunables in 15 groups.** Every one is justified and "everything
   tweakable" is settled — this is not a case for removing any. But the panel
   could fold the ones nobody should ever touch behind an *advanced* disclosure,
   the way the trait override already is, before the number doubles.
+
+## 8a. P4, increment 1 — the turn report ✅ built
+
+**`helpers/dnd/narrate.py`**, a new tuning group *Reporting* (8 tunables), and
+`tests/test_dnd_p4.py` (63 checks). `/gm advance` now says what people did, in
+the detail the campaign asks for.
+
+Before: `**2 day(s)** pass. 5 mind(s) aged…` plus, at most, a line per actor
+with a goal clause. After, with everything switched on:
+
+```
+**While that happened:**
+· **Marla** went for **Ondry** — closer to *settle the debt*; that settled
+  their nerves a little; it was everything to **Ondry**; 3 will remember it;
+  and turned from *Coward* toward *Predator*
+
+**Elsewhere:**
+· **Sella** took from **Bram** — and got what they wanted: *not go hungry*
+```
+
+Five bands, each its own switch, each reading data P3 already produced and threw
+away: goals, needs relieved, stakes, witnesses, archetype drift. Plus a line cap
+(`report_lines`, and **0 switches the whole report off**), whether people who did
+nothing are listed, and whether off-screen actors appear at all.
+
+**What the increment settled, and what not to undo:**
+
+* **The room and the world are kept apart.** *The world got on with it* and *the
+  person across the table moved* are different pieces of news; one merged list
+  cannot tell you which is which. The cap is shared across both, so off-screen
+  drifting can never push the scene off the bottom.
+* **Waiting and watching are not reported by default.** They are real choices —
+  `wait` is the floor every decision falls back to — but a turn where six people
+  held still reads as quiet, not as six lines of *did nothing*. `report_idle`
+  brings them back. This is the one place the increment **changes existing
+  behaviour**; everything else only adds.
+* **Drift had to be narrowed to be worth anything.** `became` is the whole
+  mixture and arrives whenever any weight in it moved — which is nearly every
+  action, because drift is continuous. Reported as-is it marked *every line* and
+  said nothing. `commit_decision` now also records `was`, the leading archetype
+  before the step, and the band fires only when the lead actually changes. If a
+  later change drops `was`, the band goes quiet rather than guessing.
+* **Defaults are quiet on purpose.** Goals and needs on; stakes, witnesses and
+  drift off. The human verdict on P0–P2 was *"too convoluted for no payoff"*, and
+  a turn answering with forty lines of trailing clauses is that verdict in a new
+  place. Switching one on costs a GM one click.
+* **`describe_act` and `ACTED_PHRASES` moved** from `minds` into `narrate`;
+  `minds` re-exports both, so nothing that imported them from there broke.
+  `report["actor_id"]` was added during the work and removed again when the
+  design stopped needing it — do not re-add it without a caller.
+
+**The bug this increment produced and caught, which is the useful part:**
+`_stake_note` shipped reading its map with `int(key)`. **Entity ids are not
+integers** — `ObjectId` in production, `str` in the fake — so every key raised,
+every raise was caught and skipped, and the band rendered nothing at all while
+its switch, its label and its description were all perfectly correct. That is
+`14-CONVENTIONS.md` §5a's failure mode arriving in a Discord message instead of
+on a page, and no test would have found it, because a test asserting "the band
+renders" with integer fixture ids would have passed. It was found by **running a
+real advance against a real store and reading the output** — the same move that
+found the four bugs in P3. `test_ids_are_not_integers` is the regression, and its
+fixture ids are strings for the same reason `FakeGuild.id` is a real snowflake.
+
+Verified before shipping: all six suites; the *Reporting* group rendered and
+**clicked** in `tests/render_panel.py`'s preview (8 controls, right types, right
+defaults, guild id intact as a string in the POST, console clean but for the
+static server's 501 on POST); and `tuning.coerce` round-tripped `"1"` → `True`
+and `"3"` → `3` into a resolved `ReportTuning`.
+
+**Next in this half:** episode gists (§8 item 2) is the natural follow-on — it is
+the same deterministic-templating job one layer down, in `mind/memory`, and
+`narrate.py` is where its phrase tables belong.
 
 ## 9. Keeping this file honest
 

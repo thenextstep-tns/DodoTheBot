@@ -45,7 +45,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
     "Perception", "Actions", "Goals", "Behaviour", "Deciding", "Continuity",
-    "Knowledge", "Generation",
+    "Reporting", "Knowledge", "Generation",
 )
 
 
@@ -285,6 +285,57 @@ TUNABLES: list[dict] = [
           "How much time passes each time it turns. At 1 day per 6 hours, a week "
           "away is about a month in the world.",
           1.0, minimum=0.01, maximum=90.0),
+
+    # --- Reporting --------------------------------------------------------- #
+    # What `/gm advance` says back. None of it changes the simulation by a
+    # hair — these decide how much of what already happened you are told about.
+    _spec("report_lines", "Reporting", "Actions listed",
+          "How many of a turn's actions the report lists before it says *and "
+          "others*. A turn can run to as many people as act each time, and a "
+          "wall of forty lines is a log dump rather than a report. **0 switches "
+          "the whole report off** and you get the bare count of minds aged, the "
+          "way it was before any of this existed.",
+          8, kind="int", minimum=0, maximum=200),
+    _spec("report_idle", "Reporting", "Mention doing nothing",
+          "Whether to list people who waited or hung back watching. Both are "
+          "real choices the simulation needs — waiting is the floor every "
+          "decision falls back to — but neither is news, and a turn where six "
+          "people held still reads better as quiet than as six lines of *did "
+          "nothing*. **On** if you want to see everyone the engine actually ran.",
+          False, kind="bool", minimum=0, maximum=1),
+    _spec("report_goals", "Reporting", "Say what it got them",
+          "Add what an action moved somebody towards, or finished — *closer to "
+          "settling the debt*. This is what makes a turn read as consequence "
+          "instead of as a list of gestures.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("report_needs", "Reporting", "Say what it settled",
+          "Add the need an action eased — *that settled their hunger a little*. "
+          "Blunt on purpose: the engine knows they did something about being "
+          "hungry, not what they ate.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("report_stakes", "Reporting", "Say who it mattered to",
+          "Add who an action landed on and how hard — *it was everything to "
+          "Ondry*. The same weight that drives their memory of it and how they "
+          "come to feel about the person who did it. Off by default: it is the "
+          "engine showing its working.",
+          False, kind="bool", minimum=0, maximum=1),
+    _spec("report_witnesses", "Reporting", "Say who will remember",
+          "Add how many people formed a memory of it. Useful for seeing whether "
+          "something happened in front of anyone; noise the rest of the time.",
+          False, kind="bool", minimum=0, maximum=1),
+    _spec("report_drift", "Reporting", "Say who they turned into",
+          "Add it when what somebody did changed which archetype they lead with "
+          "— *turned from Coward toward Predator*. Not every nudge: the mixture "
+          "shifts a little on almost every action, and reporting that would "
+          "mark every line and tell you nothing. This fires only when the part "
+          "of them that answers first is a different part, which is rare.",
+          False, kind="bool", minimum=0, maximum=1),
+    _spec("report_offscreen", "Reporting", "Report what happened elsewhere",
+          "Whether to include people nobody is watching, listed apart from the "
+          "ones in an open scene. *The world got on with it* and *the person "
+          "across the table moved* are different pieces of news. **Off** keeps "
+          "the report to the room; the world still turns either way.",
+          True, kind="bool", minimum=0, maximum=1),
     _spec("stakes_actor_echo", "Stakes", "Doing versus receiving",
           "How much of a feeling the person who *did* something keeps for the "
           "person they did it to. Helping someone warms you to them a little, "
@@ -787,6 +838,18 @@ class Tuning:
             actors=int(self.get("actors_per_advance")),
         )
 
+    def report(self) -> "ReportTuning":
+        return ReportTuning(
+            lines=int(self.get("report_lines")),
+            idle=bool(self.get("report_idle")),
+            goals=bool(self.get("report_goals")),
+            needs=bool(self.get("report_needs")),
+            stakes=bool(self.get("report_stakes")),
+            witnesses=bool(self.get("report_witnesses")),
+            drift=bool(self.get("report_drift")),
+            offscreen=bool(self.get("report_offscreen")),
+        )
+
     def rumours(self) -> "RumourTuning":
         return RumourTuning(
             familiarity_floor=self.get("rumour_familiarity"),
@@ -968,6 +1031,37 @@ class ContinuityTuning:
 
 
 @dataclass(frozen=True)
+class ReportTuning:
+    """How much of what happened you are told about (``helpers/dnd/narrate.py``).
+
+    Alone among the tuning views, **nothing here changes the simulation**. Every
+    band is already computed and stored; these decide what reaches the message.
+    That is also why the defaults are quiet rather than complete: switching one
+    on costs a GM nothing and can be undone in a click, and the alternative — a
+    turn that answers with forty lines of trailing clauses — is the *"too
+    convoluted for no payoff"* verdict landing in a new place.
+
+    ``lines = 0`` switches the report off entirely. Note this is the opposite of
+    the ``Perception`` caps, where 0 means *no cap*: there, 0 is the limit lifted
+    and everything gets through, and here 0 is the only sense in which a report
+    can be off at all.
+    """
+
+    lines: int = 8
+    idle: bool = False
+    goals: bool = True
+    needs: bool = True
+    stakes: bool = False
+    witnesses: bool = False
+    drift: bool = False
+    offscreen: bool = True
+
+    @property
+    def off(self) -> bool:
+        return self.lines == 0
+
+
+@dataclass(frozen=True)
 class RumourTuning:
     familiarity_floor: float = 0.15   # below this, two people do not chat
     mutate_chance: float = 0.25       # how often the claim itself drifts
@@ -1126,3 +1220,4 @@ DEFAULT_GOALS = GoalTuning()
 DEFAULT_BEHAVIOUR = BehaviourTuning()
 DEFAULT_DECISION = DecisionTuning()
 DEFAULT_GENERATION = GenerationTuning()
+DEFAULT_REPORT = ReportTuning()

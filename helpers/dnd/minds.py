@@ -16,6 +16,7 @@ from __future__ import annotations
 from random import Random
 from typing import Any
 
+from helpers.dnd import narrate
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd.mind import behaviour
@@ -639,8 +640,15 @@ def commit_decision(
 
     # --- and who it made them ---------------------------------------------- #
     entity = store.entities.get(entity.id) or entity
+    # What they were leaning into *before* this, so a report can tell an actual
+    # turn of character from the ordinary churn. The mixture's weights move on
+    # nearly every action — that is what continuous drift means — so ``became``
+    # alone marks almost every line and says nothing. The leading archetype
+    # changing is rare, and is the thing worth being told.
+    leading = packs_of(entity)
     drifted = drift_packs(store, entity, world_time=world_time, verb=verb,
                           campaign=campaign, tuning=tuning, available=available)
+    report["was"] = leading[0].key if leading else ""
     report["became"] = [(a.key, a.weight) for a in drifted]
     report["event_seq"] = event.seq if event is not None else seq
     return report
@@ -758,31 +766,15 @@ def act(
     return report
 
 
-# What an action reads as when nothing narrates it. Deterministic, no model:
-# `08-LLM-LAYER.md` §5's non-AI path, and the difference between a decision
-# engine that runs and one anybody can tell is running.
-ACTED_PHRASES = {
-    "attack": "went for", "take": "took from", "give": "gave something to",
-    "speak": "spoke to", "flee": "got out", "hide": "went to ground",
-    "move": "moved off", "use": "used what they had", "wait": "did nothing",
-    "watch": "hung back and watched",
-}
-
-
-def describe_act(report: dict, names: dict | None = None) -> tuple[str, str, str]:
-    """One committed action as ``(name, verb, target)``, ready for a message.
-
-    Lives here rather than in the cog because the panel wants the same words:
-    two renderings of one event that disagree is how a GM stops trusting either.
-    """
-    names = names or {}
-    verb = ACTED_PHRASES.get(report.get("verb", ""), report.get("verb") or "acted")
-    target_id = report.get("target_id")
-    target = ""
-    if target_id is not None:
-        who = (names.get(target_id) or {}).get("name") or ""
-        target = f" **{who}**" if who else ""
-    return report.get("name", ""), verb, target
+# What an action reads as when nothing narrates it. These now live in
+# `helpers/dnd/narrate.py` — the deterministic, no-model half of P4
+# (`08-LLM-LAYER.md` §5) — and are re-exported here because they were part of
+# this module's surface first and the panel and cog both reach for them. The
+# words themselves belong beside the rest of the report, not inside the
+# orchestration layer: a pure module can be tested without a database, and two
+# renderings of one event that disagree is how a GM stops trusting either.
+ACTED_PHRASES = narrate.ACTED_PHRASES
+describe_act = narrate.describe_act
 
 
 def last_choice(store, entity: Entity):
