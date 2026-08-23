@@ -33,7 +33,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
 | P3 | ✅ **complete** | World tick, faction clocks, rumours — and the whole decision engine: what an NPC may see, what a scene permits, what they want, who they are, how they choose, what happens when they do, and the cheap paths for everybody nobody is watching |
-| P4 | ◐ started | Voice. **Its first half needs no model at all**, and the first piece of that half — the turn report — is built and live. See §8a |
+| P4 | ◐ started | Voice. **Its first half needs no model at all**; two of its four pieces are built and live — the turn report (§8a) and episode gists (§8b). No model has been installed and none is needed yet |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -65,14 +65,14 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**802 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
+**875 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
 Voice phase has its own, and it is where the null-backend suite will go:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py
 ```
 
-The count is 4 + 95 + 52 + 542 + 46 + 63, **measured** — `test_command_names.py`
+The count is 4 + 95 + 52 + 542 + 62 + 120, **measured** — `test_command_names.py`
 prints no total, so its four checks have to be counted by eye. See §9.
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
@@ -150,9 +150,10 @@ ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min'
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/tuning.py   116 tunables, resolved default → server → campaign
+helpers/dnd/tuning.py   118 tunables, resolved default → server → campaign
 helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
-helpers/dnd/narrate.py  saying what happened, with no model     (pure, no RNG)
+helpers/dnd/narrate.py  saying what happened — turn report and the words a
+                        memory carries, no model anywhere     (pure, no RNG)
 helpers/dnd/data/       what ships as data rather than as code (packs.json)
 helpers/dnd/mind/       traits, needs, memory, relationships, stakes,
                         goals, behaviour (propose), decide (score + select)
@@ -523,9 +524,11 @@ is a standing-rule violation looking for an owner.
 - **`/canon` is empty and stays empty until P4.** Nothing invents facts yet.
 - **Almost nothing narrates**, and what does, does it without a model. Scenes,
   checks and rolls are all mechanical output by design. The exceptions are
-  `helpers/dnd/narrate.py` (the turn report, §8a), `/npc why`, and the phrase
-  tables — every one of them a deterministic template over state that already
-  exists, which is the argument for doing the non-AI half of P4 first.
+  `helpers/dnd/narrate.py` (the turn report §8a, and the words every memory
+  carries §8b) and `/npc why` — every one of them a deterministic template over
+  state that already exists, which is the argument for doing the non-AI half of
+  P4 first. **What a player reads during play still does not narrate at all**;
+  that is `render_scene`, and it is the half that needs a model.
 - **The legacy cog is still loaded** as `dnd_legacy`. It goes one release after
   the migration has actually been run (`13-MIGRATION.md` §6).
 - **Nothing ever writes `entity.traits` after creation.** *(Note: `entity.packs`
@@ -583,7 +586,8 @@ and §2b. Anything it returns outranks this list.
 ### The half that needs no model
 
 1. ~~**More of `_turn_summary`.**~~ ✅ **built** — see §8a.
-2. **Templated episode gists** (`08-LLM-LAYER.md` §5). Memory currently stores
+2. ~~**Templated episode gists.**~~ ✅ **built** — see §8b. *(Left below for the
+   shape of the original ask.)* Memory used to store
    the GM's words or a phrase from `mind/relationships.PHRASES`. A richer
    deterministic templater makes recall read like recollection.
 3. **The verb parser.** `/check` takes an approach and free text; P4 wants
@@ -609,7 +613,7 @@ mid-scene degrades to templates without interrupting play.
 * **Six command slots left** (94/100). Discord's cap is hard and hitting it takes
   the *whole cog* offline — it has happened twice. P4 wants commands. Group new
   ones under `/gm` or an existing group, where a whole group costs one slot.
-* **116 tunables in 15 groups.** Every one is justified and "everything
+* **118 tunables in 16 groups.** Every one is justified and "everything
   tweakable" is settled — this is not a case for removing any. But the panel
   could fold the ones nobody should ever touch behind an *advanced* disclosure,
   the way the trait override already is, before the number doubles.
@@ -682,9 +686,94 @@ defaults, guild id intact as a string in the POST, console clean but for the
 static server's 501 on POST); and `tuning.coerce` round-tripped `"1"` → `True`
 and `"3"` → `3` into a resolved `ReportTuning`.
 
-**Next in this half:** episode gists (§8 item 2) is the natural follow-on — it is
-the same deterministic-templating job one layer down, in `mind/memory`, and
-`narrate.py` is where its phrase tables belong.
+**Next in this half:** episode gists (§8 item 2) — built, §8b.
+
+## 8b. P4, increment 2 — episode gists ✅ built
+
+`08-LLM-LAYER.md` §5's `summarize_episode`, which was going to be an LLM task
+and is now a template. Two halves, one new tuning group *Remembering*, and 57
+more checks in `test_dnd_p4.py`.
+
+### One event, three memories of it
+
+`minds.interact` already worked out each party's **role** — they did it, it was
+done to them, or they watched — and used it for the relationship deltas. It then
+handed all three **the same gist string**. P2's headline acceptance criterion is
+that two witnesses to one event hold measurably different memories, and that was
+true only of the *numbers*: fidelity, salience, which fields rot first. The words
+were identical. Now:
+
+```
+Ondry saved me      Marla, who it happened to
+I saved Marla       Ondry, who did it
+Ondry saved Marla   Cass, who watched
+```
+
+* **One table, reused not copied.** `mind/relationships.PHRASES` does all three,
+  because English past tense does not conjugate between *I saved* and *Ondry
+  saved* — the pronouns are the whole trick. A test asserts `narrate` holds the
+  same object, so a kind can never read one way in a relationship log and
+  another in a memory.
+* **Undirected acts too**, via `ACT_GISTS` — *I went to ground* against *Marla
+  went to ground*. These are most of what anybody does, so it is the commonest
+  memory a character holds about themselves. `witness_event` grew a `gist_for`
+  callable for it; passing a flat `gist` still works and is right for a GM's own
+  description.
+* **The GM's words are never re-personed.** If a description was typed, everyone
+  gets it verbatim. Authored text is not ours to rewrite into first person.
+* **There is deliberately no intensity band.** *"Saved my life"* at a high stake
+  reads well and asserts something the simulation does not know; an attack
+  becoming *"tried to kill"* is a different claim about what happened. How much
+  it mattered is `salience`, which is already per-person and already decays. If
+  a later change wants gravity in the wording it needs a fact to hang it on
+  first — this was considered and rejected, not overlooked.
+
+### What a forgotten stretch reduces to
+
+`consolidate.summarise` folds pruned memories into one hazy summary instead of
+deleting them — the difference between forgetting and amnesia. It said *"a
+stretch of 41 things that no longer come to mind clearly"*: a **count**, which
+is the one thing about a forgotten period nobody has ever retained. §8 of
+`05-MEMORY.md` asks for *"a hard winter at the docks"*, and it now says things
+like **"a quiet month, mostly with Ondry"** — span, mean valence and dominant
+company, all measured off the memories being folded, none invented.
+
+`narrate.dominant` breaks ties on first appearance rather than arbitrarily,
+because the same memories must fold the same way every time or replay drifts.
+
+**`place` is the one part not wired, on purpose.** `summary_gist` takes it and
+renders it, and `_summarise` passes nothing, because **nothing in the codebase
+ever writes `Memory.location_id`** — every memory has `None` there. The tempting
+shortcut is the scene id and it is a trap: `Position` keeps `location_id` and
+`scene_id` apart and `world/view.py` carries the former, so filing scene ids
+under a memory's location would collide with the location model the moment
+anybody builds one. When memories learn where they happened, that call gains one
+argument. **Do not "fix" this by passing a scene id.**
+
+### What clicking found this time
+
+The *Remembering* group shipped **with no icon** — `_GROUP_EMOJI` in
+`web/dnd/pages.py` is a hand-maintained map and a missing key renders a bare
+heading and a bullet where every other group has a face. Invisible to all 875
+assertions, and found in the preview. `test_dnd_panel.py` now asserts every
+group in `tuning_registry.GROUPS` has one, so the next group cannot ship bare.
+
+Also worth knowing: **the 542-test P2 suite asserted nothing about gist wording
+at all.** Changing what every memory in the system says broke no test. The
+mechanics were covered thoroughly and the words were not covered at all, which
+is `14-CONVENTIONS.md` §5a's lesson in a different costume.
+
+`tests/render_panel.py` now runs one real `interact`, so the inspector preview
+shows a gist the engine phrased rather than only ones typed by hand. Verified by
+clicking: it renders as *"Ondry Kass saved me — a long time ago"* under **Right
+now**, and the *Remembering* controls post with the guild id intact as a string.
+
+**Next in this half:** the verb parser (§8 item 3) — `/check`'s free text
+resolving to one of the ten affordance verbs, deterministic first. It is the one
+remaining no-model item that touches the *"too convoluted to play"* verdict
+directly, and the vocabulary it maps onto is already fixed by `rules/ruleset.py`.
+Item 4, name and culture tables as data, is the other and is pure plumbing —
+the archetype machinery in `helpers/dnd/packs.py` is the pattern to copy.
 
 ## 9. Keeping this file honest
 

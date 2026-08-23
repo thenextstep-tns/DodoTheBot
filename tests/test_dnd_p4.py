@@ -66,8 +66,10 @@ from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd.rules import ruleset as rs  # noqa: E402
+from helpers.dnd.mind import decide as decide_math  # noqa: E402
+from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
 from helpers.dnd import tuning as tuning_registry  # noqa: E402
-from helpers.dnd.tuning import TUNABLES, ReportTuning, Tuning  # noqa: E402
+from helpers.dnd.tuning import GistTuning, TUNABLES, ReportTuning, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
 from helpers.dnd.world.scene import Scene  # noqa: E402
 
@@ -406,6 +408,212 @@ def test_end_to_end() -> None:
           == "\n\nNobody did anything worth reporting.")
 
 
+# --------------------------------------------------------------------------- #
+#  5. Episode gists — one event, three memories of it
+# --------------------------------------------------------------------------- #
+def test_episode_gists() -> None:
+    """`08-LLM-LAYER.md` §5's `summarize_episode`, done with a template.
+
+    The gist is the longest-lived field in the decay model, so it is what a
+    memory eventually *is*. Wording it from the holder's side is what makes P2's
+    "two witnesses differ" true of the words and not only of the numbers.
+    """
+    gist = narrate.episode_gist
+    check("gist: it happened to them", gist("saved", "Ondry", "Marla",
+                                            role=narrate.ROLE_SUBJECT)
+          == "Ondry saved me")
+    check("gist: THEY DID IT", gist("saved", "Ondry", "Marla",
+                                    role=narrate.ROLE_ACTOR) == "I saved Marla")
+    check("gist: they watched", gist("saved", "Ondry", "Marla",
+                                     role=narrate.ROLE_WITNESS)
+          == "Ondry saved Marla")
+
+    check("gist: the three genuinely differ",
+          len({gist("saved", "Ondry", "Marla", role=r)
+               for r in (narrate.ROLE_SUBJECT, narrate.ROLE_ACTOR,
+                         narrate.ROLE_WITNESS)}) == 3)
+
+    flat = GistTuning(perspective=False)
+    check("gist: perspective switches off",
+          {gist("saved", "Ondry", "Marla", role=r, tuning=flat)
+           for r in (narrate.ROLE_SUBJECT, narrate.ROLE_ACTOR,
+                     narrate.ROLE_WITNESS)} == {"Ondry saved Marla"},
+          detail="off must give exactly the flat third-person line it always did")
+
+    # The table is `mind/relationships.PHRASES`, not a copy of it, so a kind can
+    # never read one way in a relationship log and another in a memory.
+    check("gist: the phrase table is the relationships one",
+          narrate.rel_mod.PHRASES is rel_mod.PHRASES)
+    for kind in rel_mod.PHRASES:
+        line = gist(kind, "Ondry", "Marla", role=narrate.ROLE_SUBJECT)
+        check(f"gist: '{kind}' reads as a sentence",
+              line.startswith("Ondry ") and line.endswith(" me")
+              and "_" not in line,
+              detail=repr(line))
+
+    check("gist: an unknown kind still reads",
+          gist("bargained_with", "Ondry", "Marla") == "Ondry bargained with Marla")
+
+    # Undirected acts — most of what anybody actually does.
+    check("gist: their own undirected act says 'I'",
+          narrate.act_gist("hide", "Marla", first_person=True)
+          == "I went to ground")
+    check("gist: and the room's version names them",
+          narrate.act_gist("hide", "Marla") == "Marla went to ground")
+    check("gist: person agreement holds inside the sentence",
+          narrate.act_gist("use", "Marla", first_person=True) == "I used what I had"
+          and narrate.act_gist("use", "Marla") == "Marla used what they had",
+          detail="'I used what they had' is the failure this guards")
+    check("gist: switched off, an actor is named like anyone else",
+          narrate.act_gist("hide", "Marla", first_person=True, tuning=flat)
+          == "Marla went to ground")
+    # Every verb an NPC can actually commit to has to produce a real sentence
+    # somewhere, by one of the two routes: a directed verb becomes a
+    # relationship kind and takes the PHRASES table, an undirected one takes
+    # ACT_GISTS. A verb in neither renders as its own key in somebody's memory.
+    undirected = set(narrate.ACT_GISTS)
+    directed = {
+        verb: minds.ACT_AS_RELATION[verb]
+        for verb in rs.AFFORDANCES if verb in minds.ACT_AS_RELATION
+    }
+    for verb in rs.AFFORDANCES:
+        via = directed.get(verb)
+        check(f"gist: '{verb}' has a sentence",
+              verb in undirected or (via is not None and via in rel_mod.PHRASES),
+              detail=f"neither in ACT_GISTS nor mapped to a known kind ({via!r})")
+
+
+def test_summary_gists() -> None:
+    """What a stretch nobody can call to mind any more reduces to.
+
+    `05-MEMORY.md` §8 asks for *"a hard winter at the docks"*; the old line was
+    a count of how many things went, which is the one thing about a forgotten
+    period nobody has ever retained.
+    """
+    line = narrate.summary_gist(count=41, span_days=18.0, valence=-0.5,
+                                with_names=["Ondry"], place="the docks")
+    check("summary: IT DESCRIBES THE STRETCH",
+          line == "a bad fortnight, mostly with Ondry at the docks", detail=line)
+
+    check("summary: how long it ran comes from the span",
+          [narrate.summary_gist(count=2, span_days=d, valence=0.0)
+           for d in (0.2, 5.0, 18.0, 40.0, 120.0, 300.0, 900.0)]
+          == ["a quiet day", "a quiet week", "a quiet fortnight", "a quiet month",
+              "a quiet season", "a quiet year", "a quiet few years"])
+
+    tones = [narrate.summary_gist(count=2, span_days=5.0, valence=v)
+             for v in (-0.9, -0.2, 0.0, 0.3, 0.9)]
+    check("summary: and how it felt comes from the valence",
+          tones == ["a bad week", "a hard week", "a quiet week", "a good week",
+                    "a fine week"], detail=str(tones))
+
+    check("summary: company reads as a list",
+          narrate.summary_gist(count=2, span_days=5.0, valence=0.0,
+                               with_names=["A", "B", "C"])
+          == "a quiet week, mostly with A, B and C")
+    check("summary: an empty name is not company",
+          narrate.summary_gist(count=2, span_days=5.0, valence=0.0,
+                               with_names=[None, ""]) == "a quiet week",
+          detail="an unresolved id must not render as 'mostly with None'")
+
+    check("summary: it switches off to the old count",
+          narrate.summary_gist(count=41, span_days=18.0, valence=-0.5,
+                               with_names=["Ondry"],
+                               tuning=GistTuning(summaries=False))
+          == "a stretch of 41 things that no longer come to mind clearly")
+
+    # Replay depends on the same memories folding the same way every time.
+    people = ["b", "a", "b", "c", "a", "b"]
+    check("summary: who dominates is stable, not arbitrary",
+          narrate.dominant(people) == narrate.dominant(list(people)) == ["b", "a"])
+    check("summary: and the holder is never their own company",
+          narrate.dominant(people, exclude=("b",)) == ["a", "c"])
+
+
+def test_gists_end_to_end() -> None:
+    """Through ``interact`` and ``commit_decision``, with a real store."""
+    campaign, store = _campaign(9402, "Gists")
+    ondry = minds.spawn_npc(store, name="Ondry", role="guard", world_time=0,
+                            rng=Random(3))
+    marla = minds.spawn_npc(store, name="Marla", role="thief", world_time=0,
+                            rng=Random(7))
+    cass = minds.spawn_npc(store, name="Cass", role="scribe", world_time=0,
+                           rng=Random(9))
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, channel_id=1,
+        title="the tap room", present=[ondry.id, marla.id, cass.id],
+    ))
+
+    def retune(**overrides):
+        campaign.settings["tuning"] = dict(overrides)
+        campaigns_for(campaign.guild_id).save_settings(campaign.id, campaign.settings)
+
+    out = minds.interact(store, ondry, marla, "saved", world_time=100,
+                         rng=Random(4), witnesses=[cass],
+                         tuning=minds.tuning_for(store, campaign))
+    said = {eid: memory.gist for eid, memory in out["memories"].items()}
+    check("e2e gist: ONE EVENT, THREE DIFFERENT MEMORIES",
+          said.get(marla.id) == "Ondry saved me"
+          and said.get(ondry.id) == "I saved Marla"
+          and said.get(cass.id) == "Ondry saved Marla", detail=str(said))
+
+    told = minds.interact(
+        store, ondry, marla, "saved", world_time=300, rng=Random(6),
+        witnesses=[cass], description="the beam came down and Ondry took it",
+        tuning=minds.tuning_for(store, campaign),
+    )
+    check("e2e gist: THE GM'S OWN WORDS ARE NEVER RE-PERSONED",
+          {m.gist for m in told["memories"].values()}
+          == {"the beam came down and Ondry took it"},
+          detail="authored text is not ours to rewrite into first person")
+
+    retune(gist_perspective=False)
+    flat = minds.interact(store, ondry, marla, "helped", world_time=200,
+                          rng=Random(5), witnesses=[cass],
+                          tuning=minds.tuning_for(store, campaign))
+    check("e2e gist: and it switches off for the whole campaign",
+          {m.gist for m in flat["memories"].values()} == {"Ondry helped Marla"})
+
+    # An undirected act: the actor's own memory against the room's.
+    retune()
+    marla = store.entities.get(marla.id)
+    hiding = decide_math.Decision(
+        chosen=decide_math.Scored(verb="hide", target_id=None, utility=1.0,
+                                  terms={"trait": 1.0}),
+        considered=(decide_math.Scored(verb="hide", target_id=None),),
+    )
+    minds.commit_decision(store, marla, scene, hiding, world_time=400,
+                          rng=Random(8), campaign=campaign)
+
+    def newest(entity_id):
+        held = sorted(store.memories.for_entity(entity_id),
+                      key=lambda m: -m.encoded_at)
+        return held[0].gist if held else ""
+
+    check("e2e gist: they remember doing it, the room remembers watching",
+          newest(marla.id) == "I went to ground"
+          and newest(cass.id) == "Marla went to ground",
+          detail=f"{newest(marla.id)!r} / {newest(cass.id)!r}")
+
+    # And the forgotten stretch. Scene close is where working memories go.
+    for day in range(40):
+        minds.interact(store, ondry, marla, "talked",
+                       world_time=500 + day * 1440, rng=Random(day),
+                       tuning=minds.tuning_for(store, campaign))
+    end = 500 + 40 * 1440
+    report = minds.close_scene(store, [store.entities.get(marla.id)], end)
+    _kept, dropped = report.get(marla.id, (0, 0))
+    check("e2e gist: a scene's trivia is let go", dropped > 0)
+
+    summaries = [m.gist for m in store.memories.for_entity(marla.id)
+                 if m.when_precision == "sometime"]
+    check("e2e gist: AND FOLDS INTO SOMETHING THAT READS LIKE A MEMORY",
+          any(s.startswith("a ") and "mostly with Ondry" in s for s in summaries),
+          detail=str(summaries))
+    check("e2e gist: the summary is not a count of what went",
+          not any("things that no longer" in s for s in summaries))
+
+
 def test_reexports() -> None:
     """``describe_act`` moved into ``narrate``; ``minds`` still answers for it."""
     check("moved: minds.describe_act is narrate's",
@@ -427,6 +635,9 @@ def main() -> int:
         test_drift_is_only_news_when_it_turns,
         test_tunables,
         test_end_to_end,
+        test_episode_gists,
+        test_summary_gists,
+        test_gists_end_to_end,
         test_reexports,
     ):
         test()

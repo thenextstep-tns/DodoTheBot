@@ -164,8 +164,9 @@ def _actor_affinity(affinities: dict, participants, witness_id) -> float:
 def witness_event(
     store,
     witnesses: list[tuple[Entity, float]],
-    gist: str,
+    gist: str = "",
     *,
+    gist_for=None,
     world_time: int,
     rng: Random,
     valence: float = 0.0,
@@ -180,6 +181,12 @@ def witness_event(
     ``witnesses`` is ``[(entity, perception)]``. This is the function that makes
     the world generative: nobody agrees on what happened, because nobody saw the
     same thing.
+
+    ``gist_for`` is that taken one step further: a callable ``(entity) -> str``,
+    so the words differ too and not merely the fidelity. The person who did a
+    thing remembers doing it; the people who watched remember watching them.
+    Without it every witness gets ``gist`` verbatim, which is right for a GM's
+    own description and wrong for anything the engine phrased itself.
     """
     tuning = tuning or tuning_for(store)
     formed = {}
@@ -187,7 +194,7 @@ def witness_event(
         formed[entity.id] = remember(
             store,
             entity,
-            gist,
+            gist_for(entity) if gist_for is not None else gist,
             world_time=world_time,
             rng=rng,
             valence=valence,
@@ -617,14 +624,21 @@ def commit_decision(
         if idle and not tuning.decision().remember_idle:
             report["memories"] = 0
             report["idle"] = True
-            gist = ""
+            remembered = False
         else:
-            gist = ACT_PHRASES.get(verb, "{name} acted").format(name=entity.identity.name)
-        if gist:
+            remembered = True
+        if remembered:
+            gist_tuning = tuning.gists()
             formed = witness_event(
                 store,
                 [(entity, 1.0)] + [(other, 0.85) for other in onlookers],
-                gist,
+                # The actor's own memory says *I*; everyone else's names them.
+                # Undirected acts are most of what anybody does, so this is the
+                # commonest memory a character holds about themselves.
+                gist_for=lambda holder: narrate.act_gist(
+                    verb, entity.identity.name,
+                    first_person=holder.id == entity.id, tuning=gist_tuning,
+                ),
                 world_time=world_time, rng=rng,
                 participants=[entity.id], source_event_seq=seq, tuning=tuning,
             )
@@ -1212,11 +1226,47 @@ def enforce_budget(store, entity: Entity, world_time: int,
     if not pruned:
         return 0
 
-    summary = consolidate.summarise(pruned, entity.id, world_time)
+    summary = _summarise(store, entity, pruned, world_time, tuning)
     store.memories.forget_many(pruned)
     if summary is not None:
         store.memories.add(summary)
     return len(pruned)
+
+
+def _summarise(store, entity: Entity, pruned: list, world_time: int,
+               tuning: Tuning):
+    """``consolidate.summarise`` with the two lookups it may not do itself.
+
+    A summary says who a forgotten stretch was mostly *with* and where it mostly
+    *was*, and both of those are ids on the memories until somebody resolves
+    them. This is the orchestration edge that does it — and it does no work at
+    all when the wording is switched off, because then there is nothing to name.
+    """
+    gist_tuning = tuning.gists()
+    if not pruned or not gist_tuning.summaries:
+        return consolidate.summarise(pruned, entity.id, world_time,
+                                     tuning=gist_tuning)
+
+    company = narrate.dominant(
+        [p for memory in pruned for p in memory.participants],
+        exclude=(entity.id, str(entity.id)),
+    )
+    names = store.entities.identities_of(company) if company else {}
+    # No `place=` yet, deliberately. `summary_gist` takes one and renders it —
+    # "a hard winter **at the docks**" is `05-MEMORY.md` §8's own example — but
+    # **nothing in the codebase ever writes `Memory.location_id`**, so passing
+    # anything here would mean inventing a place or borrowing a field.
+    #
+    # The tempting shortcut is the scene id, and it is a trap: `Position` keeps
+    # `location_id` and `scene_id` apart and `world/view.py` carries the former,
+    # so filing scene ids under a memory's location would collide with the
+    # location model the moment anybody builds one. When memories learn where
+    # they happened, this call gains one argument and the sentence grows a tail.
+    return consolidate.summarise(
+        pruned, entity.id, world_time,
+        names={key: (value or {}).get("name") or "" for key, value in names.items()},
+        tuning=gist_tuning,
+    )
 
 
 def due_for_tick(campaign, now: float, tuning: Tuning | None = None) -> bool:
@@ -1282,7 +1332,7 @@ def close_scene(store, entities: list[Entity], world_time: int,
         if kept:
             store.memories.save_all(kept)
         if dropped:
-            summary = consolidate.summarise(dropped, entity.id, world_time)
+            summary = _summarise(store, entity, dropped, world_time, tuning)
             store.memories.forget_many(dropped)
             if summary is not None:
                 store.memories.add(summary)
@@ -1608,9 +1658,11 @@ def interact(
     stake_tuning = tuning.stakes()
 
     size = stakes.default_magnitude(kind) if magnitude is None else magnitude
-    gist = description.strip() or rel_mod.phrase(
-        kind, actor.identity.name, subject.identity.name
-    )
+    # The GM's own words, if they wrote any, go to everyone unchanged — authored
+    # text is not ours to re-person. Otherwise each party's memory is worded from
+    # their own side of it, below, in the loop that already knows their role.
+    told = description.strip()
+    gist_tuning = tuning.gists()
     base_valence = rel_mod.felt_valence(kind)
 
     # Who was touched, how aware each is, and how much of the event was theirs.
@@ -1678,7 +1730,10 @@ def interact(
         memory = remember(
             store,
             holder,
-            gist,
+            told or narrate.episode_gist(
+                kind, actor.identity.name, subject.identity.name,
+                role=role, tuning=gist_tuning,
+            ),
             world_time=world_time,
             rng=rng,
             valence=base_valence * stake.felt,

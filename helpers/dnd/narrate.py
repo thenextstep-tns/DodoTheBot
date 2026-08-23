@@ -33,7 +33,8 @@ witnesses and drift are opt-in because they read as instrumentation.
 
 from __future__ import annotations
 
-from helpers.dnd.tuning import DEFAULT_REPORT, ReportTuning
+from helpers.dnd.mind import relationships as rel_mod
+from helpers.dnd.tuning import DEFAULT_GIST, DEFAULT_REPORT, GistTuning, ReportTuning
 
 # What an action reads as when nothing narrates it. Moved here from ``minds`` in
 # P4, where it was already doing this module's job from inside the orchestration
@@ -74,6 +75,103 @@ STAKE_BANDS = (
     (0.15, "{who} took note"),
     (0.00, "{who} barely noticed"),
 )
+
+
+# --------------------------------------------------------------------------- #
+#  Episode gists — what a memory says happened
+# --------------------------------------------------------------------------- #
+# `08-LLM-LAYER.md` §5's `summarize_episode`, which was going to be an LLM task
+# and is not: *"Structured gist from event kinds and participants… a template
+# phrases it fine."* The gist is a memory's substance and the **longest-lived
+# field there is** — `stability_gist` outlasts when, who, the details and even
+# how it felt, which is the decay model saying you remember *that* something
+# happened long after everything else about it has gone. So it is the sentence
+# that has to survive being the only thing left.
+#
+# What makes these read like recollection rather than like a log is **whose
+# memory it is**. `minds.interact` already works out each party's role — they
+# did it, it was done to them, or they watched — and used to hand all three the
+# same string. P2's headline is that two witnesses to one event hold measurably
+# different memories, and that was true only of the *numbers*; the words were
+# identical. Now:
+#
+#     Ondry saved me      the person it happened to
+#     I saved Ondry       the person who did it
+#     Ondry saved Marla   the bystander
+#
+# One table does all three, because English past tense does not conjugate
+# between "I saved" and "Ondry saved" — the pronouns are the whole trick, and
+# `mind/relationships.PHRASES` is reused rather than copied so a kind can never
+# read one way in a relationship log and another in a memory.
+#
+# **There is deliberately no intensity band.** "Saved my life" for a high stake
+# reads well and asserts something the simulation does not know; an attack
+# becoming "tried to kill" is a different claim about what happened, and a
+# memory is the wrong place to invent one. How much it mattered is `salience`,
+# which is already per-person and already decays. If a later change wants
+# gravity in the wording, it needs a fact to hang it on first.
+ROLE_SUBJECT = "subject"   # it was done to them
+ROLE_ACTOR = "actor"       # they did it
+ROLE_WITNESS = "witness"   # they saw it happen to somebody else
+
+# What an undirected act reads as. Written with ``{a}`` rather than ``{name}``
+# so the actor's own memory can say *I* and a bystander's can say who it was.
+ACT_GISTS = {
+    "flee": "{a} got out",
+    "hide": "{a} went to ground",
+    "move": "{a} moved off",
+    "use": "{a} used what {a_had}",
+    "wait": "{a} did nothing",
+    "watch": "{a} hung back and watched",
+}
+
+# (subject-position, object-position, possessive) for the person remembering,
+# and for anybody else.
+_ME = ("I", "me", "my")
+
+
+def _speaker(name: str, first_person: bool) -> tuple[str, str, str]:
+    return _ME if first_person else (name, name, f"{name}'s")
+
+
+def episode_gist(kind: str, actor_name: str, subject_name: str, *,
+                 role: str = ROLE_WITNESS,
+                 tuning: GistTuning = DEFAULT_GIST) -> str:
+    """What one person's memory of a directed act says.
+
+    ``role`` is the **holder's** part in it, which is the only thing that varies
+    — the act is the same act. With ``perspective`` switched off this returns
+    the flat third-person phrasing every memory used to carry, which is also
+    what a caller should use when it has no idea whose memory it is.
+    """
+    verb = rel_mod.PHRASES.get(kind, str(kind).replace("_", " "))
+    if not tuning.perspective:
+        return f"{actor_name} {verb} {subject_name}"
+    actor = _speaker(actor_name, role == ROLE_ACTOR)
+    subject = _speaker(subject_name, role == ROLE_SUBJECT)
+    return f"{actor[0]} {verb} {subject[1]}"
+
+
+def act_gist(verb: str, name: str, *, first_person: bool = False,
+             tuning: GistTuning = DEFAULT_GIST) -> str:
+    """What one person's memory of an *undirected* act says.
+
+    The commonest memory anybody forms of themselves, because most of what a
+    character does is not aimed at a person.
+    """
+    template = ACT_GISTS.get(verb, "{a} acted")
+    who = _speaker(name, first_person and tuning.perspective)
+    return template.format(a=who[0], a_poss=who[2],
+                           a_had="they had" if who[0] != "I" else "I had")
+
+
+# Kept as the old name and shape so anything still reaching for it — and the
+# suites that assert on its wording — keeps working. New callers want
+# :func:`act_gist`, which knows whose memory it is.
+ACT_PHRASES = {
+    verb: template.format(a="{name}", a_poss="{name}'s", a_had="they had")
+    for verb, template in ACT_GISTS.items()
+}
 
 
 def describe_act(report: dict, names: dict | None = None) -> tuple[str, str, str]:
@@ -275,6 +373,92 @@ def turn_lines(turn: dict, *, names: dict | None = None,
         "hidden": len(reports) - budget,
         "acted": len(reports),
     }
+
+
+# --------------------------------------------------------------------------- #
+#  Summary gists — the shape of a stretch nobody can call to mind any more
+# --------------------------------------------------------------------------- #
+# When memories are pruned they are folded into one low-salience summary rather
+# than deleted, which is the difference between forgetting and amnesia
+# (`05-MEMORY.md` §8). That summary used to read *"a stretch of 41 things that
+# no longer come to mind clearly"* — a count, which is the one thing about a
+# forgotten period nobody has ever retained. §8 asks for **"a hard winter at the
+# docks"**, and every part of that is already in the memories being folded: how
+# long it ran, how it felt on average, who kept turning up in it, and where.
+
+# How long it went on, in the words a person would use. The thresholds are days.
+_PERIODS = (
+    (1.5, "day"), (10.0, "week"), (24.0, "fortnight"), (75.0, "month"),
+    (200.0, "season"), (500.0, "year"),
+)
+_LONG_PERIOD = "few years"
+
+# How it felt on the whole. All of these take "a", so the sentence composes.
+_TONES = (
+    (-0.35, "bad"), (-0.12, "hard"), (0.12, "quiet"), (0.40, "good"),
+)
+_BEST_TONE = "fine"
+
+
+def _period(span_days: float) -> str:
+    for limit, word in _PERIODS:
+        if span_days < limit:
+            return word
+    return _LONG_PERIOD
+
+
+def _tone(valence: float) -> str:
+    for limit, word in _TONES:
+        if valence < limit:
+            return word
+    return _BEST_TONE
+
+
+def summary_gist(*, count: int, span_days: float, valence: float,
+                 with_names: list | None = None, place: str = "",
+                 tuning: GistTuning = DEFAULT_GIST) -> str:
+    """One line for a stretch that has stopped being individual memories.
+
+    Everything here is measured off the memories being folded, never invented.
+    With ``summaries`` switched off this is the old count-based line, which is
+    also the honest fallback when a caller has nothing but a count.
+    """
+    if not tuning.summaries:
+        return (f"a stretch of {count} things that no longer come to mind clearly")
+
+    line = f"a {_tone(valence)} {_period(span_days)}"
+    names = [str(n) for n in (with_names or []) if n]
+    if names:
+        if len(names) == 1:
+            company = names[0]
+        elif len(names) == 2:
+            company = f"{names[0]} and {names[1]}"
+        else:
+            company = f"{', '.join(names[:-1])} and {names[-1]}"
+        line += f", mostly with {company}"
+    if place:
+        line += f" at {place}"
+    return line
+
+
+def dominant(values: list, *, exclude=(), limit: int = 2) -> list:
+    """The things that keep turning up, commonest first.
+
+    Used for both *who was in this stretch* and *where it happened*. Ties break
+    on first appearance rather than arbitrarily, so a summary of the same
+    memories is the same summary every time — replay depends on it.
+    """
+    order, counts = [], {}
+    for value in values:
+        if value is None or value in exclude:
+            continue
+        key = str(value)
+        if key not in counts:
+            counts[key] = [0, len(order)]
+            order.append(value)
+        counts[key][0] += 1
+    ranked = sorted(order, key=lambda v: (-counts[str(v)][0], counts[str(v)][1]))
+    return ranked[:limit] if limit else ranked
 
 
 def target_ids(turn: dict) -> list:

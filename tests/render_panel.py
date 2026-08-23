@@ -71,6 +71,13 @@ def main() -> None:
         store, name="Ondry Kass", role="dockhand", culture="tidewater",
         world_time=0, rng=Random(11),
     )
+    # One event that actually went through `interact`, so the inspector shows a
+    # gist the engine phrased rather than only ones typed by hand. Marla's copy
+    # of this reads "Ondry Kass saved me" and Ondry's reads "I saved Marla Venn"
+    # — the same act, worded from each side, which is the thing to look at.
+    minds.interact(store, ondry, store.entities.get(marla.id), "saved",
+                   world_time=0, rng=Random(21))
+
     marla = store.entities.get(marla.id)
     minds.add_goal(store, marla, "harm", world_time=0, priority=1.0,
                    text="see Ondry answer for the north dock", subject_id=ondry.id)

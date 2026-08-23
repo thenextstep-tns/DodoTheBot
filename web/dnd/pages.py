@@ -777,7 +777,8 @@ _GROUP_EMOJI = {
     "Relationships": "🤝", "Stakes": "⚖️", "Perception": "👁️",
     "Actions": "🎬", "Goals": "🎯", "Behaviour": "🧭",
     "Deciding": "🧮",
-    "Continuity": "⏳", "Reporting": "📣", "Knowledge": "📚", "Generation": "🎲",
+    "Continuity": "⏳", "Reporting": "📣", "Remembering": "💭",
+    "Knowledge": "📚", "Generation": "🎲",
 }
 
 

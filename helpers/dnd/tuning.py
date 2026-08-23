@@ -45,7 +45,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
     "Perception", "Actions", "Goals", "Behaviour", "Deciding", "Continuity",
-    "Reporting", "Knowledge", "Generation",
+    "Reporting", "Remembering", "Knowledge", "Generation",
 )
 
 
@@ -330,6 +330,25 @@ TUNABLES: list[dict] = [
           "mark every line and tell you nothing. This fires only when the part "
           "of them that answers first is a different part, which is rare.",
           False, kind="bool", minimum=0, maximum=1),
+    # --- Remembering ------------------------------------------------------- #
+    # How a memory words itself. Not what is remembered, how well, or for how
+    # long — those are Memory, Forgetting and Salience. Only the sentence.
+    _spec("gist_perspective", "Remembering", "Remember it in their own terms",
+          "Word each person's memory from **their** side of it: the man who was "
+          "saved remembers *Ondry saved me*, Ondry remembers *I saved Marla*, "
+          "and the bystander remembers *Ondry saved Marla*. One event, three "
+          "memories, which is what the rest of the memory model already assumes. "
+          "**Off** gives every witness the same flat third-person sentence.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("gist_summaries", "Remembering", "Summarise what was forgotten",
+          "When memories are let go they are folded into one hazy summary "
+          "instead of vanishing — the difference between forgetting and amnesia. "
+          "On, that summary is built from the stretch it replaces: *a hard "
+          "fortnight, mostly with Ondry at the tap room*. **Off** falls back to "
+          "a bare count of how many things went, which is the one thing nobody "
+          "has ever actually retained about a forgotten period.",
+          True, kind="bool", minimum=0, maximum=1),
+
     _spec("report_offscreen", "Reporting", "Report what happened elsewhere",
           "Whether to include people nobody is watching, listed apart from the "
           "ones in an open scene. *The world got on with it* and *the person "
@@ -838,6 +857,12 @@ class Tuning:
             actors=int(self.get("actors_per_advance")),
         )
 
+    def gists(self) -> "GistTuning":
+        return GistTuning(
+            perspective=bool(self.get("gist_perspective")),
+            summaries=bool(self.get("gist_summaries")),
+        )
+
     def report(self) -> "ReportTuning":
         return ReportTuning(
             lines=int(self.get("report_lines")),
@@ -1031,6 +1056,20 @@ class ContinuityTuning:
 
 
 @dataclass(frozen=True)
+class GistTuning:
+    """How a memory words itself (``helpers/dnd/narrate.py``).
+
+    Like :class:`ReportTuning` this changes no simulation value — salience,
+    decay, budgets and recall are untouched. It decides the *sentence* a memory
+    carries, which matters more than it sounds: the gist is the longest-lived
+    field in the decay model, so it is what a memory eventually consists of.
+    """
+
+    perspective: bool = True
+    summaries: bool = True
+
+
+@dataclass(frozen=True)
 class ReportTuning:
     """How much of what happened you are told about (``helpers/dnd/narrate.py``).
 
@@ -1221,3 +1260,4 @@ DEFAULT_BEHAVIOUR = BehaviourTuning()
 DEFAULT_DECISION = DecisionTuning()
 DEFAULT_GENERATION = GenerationTuning()
 DEFAULT_REPORT = ReportTuning()
+DEFAULT_GIST = GistTuning()

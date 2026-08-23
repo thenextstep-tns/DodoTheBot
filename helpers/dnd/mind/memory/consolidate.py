@@ -23,7 +23,8 @@ difference between forgetting and amnesia.
 
 from __future__ import annotations
 
-from helpers.dnd.tuning import DEFAULT_MEMORY, MemoryTuning
+from helpers.dnd import narrate
+from helpers.dnd.tuning import DEFAULT_GIST, DEFAULT_MEMORY, GistTuning, MemoryTuning
 from helpers.dnd.world.memory import (
     TIER_IMPRINT,
     TIER_LONG,
@@ -146,12 +147,20 @@ def prune(
     return surviving, pruned
 
 
-def summarise(pruned: list[Memory], entity_id, world_time: int) -> Memory | None:
+def summarise(pruned: list[Memory], entity_id, world_time: int, *,
+              names: dict | None = None, place: str = "",
+              tuning: GistTuning = DEFAULT_GIST) -> Memory | None:
     """Fold pruned memories into one low-salience summary.
 
     Keeps the shape of a forgotten stretch without its episodes: "a hard winter
     at the docks" rather than forty individual cold mornings. Returns ``None``
     when there is nothing to fold.
+
+    ``names`` maps entity id → display name for whoever kept turning up, and
+    ``place`` is where it mostly happened; the orchestration layer resolves both,
+    because this function may not do I/O. Given neither, the summary still says
+    how long the stretch was and how it felt, which is more than a count of what
+    went.
     """
     if not pruned:
         return None
@@ -163,11 +172,26 @@ def summarise(pruned: list[Memory], entity_id, world_time: int) -> Memory | None
                 participants.append(person)
 
     mean_valence = sum(m.valence for m in pruned) / len(pruned)
+    first, last = min(m.encoded_at for m in pruned), max(m.encoded_at for m in pruned)
+    # Who was actually in this stretch, rather than everyone who appeared once.
+    # The holder is excluded: "mostly with myself" is not a memory.
+    company = narrate.dominant(
+        [p for memory in pruned for p in memory.participants],
+        exclude=(entity_id, str(entity_id)),
+    )
+    lookup = names or {}
     return Memory(
         entity_id=entity_id,
         tier=TIER_LONG,
-        encoded_at=min(m.encoded_at for m in pruned),
-        gist=f"a stretch of {len(pruned)} things that no longer come to mind clearly",
+        encoded_at=first,
+        gist=narrate.summary_gist(
+            count=len(pruned),
+            span_days=(last - first) / MINUTES_PER_DAY,
+            valence=mean_valence,
+            with_names=[lookup.get(who) or lookup.get(str(who)) for who in company],
+            place=place,
+            tuning=tuning,
+        ),
         valence=round(mean_valence, 3),
         arousal=0.1,
         participants=participants[:5],

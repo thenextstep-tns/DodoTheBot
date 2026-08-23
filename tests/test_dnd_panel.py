@@ -51,6 +51,7 @@ from helpers.dnd.world.knowledge import Fact  # noqa: E402
 from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd import minds  # noqa: E402
+from helpers.dnd import tuning as tuning_registry  # noqa: E402
 from helpers.dnd import parameters as dnd_parameters  # noqa: E402
 from web.dnd import access, pages  # noqa: E402
 
@@ -287,6 +288,15 @@ def test_tuning_section() -> None:
     player_page = pages.campaigns_html(FakeBot(), guild, panel_access.SCOPE_STATS, 2)
     check("tuning: an admin gets the server defaults", "Simulation defaults" in admin_page)
     check("tuning: a player does not", "Simulation defaults" not in player_page)
+
+    # Every group needs an icon, or it renders with a bare heading in the panel
+    # and a bullet in the side menu while every other group has a face. Cosmetic,
+    # and invisible to every other assertion here — `Remembering` shipped without
+    # one and it took clicking the page to notice.
+    for group in tuning_registry.GROUPS:
+        check(f"tuning: the '{group}' group has an icon",
+              bool(pages._GROUP_EMOJI.get(group)),
+              detail="add it to web/dnd/pages.py::_GROUP_EMOJI")
 
     # A campaign override shows as the campaign's own.
     campaign.settings = {"tuning": {"memory_decay_rate": 0}}
