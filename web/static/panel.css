@@ -1159,3 +1159,11 @@ body.board { background: var(--color-surface-soft); }
 .packweight.lead output { color: var(--color-ink); }
 .packcard button { margin-top: 12px; margin-right: 6px; }
 .packlayer { font-size: 12px; color: var(--color-muted); margin: 0 0 10px; }
+
+/* The decision trace: the reason a GM trusts the engine instead of suspecting it. */
+.decisiontable .utilcell { width: 60px; text-align: right; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.decisiontable tr.chosenrow { background: rgba(255, 56, 92, .06); }
+.decisiontable tr.chosenrow .utilcell { color: var(--color-primary); }
+.decisiontable .chips { gap: 4px; }
+.decisiontable .chip { font-size: 11px; padding: 2px 8px; }

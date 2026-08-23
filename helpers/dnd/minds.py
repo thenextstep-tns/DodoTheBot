@@ -19,6 +19,7 @@ from typing import Any
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd.mind import behaviour
+from helpers.dnd.mind import decide as decide_math
 from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
@@ -411,6 +412,46 @@ def candidates_for(
     return behaviour.propose(
         view, allowed, packs_of(entity),
         packs_for(store, campaign).available(), tuning.behaviour(),
+    )
+
+
+def decide_for(
+    store,
+    entity: Entity,
+    scene,
+    *,
+    world_time: int,
+    rng: Random,
+    campaign=None,
+    tuning: Tuning | None = None,
+    features=(),
+    sealed: bool = False,
+):
+    """What this entity would do here, and the working behind it.
+
+    The whole pipeline: what the scene permits, narrowed by what the campaign
+    allows, crossed with what this person would think of, weighed by everything
+    they are. Nothing is written — committing the choice is a separate step, so
+    that a GM can ask what somebody *would* do without it happening.
+
+    The engine only ever sees the :class:`EntityView`, so an NPC decides on what
+    they believe rather than on what is true, at the type level rather than by
+    anybody remembering to.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+
+    present = tuple(getattr(scene, "present", ()) or ())
+    view = view_for(store, entity, world_time=world_time, tuning=tuning,
+                    include=present)
+    candidates = candidates_for(
+        store, entity, scene, world_time=world_time, campaign=campaign,
+        tuning=tuning, view=view, features=features, sealed=sealed,
+    )
+    return decide_math.decide(
+        view, candidates, rng,
+        tuning=tuning.decision(), goals=tuning.goals(), needs=tuning.needs(),
     )
 
 

@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–3 of 6 built |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–4 of 6 built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -55,7 +55,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**579 tests** across five suites, all passing:
+**599 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -283,12 +283,40 @@ checkable on its own:
      to aim at, because an unmet stranger is in no relationship and no belief.
      That is what `include` was added for in step 1; anything else building a
      view for a scene needs it too.
-4. **`mind/decide.py`** — perceive → appraise → propose → score → select, pure
-   and seeded. Eight utility terms, each bounded to −1…1 before weighting.
-   **Traits modulate the terms, never the weights** (§6 of the spec) — per-entity
-   weights would be untunable across 200 NPCs.
-5. **Commit + traces** — the term breakdown stored on the `WorldEvent`, and a
-   decision-trace view in the panel inspector. This is the explainability
+4. **`mind/decide.py`** — ✅ **built** (`minds.decide_for`, panel group *Deciding*,
+   and a live trace in the inspector under *What they would do next*).
+   * **Nine terms, not eight.** The spec's eight plus `archetype` — the leaning
+     that put the candidate on the table has to enter the score somewhere, and a
+     visible term beats a silent multiplier on the total. A number that moves a
+     decision and never appears in its trace is the thing this file exists to
+     prevent.
+   * Every term is bounded −1…1 **before** weighting, the trace always comes
+     back and sums exactly to the utility, and every weight is a tunable that
+     switches off.
+   * **Traits modulate the terms, never the weights.** Two hundred NPCs with
+     their own weights would be untunable; a bold character gets a different
+     risk *term*.
+   * **`boldness` is finally read by code** — declared in P2, rolled, stored,
+     displayed, and consulted by nothing until `TRAIT_AFFINITY`.
+   * Softmax, not argmax, at `T = temperature + spread × volatility`. Steady
+     people are predictable, volatile ones are not, and T is never 0.
+   * **The risk curve is kept inside 0..1 by construction, not by clamping.**
+     It was `(0.5 + fear) ** curve` and clipped at 1, which sawed the top off
+     exactly where the difference between *frightened* and *cannot make
+     themselves* is supposed to live — the frightened→terrified gap came out
+     smaller than the brave→ordinary one.
+   * The softmax exponentiates `(u - best)`, because `exp` of a large utility
+     overflows and of a large negative one underflows every weight to zero and
+     makes `rng.choices` raise.
+   * **Nothing is written.** Asking what somebody would do must not make them do
+     it; committing is step 5.
+   * Measured at **0.06–0.18 ms** to score and select ~17 candidates, against a
+     1 ms budget. The lever if that ever changes is `candidate_cap` or the term
+     count — **never caching**, which would break replay.
+5. **Commit** — what remains of this step is the *writing*: emit the
+   `WorldEvent` with `Decision.to_doc()` on it (already shaped for that),
+   witnesses encode, relationship deltas apply, beliefs propagate
+   (§8). The trace **view** landed with step 4. This is the explainability
    feature and the debugger; it is not optional polish.
 6. **Coarse and dormant paths** — `active` NPCs run argmax with no perception;
    `dormant` are extrapolated in closed form. Follow the shape of
@@ -340,8 +368,6 @@ Clocks page and the decision-trace view.
   it would need attention before a non-English campaign.
 - **`web/routes.py` is ~3300 lines.** Tabletop stays out of it; anything new goes
   in `web/dnd/`.
-- **`boldness` is read by nothing.** Declared, rolled, stored, displayed, and
-  consulted by no code anywhere. P3's risk term is where it starts mattering.
 - **Seeded backstories are stamped "recently".** `_seed_history` dates them
   `max(0, world_time - randint(200, 20000))` minutes, which clamps to 0 in a
   fresh campaign and is only ~14 days even when it does not — so a formative

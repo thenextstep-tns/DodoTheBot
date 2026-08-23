@@ -79,6 +79,16 @@ def main() -> None:
         minds.add_goal(store, marla, "learn" if index else "acquire",
                        world_time=0, text=errand, priority=0.25)
 
+    # An open scene with both of them in it, so the decision trace has somebody
+    # to consider acting on. Without one an NPC is weighing an empty room and the
+    # directed options — speak, give, attack — never appear at all.
+    from helpers.dnd.world.scene import Scene
+
+    store.scenes.create(Scene(
+        guild_id=guild.id, campaign_id=campaign.id, title="The harbour office",
+        channel_id=1, present=[marla.id, ondry.id], lighting="dim",
+    ))
+
     minds.advance(store, campaign, 900, Random(3))
     marla = store.entities.get(marla.id)
     _write("inspector.html", pages._inspector_html(bot, guild, campaign, marla, store))

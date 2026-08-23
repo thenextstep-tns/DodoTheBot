@@ -103,6 +103,20 @@ def urgency(goal: Goal, world_time: int, tuning: GoalTuning = DEFAULT_GOALS) -> 
 # --------------------------------------------------------------------------- #
 #  Attention — the scarce thing
 # --------------------------------------------------------------------------- #
+def axis_of(traits, name: str, default: float = 0.0) -> float:
+    """One trait axis, from a :class:`Traits` or from the plain mapping an
+    ``EntityView`` carries. Both reach this module — the view deliberately holds
+    inert data rather than a mind object — and a reader that only understood one
+    of them would work everywhere except inside a decision."""
+    if traits is None:
+        return default
+    if hasattr(traits, "axis"):
+        return float(traits.axis(name))
+    if isinstance(traits, dict):
+        return float(traits.get(name, default))
+    return float(getattr(traits, name, default))
+
+
 def budget(traits=None, tuning: GoalTuning = DEFAULT_GOALS) -> float:
     """How much attention this person has to spend at all.
 
@@ -112,7 +126,7 @@ def budget(traits=None, tuning: GoalTuning = DEFAULT_GOALS) -> float:
     """
     if traits is None or tuning.attention_reach <= 0:
         return max(0.0, tuning.attention)
-    diligence = float(getattr(traits, "diligence", 0.0))
+    diligence = axis_of(traits, "diligence")
     return max(0.0, tuning.attention * (1.0 + tuning.attention_reach * diligence))
 
 

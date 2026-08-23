@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import html
 import re
+from random import Random
 
 from aiohttp import web
 
@@ -29,6 +30,7 @@ from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd.rules.ruleset import AFFORDANCES, AFFORDANCE_LABELS
 from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
 from helpers.dnd.mind import behaviour as behaviour_math
+from helpers.dnd.mind import decide as decide_math
 from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind.needs import NEED_LABELS
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT, TRAIT_LABELS
@@ -971,6 +973,90 @@ def _memory_card(entity, memory, explain) -> str:
 </td><td>{fields}</td></tr>"""
 
 
+_TERM_LABELS = {
+    "need": "their body wants it",
+    "impulse": "an urge they keep coming back to",
+    "goal": "it serves what they are after",
+    "relation": "how they feel about them",
+    "risk": "what it might cost",
+    "trait": "the sort of thing they do",
+    "imprint": "something they cannot forget",
+    "norm": "what it would look like",
+    "archetype": "the sort of person they are",
+}
+
+
+def _decision_section(campaign, entity, store, world_time: int) -> str:
+    """What they would do right now, and the whole working behind it.
+
+    The explainability feature, and the debugger. A GM who can read *why* an NPC
+    did something is a GM collaborating with the simulation; one who cannot is a
+    GM suspicious of it, and that difference is most of whether this is worth
+    using. Read-only: asking what somebody would do must not make them do it.
+    """
+    scene = None
+    if entity.position.scene_id is not None:
+        scene = store.scenes.get(entity.position.scene_id)
+    if scene is None:
+        scene = next((s for s in store.scenes.open_scenes() if entity.id in s.present), None)
+
+    # Seeded from the campaign and the entity, so the page shows the same answer
+    # on a refresh rather than rerolling the softmax under the reader.
+    seed = f"{campaign.seed}:{entity.id}:{world_time}"
+    decision = minds.decide_for(
+        store, entity, scene, world_time=world_time,
+        rng=Random(abs(hash(seed)) % (2 ** 32)), campaign=campaign,
+    )
+    if not decision.considered:
+        return """
+  <h2>What they would do next</h2>
+  <p class="muted small">Nothing to weigh: they are in no open scene, so the
+  engine has no room to offer them options in.</p>"""
+
+    names = store.entities.identities_of(
+        [s.target_id for s in decision.considered if s.target_id is not None]
+    )
+
+    def _who(target_id):
+        if target_id is None:
+            return ""
+        return " → " + _escape((names.get(target_id) or {}).get("name") or "someone")
+
+    rows = ""
+    for scored in decision.considered[:8]:
+        chosen = scored is decision.chosen
+        working = "".join(
+            f'<span class="chip">{_escape(_TERM_LABELS.get(name, name))} {value:+.2f}</span>'
+            for name, value in scored.top_terms(5)
+        ) or '<span class="muted small">nothing pulled either way</span>'
+        rows += f"""
+<tr{' class="chosenrow"' if chosen else ''}>
+  <td><b>{_escape(scored.verb)}</b>{_who(scored.target_id)}
+    {'<span class="chip">chosen</span>' if chosen else ''}
+    {f'<div class="muted small">proposed by {_escape(scored.pack)}</div>' if scored.pack else ''}</td>
+  <td class="utilcell">{scored.utility:+.2f}</td>
+  <td><div class="chips wrap">{working}</div></td>
+</tr>"""
+
+    where = f"in <b>{_escape(scene.title or 'the open scene')}</b>" if scene else "alone"
+    close = ("It was close — they could easily have done something else."
+             if decision.margin < 0.1 else
+             "That was a clear choice.")
+    return f"""
+  <h2>What they would do next</h2>
+  <p class="muted small">Every option this character is weighing {where}, and the
+  terms that decided it. <b>Nothing here has happened</b> — asking what somebody
+  would do must not make them do it. Choice is a weighted draw rather than
+  always-the-highest, so a steady character is predictable and a volatile one is
+  not: this one is being drawn at <b>T {decision.temperature:.2f}</b>. {close}</p>
+  <table class="ranktable decisiontable"><thead><tr>
+    <th>Option</th><th>Score</th><th>Why</th></tr></thead>
+    <tbody>{rows}</tbody></table>
+  <p class="muted small">Weights are global and tunable under <b>Deciding</b>;
+  what varies per character is the <i>terms</i>, not the weights — two hundred
+  NPCs with their own weights would be untunable.</p>"""
+
+
 def _archetype_section(guild, campaign, entity, tuning) -> str:
     """What this person reaches for, and how well the archetype actually suits them.
 
@@ -1390,6 +1476,8 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
   <table class="ranktable"><tbody>{need_rows}</tbody></table>
   <p>{impulse_html}</p>
+
+  {_decision_section(campaign, entity, store, world_time)}
 
   {_archetype_section(guild, campaign, entity, tuning)}
 

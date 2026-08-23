@@ -70,9 +70,11 @@ from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd import packs as pack_registry  # noqa: E402
 from helpers.dnd import rules  # noqa: E402
 from helpers.dnd.mind import behaviour  # noqa: E402
+from helpers.dnd.mind import decide as decide_math  # noqa: E402
 from helpers.dnd.world import pack as pack_model  # noqa: E402
 from helpers.dnd.mind import goals as goal_math  # noqa: E402
 from helpers.dnd.world import goal as goal_model  # noqa: E402
+from helpers.dnd.world import view as view_model  # noqa: E402
 from helpers.dnd.rules import ruleset as rs  # noqa: E402
 from helpers.dnd.tuning import TUNABLES, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
@@ -1924,6 +1926,192 @@ def test_archetypes_both_ways() -> None:
               if s["key"].startswith("pack_")))
 
 
+# --------------------------------------------------------------------------- #
+#  24. Deciding — nine terms, a trace, and a weighted draw
+# --------------------------------------------------------------------------- #
+def _view_with_need(store, entity, name: str, value: float):
+    """A view of somebody with one need pinned, for testing a curve."""
+    clone = store.entities.get(entity.id)
+    needs = dict(clone.needs or {})
+    needs[name] = value
+    needs["ticked_at"] = 0
+    return view_model.project(clone, world_time=0, needs=needs, traits=clone.traits)
+
+
+def _view_with_trait(store, entity, axis: str, value: float):
+    """A view of somebody with one axis pinned."""
+    clone = store.entities.get(entity.id)
+    traits = dict(clone.traits or {})
+    traits[axis] = value
+    return view_model.project(clone, world_time=0, needs=clone.needs, traits=traits)
+
+
+def test_deciding() -> None:
+    campaign, store = _campaign(9319, "Deciding")
+    marla = minds.spawn_npc(store, name="Marla", role="thief", culture="city",
+                            world_time=0, rng=Random(7))
+    ondry = minds.spawn_npc(store, name="Ondry", role="guard", world_time=0, rng=Random(3))
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, title="The tap room",
+        present=[marla.id, ondry.id], lighting="dim",
+    ))
+    marla = store.entities.get(marla.id)
+
+    tuning = Tuning()
+    view = minds.view_for(store, marla, world_time=0, tuning=tuning,
+                          include=(marla.id, ondry.id))
+    candidates = minds.candidates_for(store, marla, scene, world_time=0,
+                                      campaign=campaign, tuning=tuning, view=view)
+
+    # --- 1. Every term is bounded before it is weighted ------------------- #
+    extreme = minds.view_for(store, marla, world_time=500_000, tuning=tuning,
+                             include=(ondry.id,))
+    unbounded = []
+    for probe in (view, extreme):
+        for verb in rs.AFFORDANCES:
+            raw = {
+                "need": decide_math.need_term(probe, verb, tuning.needs()),
+                "impulse": decide_math.impulse_term(probe, verb, tuning.needs()),
+                "goal": decide_math.goal_term(probe, verb, {}, tuning.goals()),
+                "relation": decide_math.relation_term(probe, verb, ondry.id),
+                "risk": decide_math.risk_term(probe, verb, ondry.id, tuning.decision()),
+                "trait": decide_math.trait_term(probe, verb),
+                "imprint": decide_math.imprint_term(probe, verb, ondry.id),
+                "norm": decide_math.norm_term(probe, verb, 40),
+                "archetype": decide_math.archetype_term(9.0),
+            }
+            unbounded += [f"{verb}.{k}={v:.2f}" for k, v in raw.items()
+                          if not -1.0 <= v <= 1.0]
+    check("deciding: EVERY TERM IS BOUNDED TO -1..1 BEFORE WEIGHTING",
+          not unbounded, str(unbounded[:4]))
+    check("deciding: risk never argues *for* an action",
+          all(decide_math.risk_term(view, v, ondry.id, tuning.decision()) <= 0
+              for v in rs.AFFORDANCES))
+
+    # --- 2. The trace always comes back, and it adds up ------------------- #
+    decision = decide_math.decide(view, candidates, Random(3), tuning=tuning.decision(),
+                                  goals=tuning.goals(), needs=tuning.needs())
+    check("deciding: THE TRACE COMES BACK, ALWAYS",
+          set(decision.chosen.terms) == set(decide_math.TERMS),
+          str(sorted(set(decide_math.TERMS) - set(decision.chosen.terms))))
+    check("deciding: and the terms are the score",
+          abs(sum(decision.chosen.terms.values()) - decision.chosen.utility) < 1e-6)
+    check("deciding: everything considered is kept, not just the winner",
+          len(decision.considered) == len(candidates))
+    check("deciding: it can say what it did in one line",
+          "U " in decision.describe() and decision.chosen.verb in decision.describe())
+    check("deciding: and the trace is storable on an event",
+          set(decision.to_doc()) >= {"verb", "terms", "utility", "temperature", "margin"})
+
+    # --- 3. Curves, not lines --------------------------------------------- #
+    hungry = decide_math.need_term(_view_with_need(store, marla, "hunger", 0.9),
+                                   "take", tuning.needs())
+    peckish = decide_math.need_term(_view_with_need(store, marla, "hunger", 0.45),
+                                    "take", tuning.needs())
+    check("deciding: needs are cubed, not linear", hungry > 6 * peckish,
+          f"{peckish:.3f} then {hungry:.3f}")
+
+    brave = _view_with_trait(store, marla, "fear_of_death", 0.0)
+    ordinary = _view_with_trait(store, marla, "fear_of_death", 0.5)
+    terrified = _view_with_trait(store, marla, "fear_of_death", 1.0)
+    gap_low = abs(decide_math.risk_term(ordinary, "attack", None, tuning.decision())
+                  - decide_math.risk_term(brave, "attack", None, tuning.decision()))
+    gap_high = abs(decide_math.risk_term(terrified, "attack", None, tuning.decision())
+                   - decide_math.risk_term(ordinary, "attack", None, tuning.decision()))
+    check("deciding: RISK AVERSION IS A CURVE, so the frightened are far more frightened",
+          gap_high > gap_low, f"{gap_low:.3f} vs {gap_high:.3f}")
+
+    # --- 4. boldness, read by code at last -------------------------------- #
+    bold = _view_with_trait(store, marla, "boldness", 0.9)
+    timid = _view_with_trait(store, marla, "boldness", -0.9)
+    check("deciding: BOLDNESS FINALLY DOES SOMETHING",
+          decide_math.trait_term(bold, "attack") > decide_math.trait_term(timid, "attack"))
+    check("deciding: and it points the other way for running",
+          decide_math.trait_term(timid, "flee") > decide_math.trait_term(bold, "flee"))
+
+    # --- 5. Traits modulate the terms, never the weights ------------------ #
+    # A candidate boldness actually speaks to — comparing two people on a verb
+    # neither of their differing axes touches proves nothing at all.
+    violent = next(c for c in candidates if c.verb == "attack")
+    bold_scored = decide_math.score(bold, violent, shares={}, onlookers=1,
+                                    tuning=tuning.decision())
+    timid_scored = decide_math.score(timid, violent, shares={}, onlookers=1,
+                                     tuning=tuning.decision())
+    check("deciding: TWO PEOPLE SHARE ONE SET OF WEIGHTS",
+          Tuning().decision().weights == tuning.decision().weights)
+    check("deciding: and differ in their terms", bold_scored.terms != timid_scored.terms)
+
+    # --- 6. Softmax: usually the best, sometimes not ---------------------- #
+    picks = [decide_math.decide(view, candidates, Random(seed), tuning=tuning.decision(),
+                                goals=tuning.goals(), needs=tuning.needs())
+             for seed in range(60)]
+    best = max(candidates, key=lambda c: decide_math.score(
+        view, c, shares={}, onlookers=1, tuning=tuning.decision()).utility)
+    top_wins = sum(1 for d in picks if d.chosen.verb == best.verb)
+    check("deciding: the best option usually wins", top_wins > 15, f"{top_wins}/60")
+    check("deciding: BUT NOT ALWAYS, so people surprise you",
+          len({d.chosen.verb for d in picks}) > 1,
+          str(sorted({d.chosen.verb for d in picks})))
+
+    steady = _view_with_trait(store, marla, "volatility", -1.0)
+    explosive = _view_with_trait(store, marla, "volatility", 1.0)
+    check("deciding: volatile people are harder to call",
+          decide_math.temperature(explosive, tuning.decision())
+          > decide_math.temperature(steady, tuning.decision()))
+    check("deciding: and temperature is never zero, since argmax surprises nobody",
+          decide_math.temperature(steady, Tuning(campaign={
+              "decide_temperature": 0.01, "decide_temperature_spread": 0}).decision()) > 0)
+
+    # --- 7. Deterministic, and it writes nothing -------------------------- #
+    once = minds.decide_for(store, marla, scene, world_time=0, rng=Random(5),
+                            campaign=campaign)
+    twice = minds.decide_for(store, marla, scene, world_time=0, rng=Random(5),
+                             campaign=campaign)
+    check("deciding: THE SAME SEED GIVES THE SAME DECISION", once.to_doc() == twice.to_doc())
+    before = store.entities.get(marla.id).to_doc()
+    held = store.memories.count_for(marla.id)
+    minds.decide_for(store, marla, scene, world_time=0, rng=Random(9), campaign=campaign)
+    check("deciding: ASKING WHAT SOMEBODY WOULD DO DOES NOT MAKE THEM DO IT",
+          store.entities.get(marla.id).to_doc() == before
+          and store.memories.count_for(marla.id) == held)
+
+    # --- 8. Extremes do not blow it up ------------------------------------ #
+    savage = Tuning(campaign={f"decide_w_{name}": 3.0 for name in decide_math.TERMS})
+    wild = decide_math.decide(extreme, candidates, Random(2), tuning=savage.decision(),
+                              goals=tuning.goals(), needs=tuning.needs())
+    check("deciding: every weight at maximum still produces a choice",
+          wild.chosen.verb in {c.verb for c in candidates})
+    check("deciding: and a finite one", abs(wild.chosen.utility) < 1e6)
+    check("deciding: an empty candidate list is not a crash",
+          decide_math.decide(view, [], Random(1)).chosen.verb == "wait")
+
+    # --- 9. Every weight is a tunable, and every one switches off --------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("deciding: every weight is registered",
+          all(f"decide_w_{name}" in keys for name in decide_math.TERMS))
+    check("deciding: grouped for the panel",
+          all(s["group"] == "Deciding" for s in TUNABLES if s["key"].startswith("decide_")))
+    silent = Tuning(campaign={f"decide_w_{name}": 0 for name in decide_math.TERMS})
+    flat = decide_math.decide(view, candidates, Random(1), tuning=silent.decision(),
+                              goals=tuning.goals(), needs=tuning.needs())
+    check("deciding: EVERY TERM SWITCHES OFF ENTIRELY",
+          all(v == 0 for v in flat.chosen.terms.values()) and flat.chosen.utility == 0)
+    off_one = Tuning(campaign={"decide_w_risk": 0}).decision()
+    check("deciding: and one at a time",
+          decide_math.score(view, candidates[0], shares={}, onlookers=1,
+                            tuning=off_one).terms["risk"] == 0)
+
+    # --- 10. Inside the performance budget -------------------------------- #
+    import time
+    rng = Random(1)
+    start = time.perf_counter()
+    for _ in range(200):
+        decide_math.decide(view, candidates, rng, tuning=tuning.decision(),
+                           goals=tuning.goals(), needs=tuning.needs())
+    each = (time.perf_counter() - start) * 1000 / 200
+    check("deciding: under a millisecond per decision", each < 1.0, f"{each:.3f} ms")
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1950,6 +2138,7 @@ def main() -> int:
         test_attention,
         test_packs,
         test_archetypes_both_ways,
+        test_deciding,
         test_end_to_end,
     ):
         test()

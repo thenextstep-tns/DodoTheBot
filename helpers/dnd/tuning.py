@@ -44,8 +44,8 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Perception", "Actions", "Goals", "Behaviour", "Continuity", "Knowledge",
-    "Generation",
+    "Perception", "Actions", "Goals", "Behaviour", "Deciding", "Continuity",
+    "Knowledge", "Generation",
 )
 
 
@@ -438,6 +438,56 @@ TUNABLES: list[dict] = [
           "the engine is too slow. **0 lifts the cap**, at your own risk.",
           24, kind="int", minimum=0, maximum=200),
 
+    # --- Deciding (P3) ----------------------------------------------------- #
+    # The utility weights. Global on purpose: **traits modulate the terms, never
+    # the weights** (06-DECISION-ENGINE.md §6). Per-entity weights would be
+    # untunable — with two hundred NPCs you would never find the one that is
+    # wrong — so a bold character gets a different risk *term*, not a different
+    # risk weight.
+    _spec("decide_w_need", "Deciding", "Weight: what their body wants",
+          "How much hunger, cold and fear for their own safety decide what somebody does. Cubed before it is weighed, so it is ignorable until it suddenly is not. **0 and nobody ever acts on their own body.**",
+          1.0, minimum=0.0, maximum=3.0),
+    _spec("decide_w_impulse", "Deciding", "Weight: urges",
+          "How much a need that has crossed into an *urge* pulls, on top of the steady pressure above. The gap between the two is where a disciplined character feels like running and holds the line anyway.",
+          0.6, minimum=0.0, maximum=3.0),
+    _spec("decide_w_goal", "Deciding", "Weight: what they are after",
+          "How much somebody's own ambitions decide what they do. **0 and goals become scenery** — still recorded, still shown, never acted on.",
+          1.0, minimum=0.0, maximum=3.0),
+    _spec("decide_w_relation", "Deciding", "Weight: how they feel about you",
+          "How much affection, fear, trust and debt decide what somebody does to the person in front of them.",
+          0.8, minimum=0.0, maximum=3.0),
+    _spec("decide_w_risk", "Deciding", "Weight: what it might cost",
+          "How much danger puts characters off. Rides an exponent on their fear of death, so the gap between fearless and average is far smaller than the gap between average and someone who simply cannot make themselves do it. **0 and everybody is fearless.**",
+          0.9, minimum=0.0, maximum=3.0),
+    _spec("decide_w_trait", "Deciding", "Weight: the sort of thing they do",
+          "How much raw disposition decides the choice — the bold reaching for the fight, the grasping reaching for the purse — before anything about the situation is considered.",
+          0.7, minimum=0.0, maximum=3.0),
+    _spec("decide_w_imprint", "Deciding", "Weight: what they cannot forget",
+          "How much a formative memory of the person in front of them drives the choice. This is the term that produces somebody drawing a knife instead of answering, and being able to say why.",
+          0.8, minimum=0.0, maximum=3.0),
+    _spec("decide_w_norm", "Deciding", "Weight: what it would look like",
+          "How much being seen matters. Saturates in the number of onlookers — the first witness changes everything, the ninth almost nothing — and is weighed by how much honour the character has. **0 and nobody minds an audience.**",
+          0.5, minimum=0.0, maximum=3.0),
+    _spec("decide_w_archetype", "Deciding", "Weight: what they reached for",
+          "How much the archetypes somebody is drawn from decide the choice, beyond having put the option on the table at all.",
+          0.6, minimum=0.0, maximum=3.0),
+    _spec("decide_temperature", "Deciding", "How predictable people are",
+          "How often somebody does the second-best thing instead of the best "
+          "one. Low and characters are reliable; high and they are erratic. It "
+          "is never zero: always taking the highest score makes a world where "
+          "nobody ever surprises you.",
+          0.25, minimum=0.01, maximum=2.0),
+    _spec("decide_temperature_spread", "Deciding", "Volatile people surprise you",
+          "How much **volatility** widens that. At 0 everyone is equally "
+          "predictable whoever they are; higher and the explosive ones become "
+          "genuinely hard to call while the steady ones stay steady.",
+          0.5, minimum=0.0, maximum=3.0),
+    _spec("decide_risk_curve", "Deciding", "Cowardice curve",
+          "How sharply fear of death bends what risk costs somebody. Higher "
+          "makes the frightened far more frightened without making the brave "
+          "any braver. 1 is a straight line.",
+          2.0, minimum=0.1, maximum=6.0),
+
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
           "How much campaign knowledge a scene may draw on.",
@@ -658,6 +708,16 @@ class Tuning:
             candidate_cap=int(self.get("candidate_cap")),
         )
 
+    def decision(self) -> "DecisionTuning":
+        return DecisionTuning(
+            weights={name: self.get(f"decide_w_{name}") for name in (
+                "need", "impulse", "goal", "relation", "risk", "trait",
+                "imprint", "norm", "archetype")},
+            temperature=self.get("decide_temperature"),
+            temperature_spread=self.get("decide_temperature_spread"),
+            risk_curve=self.get("decide_risk_curve"),
+        )
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -854,6 +914,22 @@ class BehaviourTuning:
 
 
 @dataclass(frozen=True)
+class DecisionTuning:
+    """The utility weights and the shape of choosing (``mind/decide.py``).
+
+    Weights are global, and that is the design: traits modulate the *terms*.
+    """
+
+    weights: dict = field(default_factory=lambda: {
+        "need": 1.0, "impulse": 0.6, "goal": 1.0, "relation": 0.8, "risk": 0.9,
+        "trait": 0.7, "imprint": 0.8, "norm": 0.5, "archetype": 0.6,
+    })
+    temperature: float = 0.25
+    temperature_spread: float = 0.5
+    risk_curve: float = 2.0
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -876,4 +952,5 @@ DEFAULT_PERCEPTION = PerceptionTuning()
 DEFAULT_AFFORDANCES = AffordanceTuning()
 DEFAULT_GOALS = GoalTuning()
 DEFAULT_BEHAVIOUR = BehaviourTuning()
+DEFAULT_DECISION = DecisionTuning()
 DEFAULT_GENERATION = GenerationTuning()
