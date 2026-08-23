@@ -26,6 +26,7 @@ def dnd_routes() -> list:
         api_dnd_entity_goals,
         api_dnd_entity_traits,
         api_dnd_lore,
+        api_dnd_pack,
         api_dnd_param,
         api_dnd_tune,
         api_dnd_tune_server,
@@ -55,6 +56,9 @@ def dnd_routes() -> list:
         web.post("/api/guild/{gid}/dnd/entity-traits", view(api_dnd_entity_traits)),
         # Goals are plot rather than disposition, and plot is the GM's to author.
         web.post("/api/guild/{gid}/dnd/entity-goals", view(api_dnd_entity_goals)),
+        # Behaviour archetypes are campaign data a GM authors, not a table that
+        # ships in a Python module and can never be added to.
+        web.post("/api/guild/{gid}/dnd/pack", view(api_dnd_pack)),
         # Server-level tuning is server configuration, so it needs the same
         # scope the general settings page does.
         web.post("/api/guild/{gid}/dnd/tune-server", configure(api_dnd_tune_server)),

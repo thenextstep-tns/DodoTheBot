@@ -34,6 +34,10 @@ from helpers.dnd.world.goal import (  # noqa: F401
     KINDS as GOAL_KINDS,
     Goal,
 )
+from helpers.dnd.world.pack import (  # noqa: F401
+    Assignment,
+    BehaviourPack,
+)
 from helpers.dnd.world.scene import Scene  # noqa: F401
 from helpers.dnd.world.view import (  # noqa: F401
     EntityView,

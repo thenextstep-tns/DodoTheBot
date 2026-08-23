@@ -324,6 +324,10 @@ class EntityView:
     # already, and carries nothing its owner cannot see — the same reasoning that
     # lets `conditions` and `standing` through raw.
     goals: tuple = ()
+    # Which archetypes they are drawn from. Self-knowledge like goals, and the
+    # trace wants it: "she reached for the door" is only interesting alongside
+    # "because she is mostly a coward".
+    packs: tuple = ()
 
     # ------------------------------------------------------------------ #
     #  Reading a view
@@ -417,6 +421,7 @@ def project(
     memories: list[Memory] | tuple = (),
     beliefs: list[Belief] | tuple = (),
     goals: tuple = (),
+    packs: tuple = (),
     relations: list[Relationship] | tuple = (),
     identities: Mapping[Any, Mapping] | None = None,
     include: tuple = (),
@@ -509,5 +514,6 @@ def project(
         beliefs=tuple(convictions),
         memories=tuple(recalled),
         goals=tuple(goals),
+        packs=tuple(packs),
         others=MappingProxyType(others),
     )

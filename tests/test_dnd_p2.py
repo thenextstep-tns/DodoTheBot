@@ -67,7 +67,10 @@ from helpers.dnd.store import knowledge as knowledge_module  # noqa: E402
 from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd.store import scenes as scenes_module  # noqa: E402
+from helpers.dnd import packs as pack_registry  # noqa: E402
 from helpers.dnd import rules  # noqa: E402
+from helpers.dnd.mind import behaviour  # noqa: E402
+from helpers.dnd.world import pack as pack_model  # noqa: E402
 from helpers.dnd.mind import goals as goal_math  # noqa: E402
 from helpers.dnd.world import goal as goal_model  # noqa: E402
 from helpers.dnd.rules import ruleset as rs  # noqa: E402
@@ -1658,6 +1661,144 @@ def test_attention() -> None:
           Tuning().goals().cap == 0)
 
 
+# --------------------------------------------------------------------------- #
+#  22. Behaviour packs — what a person thinks of doing
+#
+#  The propose step. Archetypes ship as *data* rather than as a table in a Python
+#  module, which is the mistake the role and culture priors are still making.
+# --------------------------------------------------------------------------- #
+def test_packs() -> None:
+    shipped = pack_registry.reload()
+    check("packs: the six archetypes ship as data",
+          set(shipped) == {"coward", "zealot", "merchant", "predator",
+                           "loyalist", "opportunist"}, str(sorted(shipped)))
+    check("packs: loaded from JSON, not from a Python table",
+          pack_registry.DATA_PATH.endswith(".json") and os.path.exists(pack_registry.DATA_PATH))
+    check("packs: every weight is for a verb a ruleset can offer",
+          all(set(p.weights) <= set(rs.AFFORDANCES) for p in shipped.values()),
+          str({k: sorted(set(p.weights) - set(rs.AFFORDANCES)) for k, p in shipped.items()
+               if set(p.weights) - set(rs.AFFORDANCES)}))
+    check("packs: and every one describes itself",
+          all(p.label and p.description and p.priors for p in shipped.values()))
+
+    # --- 1. A GM can add an archetype ------------------------------------- #
+    registry = pack_registry.Packs(campaign={
+        "smuggler": {"label": "Smuggler",
+                     "weights": {"hide": 1.0, "take": 0.7, "speak": 0.6, "fly": 0.9}}})
+    check("packs: A CAMPAIGN CAN ADD ONE", "smuggler" in registry.keys())
+    check("packs: and a weight for a verb nothing affords is dropped",
+          "fly" not in registry.get("smuggler").weights)
+    check("packs: the source is reported", registry.source_of("smuggler") == "campaign")
+    check("packs: shipped ones still come through",
+          registry.source_of("coward") == "builtin")
+
+    # Overriding a shipped archetype replaces it for this campaign only.
+    retuned = pack_registry.Packs(campaign={"coward": {"label": "Coward",
+                                                       "weights": {"attack": 1.0}}})
+    check("packs: a campaign can retune a shipped archetype",
+          retuned.get("coward").weight_for("attack") == 1.0
+          and pack_registry.built_in()["coward"].weight_for("attack") < 0.2)
+    check("packs: layered like everything else",
+          pack_registry.Packs(server={"coward": {"weights": {"flee": 0.1}}},
+                              campaign={"coward": {"weights": {"flee": 0.9}}}
+                              ).get("coward").weight_for("flee") == 0.9)
+
+    # Refusals a GM should see rather than have silently repaired.
+    check("packs: an archetype that reaches for nothing is refused",
+          pack_registry.validate({"key": "ghost", "weights": {}})[0] is None)
+    check("packs: and one with no name",
+          pack_registry.validate({"key": "  ", "weights": {"flee": 1}})[0] is None)
+
+    # --- 2. Priors are read backwards ------------------------------------- #
+    timid = Traits(boldness=-0.8, fear_of_death=0.9)
+    bold = Traits(boldness=0.8, fear_of_death=0.1, warmth=-0.7, honour=0.1)
+    coward, predator = shipped["coward"], shipped["predator"]
+    check("packs: a timid person is coward-shaped",
+          behaviour.fit(timid, coward) > 0.3, f"{behaviour.fit(timid, coward):.2f}")
+    check("packs: and not predator-shaped", behaviour.fit(timid, predator) < 0)
+    check("packs: the bold one is the other way round",
+          behaviour.fit(bold, predator) > behaviour.fit(bold, coward))
+    check("packs: an archetype with no priors fits nobody in particular",
+          behaviour.fit(timid, pack_model.BehaviourPack(key="x")) == 0.0)
+
+    # Weighted, not argmax — so the odd ones still happen.
+    drawn = [behaviour.assign(timid, shipped.values(), Random(seed),
+                              Tuning().behaviour())[0].key for seed in range(40)]
+    check("packs: type runs true most of the time",
+          drawn.count("coward") > 15, f"{drawn.count('coward')}/40")
+    check("packs: BUT THE ODD ONE STILL HAPPENS", len(set(drawn)) > 1, str(set(drawn)))
+    even = [behaviour.assign(timid, shipped.values(), Random(s),
+                             Tuning(campaign={"pack_fit_sharpness": 0}).behaviour())[0].key
+            for s in range(40)]
+    check("packs: and sharpness 0 draws them at random",
+          len(set(even)) >= 5, str(sorted(set(even))))
+
+    # --- 3. Assignment shape ---------------------------------------------- #
+    assigned = behaviour.assign(bold, shipped.values(), Random(2), Tuning().behaviour())
+    check("packs: two archetypes by default", len(assigned) == 2)
+    check("packs: the first is who they mostly are",
+          assigned[0].weight > assigned[1].weight)
+    check("packs: and they add up to one person",
+          abs(sum(a.weight for a in assigned) - 1.0) < 0.01)
+    check("packs: nobody is drawn from the same archetype twice",
+          len({a.key for a in assigned}) == len(assigned))
+    check("packs: a count of 0 assigns none",
+          behaviour.assign(bold, shipped.values(), Random(2),
+                           Tuning(campaign={"pack_count": 0}).behaviour()) == [])
+
+    # --- 4. Proposing, against a real scene -------------------------------- #
+    campaign, store = _campaign(9317, "What They Reach For")
+    marla = minds.spawn_npc(store, name="Marla", role="thief", culture="city",
+                            world_time=0, rng=Random(7))
+    ondry = minds.spawn_npc(store, name="Ondry", role="guard", world_time=0, rng=Random(3))
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, title="The tap room",
+        present=[marla.id, ondry.id], lighting="dim",
+    ))
+    marla = store.entities.get(marla.id)
+    check("packs: a generated NPC comes with archetypes", len(minds.packs_of(marla)) == 2)
+
+    candidates = minds.candidates_for(store, marla, scene, world_time=0, campaign=campaign)
+    check("packs: they think of several things", len(candidates) >= 4, str(len(candidates)))
+    check("packs: WAITING IS ALWAYS ON THE TABLE",
+          any(c.verb == "wait" for c in candidates))
+    check("packs: and every candidate is something the scene allows",
+          {c.verb for c in candidates}
+          <= minds.affordances_for(store, marla, scene, campaign=campaign))
+    check("packs: SOMEBODY IN THE ROOM IS SOMETHING TO ACT ON",
+          any(c.directed and c.target_id == ondry.id for c in candidates),
+          "the view must include whoever is present, met or not")
+    check("packs: each candidate says which archetype proposed it",
+          all(c.pack for c in candidates if c.weight > 0 and c.verb != "wait"))
+
+    # A campaign that forbids a verb removes it from what anyone considers.
+    peaceful = minds.candidates_for(store, marla, scene, world_time=0, campaign=campaign,
+                                    tuning=Tuning(campaign={"affordance_attack": False}))
+    check("packs: an archetype cannot propose what the campaign forbids",
+          not any(c.verb == "attack" for c in peaceful))
+
+    # --- 5. Both switches ------------------------------------------------- #
+    off = minds.candidates_for(store, marla, scene, world_time=0, campaign=campaign,
+                               tuning=Tuning(campaign={"pack_count": 0}))
+    check("packs: ARCHETYPES SWITCH OFF FOR PEOPLE WHO ALREADY HAVE THEM",
+          {c.weight for c in off} == {1.0} and not any(c.pack for c in off),
+          "a setting that only affects future NPCs is a setting that looks broken")
+    check("packs: and the engine still has candidates", len(off) >= 4)
+
+    capped = minds.candidates_for(store, marla, scene, world_time=0, campaign=campaign,
+                                  tuning=Tuning(campaign={"candidate_cap": 3}))
+    check("packs: the candidate cap bites", len(capped) == 3, str(len(capped)))
+    check("packs: and waiting survives it", any(c.verb == "wait" for c in capped))
+
+    # --- 6. Tunables ------------------------------------------------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("packs: every knob is registered",
+          {"pack_count", "pack_fit_sharpness", "pack_falloff", "candidate_cap"} <= keys)
+    check("packs: grouped for the panel",
+          all(s["group"] == "Behaviour" for s in TUNABLES
+              if s["key"].startswith("pack_") or s["key"] == "candidate_cap"))
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1682,6 +1823,7 @@ def main() -> int:
         test_goals,
         test_entity_round_trip,
         test_attention,
+        test_packs,
         test_end_to_end,
     ):
         test()

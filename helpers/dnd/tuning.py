@@ -44,7 +44,8 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Perception", "Actions", "Goals", "Continuity", "Knowledge", "Generation",
+    "Perception", "Actions", "Goals", "Behaviour", "Continuity", "Knowledge",
+    "Generation",
 )
 
 
@@ -390,6 +391,32 @@ TUNABLES: list[dict] = [
           "How far along a goal must get before it is done and leaves the list.",
           1.0, minimum=0.1, maximum=1.0),
 
+    # --- Behaviour (P3) ---------------------------------------------------- #
+    _spec("pack_count", "Behaviour", "Archetypes per person",
+          "How many behaviour archetypes each character is drawn from — a coward "
+          "who is also a little of an opportunist reads as a person, where one "
+          "flat archetype reads as a type. **0 switches archetypes off entirely**: "
+          "everyone then considers everything the scene allows, evenly, and only "
+          "their disposition and circumstances tell them apart.",
+          2, kind="int", minimum=0, maximum=6),
+    _spec("pack_fit_sharpness", "Behaviour", "Type runs true",
+          "How strongly disposition decides which archetypes somebody gets. High "
+          "and the bold are always predators; **0 draws them at random**, so who "
+          "someone is says nothing about what they reach for. The interesting "
+          "characters live in the middle — the timid soldier, the gentle thug.",
+          3.0, minimum=0.0, maximum=10.0),
+    _spec("pack_falloff", "Behaviour", "Second nature",
+          "How much of a person their *second* archetype accounts for, relative "
+          "to their first. At 1 they are equally both; low and the first one is "
+          "who they are with the rest as shading.",
+          0.45, minimum=0.05, maximum=1.0),
+    _spec("candidate_cap", "Behaviour", "Options weighed at once",
+          "The most actions a character will consider in one decision, the ones "
+          "they lean toward most kept. This is what stops a crowded room costing "
+          "more to think in than a quiet one — it is the documented lever when "
+          "the engine is too slow. **0 lifts the cap**, at your own risk.",
+          24, kind="int", minimum=0, maximum=200),
+
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
           "How much campaign knowledge a scene may draw on.",
@@ -599,6 +626,14 @@ class Tuning:
             completion=self.get("goal_completion"),
         )
 
+    def behaviour(self) -> "BehaviourTuning":
+        return BehaviourTuning(
+            count=int(self.get("pack_count")),
+            fit_sharpness=self.get("pack_fit_sharpness"),
+            falloff=self.get("pack_falloff"),
+            candidate_cap=int(self.get("candidate_cap")),
+        )
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -771,6 +806,22 @@ class GoalTuning:
 
 
 @dataclass(frozen=True)
+class BehaviourTuning:
+    """Archetypes and how many options they put on the table
+    (``mind/behaviour.py``)."""
+
+    count: int = 2
+    fit_sharpness: float = 3.0
+    falloff: float = 0.45
+    candidate_cap: int = 24
+
+    @property
+    def off(self) -> bool:
+        """Whether archetypes shape anything at all."""
+        return self.count <= 0
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -792,4 +843,5 @@ DEFAULT_RUMOURS = RumourTuning()
 DEFAULT_PERCEPTION = PerceptionTuning()
 DEFAULT_AFFORDANCES = AffordanceTuning()
 DEFAULT_GOALS = GoalTuning()
+DEFAULT_BEHAVIOUR = BehaviourTuning()
 DEFAULT_GENERATION = GenerationTuning()

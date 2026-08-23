@@ -31,6 +31,7 @@ from helpers.dnd import registry as dnd_registry
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd import minds
+from helpers.dnd import packs as pack_registry
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT
 from helpers.dnd.world import goal as goal_model
 from helpers.dnd.world.knowledge import KINDS, Fact
@@ -297,6 +298,67 @@ async def api_dnd_tune_server(request: web.Request):
 # --------------------------------------------------------------------------- #
 #  Entity traits
 # --------------------------------------------------------------------------- #
+async def api_dnd_pack(request: web.Request):
+    """Add, edit or remove one behaviour archetype for a campaign.
+
+    ``{campaign_id, action, key, label, description, weights}`` where action is
+    ``save`` or ``remove``.
+
+    Saving under the key of a shipped archetype **overrides** it for this
+    campaign; removing that override puts the shipped one back. This is the
+    thing ``04-ENTITIES.md`` §9 asks for and the role and culture tables still do
+    not have: a GM who needs a smuggler adds one, instead of a table in a Python
+    module deciding what kinds of people can exist.
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    action = str(data.get("action", "")).strip().lower()
+    settings = dict(campaign.settings or {})
+    own = dict(settings.get("packs") or {})
+
+    if action == "remove":
+        key = str(data.get("key", "")).strip().lower()
+        if key not in own:
+            return _bad("This campaign has not changed that archetype.")
+        own.pop(key)
+        settings["packs"] = own
+        store.campaigns.save_settings(campaign.id, settings)
+        await _record_change(
+            request, "dnd_pack", key, "campaign", None,
+            f"removed the campaign's **{key}** archetype",
+        )
+        return web.json_response({"ok": True, "key": key})
+
+    if action != "save":
+        return _bad("Unknown action.")
+
+    clean, problem = pack_registry.validate({
+        "key": data.get("key"),
+        "label": data.get("label"),
+        "description": data.get("description"),
+        "weights": data.get("weights") or {},
+        "priors": data.get("priors") or {},
+    })
+    if clean is None:
+        return _bad(problem)
+
+    key = clean["key"]
+    was = "campaign" if key in own else pack_registry.Packs().source_of(key)
+    own[key] = clean
+    settings["packs"] = own
+    store.campaigns.save_settings(campaign.id, settings)
+    await _record_change(
+        request, "dnd_pack", key, was, "campaign",
+        f"set the **{clean['label']}** archetype for this campaign",
+    )
+    return web.json_response({"ok": True, "key": key})
+
+
 async def api_dnd_entity_goals(request: web.Request):
     """Add, advance or drop one goal on one entity.
 

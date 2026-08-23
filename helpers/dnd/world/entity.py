@@ -138,6 +138,12 @@ class Entity:
     # memory and beliefs, which is why those got collections and this did not.
     goals: list | None = None
 
+    # Which behaviour archetypes they are drawn from, weighted
+    # (``world/pack.py``). Assigned at generation from their disposition, and
+    # editable after: the definitions are campaign configuration, but *who is
+    # what* is a fact about this person.
+    packs: list | None = None
+
     retired: bool = False
     legacy_id: Any = None                # set by the importer, for idempotency
 
@@ -164,6 +170,7 @@ class Entity:
             "inheritance": self.inheritance,
             "needs": self.needs,
             "goals": list(self.goals) if self.goals else [],
+            "packs": list(self.packs) if self.packs else [],
             "retired": bool(self.retired),
         }
         if self.legacy_id is not None:
@@ -192,6 +199,7 @@ class Entity:
             inheritance=doc.get("inheritance"),
             needs=doc.get("needs"),
             goals=list(doc.get("goals") or []) or None,
+            packs=list(doc.get("packs") or []) or None,
             retired=bool(doc.get("retired", False)),
             legacy_id=doc.get("legacy_id"),
         )

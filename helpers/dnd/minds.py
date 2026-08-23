@@ -16,7 +16,9 @@ from __future__ import annotations
 from random import Random
 from typing import Any
 
+from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
+from helpers.dnd.mind import behaviour
 from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
@@ -36,6 +38,7 @@ from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world import goal as goal_model
+from helpers.dnd.world import pack as pack_model
 from helpers.dnd.world import view as view_model
 from helpers.dnd.rules import ruleset as ruleset_model
 from helpers.dnd.world.memory import TIER_WORKING, Memory
@@ -293,10 +296,92 @@ def view_for(
         memories=memories,
         beliefs=beliefs,
         goals=tuple(goals_of(entity, world_time, tuning)),
+        packs=tuple(packs_of(entity)),
         relations=relations,
         identities=identities,
         include=tuple(include),
         perception=perception,
+    )
+
+
+# --------------------------------------------------------------------------- #
+#  Who somebody is, in terms of what they reach for
+# --------------------------------------------------------------------------- #
+def packs_for(store, campaign=None) -> pack_registry.Packs:
+    """The archetypes this campaign can draw on: built-in, then server, then its
+    own. Built once per command and handed down, like the tuning."""
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    return pack_registry.Packs.for_campaign(store.guild_id, campaign)
+
+
+def packs_of(entity: Entity) -> list:
+    """Which archetypes this entity carries, weighted."""
+    return pack_model.assignments_from(entity.packs)
+
+
+def assign_packs(store, entity: Entity, rng: Random, *, campaign=None,
+                 tuning: Tuning | None = None) -> list:
+    """Draw this entity's archetypes from who they already are, and store them.
+
+    Called at generation. Separate from ``spawn_npc`` so a GM can re-roll
+    somebody's archetypes without rebuilding the person, and so an entity that
+    predates the feature can be given some.
+    """
+    tuning = tuning or tuning_for(store, campaign)
+    available = packs_for(store, campaign).available().values()
+    assignments = behaviour.assign(
+        traits_of(entity), available, rng, tuning.behaviour()
+    )
+    entity.packs = pack_model.assignments_to(assignments) or None
+    store.entities.save(entity)
+    return assignments
+
+
+def set_packs(store, entity: Entity, assignments) -> Entity:
+    """Say what somebody is by hand. The definitions are configuration; which of
+    them a given person is drawn from is a fact about that person."""
+    entity.packs = pack_model.assignments_to(assignments) or None
+    store.entities.save(entity)
+    return entity
+
+
+def candidates_for(
+    store,
+    entity: Entity,
+    scene,
+    *,
+    world_time: int,
+    campaign=None,
+    tuning: Tuning | None = None,
+    view=None,
+    features=(),
+    sealed: bool = False,
+) -> list:
+    """What this entity would think of doing here.
+
+    The **propose** step end to end: what the scene physically permits, narrowed
+    by what the campaign allows, crossed with what this person's archetypes reach
+    for, fanned out over whoever they can see. Scoring them is the next stage and
+    is not this function's business.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    tuning = tuning or tuning_for(store, campaign)
+    if view is None:
+        # Everyone on stage must be in the view even if this entity has never
+        # met them and holds no belief about them: you can act on a stranger you
+        # are standing next to, and without this the directed verbs — speak,
+        # attack, give, take — quietly find nobody to aim at.
+        present = tuple(getattr(scene, "present", ()) or ())
+        view = view_for(store, entity, world_time=world_time, tuning=tuning,
+                        include=present)
+
+    allowed = affordances_for(store, entity, scene, campaign=campaign, tuning=tuning,
+                              features=features, sealed=sealed)
+    return behaviour.propose(
+        view, allowed, packs_of(entity),
+        packs_for(store, campaign).available(), tuning.behaviour(),
     )
 
 
@@ -1128,6 +1213,11 @@ def spawn_npc(
             standing=0.5 if standing is None else max(0.0, min(1.0, standing)),
         )
     )
+
+    # Archetypes drawn from who they turned out to be, not from the label on
+    # them — the same backwards read as the role, one line later so it can see
+    # the finished disposition.
+    assign_packs(store, entity, rng, campaign=None, tuning=tuning)
 
     for gist, valence, arousal in _seed_history(entity_traits, role, culture, rng):
         remember(

@@ -22,10 +22,13 @@ from helpers import panel_access
 from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
 from helpers.dnd import minds
+from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
+from helpers.dnd.rules.ruleset import AFFORDANCES, AFFORDANCE_LABELS
 from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
+from helpers.dnd.mind import behaviour as behaviour_math
 from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind.needs import NEED_LABELS
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT, TRAIT_LABELS
@@ -246,6 +249,10 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
         sections.append(
             ("canon", "⚖️", "Canon queue", "invented facts awaiting a ruling",
              _canon_section(store, is_gm))
+        )
+        sections.append(
+            ("packs", "🧭", "Archetypes", "what people reach for",
+             _packs_section(guild, campaign, store, is_gm))
         )
         sections.append(
             ("tuning", "🎛️", "This game's rules", "campaign only",
@@ -618,6 +625,47 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       if (data.ok) location.reload();   // the meters and the read-line follow
     }});
   }});
+  // Archetypes. A card's weights live in the card, so one handler serves them
+  // all and adding an archetype needs no new wiring.
+  const packWeights = (root) => {{
+    const out = {{}};
+    root.querySelectorAll("input[data-verb]").forEach((i) => {{
+      const n = parseFloat(i.value);
+      if (!isNaN(n) && n > 0) out[i.dataset.verb] = n;
+    }});
+    return out;
+  }};
+  document.querySelectorAll(".dndpack-save").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const card = el.closest(".packcard");
+      const data = await post(`/api/guild/${{gid}}/dnd/pack`, {{
+        campaign_id: cid, action: "save", key: el.dataset.key,
+        label: (card.querySelector(".packlabel") || {{}}).value || el.dataset.key,
+        weights: packWeights(card),
+      }});
+      if (data.ok) location.reload();
+    }});
+  }});
+  document.querySelectorAll(".dndpack-remove").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/pack`,
+        {{campaign_id: cid, action: "remove", key: el.dataset.key}});
+      if (data.ok) location.reload();
+    }});
+  }});
+  const packAdd = document.getElementById("packadd");
+  if (packAdd) {{
+    packAdd.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/pack`, {{
+        campaign_id: cid, action: "save",
+        key: document.getElementById("packkey").value,
+        label: document.getElementById("packlabel").value,
+        description: document.getElementById("packdesc").value,
+        weights: packWeights(document.getElementById("packnewweights")),
+      }});
+      if (data.ok) location.reload();
+    }});
+  }}
   // Goals: the one part of a mind the panel is *meant* to author.
   const goalAdd = document.getElementById("goaladd");
   if (goalAdd) {{
@@ -919,6 +967,72 @@ def _memory_card(entity, memory, explain) -> str:
 </td><td>{fields}</td></tr>"""
 
 
+def _archetype_section(guild, campaign, entity, tuning) -> str:
+    """What this person reaches for, and how well the archetype actually suits them.
+
+    The fit is the interesting number and the reason priors are read backwards:
+    an NPC drawn as a predator who fits at −0.3 is a reluctant one, and saying
+    so out loud is the difference between an emergent oddity and a wasted one.
+    """
+    assignments = minds.packs_of(entity)
+    registry = pack_registry.Packs.for_campaign(guild.id, campaign)
+    available = registry.available()
+    traits = minds.traits_of(entity)
+
+    if tuning.behaviour().off:
+        return """
+  <h2>What they reach for</h2>
+  <p class="muted small">Archetypes are switched off for this campaign
+  (<code>pack_count</code> is 0), so everyone weighs everything the scene allows
+  evenly and only disposition and circumstance tell them apart.</p>"""
+
+    rows = ""
+    for assignment in assignments:
+        pack = available.get(assignment.key)
+        if pack is None:
+            rows += (
+                f'<tr><td>{_escape(assignment.key)}</td>'
+                f'<td class="muted small" colspan="2">no longer defined in this '
+                'campaign — it proposes nothing</td></tr>'
+            )
+            continue
+        value = behaviour_math.fit(traits, pack)
+        rows += f"""
+<tr>
+  <td><b>{_escape(pack.label)}</b>
+    <div class="muted small">{_escape(behaviour_math.describe_fit(value, pack.label))}</div></td>
+  <td>{_meter(assignment.weight)}<span class="muted small">
+    {assignment.weight * 100:.0f}% of them</span></td>
+  <td>{_axis_cell(value, -1.0, 1.0, 0.0)}<span class="muted small">fit</span></td>
+</tr>"""
+    if not rows:
+        rows = ('<tr><td class="muted" colspan="3">Drawn from no archetype. They '
+                'consider everything the scene allows, evenly.</td></tr>')
+
+    reaches = {}
+    for assignment in assignments:
+        pack = available.get(assignment.key)
+        if pack is None:
+            continue
+        for verb in pack.reaches_for:
+            reaches[verb] = max(reaches.get(verb, 0.0),
+                                pack.weight_for(verb) * assignment.weight)
+    leaning = ", ".join(
+        _escape(AFFORDANCE_LABELS.get(v, v).lower())
+        for v, _ in sorted(reaches.items(), key=lambda p: -p[1])[:4]
+    )
+    return f"""
+  <h2>What they reach for</h2>
+  <p class="muted small">Archetypes are <b>noticed, not assigned</b>: these were
+  drawn from the disposition above, weighted by how well each fits, so the timid
+  soldier and the gentle thug still happen. The fit column is that read backwards
+  — a predator who fits badly is a reluctant one. They can only ever reach for
+  what a scene actually offers.</p>
+  <table class="ranktable"><tbody>{rows}</tbody></table>
+  {f'<p class="muted small">In a room with options, they go for: <b>{leaning}</b>.</p>'
+   if leaning else ''}"""
+
+
 def _goals_section(entity, store, tuning, world_time: int) -> str:
     """What they are trying to bring about, and a way to author it.
 
@@ -1019,6 +1133,81 @@ def _goals_section(entity, store, tuning, world_time: int) -> str:
            title="days until it stops being worth anything (optional)">
     <button id="goaladd">Give them this goal</button>
   </div>"""
+
+
+def _packs_section(guild, campaign, store, is_gm: bool) -> str:
+    """The behaviour archetypes this campaign can draw on, and a way to add one.
+
+    ``04-ENTITIES.md`` §9 asks for this and the role and culture tables still do
+    not have it — they are Python, so a GM cannot add a trade. Archetypes are
+    the first of those tables to ship as data a GM can actually edit, which is
+    the whole reason they are not a dict in a module.
+    """
+    registry = pack_registry.Packs.for_campaign(guild.id, campaign)
+    available = registry.available()
+    counts: dict = {}
+    for entity in store.entities.list(limit=300):
+        for assignment in minds.packs_of(entity):
+            counts[assignment.key] = counts.get(assignment.key, 0) + 1
+
+    cards = ""
+    for key, pack in available.items():
+        source = registry.source_of(key)
+        badge = (
+            '<span class="chip">this campaign</span>' if source == "campaign"
+            else f'<span class="muted small">{_escape(source)}</span>'
+        )
+        reset = (
+            f'<button class="dndpack-remove ghost" data-key="{_escape(key)}">'
+            'Back to the shipped one</button>'
+            if source == "campaign" and key in pack_registry.built_in() else ""
+        )
+        weights = "".join(
+            f'<label class="packweight">{_escape(AFFORDANCE_LABELS.get(verb, verb))}'
+            f'<input type="number" step="0.05" min="0" max="1" data-verb="{verb}"'
+            f' value="{pack.weight_for(verb):.2f}"></label>'
+            for verb in AFFORDANCES
+        )
+        used = counts.get(key, 0)
+        cards += f"""
+<details class="packcard" data-key="{_escape(key)}">
+  <summary><b>{_escape(pack.label)}</b> {badge}
+    <span class="muted small">reaches for {_escape(', '.join(pack.reaches_for))}
+    · {used} character{'' if used == 1 else 's'}</span></summary>
+  <p class="muted small">{_escape(pack.description)}</p>
+  <input type="text" class="packlabel" value="{_escape(pack.label)}" maxlength="40">
+  <div class="packweights">{weights}</div>
+  <button class="dndpack-save" data-key="{_escape(key)}">Save for this campaign</button>
+  {reset}
+</details>"""
+
+    if not is_gm:
+        return ""
+    blank = "".join(
+        f'<label class="packweight">{_escape(AFFORDANCE_LABELS.get(verb, verb))}'
+        f'<input type="number" step="0.05" min="0" max="1" data-verb="{verb}" value="0.00">'
+        '</label>'
+        for verb in AFFORDANCES
+    )
+    return f"""
+  <p class="muted small">An archetype is a set of leanings across the things a
+  scene can offer — a coward reaches for the door, a merchant reaches for a
+  conversation. Characters are drawn from one or two of these at generation,
+  by how well each fits the person they turned out to be, and the engine
+  proposes what their archetypes reach for <i>and the scene allows</i>. An
+  archetype can never widen what is possible, only weight it.</p>
+  <p class="muted small">The six that ship are a starting point. <b>Add your
+  own</b> — a smuggler, a zealot of a particular church — or save over a shipped
+  one to retune it for this campaign only.</p>
+  {cards}
+  <details class="packcard packnew">
+    <summary><b>Add an archetype</b></summary>
+    <input type="text" id="packkey" placeholder="short name, e.g. smuggler" maxlength="24">
+    <input type="text" id="packlabel" placeholder="what to call it" maxlength="40">
+    <input type="text" id="packdesc" placeholder="who this is, in a sentence" maxlength="200">
+    <div class="packweights" id="packnewweights">{blank}</div>
+    <button id="packadd">Add it</button>
+  </details>"""
 
 
 def _inspector_html(bot, guild, campaign, entity, store) -> str:
@@ -1181,6 +1370,8 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
   <table class="ranktable"><tbody>{need_rows}</tbody></table>
   <p>{impulse_html}</p>
+
+  {_archetype_section(guild, campaign, entity, tuning)}
 
   {_goals_section(entity, store, tuning, world_time)}
 

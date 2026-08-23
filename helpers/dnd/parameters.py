@@ -107,6 +107,29 @@ def tuning_overrides(guild_id: Optional[int]) -> dict:
     return (doc or {}).get("values", {})
 
 
+def pack_overrides(guild_id: Optional[int]) -> dict:
+    """Every server-level behaviour archetype for a guild.
+
+    Same document as the tunables, different field: archetypes are configuration
+    layered the same way, and a second collection would be a second thing to
+    scope, index and export for no gain.
+    """
+    doc = TUNING_COLLECTION.find_one({"guild_id": guild_id})
+    return (doc or {}).get("packs", {})
+
+
+def set_packs(guild_id: Optional[int], packs: dict) -> None:
+    """Replace a guild's server-level archetypes wholesale.
+
+    The whole map rather than one key, so removing one is an ordinary write. The
+    per-key ``$unset`` the tunables use is the reason clearing a server tunable
+    is the one path no test covers (``tests/fake_mongo.py`` has no ``$unset``).
+    """
+    TUNING_COLLECTION.update_one(
+        {"guild_id": guild_id}, {"$set": {"packs": dict(packs or {})}}, upsert=True
+    )
+
+
 def set_tuning(guild_id: Optional[int], key: str, value) -> None:
     """Set one server-level tunable. ``None`` clears it back to the default."""
     if value is None:

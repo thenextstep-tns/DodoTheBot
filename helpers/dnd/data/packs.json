@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "note": "Behaviour archetypes. Data, not code — docs/dnd/03-KNOWLEDGE-BASE.md §7. `weights` are how much this archetype reaches for each affordance (rules/ruleset.py AFFORDANCES); `priors` are the disposition it implies, read backwards to ask how well a given person fits the archetype rather than stamping it on them.",
+  "packs": [
+    {
+      "key": "coward",
+      "label": "Coward",
+      "description": "Gets out. Talks their way clear if they cannot, gives something up if they cannot do that, and fights only when there is nothing left to try.",
+      "weights": {
+        "flee": 1.0, "hide": 0.9, "wait": 0.6, "move": 0.5, "give": 0.45,
+        "speak": 0.35, "use": 0.3, "take": 0.1, "attack": 0.05
+      },
+      "priors": {"boldness": -0.5, "fear_of_death": 0.45, "volatility": 0.15}
+    },
+    {
+      "key": "zealot",
+      "label": "Zealot",
+      "description": "Says the thing. Does the thing. Does not leave, does not hide, and is not much interested in what it costs.",
+      "weights": {
+        "speak": 1.0, "attack": 0.8, "move": 0.5, "use": 0.4, "give": 0.4,
+        "take": 0.3, "wait": 0.15, "flee": 0.05, "hide": 0.05
+      },
+      "priors": {"honour": 0.5, "fear_of_death": -0.3, "diligence": 0.25, "openness": -0.35}
+    },
+    {
+      "key": "merchant",
+      "label": "Merchant",
+      "description": "Everything is a transaction and most of them are conversations. Would rather buy the problem than fight it.",
+      "weights": {
+        "speak": 1.0, "give": 0.8, "take": 0.7, "use": 0.5, "move": 0.4,
+        "wait": 0.4, "flee": 0.3, "hide": 0.2, "attack": 0.1
+      },
+      "priors": {"greed": 0.45, "openness": 0.2, "volatility": -0.2, "warmth": 0.1}
+    },
+    {
+      "key": "predator",
+      "label": "Predator",
+      "description": "Waits, closes, takes. Violence is not a last resort here, it is the shortest route.",
+      "weights": {
+        "attack": 1.0, "take": 0.9, "hide": 0.6, "move": 0.6, "use": 0.4,
+        "speak": 0.3, "wait": 0.25, "flee": 0.15, "give": 0.05
+      },
+      "priors": {"warmth": -0.5, "boldness": 0.4, "honour": -0.35, "greed": 0.3}
+    },
+    {
+      "key": "loyalist",
+      "label": "Loyalist",
+      "description": "Stands where they said they would stand, next to whoever they said it to. Will fight for someone else long before they fight for themselves.",
+      "weights": {
+        "speak": 0.8, "give": 0.7, "move": 0.6, "wait": 0.55, "attack": 0.5,
+        "use": 0.4, "take": 0.2, "hide": 0.2, "flee": 0.1
+      },
+      "priors": {"belonging": 0.45, "honour": 0.4, "warmth": 0.3, "openness": -0.15}
+    },
+    {
+      "key": "opportunist",
+      "label": "Opportunist",
+      "description": "Reads the room for what is loose in it. Rarely starts anything, and is never the one left holding it.",
+      "weights": {
+        "take": 1.0, "speak": 0.7, "hide": 0.6, "use": 0.6, "move": 0.5,
+        "flee": 0.4, "attack": 0.35, "wait": 0.3, "give": 0.1
+      },
+      "priors": {"greed": 0.4, "honour": -0.4, "curiosity": 0.25, "boldness": 0.2}
+    }
+  ]
+}

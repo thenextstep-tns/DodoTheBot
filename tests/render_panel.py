@@ -55,7 +55,6 @@ def main() -> None:
     bot = harness.FakeBot()
 
     _write("index.html", pages.campaigns_html(bot, guild, panel_access.SCOPE_FULL, 1))
-    _write("campaign.html", pages.campaign_html(bot, guild, campaign, access.CAMPAIGN_GM))
 
     marla = minds.spawn_npc(
         store, name="Marla Venn", role="harbourmaster", culture="tidewater",
@@ -83,6 +82,9 @@ def main() -> None:
     minds.advance(store, campaign, 900, Random(3))
     marla = store.entities.get(marla.id)
     _write("inspector.html", pages._inspector_html(bot, guild, campaign, marla, store))
+    # Last, so the archetype counts and the cast are of a populated campaign
+    # rather than of an empty one.
+    _write("campaign.html", pages.campaign_html(bot, guild, campaign, access.CAMPAIGN_GM))
 
     print(f"\nguild id in the pages: {guild.id} (a real snowflake, on purpose)")
     print("now: py -m http.server 8899 --directory .preview — then click things")

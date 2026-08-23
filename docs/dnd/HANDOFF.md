@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–3a of 6 built |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–3 of 6 built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -54,7 +54,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**508 tests** across five suites, all passing:
+**545 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -223,12 +223,40 @@ checkable on its own:
    * Goals are the one part of a mind the panel is *meant* to author — disposition
      is fenced behind a warning, plot is the GM's job.
 
-3b. **Behaviour packs** — still to do, and the open question is unchanged: the
-   roadmap says packs come from the global KB, the prior tables are still Python
-   (§7), and `helpers/dnd/data/` does not exist yet. Note that the KB's `Fact`
-   shape is prose + tags built for retrieval, so packs would either be a JSON
-   blob stuffed in `text` or a new store. **Decide that deliberately** before
-   writing any of it.
+3b. **Behaviour packs** — ✅ **built** (`helpers/dnd/data/packs.json`,
+   `helpers/dnd/packs.py`, `world/pack.py`, `mind/behaviour.py`,
+   `minds.candidates_for`, panel group *Behaviour* + an **Archetypes** section on
+   the campaign page and a *What they reach for* section in the inspector).
+
+   **The decision that was open, and how it went.** The roadmap said "from the
+   global KB". The KB's `Fact` is prose + tags built for budgeted retrieval, so
+   putting weight tables in `text` would have been a JSON blob in a field nothing
+   validates. Instead the six ship as **data in `helpers/dnd/data/`** (the home
+   `03-KNOWLEDGE-BASE.md` §7 names) and resolve **built-in → server → campaign**
+   through the *same two override layers as the tunables* — server in the
+   `DndTuning` document's `packs` map, campaign in `campaign.settings["packs"]`.
+   No new collection, and a campaign carries its archetypes in its export bundle.
+   **A GM can add a smuggler from the panel**, which is precisely what the role
+   and culture tables still cannot do (§7).
+
+   * **Priors are read backwards**, as with roles: `fit(traits, pack)` asks how
+     predator-shaped this person already is rather than stamping a temperament
+     on anyone labelled one. Assignment is weighted, not argmax, so the timid
+     soldier still happens — and the inspector says so out loud.
+   * **A pack weights verbs, it never adds one.** Candidates are archetypes
+     ∩ affordances, so nothing can propose what the scene forbids and adding an
+     archetype can never widen what is possible. Weights for unknown verbs are
+     dropped on load.
+   * `pack_count = 0` switches archetypes off **for people who already have
+     them**, not merely for the next NPC generated — a setting that only affects
+     future entities is a setting that looks broken.
+   * `candidate_cap` is the documented performance lever (§11). Waiting always
+     survives it.
+   * **`candidates_for` builds the view with `include=scene.present`.** Without
+     that the directed verbs — speak, attack, give, take — silently find nobody
+     to aim at, because an unmet stranger is in no relationship and no belief.
+     That is what `include` was added for in step 1; anything else building a
+     view for a scene needs it too.
 4. **`mind/decide.py`** — perceive → appraise → propose → score → select, pure
    and seeded. Eight utility terms, each bounded to −1…1 before weighting.
    **Traits modulate the terms, never the weights** (§6 of the spec) — per-entity
@@ -298,9 +326,13 @@ Clocks page and the decision-trace view.
   is not wired — a cheap next job.
 - **`PYTHONIOENCODING=utf-8` is needed** to run the suites in this shell, or the
   clock faces and arrows crash the Windows console rather than the code.
-- **Prior tables are still Python.** `04-ENTITIES.md` §9 step 1 says culture and
-  role come from the campaign KB. `role_prior_weight` makes them switchable but
-  not yet *editable* — a GM cannot add a trade.
+- **Prior tables are still Python** — the role and culture ones, at least.
+  Behaviour archetypes are now data a GM can edit (§6 step 3b), and the same
+  treatment is what `04-ENTITIES.md` §9 step 1 wants for these: they could
+  move into `helpers/dnd/data/` and layer through `campaign.settings` with
+  the machinery packs already built.
+  `role_prior_weight` makes them switchable but not *editable* — a GM still
+  cannot add a trade.
 - **Rulesets do not model wealth**, so `standing` is set by hand. Deriving it
   from the sheet is the natural next step (`04-ENTITIES.md` §2b).
 
