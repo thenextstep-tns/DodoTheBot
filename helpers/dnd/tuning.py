@@ -44,7 +44,7 @@ SCOPE_CAMPAIGN = "campaign"   # campaign GMs (and server admins)
 # Groups, in the order the panel shows them.
 GROUPS = (
     "Memory", "Forgetting", "Salience", "Needs", "Relationships", "Stakes",
-    "Perception", "Actions", "Continuity", "Knowledge", "Generation",
+    "Perception", "Actions", "Goals", "Continuity", "Knowledge", "Generation",
 )
 
 
@@ -326,6 +326,39 @@ TUNABLES: list[dict] = [
           "Whether a character may reposition inside a scene. Off pins everyone where they stand.",
           True, kind="bool", minimum=0, maximum=1),
 
+    # --- Goals (P3) -------------------------------------------------------- #
+    _spec("goal_cap", "Goals", "Goals at once",
+          "How many things a character can be pursuing at the same time, the ones "
+          "they care about most first. People with a dozen active ambitions read "
+          "as scatterbrained rather than driven. **0 lifts the cap entirely.**",
+          4, kind="int", minimum=0, maximum=50),
+    _spec("goal_decay", "Goals", "Wanting fades",
+          "How much of a want is lost each day nobody acts on it. A goal being "
+          "actively pursued does not fade at all — the clock runs from the last "
+          "time it moved. **0 means a vow is a vow**: goals never weaken with time.",
+          0.02, minimum=0.0, maximum=0.5),
+    _spec("goal_abandon_below", "Goals", "Give up below",
+          "How faded a want has to get before they stop carrying it at all. "
+          "**0 means nobody ever gives up on anything**, however long ago.",
+          0.08, minimum=0.0, maximum=1.0),
+    _spec("goal_deadline_reach", "Goals", "Deadlines press",
+          "How much a closing deadline raises what a goal is worth. At 1 a goal "
+          "on its final day is worth twice what it was. **0 and a deadline is "
+          "just a date** — it still expires, it simply never hurries anyone.",
+          1.0, minimum=0.0, maximum=4.0),
+    _spec("goal_deadline_window", "Goals", "Starts pressing (days)",
+          "How far out a deadline begins to be felt. Beyond this it is somebody "
+          "else's problem; inside it the pressure climbs steeply toward the end.",
+          14.0, minimum=0.1, maximum=365.0),
+    _spec("goal_gradient", "Goals", "Nearly there",
+          "How much being close to done raises what the next step is worth — the "
+          "reason people finish things they would not have started. **0 makes the "
+          "last step worth exactly as much as the first.**",
+          0.5, minimum=0.0, maximum=3.0),
+    _spec("goal_completion", "Goals", "Counts as achieved",
+          "How far along a goal must get before it is done and leaves the list.",
+          1.0, minimum=0.1, maximum=1.0),
+
     # --- Knowledge (P1) ---------------------------------------------------- #
     _spec("kb_budget", "Knowledge", "Knowledge budget (tokens)",
           "How much campaign knowledge a scene may draw on.",
@@ -520,6 +553,17 @@ class Tuning:
             if name == ruleset_model.WAIT or bool(self.get(f"affordance_{name}"))
         ))
 
+    def goals(self) -> "GoalTuning":
+        return GoalTuning(
+            cap=int(self.get("goal_cap")),
+            decay=self.get("goal_decay"),
+            abandon_below=self.get("goal_abandon_below"),
+            deadline_reach=self.get("goal_deadline_reach"),
+            deadline_window=self.get("goal_deadline_window"),
+            gradient=self.get("goal_gradient"),
+            completion=self.get("goal_completion"),
+        )
+
     def generation(self) -> "GenerationTuning":
         return GenerationTuning(
             importance=self.get("npc_importance_default"),
@@ -664,6 +708,24 @@ class AffordanceTuning:
 
 
 @dataclass(frozen=True)
+class GoalTuning:
+    """What time and progress do to a want (``mind/goals.py``)."""
+
+    cap: int = 4
+    decay: float = 0.02            # fraction of the wanting lost per idle day
+    abandon_below: float = 0.08
+    deadline_reach: float = 1.0
+    deadline_window: float = 14.0  # days out that a deadline starts being felt
+    gradient: float = 0.5
+    completion: float = 1.0
+
+    @property
+    def eternal(self) -> bool:
+        """Whether wanting fades at all."""
+        return self.decay <= 0
+
+
+@dataclass(frozen=True)
 class GenerationTuning:
     importance: float = 0.5
     heritability: float = 0.4
@@ -684,4 +746,5 @@ DEFAULT_STAKES = StakesTuning()
 DEFAULT_RUMOURS = RumourTuning()
 DEFAULT_PERCEPTION = PerceptionTuning()
 DEFAULT_AFFORDANCES = AffordanceTuning()
+DEFAULT_GOALS = GoalTuning()
 DEFAULT_GENERATION = GenerationTuning()

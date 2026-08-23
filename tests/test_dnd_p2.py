@@ -68,6 +68,8 @@ from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd import rules  # noqa: E402
+from helpers.dnd.mind import goals as goal_math  # noqa: E402
+from helpers.dnd.world import goal as goal_model  # noqa: E402
 from helpers.dnd.rules import ruleset as rs  # noqa: E402
 from helpers.dnd.tuning import TUNABLES, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
@@ -1320,6 +1322,202 @@ def test_affordances() -> None:
           Tuning(server={"affordance_hide": False}).affordances().permits("hide") is False)
 
 
+# --------------------------------------------------------------------------- #
+#  20. Goals — what somebody is after
+#
+#  P3's acceptance criterion is "an NPC pursues a goal". This is the half that
+#  says what a goal is worth at a given moment; the scorer that acts on it is the
+#  next increment.
+# --------------------------------------------------------------------------- #
+def test_goals() -> None:
+    campaign, store = _campaign(9313, "Wanting Things")
+    marla = _npc(store, campaign, "Marla")
+    day = 1440
+
+    # --- 1. A goal names the verbs that serve it -------------------------- #
+    check("goals: every kind is served by something",
+          all(goal_model.SERVED_BY.get(k) for k in goal_model.KINDS))
+    verbs = {v for served in goal_model.SERVED_BY.values() for v in served}
+    check("goals: AND EVERY VERB IS ONE A RULESET CAN ACTUALLY OFFER",
+          verbs <= set(rs.AFFORDANCES), str(sorted(verbs - set(rs.AFFORDANCES))))
+    acquire = goal_model.Goal(key="a-1", kind=goal_model.ACQUIRE, priority=1.0)
+    check("goals: taking serves acquiring squarely", acquire.served_by("take") == 1.0)
+    check("goals: attacking does not serve it at all", acquire.served_by("attack") == 0.0)
+
+    # --- 2. Wanting fades, unless it is being pursued --------------------- #
+    stale = goal_model.Goal(key="a-2", priority=0.8, touched_at=0)
+    check("goals: a want nobody acts on fades",
+          goal_math.faded(stale, 200 * day) < 0.3,
+          f"{goal_math.faded(stale, 200 * day):.3f}")
+    fresh = stale.with_progress(0.1, 200 * day)
+    check("goals: pursuing it resets the clock",
+          goal_math.faded(fresh, 200 * day) == 0.8)
+    frozen = Tuning(campaign={"goal_decay": 0}).goals()
+    check("goals: A VOW CAN BE MADE A VOW — decay switches off",
+          goal_math.faded(stale, 3650 * day, frozen) == 0.8 and frozen.eternal)
+
+    # --- 3. A deadline presses, convexly ---------------------------------- #
+    tuning = Tuning().goals()
+    dated = goal_model.Goal(key="a-3", priority=0.5, deadline=30 * day)
+    far = goal_math.urgency(dated, 0, tuning)
+    close = goal_math.urgency(dated, 29 * day, tuning)
+    middling = goal_math.urgency(dated, 23 * day, tuning)
+    check("goals: a distant deadline does not press at all", far == 0.0)
+    check("goals: a close one presses hard", close > 0.8, f"{close:.2f}")
+    check("goals: and the curve is convex, not a ramp",
+          close - middling > middling - far, f"{middling:.2f}")
+    check("goals: a deadline still expires when it stops pressing",
+          goal_model.Goal(key="a-4", deadline=10).expired(11))
+    # Switched off, a goal with a deadline one day out is worth exactly what the
+    # same goal with no deadline is worth — compared at the same moment, or
+    # ordinary fading would explain the gap instead.
+    calm = Tuning(campaign={"goal_deadline_reach": 0}).goals()
+    undated = goal_model.Goal(key="a-3", priority=0.5, deadline=None)
+    check("goals: deadlines can be made not to hurry anyone",
+          goal_math.pressure(dated, 29 * day, calm)
+          == goal_math.pressure(undated, 29 * day, calm))
+    check("goals: while they still press by default",
+          goal_math.pressure(dated, 29 * day, tuning)
+          > goal_math.pressure(undated, 29 * day, tuning))
+
+    # --- 4. Nearly done is worth more than barely started ----------------- #
+    started = goal_model.Goal(key="a-5", priority=0.5, progress=0.0)
+    nearly = goal_model.Goal(key="a-6", priority=0.5, progress=0.9)
+    check("goals: the goal gradient is real",
+          goal_math.pressure(nearly, 0, tuning) > goal_math.pressure(started, 0, tuning))
+    flat = Tuning(campaign={"goal_gradient": 0}).goals()
+    check("goals: and can be switched off",
+          goal_math.pressure(nearly, 0, flat) == goal_math.pressure(started, 0, flat))
+
+    # --- 5. Everything the engine reads is bounded ------------------------ #
+    extreme = goal_model.Goal(key="a-7", priority=1.0, progress=1.0, deadline=1)
+    for t in (tuning, Tuning(campaign={"goal_gradient": 3, "goal_deadline_reach": 4}).goals()):
+        check("goals: pressure never leaves 0..1",
+              0.0 <= goal_math.pressure(extreme, 0, t) <= 1.0,
+              f"{goal_math.pressure(extreme, 0, t):.3f}")
+        check("goals: and neither does what a verb is worth",
+              0.0 <= goal_math.value_of(extreme, "take", 0, t) <= 1.0)
+
+    # --- 6. Through the store: authored, pursued, finished ---------------- #
+    goal = minds.add_goal(store, marla, goal_model.ACQUIRE, world_time=0,
+                          text="buy back her sister's indenture", priority=0.9)
+    marla = store.entities.get(marla.id)
+    check("goals: A GOAL SURVIVES BEING SAVED", [g.key for g in minds.goals_of(marla, 0)] == [goal.key])
+    check("goals: and reaches the projection an NPC decides from",
+          [g.text for g in minds.view_for(store, marla, world_time=0).goals]
+          == ["buy back her sister's indenture"])
+
+    minds.advance_goal(store, marla, goal.key, 0.5, world_time=day)
+    marla = store.entities.get(marla.id)
+    check("goals: progress is recorded", minds.all_goals_of(marla)[0].progress == 0.5)
+    minds.advance_goal(store, marla, goal.key, 0.6, world_time=day)
+    marla = store.entities.get(marla.id)
+    done = minds.all_goals_of(marla)[0]
+    check("goals: finishing one closes it", done.status == "done")
+    check("goals: and it leaves the live list", not minds.goals_of(marla, day))
+    check("goals: but stays on the record",
+          len(minds.all_goals_of(marla)) == 1)
+
+    # Giving up is recorded too — what somebody abandoned is a fact about them.
+    second = minds.add_goal(store, marla, goal_model.HARM, world_time=day, text="see him ruined")
+    marla = store.entities.get(marla.id)
+    minds.drop_goal(store, marla, second.key)
+    marla = store.entities.get(marla.id)
+    check("goals: giving up is kept, not deleted",
+          [g.status for g in minds.all_goals_of(marla) if g.key == second.key] == ["dropped"])
+
+    # --- 7. The cap refuses rather than evicting -------------------------- #
+    crowded, crowded_store = _campaign(9314, "Too Much Wanting")
+    ondry = _npc(crowded_store, crowded, "Ondry")
+    tight = Tuning(campaign={"goal_cap": 2})
+    made = [minds.add_goal(crowded_store, crowded_store.entities.get(ondry.id),
+                           goal_model.REACH, world_time=0, text=f"go {i}", tuning=tight)
+            for i in range(3)]
+    check("goals: the cap bites", made[2] is None and made[1] is not None)
+    check("goals: AND REFUSES RATHER THAN QUIETLY DROPPING AN AMBITION",
+          len(minds.all_goals_of(crowded_store.entities.get(ondry.id))) == 2)
+    loose = Tuning(campaign={"goal_cap": 0})
+    check("goals: a cap of 0 is no cap",
+          minds.add_goal(crowded_store, crowded_store.entities.get(ondry.id),
+                         goal_model.REACH, world_time=0, text="go 4", tuning=loose) is not None)
+
+    # --- 8. Goals meet affordances ---------------------------------------- #
+    scene = crowded_store.scenes.create(Scene(
+        guild_id=crowded.guild_id, campaign_id=crowded.id, title="The road",
+        present=[ondry.id], lighting="bright",
+    ))
+    ondry = crowded_store.entities.get(ondry.id)
+    allowed = minds.affordances_for(crowded_store, ondry, scene, campaign=crowded)
+    live = minds.goals_of(ondry, 0, loose)
+    verb, worth = goal_math.best_verb(live, allowed, 0, loose.goals())
+    check("goals: the best thing to do here serves what they want",
+          verb == "move" and worth > 0, f"{verb} {worth:.2f}")
+    # And a campaign that forbids the verb leaves the goal unserved, rather than
+    # leaving the NPC to propose something the scene will not allow.
+    pinned = minds.affordances_for(crowded_store, ondry, scene, campaign=crowded,
+                                   tuning=Tuning(campaign={"affordance_move": False,
+                                                           "affordance_flee": False}))
+    check("goals: a forbidden verb serves nothing",
+          goal_math.best_verb(live, pinned, 0, loose.goals())[1] == 0.0)
+
+    # --- 9. Tunables and the panel ---------------------------------------- #
+    keys = {s["key"] for s in TUNABLES}
+    check("goals: every knob is registered",
+          {"goal_cap", "goal_decay", "goal_abandon_below", "goal_deadline_reach",
+           "goal_deadline_window", "goal_gradient", "goal_completion"} <= keys)
+    check("goals: grouped for the panel",
+          all(s["group"] == "Goals" for s in TUNABLES if s["key"].startswith("goal_")))
+    check("goals: and layered like everything else",
+          Tuning(server={"goal_cap": 9}, campaign={"goal_cap": 2}).goals().cap == 2)
+
+
+def test_entity_round_trip() -> None:
+    """Saving an entity must persist everything the entity carries.
+
+    ``EntityRepo.save`` used to name the fields it wrote, and a list like that
+    rots in silence: ``standing`` was added for stakes and never added there, so
+    the inspector's control posted, the endpoint set it, the repository dropped
+    it, and the panel said "Saved." This test is the guard, and it is written
+    against ``to_doc`` rather than against a list so the *next* field is covered
+    by it too.
+    """
+    campaign, store = _campaign(9315, "Round Trip")
+    entity = _npc(store, campaign, "Kell")
+
+    entity.standing = 0.93
+    entity.importance = 0.31
+    entity.conditions = ["bleeding"]
+    entity.inventory = [{"name": "a brass key"}]
+    entity.tier = "focus"
+    entity.goals = [goal_model.Goal(key="acquire-1", text="the key").to_doc()]
+    entity.identity.role = "harbourmaster"
+    store.entities.save(entity)
+
+    back = store.entities.get(entity.id)
+    for field_name in ("standing", "importance", "conditions", "inventory", "tier"):
+        check(f"entity: {field_name} survives a save",
+              getattr(back, field_name) == getattr(entity, field_name),
+              f"{getattr(back, field_name)!r}")
+    check("entity: goals survive a save", (back.goals or [{}])[0].get("text") == "the key")
+    check("entity: identity survives a save", back.identity.role == "harbourmaster")
+
+    # Every field to_doc emits, except the ones the scope owns, must round trip.
+    from helpers.dnd.store.entities import NOT_THE_CALLERS
+    missed = [
+        key for key in entity.to_doc()
+        if key not in NOT_THE_CALLERS and key not in store.entities.by_id(entity.id)
+    ]
+    check("entity: NO FIELD IS SILENTLY DROPPED ON SAVE", not missed, str(missed))
+
+    # And the tenancy keys are still not the caller's to move.
+    stale = store.entities.get(entity.id)
+    stale.guild_id, stale.campaign_id = 1, "elsewhere"
+    store.entities.save(stale)
+    fixed = store.entities.get(entity.id)
+    check("entity: a save cannot reparent a record",
+          fixed.guild_id == campaign.guild_id and fixed.campaign_id == campaign.id)
+
+
 def main() -> int:
     for test in (
         test_traits,
@@ -1341,6 +1539,8 @@ def main() -> int:
         test_roles_emerge,
         test_entity_view,
         test_affordances,
+        test_goals,
+        test_entity_round_trip,
         test_end_to_end,
     ):
         test()

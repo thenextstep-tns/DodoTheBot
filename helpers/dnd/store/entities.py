@@ -15,6 +15,13 @@ from helpers.dnd.store.repo import ScopedRepo
 from helpers.dnd.world.entity import KIND_NPC, KIND_PC, TIERS, Entity
 
 
+# Fields a caller may not write through :meth:`EntityRepo.save`. The scope owns
+# the tenancy keys — a wholesale overwrite is how a stale in-memory copy silently
+# reparents a record — and ``legacy_id`` belongs to the importer, which sets it
+# once at creation for idempotency.
+NOT_THE_CALLERS = frozenset({"_id", "guild_id", "campaign_id", "legacy_id"})
+
+
 class EntityRepo(ScopedRepo):
     """Entities in one campaign."""
 
@@ -100,16 +107,17 @@ class EntityRepo(ScopedRepo):
         ``campaign_id`` are the scope's to set, never the caller's, and a
         wholesale overwrite is how a stale in-memory copy silently reparents a
         record.
+
+        Everything the entity carries is written **except** the fields listed in
+        :data:`NOT_THE_CALLERS`. This used to be the other way round — a list of
+        fields to save — and a list like that rots silently: ``standing`` was
+        added for stakes and never added here, so the inspector's control posted,
+        the endpoint set it, this method dropped it, and the panel said "Saved."
+        for months. An exclusion list fails the safe way: a new field is
+        persisted unless somebody says otherwise.
         """
         doc = entity.to_doc()
-        patch = {
-            key: doc[key]
-            for key in (
-                "kind", "tier", "owner_id", "identity", "stats", "conditions",
-                "inventory", "position", "importance", "traits", "inheritance",
-                "needs", "retired",
-            )
-        }
+        patch = {k: v for k, v in doc.items() if k not in NOT_THE_CALLERS}
         return self.update_by_id(entity.id, patch)
 
     def set_tier(self, entity_id: Any, tier: str) -> int:

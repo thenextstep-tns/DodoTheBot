@@ -26,8 +26,10 @@ from helpers.dnd import rules
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
+from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind.needs import NEED_LABELS
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT, TRAIT_LABELS
+from helpers.dnd.world.goal import KIND_LABELS as GOAL_KIND_LABELS, KINDS as GOAL_KINDS
 from helpers.dnd.world.knowledge import KINDS
 from helpers.dnd.world.memory import TIER_IMPRINT, TIER_LONG, TIER_MID, TIER_WORKING
 from web.dnd import access
@@ -616,6 +618,31 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       if (data.ok) location.reload();   // the meters and the read-line follow
     }});
   }});
+  // Goals: the one part of a mind the panel is *meant* to author.
+  const goalAdd = document.getElementById("goaladd");
+  if (goalAdd) {{
+    goalAdd.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/entity-goals`, {{
+        campaign_id: cid, entity_id: eid, action: "add",
+        kind: document.getElementById("goalkind").value,
+        text: document.getElementById("goaltext").value,
+        subject_id: document.getElementById("goalsubject").value,
+        priority: document.getElementById("goalpriority").value,
+        deadline_days: document.getElementById("goaldeadline").value,
+      }});
+      if (data.ok) location.reload();
+    }});
+  }}
+  document.querySelectorAll(".dndgoal-advance, .dndgoal-drop").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const drop = el.classList.contains("dndgoal-drop");
+      const data = await post(`/api/guild/${{gid}}/dnd/entity-goals`, {{
+        campaign_id: cid, entity_id: eid, key: el.dataset.key,
+        action: drop ? "drop" : "advance", amount: 0.25,
+      }});
+      if (data.ok) location.reload();
+    }});
+  }});
   document.querySelectorAll(".canon-accept, .canon-reject").forEach((el) => {{
     el.addEventListener("click", async () => {{
       const action = el.classList.contains("canon-accept") ? "accept" : "reject";
@@ -882,6 +909,80 @@ def _memory_card(entity, memory, explain) -> str:
 </td><td>{fields}</td></tr>"""
 
 
+def _goals_section(entity, store, tuning, world_time: int) -> str:
+    """What they are trying to bring about, and a way to author it.
+
+    Deliberately open rather than folded behind a warning the way disposition
+    is. Who somebody *is* should move through what happens to them; what they
+    are currently *after* is plot, and plot is the GM's to write.
+    """
+    goal_tuning = tuning.goals()
+    everything = minds.all_goals_of(entity)
+    live = {g.key for g in minds.goals_of(entity, world_time, tuning)}
+
+    rows = ""
+    for goal in sorted(everything, key=lambda g: (g.status != "open", g.key)):
+        pressing = goal_math.pressure(goal, world_time, goal_tuning)
+        caring = goal_math.faded(goal, world_time, goal_tuning)
+        when = ""
+        if goal.deadline is not None:
+            days = (goal.deadline - world_time) / 1440
+            when = (f"{days:.1f} days left" if days >= 0 else f"{-days:.1f} days overdue")
+        state = goal.status
+        if state == "open" and goal.key not in live:
+            # Carried, but not currently in contention: faded past caring, or
+            # squeezed out by the cap. Saying which is the whole point of showing
+            # it at all — otherwise a goal that quietly stopped mattering looks
+            # identical to one that never existed.
+            state = "set aside"
+        controls = "" if goal.status != "open" else (
+            f'<button class="dndgoal-advance ghost" data-key="{_escape(goal.key)}">+25%</button> '
+            f'<button class="dndgoal-drop ghost" data-key="{_escape(goal.key)}">Give up</button>'
+        )
+        rows += f"""
+<tr>
+  <td><b>{_escape(GOAL_KIND_LABELS.get(goal.kind, goal.kind))}</b>
+    <div>{_escape(goal.text) or '<span class="muted">no words yet</span>'}</div>
+    <div class="muted small">{_escape(state)} · from {_escape(goal.origin)}
+      {(" · " + _escape(when)) if when else ""}</div></td>
+  <td>{_meter(caring)}<span class="muted small">cares {caring:.2f}</span></td>
+  <td>{_meter(goal.progress)}<span class="muted small">{int(goal.progress * 100)}% done</span></td>
+  <td>{_meter(pressing)}<span class="muted small">pressing {pressing:.2f}</span></td>
+  <td>{controls}</td>
+</tr>"""
+    if not rows:
+        rows = ('<tr><td class="muted" colspan="5">Wants nothing in particular. '
+                'An NPC with no goal only ever reacts.</td></tr>')
+
+    kinds = "".join(
+        f'<option value="{k}">{_escape(GOAL_KIND_LABELS[k])}</option>'
+        for k in GOAL_KINDS
+    )
+    people = "".join(
+        f'<option value="{e.id}">{_escape(e.identity.name)}</option>'
+        for e in store.entities.list(limit=200) if e.id != entity.id
+    )
+    return f"""
+  <h2>What they want</h2>
+  <p class="muted small">Needs are what a body is short of; a goal is what a
+  <i>person</i> is after, and it outlives the scene it was formed in. Each kind
+  names the actions that serve it, so the engine can weigh a choice against a
+  goal without planning a route to it. <b>Wanting fades</b> when nothing moves —
+  the clock runs from the last time the goal advanced, and every part of that is
+  tunable under Goals.</p>
+  <table class="ranktable"><tbody>{rows}</tbody></table>
+  <div class="paramrow goaladd">
+    <select id="goalkind">{kinds}</select>
+    <input type="text" id="goaltext" placeholder="what they are after, in your words" maxlength="200">
+    <select id="goalsubject"><option value="">nobody in particular</option>{people}</select>
+    <input type="number" id="goalpriority" step="0.05" min="0" max="1" value="0.60"
+           title="how much they care">
+    <input type="number" id="goaldeadline" step="1" min="0" placeholder="days"
+           title="days until it stops being worth anything (optional)">
+    <button id="goaladd">Give them this goal</button>
+  </div>"""
+
+
 def _inspector_html(bot, guild, campaign, entity, store) -> str:
     """Everything inside one head: disposition, body, memory, beliefs, relations.
 
@@ -1042,6 +1143,8 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
   <p class="muted small">Urgency is cubed, so a need is barely felt until it suddenly isn't.</p>
   <table class="ranktable"><tbody>{need_rows}</tbody></table>
   <p>{impulse_html}</p>
+
+  {_goals_section(entity, store, tuning, world_time)}
 
   <h2>Memory</h2>
   <p class="muted small">Each memory shows how clear every part of it still is.

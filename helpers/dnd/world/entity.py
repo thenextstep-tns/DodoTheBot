@@ -132,6 +132,12 @@ class Entity:
     inheritance: dict | None = None
     needs: dict | None = None
 
+    # What they are trying to bring about (``world/goal.py``). Embedded rather
+    # than given a collection because goals are bounded by a tunable and are
+    # never read without the person whose goals they are — the opposite of
+    # memory and beliefs, which is why those got collections and this did not.
+    goals: list | None = None
+
     retired: bool = False
     legacy_id: Any = None                # set by the importer, for idempotency
 
@@ -157,6 +163,7 @@ class Entity:
             "traits": self.traits,
             "inheritance": self.inheritance,
             "needs": self.needs,
+            "goals": list(self.goals) if self.goals else [],
             "retired": bool(self.retired),
         }
         if self.legacy_id is not None:
@@ -184,6 +191,7 @@ class Entity:
             traits=doc.get("traits"),
             inheritance=doc.get("inheritance"),
             needs=doc.get("needs"),
+            goals=list(doc.get("goals") or []) or None,
             retired=bool(doc.get("retired", False)),
             legacy_id=doc.get("legacy_id"),
         )

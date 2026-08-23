@@ -30,6 +30,10 @@ from helpers.dnd.world.entity import (  # noqa: F401
     Position,
 )
 from helpers.dnd.world.event import WorldEvent, event_seed  # noqa: F401
+from helpers.dnd.world.goal import (  # noqa: F401
+    KINDS as GOAL_KINDS,
+    Goal,
+)
 from helpers.dnd.world.scene import Scene  # noqa: F401
 from helpers.dnd.world.view import (  # noqa: F401
     EntityView,

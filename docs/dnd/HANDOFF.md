@@ -23,7 +23,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P1 | ✅ live | Four-tier knowledge with overrides, budgeted retrieval, beliefs, fog of war, canon queue — **plus full separation from the rest of the bot** |
 | P2 | ✅ live | Traits + inheritance, needs, memory that forgets like people do, relationships, NPCs, the entity inspector, tunables in two layers |
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
-| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–2 of 6 built |
+| P3 | ◑ **three of four** | World tick ✅, faction clocks ✅, rumour propagation ✅. **The decision engine is all that remains** — steps 1–3a of 6 built |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -38,6 +38,7 @@ the shape of them is the most useful thing in this file:
 | Every PC was immune to every event | `importance` (a CPU knob, pinned at 1.0 for PCs) was read as standing |
 | Disposition could insulate someone past their own station | Nothing asserted the documented ceiling |
 | Nothing ever left the `working` memory tier | `consolidate_scene` was written and called from nowhere |
+| **`standing` had never been persisted** — the inspector control posted, the endpoint set it, `EntityRepo.save` dropped it, the panel said "Saved." | `save()` named the fields it wrote, and `standing` was added for stakes without being added there. Nothing asserted a field survives a round trip |
 | A typo in any numeric tunable silently reset it to inherited, flashing "Saved." | The panel suite asserts on HTML; nothing types into a control. An unparseable number reads back as `""`, and `""` is this API's *clear the override* |
 
 **The human verdict on P0–P2: the mechanics are there and it is not playable.**
@@ -53,7 +54,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**433 tests** across five suites, all passing:
+**480 tests** across five suites, all passing:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py
@@ -187,9 +188,32 @@ checkable on its own:
      are arguments to `situation_for` that nothing passes; taking and using ride
      on what people are carrying, which is real today. The seam is there so a
      scene contents model lands as a fill.
-3. **Goals on `Entity`** plus **behaviour packs**. The roadmap says packs come
-   from the global KB — note that the prior tables are still Python
-   (§7), so decide deliberately whether packs repeat that mistake.
+3a. **Goals** — ✅ **built** (`world/goal.py`, `mind/goals.py`, `minds.add_goal`
+   and friends, panel group *Goals*, and an editor in the inspector under
+   *What they want*).
+   * **A goal names the verbs that serve it** (`SERVED_BY`). That table is the
+     cheap half of GOAP and the reason §1 could rule search out: scoring a
+     candidate against a goal is a lookup and a multiply. A test asserts every
+     verb in it is one `rules.ruleset.AFFORDANCES` can actually grant, so a goal
+     can never become unreachable.
+   * Three things happen to an untouched goal, each switchable off: it **fades**
+     (from when it last *moved*, so pursuit costs nothing), a **deadline
+     presses** convexly inside its window, and **progress raises** what the next
+     step is worth. `pressure()` is bounded 0..1 like every scorer term.
+   * The cap **refuses** rather than evicting — which ambition to drop is not a
+     decision to make behind a GM's back.
+   * Goals are embedded on the entity, not given a collection: bounded, and
+     never read without the person. Finished and abandoned ones stay on the
+     record; what somebody gave up on is a fact about them.
+   * Goals are the one part of a mind the panel is *meant* to author — disposition
+     is fenced behind a warning, plot is the GM's job.
+
+3b. **Behaviour packs** — still to do, and the open question is unchanged: the
+   roadmap says packs come from the global KB, the prior tables are still Python
+   (§7), and `helpers/dnd/data/` does not exist yet. Note that the KB's `Fact`
+   shape is prose + tags built for retrieval, so packs would either be a JSON
+   blob stuffed in `text` or a new store. **Decide that deliberately** before
+   writing any of it.
 4. **`mind/decide.py`** — perceive → appraise → propose → score → select, pure
    and seeded. Eight utility terms, each bounded to −1…1 before weighting.
    **Traits modulate the terms, never the weights** (§6 of the spec) — per-entity

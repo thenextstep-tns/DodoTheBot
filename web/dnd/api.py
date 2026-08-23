@@ -30,7 +30,9 @@ from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
+from helpers.dnd import minds
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT
+from helpers.dnd.world import goal as goal_model
 from helpers.dnd.world.knowledge import KINDS, Fact
 from web.dnd import access
 
@@ -295,6 +297,110 @@ async def api_dnd_tune_server(request: web.Request):
 # --------------------------------------------------------------------------- #
 #  Entity traits
 # --------------------------------------------------------------------------- #
+async def api_dnd_entity_goals(request: web.Request):
+    """Add, advance or drop one goal on one entity.
+
+    ``{campaign_id, entity_id, action, ...}`` where action is ``add`` (with
+    ``kind``, ``text``, ``priority``, ``subject_id``, ``deadline_days``),
+    ``advance`` (``key``, ``amount``) or ``drop`` (``key``).
+
+    Goals are the one part of a mind a GM is *supposed* to author. Disposition is
+    who somebody is and is deliberately fenced off behind a warning; what they
+    are currently trying to bring about is plot, and plot is the GM's job.
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    raw_id = str(data.get("entity_id", ""))
+    entity = next(
+        (e for e in store.entities.list(include_retired=True, limit=500)
+         if str(e.id) == raw_id),
+        None,
+    )
+    if entity is None:
+        return _bad("Entity not found.")
+
+    action = str(data.get("action", "")).strip().lower()
+    world_time = campaign.world_time
+    tuning = minds.tuning_for(store, campaign)
+
+    if action == "add":
+        kind = str(data.get("kind", "")).strip().lower()
+        if kind not in goal_model.KINDS:
+            return _bad("Unknown goal kind.")
+        text = str(data.get("text", "")).strip()[:200]
+        try:
+            priority = float(data.get("priority", 0.5))
+        except (TypeError, ValueError):
+            return _bad("Priority must be a number.")
+
+        deadline = None
+        raw_days = data.get("deadline_days")
+        if raw_days not in (None, ""):
+            try:
+                deadline = world_time + int(float(raw_days) * 1440)
+            except (TypeError, ValueError):
+                return _bad("Deadline must be a number of days.")
+
+        subject_id = data.get("subject_id") or None
+        if subject_id:
+            subject = next((e for e in store.entities.list(include_retired=True, limit=500)
+                            if str(e.id) == str(subject_id)), None)
+            if subject is None:
+                return _bad("That person is not in this campaign.")
+            subject_id = subject.id
+
+        goal = minds.add_goal(
+            store, entity, kind, world_time=world_time, text=text,
+            subject_id=subject_id, priority=priority, deadline=deadline,
+            origin=goal_model.ORIGIN_GM, tuning=tuning,
+        )
+        if goal is None:
+            cap = tuning.goals().cap
+            return _bad(
+                f"{entity.identity.name} is already pursuing {cap} things. "
+                "Drop one first, or raise 'Goals at once' under Goals."
+            )
+        await _record_change(
+            request, "dnd_goal", f"{entity.identity.name}.{goal.key}", None, goal.text or kind,
+            f"gave **{entity.identity.name}** a goal: {goal.text or kind}",
+        )
+        return web.json_response({"ok": True, "key": goal.key})
+
+    key = str(data.get("key", ""))
+    if action == "drop":
+        dropped = minds.drop_goal(store, entity, key)
+        if dropped is None:
+            return _bad("No such goal.")
+        await _record_change(
+            request, "dnd_goal", f"{entity.identity.name}.{key}", "open", "dropped",
+            f"**{entity.identity.name}** gave up on: {dropped.text or dropped.kind}",
+        )
+        return web.json_response({"ok": True, "key": key})
+
+    if action == "advance":
+        try:
+            amount = float(data.get("amount", 0.25))
+        except (TypeError, ValueError):
+            return _bad("Amount must be a number.")
+        moved = minds.advance_goal(store, entity, key, amount,
+                                   world_time=world_time, tuning=tuning)
+        if moved is None:
+            return _bad("No such goal.")
+        await _record_change(
+            request, "dnd_goal", f"{entity.identity.name}.{key}", None, moved.progress,
+            f"moved **{entity.identity.name}**'s goal to {int(moved.progress * 100)}%",
+        )
+        return web.json_response({"ok": True, "key": key, "progress": moved.progress,
+                                  "status": moved.status})
+
+    return _bad("Unknown action.")
+
+
 async def api_dnd_entity_traits(request: web.Request):
     """Set one trait axis on one NPC: ``{campaign_id, entity_id, axis, value}``.
 

@@ -17,6 +17,7 @@ from random import Random
 from typing import Any
 
 from helpers.dnd import rules
+from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind import needs as needs_mod
 from helpers.dnd.mind import relationships as rel_mod
 from helpers.dnd.mind import rumour
@@ -24,7 +25,7 @@ from helpers.dnd.mind import stakes
 from helpers.dnd.mind import traits as traits_mod
 from helpers.dnd.mind.memory import consolidate, decay, encode, recall
 from helpers.dnd.mind.memory import values as value_model
-from helpers.dnd.tuning import Tuning
+from helpers.dnd.tuning import DEFAULT_GOALS, Tuning
 from helpers.dnd.world.entity import (
     KIND_NPC,
     TIER_ACTIVE,
@@ -34,6 +35,7 @@ from helpers.dnd.world.entity import (
 from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
+from helpers.dnd.world import goal as goal_model
 from helpers.dnd.world import view as view_model
 from helpers.dnd.rules import ruleset as ruleset_model
 from helpers.dnd.world.memory import TIER_WORKING, Memory
@@ -290,11 +292,119 @@ def view_for(
         traits=entity.traits,
         memories=memories,
         beliefs=beliefs,
+        goals=tuple(goals_of(entity, world_time, tuning)),
         relations=relations,
         identities=identities,
         include=tuple(include),
         perception=perception,
     )
+
+
+# --------------------------------------------------------------------------- #
+#  What somebody is after
+# --------------------------------------------------------------------------- #
+def goals_of(entity: Entity, world_time: int, tuning: Tuning | None = None) -> list:
+    """This entity's live goals, the one they care about most first.
+
+    No store: goals ride on the entity document, the same way needs and traits
+    do. Finished, abandoned, expired and faded-past-caring goals are all left
+    out — :func:`all_goals_of` is what the inspector uses to show those.
+    """
+    view = tuning.goals() if tuning else DEFAULT_GOALS
+    return goal_math.active(goal_model.from_docs(entity.goals), world_time, view)
+
+
+def all_goals_of(entity: Entity) -> list:
+    """Every goal on the record, finished and abandoned ones included. For the
+    inspector, which has to be able to show what someone gave up on."""
+    return goal_model.from_docs(entity.goals)
+
+
+def save_goals(store, entity: Entity, goals) -> Entity:
+    """Write a goal list back. Sorted by key so a document never churns."""
+    entity.goals = goal_model.to_docs(sorted(goals, key=lambda g: g.key)) or None
+    store.entities.save(entity)
+    return entity
+
+
+def add_goal(
+    store,
+    entity: Entity,
+    kind: str,
+    *,
+    world_time: int,
+    text: str = "",
+    subject_id: Any = None,
+    priority: float = 0.5,
+    deadline: int | None = None,
+    origin: str = goal_model.ORIGIN_GM,
+    tuning: Tuning | None = None,
+):
+    """Give somebody something to want.
+
+    Returns the new goal, or ``None`` when they are already carrying as many as
+    the campaign allows — refusing rather than silently evicting, because which
+    ambition to drop is a decision with consequences and not one to make behind
+    a GM's back.
+    """
+    tuning = tuning or tuning_for(store)
+    goal_tuning = tuning.goals()
+    existing = goal_model.from_docs(entity.goals)
+
+    live = [g for g in existing if g.open and not g.expired(world_time)]
+    if goal_tuning.cap > 0 and len(live) >= goal_tuning.cap:
+        return None
+
+    goal = goal_model.Goal(
+        key=goal_model.next_key(existing, kind),
+        kind=kind if kind in goal_model.KINDS else goal_model.ACQUIRE,
+        text=text,
+        subject_id=subject_id,
+        priority=max(0.0, min(1.0, float(priority))),
+        deadline=deadline,
+        origin=origin if origin in goal_model.ORIGINS else goal_model.ORIGIN_GM,
+        created_at=int(world_time),
+        touched_at=int(world_time),
+    )
+    save_goals(store, entity, existing + [goal])
+    return goal
+
+
+def advance_goal(store, entity: Entity, key: str, amount: float, *,
+                 world_time: int, tuning: Tuning | None = None):
+    """Move one goal along. Returns the updated goal, or ``None`` if unknown."""
+    tuning = tuning or tuning_for(store)
+    goal_tuning = tuning.goals()
+
+    goals, updated = goal_model.from_docs(entity.goals), None
+    out = []
+    for goal in goals:
+        if goal.key == key:
+            updated = goal_math.progressed(goal, amount, world_time, goal_tuning)
+            out.append(updated)
+        else:
+            out.append(goal)
+    if updated is None:
+        return None
+    save_goals(store, entity, out)
+    return updated
+
+
+def drop_goal(store, entity: Entity, key: str):
+    """Give up on something. Kept on the record rather than deleted — what
+    somebody abandoned is as much a fact about them as what they finished."""
+    goals, found = goal_model.from_docs(entity.goals), None
+    out = []
+    for goal in goals:
+        if goal.key == key:
+            found = goal_math.abandoned(goal)
+            out.append(found)
+        else:
+            out.append(goal)
+    if found is None:
+        return None
+    save_goals(store, entity, out)
+    return found
 
 
 # --------------------------------------------------------------------------- #

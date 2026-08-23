@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from helpers.dnd.world.belief import Belief
 from helpers.dnd.world.entity import Entity
+from helpers.dnd.world.goal import Goal
 from helpers.dnd.world.memory import Memory
 from helpers.dnd.world.relationship import AXES, Relationship
 
@@ -319,6 +320,11 @@ class EntityView:
     memories: tuple[Recollection, ...] = ()
     others: Mapping[Any, PerceivedEntity] = field(default_factory=_empty_map)
 
+    # Passed through rather than projected: a goal is the entity's own, is frozen
+    # already, and carries nothing its owner cannot see — the same reasoning that
+    # lets `conditions` and `standing` through raw.
+    goals: tuple = ()
+
     # ------------------------------------------------------------------ #
     #  Reading a view
     # ------------------------------------------------------------------ #
@@ -410,6 +416,7 @@ def project(
     traits: Mapping[str, Any] | None = None,
     memories: list[Memory] | tuple = (),
     beliefs: list[Belief] | tuple = (),
+    goals: tuple = (),
     relations: list[Relationship] | tuple = (),
     identities: Mapping[Any, Mapping] | None = None,
     include: tuple = (),
@@ -501,5 +508,6 @@ def project(
         needs=MappingProxyType(need_doc),
         beliefs=tuple(convictions),
         memories=tuple(recalled),
+        goals=tuple(goals),
         others=MappingProxyType(others),
     )
