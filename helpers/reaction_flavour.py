@@ -28,6 +28,8 @@ from __future__ import annotations
 import re
 import zlib
 
+from helpers import reaction_written
+
 # --------------------------------------------------------------------------- #
 #  What kind of thing is this?
 # --------------------------------------------------------------------------- #
@@ -607,6 +609,10 @@ def for_cell(row: dict, class_key: str) -> dict:
     learn, and learning them is the game.
     """
     char, name = row["char"], row.get("name", "thing")
+    line = reaction_written.written_for(char, class_key)
+    if line is not None:
+        text, stats = line
+        return {"text": text, "stats": dict(stats), "source": "written"}
     if (char, class_key) in SPECIFIC:
         text, stats = SPECIFIC[(char, class_key)]
         return {"text": text, "stats": dict(stats), "source": "written"}
@@ -619,12 +625,12 @@ def for_cell(row: dict, class_key: str) -> dict:
     text, stats = options[index]
     thing = _thing(name)
     return {"text": text.format(thing=thing, a=_article(thing), A=_article(thing).capitalize()),
-            "stats": dict(stats), "source": "written"}
+            "stats": dict(stats), "source": "unwritten"}
 
 
 def coverage_report(rows: list[dict], classes: list[str]) -> dict:
     """How many cells the written lines actually reach, and via which layer."""
-    counts = {"written": 0, "empty": 0, "specific": len(SPECIFIC)}
+    counts = {"written": 0, "unwritten": 0, "empty": 0}
     tags: dict[str, int] = {}
     for row in rows:
         tags[tag_for(row.get("name", ""))] = tags.get(tag_for(row.get("name", "")), 0) + 1

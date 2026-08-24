@@ -9,6 +9,11 @@ _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2]))
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))
 
 from helpers import emoji_catalogue, reactions
+
+
+def routes_classes():
+    from web import routes
+    return routes._scrap_classes()
 from scrap_lab import FakeCollection, FakeGuild   # the in-memory store the lab uses
 
 rows = emoji_catalogue.load()
@@ -47,15 +52,32 @@ GUILD, OTHER = 1, 2
 CELL = ("👖", "loaf")
 
 seeded = reactions.grid(GUILD, ["👖"], ["loaf"])["👖"]["loaf"]
-assert seeded["source"] == "seed" and seeded["text"].startswith("Sits on them")
-print("an untouched cell answers from the shipped seed")
+assert seeded["source"] == "written" and seeded["text"].startswith("Sits on them")
+print("an untouched cell answers from what somebody wrote for it")
 
 # Everything the seed does not name still answers, from the written flavour
 # layer, because a blank cell in a fight is a cat doing nothing at all.
 blankest = reactions.grid(GUILD, ["🪗"], ["alley"])["🪗"]["alley"]
-assert blankest["source"] == "written" and blankest["text"], blankest
+assert blankest["source"] == "unwritten" and blankest["text"], blankest
 assert "accordion" in blankest["text"], blankest["text"]
-print("an object nobody wrote about still answers, and knows its own name")
+print("an object nobody has written yet still answers, and says so")
+
+# Hand-written cells are marked apart from stand-ins, so the panel can show what
+# still needs a person rather than reporting the grid as finished.
+from helpers import reaction_written  # noqa: E402
+
+for _char, _lines in reaction_written.WRITTEN.items():
+    assert set(_lines) == {c["key"] for c in routes_classes()}, _char
+    for _text, _stats in _lines.values():
+        assert _text and _text[-1] == ".", _text
+        assert len(_text) < 90, _text
+        assert "leaves the room" not in _text.lower(), "a cat cannot leave a fight: " + _text
+        assert set(_stats) <= set(("strength", "agility", "intellect", "charm")), _stats
+        assert any(_stats.values()), "a reaction with no stat change does nothing: " + _text
+written = reactions.grid(GUILD, ["🐟"], ["chonk"])["🐟"]["chonk"]
+assert written["source"] == "written" and "next fish" in written["text"], written
+print("all %d written objects carry a line for every class, all thirteen"
+      % len(reaction_written.WRITTEN))
 
 reactions.save(reactions.GLOBAL, *CELL, "Everyone's default trousers line.", {"strength": 1})
 assert reactions.grid(GUILD, ["👖"], ["loaf"])["👖"]["loaf"]["source"] == "global"
@@ -76,7 +98,7 @@ print("clearing an override returns the layer underneath, not a blank cell")
 
 # Stat numbers with no words next to them are not a cell.
 blank = reactions.save(GUILD, "🥒", "ghost", "   ", {"charm": 3})
-assert blank["cleared"] is True and blank["source"] == "seed"
+assert blank["cleared"] is True and blank["source"] == "written"
 print("a description-less stat change is treated as a clear")
 
 # Bad stat keys and non-numbers never reach the database.
