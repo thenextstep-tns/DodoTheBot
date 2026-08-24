@@ -784,7 +784,9 @@ class Pumpkin(commands.Cog, name="pumpkin"):
         return total_spent_pot
 
 
-    @commands.command(name="fight", aliases=["pt"])
+    # Renamed from "fight", which the cat scrap now owns. The "pt" alias is
+    # kept because it is what people actually type.
+    @commands.command(name="pumpkinfight", aliases=["pt", "pumpkintournament"])
     @checks.not_blacklisted()
     async def pumpkintournament(self, context: Context):
         """

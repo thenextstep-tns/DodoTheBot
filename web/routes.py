@@ -36,6 +36,8 @@ from helpers.chat import triggers as chat_triggers
 from helpers.dnd import registry as dnd_registry
 from helpers import tribes as tribe_rules
 from helpers import trial_ranks, trial_image
+from helpers import reactions, scrap
+from web import reactions_page
 from helpers.visibility import LEVEL_ADMIN, LEVEL_OWNER, LEVEL_VISIBLE, VALID_LEVELS
 from web import auth, charts
 
@@ -282,6 +284,7 @@ def _guild_nav(guild, scope: str, current: str) -> str:
     links = [("settings", "⚙️ Settings", panel_access.SCOPE_CONFIG),
              ("events", "⚡ Events", panel_access.SCOPE_CONFIG),
              ("trials", "🏆 Trial ranks", panel_access.SCOPE_CONFIG),
+             ("reactions", "🐈 Reactions", panel_access.SCOPE_CONFIG),
              # Tabletop is stats-scoped because players (not just admins) need it;
              # which campaigns they actually see is decided per campaign.
              ("tabletop", "🎲 Tabletop", panel_access.SCOPE_STATS),
@@ -315,7 +318,7 @@ def _page(title: str, body: str, *, scope: str = panel_access.SCOPE_OWNER,
 <header>
 <a href="/" class="brand">🦤 Dodo Control Panel</a>
 <nav>{_guild_nav(guild, scope, current)}
-{'<a href="/lang" class="navtool">🔤 Strings</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
+{'<a href="/lang" class="navtool">🔤 Strings</a><a href="/scrap" class="navtool">🐈 Scrap lab</a>' if scope == panel_access.SCOPE_OWNER else ""}<a href="/logout" class="logout">Log out</a></nav>
 </header>
 <main>{body}</main>
 <script src="/static/panel.js?v={_ASSET_VER}"></script>
@@ -332,6 +335,8 @@ def _nav_chips(guild_id: int, scope: str, current: str) -> str:
         links.append((f"/guild/{guild_id}/settings", "⚙️ Settings"))
     if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "events":
         links.append((f"/guild/{guild_id}/events", "⚡ Events"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "reactions":
+        links.append((f"/guild/{guild_id}/reactions", "🐈 Reactions"))
     if panel_access.at_least(scope, panel_access.SCOPE_STATS) and current != "stats":
         links.append((f"/guild/{guild_id}/stats", "📊 Stats"))
     # Tribes is bot-owner tooling (the rule engine can hand out any role), same
@@ -3356,6 +3361,249 @@ async def guild_stats_page(request: web.Request):
                  scope=scope, guild=guild, current="stats")
 
 
+
+
+# --------------------------------------------------------------------------- #
+#  Scrap lab — the cat-fight balance sandbox (bot owner only)
+# --------------------------------------------------------------------------- #
+def _scrap_reference() -> str:
+    """The rules, rendered from the engine itself so they cannot go stale."""
+    m = scrap.mechanics()
+
+    attrs = "".join(
+        f'<tr><td><b>{html.escape(a["short"])}</b></td>'
+        f'<td>{html.escape(a["key"])}</td>'
+        f'<td class="muted">{html.escape(a["job"])}</td></tr>'
+        for a in m["attributes"])
+
+    rolled = {v: k for k, v in m["legacy"].items() if k in ("Chonk", "Zoomies Pro", "Smarty Pants", "Aww summoner")}
+    trained_tag = "<span class='scraptag warm'>trained into</span>"
+    ult_tag = " <span class='scraptag warm'>ULT</span>"
+    classes = "".join(
+        f'<div class="scrapclass">'
+        f'<div class="scrapclasshead"><span class="scrapemoji">{c["emoji"]}</span>'
+        f'<b>{html.escape(c["name"])}</b><span class="scraptag">{html.escape(c["label"])}</span>'
+        f'{trained_tag if not c["rollable"] else ""}</div>'
+        f'<div class="muted small">{html.escape(c["role"])}'
+        f'{" · from " + html.escape(rolled[c["key"]]) if c["key"] in rolled else ""}</div>'
+        f'<p>{html.escape(c["perk"])}</p>'
+        f'<p class="muted small scrapwhy">{html.escape(c["why"])}</p></div>'
+        for c in m["classes"])
+
+    props = "".join(
+        f'<tr><td>{p["emoji"]} <b>{html.escape(p["name"])}</b>'
+        f'{ult_tag if p["is_ult"] else ""}</td>'
+        f'<td><span class="scraptag">{html.escape(p["resist_short"])}</span></td>'
+        f'<td>{html.escape(p["summary"])}</td>'
+        f'<td class="muted">{html.escape(p["dulled"])}</td></tr>'
+        for p in m["props"])
+
+    prefight = "".join(
+        f'<div class="scrapclass"><div class="scrapclasshead">'
+        f'<span class="scrapemoji">{f["emoji"]}</span><b>{html.escape(f["name"])}</b></div>'
+        f'<p>{html.escape(f["summary"])}</p></div>'
+        for f in m["prefight"])
+
+    return f"""
+    <section class="scrapref">
+      <h2 class="panelhead">Attributes</h2>
+      <p class="muted small">Damage comes from a cat's <b>highest</b> attribute, whatever it is.
+      Strength buys a body, not a monopoly on hurting people.</p>
+      <table class="acttable"><tbody>{attrs}</tbody></table>
+
+      <h2 class="panelhead">Classes</h2>
+      <p class="muted small">A class is a cat's two governing attributes <b>in order</b> —
+      derived, never stored, so every pet in the database already has one and training shifts it.
+      Which attribute leads picks the perk family; the second one picks the twist. Only four of
+      the twelve ordered pairs can be rolled; the rest, and the Alley Cat, are trained into.</p>
+      <div class="scrapclasses">{classes}</div>
+
+      <h2 class="panelhead">Props</h2>
+      <p class="muted small">Resistance <b>dulls</b>, it never negates: at the resist cap an effect
+      still lands at {int((1 - scrap.TUNING["max_dull"]) * 100)}% strength, so no prop is ever a dead play.</p>
+      <table class="acttable"><thead><tr><th>Prop</th><th>Resisted by</th><th>Full effect</th>
+      <th>Dulled</th></tr></thead><tbody>{props}</tbody></table>
+
+      <h2 class="panelhead">Before the fight</h2>
+      <div class="scrapclasses">{prefight}</div>
+    </section>"""
+
+
+def _scrap_html() -> str:
+    tuning = "".join(
+        f'<label class="scraptune"><span>{html.escape(key)}</span>'
+        f'<input type="number" step="any" data-tune="{html.escape(key)}" value="{value}"></label>'
+        for key, value in scrap.TUNING.items())
+    options = "".join(f'<option value="{c.key}">{c.emoji} {html.escape(c.name)}</option>' for c in scrap.CLASSES)
+    return f"""
+    <div class="scrappage">
+      <div class="panelhead"><h1>🐈 Scrap lab</h1></div>
+      <div class="explain"><p>The cat-fight engine, run without Discord. Same code the command will
+      use — if this and a real fight ever disagree, one of them is lying.</p></div>
+
+      <div class="scraparena">
+        <section class="scrapside" data-side="A">
+          <h2 class="panelhead">Side A</h2>
+          <div class="scraproster" data-roster="A"></div>
+          <div class="scrapadd">
+            <select data-preset="A"><option value="">Add a cat…</option>{options}</select>
+            <button class="ghost" data-addblank="A">Blank</button>
+          </div>
+          <label class="scrapprops">Props
+            <select data-props="A">
+              <option value="">None</option><option value="random" selected>Random</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="scrapside" data-side="B">
+          <h2 class="panelhead">Side B</h2>
+          <div class="scraproster" data-roster="B"></div>
+          <div class="scrapadd">
+            <select data-preset="B"><option value="">Add a cat…</option>{options}</select>
+            <button class="ghost" data-addblank="B">Blank</button>
+          </div>
+          <label class="scrapprops">Props
+            <select data-props="B">
+              <option value="">None</option><option value="random" selected>Random</option>
+            </select>
+          </label>
+        </section>
+      </div>
+
+      <div class="sandbox">
+        <div class="sandboxrow">
+          <button id="scraprun">Run a fight</button>
+          <button id="scrapbatch" class="ghost">Run 400 and report win rate</button>
+          <label class="scrapseed">Seed <input id="scrapseed" type="number" value="7"></label>
+          <span class="muted small" id="scrapstatus"></span>
+        </div>
+        <div id="scrapout" class="scrapout"></div>
+      </div>
+
+      <details class="scraptuning">
+        <summary>Tuning — every number the fight touches ({len(scrap.TUNING)})</summary>
+        <p class="muted small">Edits apply to the next run only. Nothing here is saved;
+        when a number is right, move it into the panel parameters.</p>
+        <div class="scraptunes">{tuning}</div>
+        <button class="ghost" id="scraptunereset">Reset to defaults</button>
+      </details>
+
+      {_scrap_reference()}
+    </div>"""
+
+
+@require_owner
+async def scrap_page(request: web.Request):
+    return _page("Scrap lab", _scrap_html())
+
+
+@require_owner
+async def api_scrap_simulate(request: web.Request):
+    """Run the fight engine on posted rosters and hand back the round log.
+
+    Body: {a: [cat...], b: [cat...], props: {A, B}, seed, tuning: {}, batch: int}.
+    A batch run returns win rates instead of a log — same engine, many seeds,
+    which is the only honest way to look at balance.
+    """
+    data = await request.json()
+    side_a, side_b = data.get("a") or [], data.get("b") or []
+    if not side_a or not side_b:
+        return _bad("Both sides need at least one cat.")
+    roster_max = int(scrap.TUNING["roster_max"])
+    if len(side_a) > roster_max or len(side_b) > roster_max:
+        return _bad(f"A side cannot field more than {roster_max} cats.")
+
+    tuning = {k: float(v) for k, v in (data.get("tuning") or {}).items() if v not in ("", None)}
+    props = data.get("props") or {}
+    batch = int(data.get("batch") or 0)
+
+    if batch:
+        batch = max(1, min(batch, 2000))
+        tally = {"A": 0, "B": 0, "draw": 0}
+        rounds_used = 0
+        for seed in range(batch):
+            result = scrap.simulate(side_a, side_b, props=props, seed=seed, tuning=tuning)
+            tally[result["winner"] or "draw"] += 1
+            rounds_used += len(result["rounds"])
+        return web.json_response({"ok": True, "batch": batch, "tally": tally,
+                                  "avg_rounds": round(rounds_used / batch, 2)})
+
+    seed = data.get("seed")
+    result = scrap.simulate(side_a, side_b, props=props,
+                            seed=int(seed) if seed not in ("", None) else None, tuning=tuning)
+    result["ok"] = True
+    result["prefight"] = {
+        cat.get("name") or "cat": {"taunt": scrap.taunt_odds(cat, tuning), "psps": scrap.psps_odds(cat, tuning)}
+        for cat in side_a + side_b
+    }
+    return web.json_response(result)
+
+
+
+
+# --------------------------------------------------------------------------- #
+#  Reaction grid — what each class of cat does with each object
+# --------------------------------------------------------------------------- #
+def _scrap_classes() -> list[dict]:
+    """The columns: every class, in the engine's own order."""
+    return [{"key": c.key, "name": c.name, "emoji": c.emoji, "label": c.label,
+             "perk": c.temperament}
+            for c in scrap.CLASSES]
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def guild_reactions_page(request: web.Request):
+    guild, scope = request["guild"], request["scope"]
+    params = {"group": (request.query.get("group") or "").strip(),
+              "q": (request.query.get("q") or "").strip()}
+    try:
+        page = max(1, int(request.query.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    rows = reactions.catalogue(guild)
+    groups = list(dict.fromkeys(row["group"] for row in rows))
+    if params["group"]:
+        rows = [r for r in rows if r["group"] == params["group"]]
+    if params["q"]:
+        needle = params["q"].casefold()
+        rows = [r for r in rows if needle in r["name"].casefold() or needle == r["char"]]
+
+    total = len(rows)
+    pages = max(1, -(-total // reactions_page.PER_PAGE))
+    page = min(page, pages)
+    start = (page - 1) * reactions_page.PER_PAGE
+    visible = rows[start:start + reactions_page.PER_PAGE]
+
+    classes = _scrap_classes()
+    grid = reactions.grid(guild.id, [r["char"] for r in visible], [c["key"] for c in classes])
+    coverage = reactions.coverage(guild.id, len(reactions.catalogue(guild)), len(classes))
+
+    body = reactions_page.render(guild, classes, visible, grid, groups,
+                                 params, page, pages, total, coverage)
+    return _page(f"{guild.name} · reactions", body, scope=scope, guild=guild, current="reactions")
+
+
+@require_scope(panel_access.SCOPE_CONFIG)
+async def api_guild_reaction(request: web.Request):
+    """Write one cell for this guild. Body: {emoji, cls, text, stats}."""
+    guild = request["guild"]
+    data = await request.json()
+    emoji, cls = (data.get("emoji") or "").strip(), (data.get("cls") or "").strip()
+    if not emoji or cls not in {c.key for c in scrap.CLASSES}:
+        return _bad("That is not a cell.")
+    text = (data.get("text") or "").strip()
+    if len(text) > 160:
+        return _bad("Keep it to 160 characters. It has to fit in a fight log.")
+
+    result = reactions.save(guild.id, emoji, cls, text, data.get("stats") or {}, request.get("uid"))
+    await _record_change(request, audit_log.KIND_SETTING, f"reaction {emoji}/{cls}",
+                         None, "cleared" if result["cleared"] else text,
+                         f"Reaction for {emoji} {'cleared' if result['cleared'] else 'set'} for {cls}")
+    return web.json_response({"ok": True, **result})
+
+
 @require_owner
 async def lang_page(request: web.Request):
     return _page("Strings", _lang_html(request.app["bot"]))
@@ -3900,6 +4148,8 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/log", guild_log_page),
             web.get("/guild/{gid}/tribes", guild_tribes_page),
             web.get("/guild/{gid}/trials", guild_trials_page),
+            web.get("/guild/{gid}/reactions", guild_reactions_page),
+            web.post("/api/guild/{gid}/reaction", api_guild_reaction),
             web.get("/r/{gid}/{token}", public_leaderboard),
             web.post("/api/guild/{gid}/trials", api_guild_trials),
             web.get("/guild/{gid}/trials.png", guild_trials_image),
@@ -3912,6 +4162,8 @@ def create_app(bot) -> web.Application:
             web.post("/api/guild/{gid}/chat-trigger", api_guild_chat_trigger),
             web.post("/api/guild/{gid}/access", api_guild_access),
             web.get("/lang", lang_page),
+            web.get("/scrap", scrap_page),
+            web.post("/api/scrap/simulate", api_scrap_simulate),
             web.post("/api/cog", api_cog),
             web.post("/api/guild/{gid}/cog", api_guild_cog),
             web.post("/api/guild/{gid}/cog-level", api_guild_cog_level),

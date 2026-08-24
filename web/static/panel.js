@@ -2323,3 +2323,350 @@ function bindMemberPicker(pick, members) {
     });
   }
 })();
+
+// --- Scrap lab: the cat-fight balance sandbox -----------------------------
+(() => {
+  const page = document.querySelector(".scrappage");
+  if (!page) return;
+
+  const ATTRS = ["strength", "agility", "intellect", "charm"];
+  const SHORT = { strength: "STR", agility: "AGI", intellect: "INT", charm: "CHA" };
+  // The leading attribute, then the second one, name the class — ties breaking
+  // in ATTRS order, exactly what helpers/scrap.classify does. Kept in step so
+  // the card never disagrees with the fight it is about to run.
+  const GENERALIST = "alley";
+  const CLASSES = [
+    { key: "pouncer", name: "Pouncer", emoji: "\u{1F405}", primary: "strength", secondary: "agility" },
+    { key: "loaf", name: "Loaf", emoji: "\u{1F35E}", primary: "strength", secondary: "intellect" },
+    { key: "chonk", name: "Chonk", emoji: "\u{1F408}\u200D\u2B1B", primary: "strength", secondary: "charm" },
+    { key: "ricochet", name: "Ricochet", emoji: "\u{1F3D3}", primary: "agility", secondary: "strength" },
+    { key: "ghost", name: "Ghost", emoji: "\u{1F47B}", primary: "agility", secondary: "intellect" },
+    { key: "gremlin", name: "Zoom Gremlin", emoji: "\u{1F63C}", primary: "agility", secondary: "charm" },
+    { key: "barger", name: "Door Barger", emoji: "\u{1F6AA}", primary: "intellect", secondary: "strength" },
+    { key: "stalker", name: "Shelf Stalker", emoji: "\u{1F5C4}\uFE0F", primary: "intellect", secondary: "agility" },
+    { key: "purrsuader", name: "Purrsuader", emoji: "\u{1F63B}", primary: "intellect", secondary: "charm" },
+    { key: "tyrant", name: "Lap Tyrant", emoji: "\u{1F451}", primary: "charm", secondary: "strength" },
+    { key: "weaver", name: "Ankle Weaver", emoji: "\u{1F9F6}", primary: "charm", secondary: "agility" },
+    { key: "dinner", name: "Second Dinner", emoji: "\u{1F37D}\uFE0F", primary: "charm", secondary: "intellect" },
+    { key: GENERALIST, name: "Alley Cat", emoji: "\u{1F43E}", primary: "any", secondary: "any" },
+  ];
+
+  // A typical claim roll: 40 in the primary, 10 in the secondary, 5 elsewhere.
+  // The Alley Cat is the one shape that cannot be written that way.
+  const PRESET = (key) => {
+    const cls = CLASSES.find((c) => c.key === key);
+    if (cls.key === GENERALIST) {
+      return { name: cls.name, strength: 20, agility: 20, intellect: 20, charm: 20, level: 1 };
+    }
+    const stats = { strength: 5, agility: 5, intellect: 5, charm: 5 };
+    stats[cls.primary] = 40;
+    stats[cls.secondary] = 10;
+    return { name: cls.name, ...stats, level: 1 };
+  };
+
+  // Read the spread off the tuning panel, so the label still agrees with the
+  // engine after you have moved that number.
+  const spread = () => {
+    const input = page.querySelector("[data-tune=generalist_spread]");
+    const value = input ? Number(input.value) : NaN;
+    return Number.isFinite(value) ? value : 8;
+  };
+
+  const classify = (stats) => {
+    const values = ATTRS.map((a) => Number(stats[a]) || 0);
+    if (Math.max(...values) - Math.min(...values) <= spread()) {
+      return CLASSES.find((c) => c.key === GENERALIST);
+    }
+    const ranked = ATTRS.slice().sort((a, b) =>
+      (Number(stats[b]) || 0) - (Number(stats[a]) || 0) || ATTRS.indexOf(a) - ATTRS.indexOf(b));
+    return CLASSES.find((c) => c.primary === ranked[0] && c.secondary === ranked[1]);
+  };
+
+  const field = (card, name) => card.querySelector("[data-field=" + name + "]");
+
+  const catCard = (cat) => {
+    const card = document.createElement("div");
+    card.className = "scrapcat";
+    card.innerHTML =
+      "<div class=\"scrapcathead\">" +
+      "<input type=\"text\" data-field=\"name\">" +
+      "<span class=\"scrapcatclass\"></span>" +
+      "<button class=\"scrapdrop\" title=\"Remove\">✕</button></div>" +
+      "<div class=\"scrapstats\">" +
+      ATTRS.map((a) => "<label>" + SHORT[a] +
+        "<input type=\"number\" min=\"0\" max=\"99\" data-field=\"" + a + "\"></label>").join("") +
+      "</div>";
+    field(card, "name").value = cat.name;
+    ATTRS.forEach((a) => { field(card, a).value = cat[a]; });
+
+    // The class label is live: it is the whole point that you can watch a cat
+    // change class as you train a stat past its neighbour.
+    const relabel = () => {
+      const stats = {};
+      ATTRS.forEach((a) => { stats[a] = Number(field(card, a).value) || 0; });
+      const cls = classify(stats);
+      const power = Math.max(...ATTRS.map((a) => stats[a]));
+      const hits = cls.key === GENERALIST
+        ? "hits with its average"
+        : "hits with " + SHORT[ATTRS.find((a) => stats[a] === power)];
+      card.querySelector(".scrapcatclass").textContent = cls.emoji + " " + cls.name + " · " + hits;
+    };
+    card.addEventListener("input", relabel);
+    card.querySelector(".scrapdrop").addEventListener("click", () => { card.remove(); });
+    relabel();
+    return card;
+  };
+
+  const roster = (side) => page.querySelector("[data-roster=" + side + "]");
+  const addCat = (side, cat) => roster(side).appendChild(catCard(cat));
+
+  const readSide = (side) => Array.from(roster(side).children).map((card) => {
+    const cat = { name: field(card, "name").value || "cat", level: 1 };
+    ATTRS.forEach((a) => { cat[a] = Number(field(card, a).value) || 0; });
+    return cat;
+  });
+
+  const readTuning = () => {
+    const out = {};
+    page.querySelectorAll("[data-tune]").forEach((input) => { out[input.dataset.tune] = input.value; });
+    return out;
+  };
+
+  const requestBody = (batch) => ({
+    a: readSide("A"),
+    b: readSide("B"),
+    props: {
+      A: page.querySelector("[data-props=A]").value || null,
+      B: page.querySelector("[data-props=B]").value || null,
+    },
+    seed: document.getElementById("scrapseed").value,
+    tuning: readTuning(),
+    batch: batch || 0,
+  });
+
+  ["A", "B"].forEach((side) => {
+    page.querySelector("[data-preset=" + side + "]").addEventListener("change", (event) => {
+      if (!event.target.value) return;
+      addCat(side, PRESET(event.target.value));
+      event.target.value = "";
+    });
+    page.querySelector("[data-addblank=" + side + "]").addEventListener("click", () => {
+      addCat(side, { name: "cat", strength: 10, agility: 10, intellect: 10, charm: 10, level: 1 });
+    });
+  });
+
+  const out = document.getElementById("scrapout");
+  const status = document.getElementById("scrapstatus");
+
+  const bars = (cats) => {
+    const wrap = document.createElement("div");
+    wrap.className = "scrapbars";
+    cats.forEach((cat) => {
+      const el = document.createElement("div");
+      el.className = "scrapbar side" + cat.side + (cat.alive ? "" : " dead");
+      const pct = Math.max(0, Math.round((cat.hp / cat.max_hp) * 100));
+      const tags = (cat.statuses || []).join(", ") + (cat.stacks ? " 🌿x" + cat.stacks : "");
+      el.innerHTML =
+        "<div class=\"scrapbarname\"><span></span><span></span></div>" +
+        "<div class=\"scraphp\"><i style=\"width:" + pct + "%\"></i></div>";
+      el.querySelector(".scrapbarname span:first-child").textContent =
+        cat.emoji + " " + cat.name + (tags.trim() ? " (" + tags.trim() + ")" : "");
+      el.querySelector(".scrapbarname span:last-child").textContent = cat.hp + "/" + cat.max_hp;
+      wrap.appendChild(el);
+    });
+    return wrap;
+  };
+
+  const render = (data) => {
+    out.textContent = "";
+    data.rounds.forEach((round) => {
+      const card = document.createElement("div");
+      card.className = "scraprnd";
+      const head = document.createElement("div");
+      head.className = "scraprndhead";
+      head.textContent = "Round " + round.round + " · charge A " + round.charge.A + " / B " + round.charge.B;
+      card.appendChild(head);
+      card.appendChild(bars(round.cats));
+      const events = document.createElement("div");
+      events.className = "scrapev";
+      round.events.forEach((event) => {
+        const line = document.createElement("span");
+        line.className = "ev-" + event.kind;
+        line.textContent = event.text;
+        events.appendChild(line);
+      });
+      card.appendChild(events);
+      out.appendChild(card);
+    });
+
+    const banner = document.createElement("div");
+    banner.className = "scrapwinner";
+    banner.textContent = data.winner
+      ? "Side " + data.winner + " wins."
+      : "Nobody wins. Both cats lose interest.";
+    const odds = Object.entries(data.prefight || {})
+      .map(([name, o]) => name + ": taunt hooks " + o.taunt.hooked + "%, psps lures " +
+                          o.psps.lured + "% / backfires " + o.psps.backfire + "%")
+      .join(" · ");
+    if (odds) {
+      const line = document.createElement("div");
+      line.className = "scrapodds";
+      line.textContent = odds;
+      banner.appendChild(line);
+    }
+    out.appendChild(banner);
+  };
+
+  document.getElementById("scraprun").addEventListener("click", async () => {
+    status.textContent = "running…";
+    const data = await post("/api/scrap/simulate", requestBody(0));
+    status.textContent = "";
+    if (!data.ok) { flash(data.error || "Failed", false); return; }
+    render(data);
+  });
+
+  // One fight tells you nothing about balance. This is the button that does.
+  document.getElementById("scrapbatch").addEventListener("click", async () => {
+    status.textContent = "running 400 fights…";
+    const data = await post("/api/scrap/simulate", requestBody(400));
+    status.textContent = "";
+    if (!data.ok) { flash(data.error || "Failed", false); return; }
+    out.textContent = "";
+    const banner = document.createElement("div");
+    banner.className = "scrapwinner";
+    const pct = (n) => Math.round((n / data.batch) * 100) + "%";
+    banner.textContent = "Over " + data.batch + " fights — A " + pct(data.tally.A) +
+      " · B " + pct(data.tally.B) + " · draws " + pct(data.tally.draw) +
+      " · " + data.avg_rounds + " rounds average";
+    out.appendChild(banner);
+  });
+
+  document.getElementById("scraptunereset").addEventListener("click", () => { location.reload(); });
+
+  // Something to look at on arrival, rather than an empty page.
+  addCat("A", PRESET("chonk"));
+  addCat("B", PRESET("ghost"));
+})();
+
+// --- Reaction grid: click a cell, write what the cat does -----------------
+(() => {
+  const page = document.querySelector(".rxpage");
+  if (!page) return;
+
+  const guildId = page.dataset.guild;
+  const editor = page.querySelector(".rxeditor");
+  const textarea = editor.querySelector(".rxtextarea");
+  const note = editor.querySelector(".rxeditornote");
+  const STATS = ["strength", "agility", "intellect", "charm"];
+  let current = null;
+
+  const statInput = (name) => editor.querySelector("[data-stat=" + name + "]");
+
+  const readCell = (cell) => {
+    const stats = {};
+    cell.querySelectorAll(".rxstat").forEach((chip) => {
+      const [label, value] = chip.textContent.trim().split(/\s+/);
+      const key = STATS.find((s) => s.slice(0, 3).toUpperCase() === label);
+      if (key) stats[key] = Number(value);
+    });
+    const text = cell.querySelector(".rxempty") ? "" : cell.querySelector(".rxtext").textContent;
+    return { text: text, stats: stats };
+  };
+
+  const open = (cell) => {
+    current = cell;
+    const row = cell.closest("tr");
+    const object = row.querySelector(".rxname").textContent;
+    const glyph = row.querySelector(".rxglyph");
+    const column = page.querySelectorAll(".rxclass")[[...row.children].indexOf(cell) - 1];
+    editor.querySelector(".rxeditortitle").textContent =
+      (glyph ? glyph.textContent + " " : "") + object + " → " +
+      column.querySelector(".rxclassname").textContent;
+
+    const value = readCell(cell);
+    textarea.value = value.text;
+    STATS.forEach((s) => { statInput(s).value = value.stats[s] || ""; });
+    note.textContent = "";
+    editor.hidden = false;
+    textarea.focus();
+  };
+
+  const close = () => { editor.hidden = true; current = null; };
+
+  // Repaint the cell in place rather than reloading: you are usually writing a
+  // run of cells, and a reload would throw away your place in 1,400 rows.
+  const MARK = { guild: "\u270E", global: "\u25C6", seed: "\u00B7", empty: "" };
+  const repaint = (cell, text, stats, source) => {
+    cell.className = "rxcell rx-" + source;
+    cell.querySelector(".rxmark").textContent = MARK[source] || "";
+    const body = cell.querySelector(".rxtext");
+    body.textContent = "";
+    if (text) {
+      body.textContent = text;
+    } else {
+      const empty = document.createElement("span");
+      empty.className = "rxempty";
+      empty.textContent = "not decided";
+      body.appendChild(empty);
+    }
+    const old = cell.querySelector(".rxstats");
+    if (old) old.remove();
+    const keys = Object.keys(stats);
+    if (keys.length) {
+      const wrap = document.createElement("span");
+      wrap.className = "rxstats";
+      keys.forEach((key) => {
+        const chip = document.createElement("span");
+        chip.className = "rxstat " + (stats[key] > 0 ? "up" : "down");
+        chip.textContent = key.slice(0, 3).toUpperCase() + " " + (stats[key] > 0 ? "+" : "") + stats[key];
+        wrap.appendChild(chip);
+      });
+      cell.appendChild(wrap);
+    }
+  };
+
+  const send = async (text) => {
+    if (!current) return;
+    const stats = {};
+    STATS.forEach((s) => {
+      const value = Number(statInput(s).value);
+      if (statInput(s).value !== "" && value) stats[s] = value;
+    });
+    const cell = current;
+    note.textContent = "saving…";
+    const data = await post("/api/guild/" + guildId + "/reaction", {
+      emoji: cell.dataset.emoji, cls: cell.dataset.cls, text: text, stats: stats,
+    });
+    if (!data.ok) { note.textContent = data.error || "Failed"; return; }
+    repaint(cell, data.text || "", data.stats || {}, data.source || "empty");
+    // A clear does not empty a cell, it uncovers whatever was underneath, so put
+    // that back in the editor rather than leaving the box misleadingly blank.
+    if (current === cell) {
+      textarea.value = data.text || "";
+      STATS.forEach((name) => { statInput(name).value = (data.stats || {})[name] || ""; });
+    }
+    const what = data.cleared ? "cleared \u2713" : "saved \u2713";
+    note.textContent = what;
+    flash(what, true);
+  };
+
+  page.addEventListener("click", (event) => {
+    const cell = event.target.closest(".rxcell");
+    if (cell) open(cell);
+  });
+  // The cells are focusable, so the grid is walkable without a mouse.
+  page.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const cell = event.target.closest(".rxcell");
+    if (cell) { event.preventDefault(); open(cell); }
+  });
+
+  editor.querySelector(".rxclose").addEventListener("click", close);
+  editor.querySelector(".rxsave").addEventListener("click", () => send(textarea.value));
+  editor.querySelector(".rxclear").addEventListener("click", () => {
+    textarea.value = "";
+    STATS.forEach((name) => { statInput(name).value = ""; });
+    send("");
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+})();

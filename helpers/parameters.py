@@ -81,6 +81,20 @@ PARAMETERS: list[dict] = [
      "label": "Fishing cost", "description": "Coins deducted per fishing attempt."},
     {"key": "fishing_bag_max", "cog": "fishing", "type": "int", "default": 24,
      "label": "Goodies bag size", "description": "Max items a user can keep stashed."},
+    # --- pet (summon name matching) ---
+    {"key": "summon_fuzzy_cutoff", "cog": "pet", "type": "float", "default": 0.7,
+     "label": "Typo tolerance", "description": "0–1 similarity a name needs to count as a typo match when nothing else matches. Higher = stricter; 1 disables fuzzy matching."},
+    {"key": "summon_max_matches", "cog": "pet", "type": "int", "default": 25,
+     "label": "Max suggestions", "description": "How many candidates the 'did you mean' dropdown offers. Discord caps a dropdown at 25."},
+    {"key": "summon_choice_timeout", "cog": "pet", "type": "int", "default": 30,
+     "label": "Choice timeout (s)", "description": "Seconds to pick from the summon dropdown before it gives up."},
+    {"key": "summon_action_timeout", "cog": "pet", "type": "int", "default": 120,
+     "label": "Action timeout (s)", "description": "Seconds a summoned pet keeps listening for its fishing/gym reactions."},
+    # --- fight (cat scraps) ---
+    {"key": "fight_signup_seconds", "cog": "fight", "type": "int", "default": 60,
+     "label": "Sign-up window (s)", "description": "How long people get to send a cat in before the bell."},
+    {"key": "fight_round_seconds", "cog": "fight", "type": "int", "default": 5,
+     "label": "Round length (s)", "description": "Seconds per round to react with objects. The clock ticks in the embed."},
     # --- cheese (co-op cheese-stretch minigame; listener feature) ---
     {"key": "cheese_drop_threshold", "cog": "cheese", "type": "int", "default": 985,
      "label": "Drop threshold", "description": "0–1000 roll; a 🧀 drops when the roll is above this (higher = rarer)."},

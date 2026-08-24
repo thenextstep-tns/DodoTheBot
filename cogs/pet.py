@@ -5,9 +5,9 @@ User-facing text lives in ``lang``.
 """
 
 import asyncio
+import difflib
 import io
 import random
-import re
 
 import aiohttp
 import bson
@@ -21,7 +21,7 @@ from discord.ext.commands import Context
 
 import config_py
 import lang
-from helpers import checks, messages
+from helpers import checks, messages, scrap, scrap_lobby
 
 # Per-pet-kind configuration for the claim flow (cats can additionally fish).
 _PET_KINDS = {
@@ -52,6 +52,11 @@ _CLAIM_REACTIONS = {"\U0001F44D": 0, "\U0001F44E": 1, "⛔": 2}  # yes / no / st
 _AGAIN_REACTIONS = {"\U0001F44D": 0, "⛔": 1}  # find another / stop
 
 
+# Summon name-match tiers, best first: an earlier tier beats a later one outright.
+_MATCH_TIERS = ("exact", "prefix", "substring", "fuzzy")
+_SELECT_LIMIT = 25  # Discord's hard cap on options in a single select.
+
+
 class Pet(commands.Cog, name="pet"):
     """Cat / dog / waifu collection and battles."""
 
@@ -65,6 +70,10 @@ class Pet(commands.Cog, name="pet"):
 
     def _collection(self, kind: str):
         return config_py.catcollection if kind == "cat" else config_py.dogcollection
+
+    def _param(self, context: Context, key: str):
+        """Read a per-guild tunable for this command (editable from the panel)."""
+        return self.bot.params.get(context.guild.id if context.guild else None, key)
 
     # ------------------------------------------------------------------ #
     #  Listing
@@ -204,16 +213,28 @@ class Pet(commands.Cog, name="pet"):
         }
 
     async def _name_and_save(self, context, channel, collection, member, kind, pet_type, url, stats, extra_fields, suggestion) -> None:
-        """Ask for a unique name and insert the claimed pet."""
+        """Ask for a unique name and insert the claimed pet.
+
+        Anyone in the channel may name someone else's new pet — that race is the
+        point of the claim message. So the name has to be unique in the
+        *claimer's* collection, never the namer's: it is ``member`` who ends up
+        owning the pet and ``member`` who later has to summon it by that name.
+        """
         await channel.send(lang.PET_CLAIM_SUCCESS)
+
+        def is_a_name(message) -> bool:
+            # Any human in the claim channel may name it; the bot's own messages
+            # must not, or a listing or log line becomes the pet's name.
+            return message.channel.id == channel.id and not message.author.bot
+
         while True:
             try:
-                name_msg = await self.bot.wait_for("message", timeout=60)
+                name_msg = await self.bot.wait_for("message", timeout=60, check=is_a_name)
             except asyncio.TimeoutError:
                 await suggestion.clear_reactions()
                 return
             name = str(name_msg.content).replace("@", " ")
-            if collection.find_one({"name": name, "owner": name_msg.author.id}):
+            if collection.find_one({"name": name, "owner": member.id}):
                 await channel.send(lang.PET_CLAIM_DUPLICATE.format(name=name, kind=kind))
                 continue
             collection.insert_one(
@@ -244,47 +265,92 @@ class Pet(commands.Cog, name="pet"):
     async def summon(self, context: Context, *, pet_name: str) -> None:
         """Summon a pet by name.
 
-        An exact (case-insensitive) name wins outright, so ``summon Bank`` picks
-        the pet literally called "Bank" even when you also own "My bank account".
-        Only when nothing matches exactly do we fall back to partial matches, and
-        any genuine tie is resolved with a dropdown.
+        Only the pet literally called what you typed is summoned outright.
+        Anything less than that -- a prefix, a substring, a typo -- is offered
+        back as a suggestion first, because ``summon Bobo`` quietly producing
+        "Bobobo" is worse than one extra click.
         """
-        pets = self.find_pets(context.author.id, pet_name, exact=True) or self.find_pets(context.author.id, pet_name)
+        tier, pets = self.find_pets(
+            context.author.id, pet_name, cutoff=self._param(context, "summon_fuzzy_cutoff")
+        )
         if not pets:
             await context.send(lang.PET_SUMMON_NOT_FOUND.format(pet_name=pet_name))
-        elif len(pets) == 1:
+        elif tier == "exact" and len(pets) == 1:
             await self.handle_pet_interaction(context, pets[0])
+        elif len(pets) == 1:
+            await self.confirm_pet_guess(context, pets[0], pet_name)
         else:
-            await self.ask_user_to_choose_pet(context, pets, pet_name)
+            await self.ask_user_to_choose_pet(context, pets, pet_name, exact=tier == "exact")
 
-    def find_pets(self, owner_id: int, pet_name: str, *, exact: bool = False) -> list:
-        """Find an owner's pets by name across all collections (case-insensitive).
+    def find_pets(self, owner_id: int, pet_name: str, *, cutoff: float = 0.7) -> tuple:
+        """Find an owner's pets by name, returning ``(tier, pets)``.
 
-        ``exact`` matches the whole name; otherwise any pet whose name contains
-        ``pet_name`` matches. The query is regex-escaped so names with special
-        characters are treated literally.
+        Every pet the owner has is sorted into a tier -- the exact name, names
+        starting with the query, names containing it, then near-misses at or
+        above ``cutoff`` similarity -- and the best non-empty tier wins outright,
+        so a pet actually called "Bo" is never beaten by "Bobobo". Within a tier
+        the closest name comes first. Returns ``(None, [])`` when nothing is
+        close enough; each pet is tagged with its ``collection``.
         """
-        escaped = re.escape(pet_name)
-        pattern = f"^{escaped}$" if exact else escaped
-        regex = re.compile(pattern, re.IGNORECASE)
-        found = []
-        for pet_type, collection in self.pet_collections.items():
-            for pet in collection.find({"owner": owner_id, "name": {"$regex": regex}}):
-                pet["type"] = pet_type
-                found.append(pet)
-        return found
+        query = pet_name.strip().casefold()
+        if not query:
+            return None, []
 
-    async def ask_user_to_choose_pet(self, context: Context, pets: list, pet_name: str) -> None:
-        """Disambiguate multiple name matches with a select dropdown."""
+        scored = []
+        for kind, collection in self.pet_collections.items():
+            for pet in collection.find({"owner": owner_id}):
+                name = str(pet.get("name", "")).casefold()
+                ratio = difflib.SequenceMatcher(None, query, name).ratio()
+                if name == query:
+                    tier = 0
+                elif name.startswith(query):
+                    tier = 1
+                elif query in name:
+                    tier = 2
+                elif ratio >= cutoff:
+                    tier = 3
+                else:
+                    continue
+                pet["collection"] = kind
+                scored.append((tier, ratio, len(name), pet))
+
+        if not scored:
+            return None, []
+        best = min(match[0] for match in scored)
+        winners = sorted(
+            (match for match in scored if match[0] == best), key=lambda match: (-match[1], match[2])
+        )
+        return _MATCH_TIERS[best], [match[3] for match in winners]
+
+    async def confirm_pet_guess(self, context: Context, pet: dict, pet_name: str) -> None:
+        """One near-miss and nothing exact: ask before summoning something else."""
+        confirmed = await messages.prompt_confirm(
+            context, context.author,
+            content=lang.PET_SUMMON_DID_YOU_MEAN.format(
+                pet_name=pet_name, name=pet["name"], kind=pet["collection"]
+            ),
+            timeout=self._param(context, "summon_choice_timeout"),
+        )
+        if not confirmed:
+            await context.send(lang.PET_SUMMON_CANCELLED)
+            return
+        await self.handle_pet_interaction(context, pet)
+
+    async def ask_user_to_choose_pet(self, context: Context, pets: list, pet_name: str, *, exact: bool) -> None:
+        """Disambiguate several matches with a select dropdown."""
+        limit = max(1, min(self._param(context, "summon_max_matches"), _SELECT_LIMIT))
         options = [
             discord.SelectOption(
-                label=pet["name"][:100], description=pet["type"].title(), value=str(index)
+                label=pet["name"][:100], description=pet["collection"].title(), value=str(index)
             )
-            for index, pet in enumerate(pets[:25])  # Discord caps a select at 25 options.
+            for index, pet in enumerate(pets[:limit])
         ]
+        prompt = lang.PET_SUMMON_CHOOSE if exact else lang.PET_SUMMON_CHOOSE_INEXACT
         choice = await messages.prompt_select(
-            context, lang.PET_SUMMON_CHOOSE.format(pet_name=pet_name), options,
-            placeholder="Pick a pet", timeout=30,
+            context, prompt.format(pet_name=pet_name), options,
+            placeholder=lang.PET_SUMMON_PLACEHOLDER,
+            timeout=self._param(context, "summon_choice_timeout"),
+            member=context.author,
         )
         if choice is None:
             await context.send(lang.PET_SUMMON_TIMEOUT)
@@ -294,7 +360,10 @@ class Pet(commands.Cog, name="pet"):
     async def handle_pet_interaction(self, context: Context, pet: dict) -> None:
         """Show a summoned pet and react to fishing/gym toggle choices."""
         pet_msg = await context.send(embed=self.create_pet_embed(pet))
-        emoji, _ = await messages.wait_for_reaction(self.bot, pet_msg, config_py.pet_actions, member=context.author, timeout=120)
+        emoji, _ = await messages.wait_for_reaction(
+            self.bot, pet_msg, config_py.pet_actions, member=context.author,
+            timeout=self._param(context, "summon_action_timeout"),
+        )
         if emoji is None:
             await pet_msg.clear_reactions()
             return
@@ -302,14 +371,32 @@ class Pet(commands.Cog, name="pet"):
             await self.toggle_fishing(pet["_id"], context.author.id, context.channel.id)
         elif emoji == "\U0001F4AA":  # gym
             await self.toggle_gym(pet["_id"], context.author.id, context.channel.id)
+        elif emoji == "\U0001F94A":  # boxing glove
+            await self.enrol_for_fights(context, pet)
         else:
             await context.send(lang.PET_SUMMON_UNKNOWN_ACTION)
+
+    async def enrol_for_fights(self, context: Context, pet: dict) -> None:
+        """Put the summoned pet on the owner's fighting roster.
+
+        The roster is capped, and the cap is the interesting part: filling it
+        pushes the oldest cat off the end rather than refusing, because being
+        told "no, go and remove one first" three clicks into a joke is how
+        people stop playing.
+        """
+        result = scrap_lobby.enrol(context.author.id, str(pet["_id"]))
+        roster = scrap_lobby.roster(context.author.id)
+        await context.send(lang.PET_ROSTER_ADDED.format(
+            name=pet.get("name"), roster=scrap_lobby.describe_roster(roster)))
+        if result["dropped"]:
+            await context.send(lang.PET_ROSTER_FULL.format(
+                cap=int(scrap.TUNING["roster_max"])))
 
     def create_pet_embed(self, pet: dict) -> discord.Embed:
         """Build the summoned-pet embed with its stats and action prompts."""
         embed = messages.success(
             lang.PET_PET_STATUS.format(
-                type=pet["type"].title(), wins=pet.get("fightswon", 0), losses=pet.get("fightslost", 0)
+                type=pet["collection"].title(), wins=pet.get("fightswon", 0), losses=pet.get("fightslost", 0)
             )
         )
         embed.set_image(url=pet["url"])

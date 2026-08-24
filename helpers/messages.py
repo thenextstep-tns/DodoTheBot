@@ -162,19 +162,26 @@ async def send_paged(
 
 
 # ------------------------------- prompting ----------------------------------- #
-class _ConfirmView(discord.ui.View):
-    """Confirm/Cancel buttons that only the requesting member may press."""
+class _OwnedView(discord.ui.View):
+    """A view only ``member`` may interact with (or anyone, when ``member`` is None)."""
 
-    def __init__(self, member: discord.abc.User, timeout: float):
+    def __init__(self, member: Optional[discord.abc.User], timeout: float):
         super().__init__(timeout=timeout)
         self.member = member
-        self.value: Optional[bool] = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.member.id:
+        if self.member is None or interaction.user.id == self.member.id:
             return True
         await interaction.response.send_message("This one isn't yours to answer.", ephemeral=True)
         return False
+
+
+class _ConfirmView(_OwnedView):
+    """Confirm/Cancel buttons that only the requesting member may press."""
+
+    def __init__(self, member: discord.abc.User, timeout: float):
+        super().__init__(member, timeout)
+        self.value: Optional[bool] = None
 
     async def _resolve(self, interaction: discord.Interaction, value: bool) -> None:
         self.value = value
@@ -227,17 +234,19 @@ async def prompt_select(
     *,
     placeholder: str = "Select an option",
     timeout: float = 180.0,
+    member: Optional[discord.abc.User] = None,
 ) -> Optional[str]:
     """Show a single-select dropdown and return the chosen value (or ``None`` on timeout).
 
     ``options`` may be ``discord.SelectOption`` objects or ``(label, value)`` pairs.
+    Pass ``member`` to let only that member answer; otherwise anyone may.
     """
     select_options = [
         opt if isinstance(opt, discord.SelectOption) else discord.SelectOption(label=opt[0], value=opt[1])
         for opt in options
     ]
     select = _ValueSelect(placeholder, select_options)
-    view = discord.ui.View(timeout=timeout)
+    view = _OwnedView(member, timeout)
     view.add_item(select)
     await destination.send(content, view=view)
     await view.wait()

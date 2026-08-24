@@ -1173,3 +1173,151 @@ body.board { background: var(--color-surface-soft); }
 .tuneblocked { margin-top: 6px; padding: 6px 10px; font-size: 12px;
   background: rgba(179, 83, 9, .08); color: var(--color-warning);
   border-radius: var(--radius-sm); }
+
+/* ==========================================================================
+   Scrap lab — the cat-fight balance sandbox (bot owner only)
+   ========================================================================== */
+.scrappage .panelhead h1 { margin: 0; font-size: 20px; }
+.scraparena { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-base); margin: var(--space-base) 0; }
+@media (max-width: 760px) { .scraparena { grid-template-columns: 1fr; } }
+.scrapside { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scrapside .panelhead { margin-top: 0; }
+.scraproster { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+.scrapcat { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-sm); }
+.scrapcathead { display: flex; gap: var(--space-sm); align-items: center; }
+.scrapcathead input[type=text] { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font: inherit;
+  font-size: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapcatclass { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.scrapstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; }
+.scrapstats label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.scrapstats input { width: 100%; padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapdrop { background: none; border: 0; cursor: pointer; color: var(--muted); font-size: 16px; padding: 0 4px; }
+.scrapdrop:hover { color: var(--color-error); }
+.scrapadd { display: flex; gap: var(--space-sm); margin-top: var(--space-sm); }
+.scrapadd select { flex: 1 1 auto; padding: 6px 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapprops, .scrapseed { display: flex; gap: 6px; align-items: center; font-size: 12px;
+  color: var(--muted); margin-top: var(--space-sm); }
+.scrapprops select, .scrapseed input { padding: 5px 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapseed input { width: 90px; }
+
+/* The fight log */
+.scrapout { margin-top: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.scraprnd { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-sm); }
+.scraprndhead { font-size: 12px; font-weight: var(--weight-semibold); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.scrapbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.scrapbar { font-size: 12px; }
+.scrapbarname { display: flex; justify-content: space-between; gap: var(--space-sm); }
+.scraphp { height: 8px; border-radius: var(--radius-full); background: var(--color-surface-strong);
+  overflow: hidden; margin-top: 3px; }
+.scraphp > i { display: block; height: 100%; background: var(--on); transition: width .2s; }
+.scrapbar.sideB .scraphp > i { background: var(--accent); }
+.scrapbar.dead { opacity: .45; }
+.scrapbar.dead .scraphp > i { background: var(--color-muted-soft); }
+.scrapev { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.scrapev span { color: var(--text); }
+.scrapev .ev-miss, .scrapev .ev-status { color: var(--muted); }
+.scrapev .ev-crit { font-weight: var(--weight-semibold); color: var(--color-error); }
+.scrapev .ev-prop, .scrapev .ev-ult { color: var(--warning); }
+.scrapev .ev-perk { color: var(--accent); }
+.scrapev .ev-ko { font-weight: var(--weight-semibold); }
+.scrapwinner { font-size: 15px; font-weight: var(--weight-semibold); padding: var(--space-sm);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.scrapodds { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* Tuning + reference */
+.scraptuning { margin-top: var(--space-base); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scraptuning summary { cursor: pointer; font-weight: var(--weight-semibold); }
+.scraptunes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px; margin: var(--space-sm) 0; }
+.scraptune { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.scraptune input { padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapref { margin-top: var(--space-base); }
+.scrapclasses { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-sm); }
+.scrapclass { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scrapclass p { margin: 6px 0 0; font-size: 13px; }
+.scrapclasshead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.scrapemoji { font-size: 18px; }
+.scraptag { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--muted); }
+.scraptag.warm { background: #fdecd8; color: var(--warning); }
+
+.scrapwhy { font-style: italic; }
+
+/* ==========================================================================
+   Reaction grid — 1,400 objects down the side, every class across the top
+   ========================================================================== */
+.rxpage .panelhead h1 { margin: 0; font-size: 20px; }
+.rxbar { display: flex; gap: var(--space-base); align-items: center; flex-wrap: wrap;
+  margin: var(--space-base) 0 var(--space-sm); }
+.rxfilters { display: flex; gap: var(--space-sm); align-items: center; flex-wrap: wrap; }
+.rxfilters select, .rxfilters input { padding: 7px 10px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxfilters input { min-width: 220px; }
+.rxfilters button { margin: 0; }
+.rxcoverage { margin-left: auto; display: flex; gap: var(--space-sm); align-items: center; }
+.rxmeter { width: 140px; height: 8px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); overflow: hidden; }
+.rxmeter > i { display: block; height: 100%; background: var(--on); }
+.rxpager { display: flex; gap: var(--space-sm); align-items: center; margin: var(--space-sm) 0; }
+
+/* The table scrolls inside its own box; the page never scrolls sideways. */
+.rxscroll { overflow: auto; max-height: 74vh; border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--panel); }
+.rxgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.rxgrid th, .rxgrid td { border-bottom: 1px solid var(--color-hairline-soft);
+  border-right: 1px solid var(--color-hairline-soft); vertical-align: top; }
+
+.rxcorner, .rxhead { position: sticky; left: 0; z-index: 2; background: var(--panel);
+  min-width: 148px; max-width: 148px; text-align: left; padding: 6px 8px; }
+.rxcorner { z-index: 4; top: 0; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); }
+.rxclass { position: sticky; top: 0; z-index: 3; background: var(--panel);
+  min-width: 168px; max-width: 168px; padding: 6px 8px; text-align: left; }
+.rxclassemoji { font-size: 15px; margin-right: 4px; }
+.rxclassname { font-weight: var(--weight-semibold); }
+.rxclasspair { display: block; font-size: 10px; color: var(--muted); letter-spacing: .03em; }
+.rxglyph { font-size: 20px; margin-right: 6px; vertical-align: middle; }
+.rxcustom { width: 22px; height: 22px; margin-right: 6px; vertical-align: middle; border-radius: 4px; }
+.rxname { color: var(--muted); font-size: 11px; }
+
+.rxcell { padding: 6px 8px; cursor: pointer; }
+.rxcell:hover { background: var(--bg); }
+.rxcell:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rxtext { display: block; }
+.rxempty { color: var(--color-muted-soft); font-style: italic; }
+.rxmark { float: right; color: var(--muted); font-size: 11px; margin-left: 4px; }
+.rx-guild { background: #f3fbf4; }
+.rx-guild .rxmark { color: var(--on); }
+.rxstats { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.rxstat { font-size: 10px; padding: 0 5px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--muted); }
+.rxstat.up { color: var(--on); }
+.rxstat.down { color: var(--color-error); }
+
+/* The editor floats over the grid so the row stays visible behind it. */
+.rxeditor { position: fixed; right: 20px; bottom: 20px; z-index: 40; width: 340px;
+  background: var(--panel); border: 1px solid var(--border-strong, var(--line));
+  border-radius: var(--radius-md); padding: var(--space-md);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+.rxeditorhead { display: flex; justify-content: space-between; align-items: center;
+  gap: var(--space-sm); margin-bottom: var(--space-sm); }
+.rxclose { background: none; border: 0; cursor: pointer; font-size: 15px; color: var(--muted);
+  margin: 0; padding: 0 4px; }
+.rxtextarea { width: 100%; padding: 8px; font: inherit; font-size: 13px; resize: vertical;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxeditorstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin: var(--space-sm) 0; }
+.rxeditorstats label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.rxeditorstats input { width: 100%; padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxeditorfoot { display: flex; gap: var(--space-sm); align-items: center; }
+.rxeditorfoot button { margin: 0; }

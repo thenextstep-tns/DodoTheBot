@@ -6,6 +6,8 @@ train a chosen attribute; the attribute is increased after the session ends.
 import asyncio
 import datetime
 
+import bson
+
 import discord
 from discord.ext import commands, tasks
 from discord.ext.commands import Context
@@ -13,15 +15,12 @@ from discord.ext.commands import Context
 import config_py
 import lang
 
-# NOTE (pre-existing): these mapping keys don't match the muscle-group labels
-# above ('Library'/'Grooming' vs 'Brain…'/'Beauty…'), so intellect/charm training
-# currently can't resolve. Preserved as-is — behaviour unchanged.
-_ATTRIBUTE_MAPPING = {
-    "Chest and Arms": "strength",
-    "Core and Cardio": "agility",
-    "Library": "intellect",
-    "Grooming": "charm",
-}
+# Keyed by the labels the menu actually offers (``lang.GYM_MUSCLE_GROUPS``).
+# They used to read 'Library' and 'Grooming', which are not what the dropdown
+# says, so choosing brain or beauty raised a KeyError inside a background task
+# and trained nothing, silently.
+_ATTRIBUTE_MAPPING = dict(zip(lang.GYM_MUSCLE_GROUPS,
+                              ("strength", "agility", "intellect", "charm")))
 
 
 class _PetSelect(discord.ui.Select):
@@ -124,12 +123,28 @@ class Gym(commands.Cog, name="gym"):
 
         increase_attribute.start()
 
-    async def _increase_cat_attribute(self, cat_id: str, muscle_group: str, gain: int = 1) -> None:
-        """Apply the per-session gain to the cat's trained attribute."""
-        attribute = _ATTRIBUTE_MAPPING[muscle_group]
-        # NOTE (pre-existing): writes to db["catcollection"] rather than the real
-        # Cats collection (config_py.catcollection). Preserved as-is.
-        config_py.db["catcollection"].update_one({"_id": cat_id}, {"$inc": {attribute: gain}})
+    async def _increase_cat_attribute(self, cat_id, muscle_group: str, gain: int = 1) -> None:
+        """Apply the per-session gain to the cat's trained attribute.
+
+        This is also how a cat recovers: losing a scrap costs it a point of each
+        of its governing attributes, and the gym is the only way back. It writes
+        to ``config_py.catcollection`` — it used to write to a collection
+        literally named "catcollection", which does not exist and was created
+        empty on first write, so no cat has ever actually been trained by it.
+        """
+        attribute = _ATTRIBUTE_MAPPING.get(muscle_group)
+        if attribute is None:
+            self.bot.logger.warning("Gym: no attribute for muscle group %r", muscle_group)
+            return
+        try:
+            object_id = bson.ObjectId(cat_id)
+        except (bson.errors.InvalidId, TypeError):
+            self.bot.logger.warning("Gym: %r is not a cat id", cat_id)
+            return
+        result = config_py.catcollection.update_one({"_id": object_id}, {"$inc": {attribute: gain}})
+        if not result.matched_count:
+            self.bot.logger.warning("Gym: cat %s no longer exists", cat_id)
+            return
         self.bot.logger.debug(f"Updated {attribute} (+{gain}) for cat {cat_id}")
 
 

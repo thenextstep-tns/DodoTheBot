@@ -347,7 +347,8 @@ dogclasses = [
     ["Herding Dog", 3, 8, 20, 30, 40, 50, 1, 5],
     ["Companion Dog", 1, 5, 3, 8, 20, 30, 40, 50],
 ]
-pet_actions = {"\U0001F41F": "Toggle Fishing", "\U0001F4AA": "Send the cat to the gym"}
+pet_actions = {"\U0001F41F": "Toggle Fishing", "\U0001F4AA": "Send the cat to the gym",
+               "\U0001F94A": "Put this cat on your fighting roster"}
 fishing_result_actions = {"\U0001F392": "Put in the goodies bag", "\U0001F4B0": "Sell", "\U0001F4A5": "Throw away"}
 fishing_cost = 10
 
