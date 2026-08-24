@@ -19,7 +19,8 @@ PER_PAGE = 25
 SOURCE_MARK = {"guild": ("✎", "written here"), "global": ("◆", "written for every server"),
                "seed": ("·", "shipped default"), "written": ("\u270D", "written for this object"),
                "unwritten": ("\u2026", "not written yet, this is a stand-in"),
-               "empty": ("", "nobody has decided yet")}
+               "unsure": ("?", "not written yet: the cat is unsure"),
+               "empty": ("", "nobody has written this one yet")}
 
 
 def _chip(stats: dict) -> str:

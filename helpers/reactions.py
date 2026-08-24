@@ -11,7 +11,9 @@ Three layers answer for any cell, nearest first:
 1. what this server's admins wrote (``EmojiReactions`` with their ``guild_id``)
 2. what was written for everyone (the same collection with ``guild_id`` 0)
 3. :mod:`helpers.reaction_written`, the cells written one at a time
-4. :mod:`helpers.reaction_flavour`, a stand-in for everything not yet reached
+Nothing generates a line. An object nobody has written about does nothing when
+it is shown, which is honest and also the point: the game reacts to the objects
+that have had a person think about them, and no others.
 
 Nothing is ever pre-written into the database, so a fresh server inherits the
 whole grid and a server that edits one cell stores exactly one row. Because the
@@ -25,7 +27,7 @@ from __future__ import annotations
 import datetime
 
 import config_py
-from helpers import emoji_catalogue, reaction_flavour, reaction_written
+from helpers import emoji_catalogue, reaction_written
 
 GLOBAL = 0                      # the "for everyone" layer's guild_id
 ATTRS = ("strength", "agility", "intellect", "charm")
@@ -79,15 +81,8 @@ def resolve(emoji: str, cls: str, guild_rows: dict, global_rows: dict) -> dict:
     row = global_rows.get((emoji, cls))
     if row is not None:
         return {"text": row.get("text", ""), "stats": row.get("stats", {}), "source": "global"}
-    entry = _catalogue_index().get(emoji)
-    if entry is not None:
-        # Keep the flavour layer's own verdict on itself: it knows whether the
-        # line was written for this object or is standing in until somebody
-        # writes one, and flattening that to "written" hides the work left.
-        written = reaction_flavour.for_cell(entry, cls)
-        if written["text"]:
-            return written
-    return {"text": "", "stats": {}, "source": "empty"}
+    text, stats, source = reaction_written.line_for(emoji, cls)
+    return {"text": text, "stats": stats, "source": source}
 
 
 def grid(guild_id: int, emojis: list[str], classes: list[str]) -> dict:
@@ -162,4 +157,4 @@ def guild_emoji_rows(guild) -> list[dict]:
 
 def catalogue(guild=None) -> list[dict]:
     """The server's own emoji first, then the Unicode catalogue."""
-    return guild_emoji_rows(guild) + emoji_catalogue.load()
+    return guild_emoji_rows(guild) + emoji_catalogue.by_usage()

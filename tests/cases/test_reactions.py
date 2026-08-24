@@ -58,9 +58,9 @@ print("an untouched cell answers from what somebody wrote for it")
 # Everything the seed does not name still answers, from the written flavour
 # layer, because a blank cell in a fight is a cat doing nothing at all.
 blankest = reactions.grid(GUILD, ["🪗"], ["alley"])["🪗"]["alley"]
-assert blankest["source"] == "unwritten" and blankest["text"], blankest
-assert "accordion" in blankest["text"], blankest["text"]
-print("an object nobody has written yet still answers, and says so")
+assert blankest["source"] == "unsure" and blankest["text"], blankest
+assert "accordion" not in blankest["text"], "a placeholder must not pretend to know the object"
+print("an unwritten object makes the cat unsure, and says so")
 
 # Hand-written cells are marked apart from stand-ins, so the panel can show what
 # still needs a person rather than reporting the grid as finished.

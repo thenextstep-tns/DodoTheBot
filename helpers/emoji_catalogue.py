@@ -128,6 +128,29 @@ def build() -> list[dict]:
     return rows
 
 
+USAGE = DATA.parent / "emoji_usage.json"
+
+
+def usage() -> dict[str, int]:
+    """How often each emoji appears in this server's message history.
+
+    Guessing which emoji people "probably" use is how you end up writing jokes
+    about mahjong tiles. Counted from ``messages.csv`` once and stored; rebuild
+    it by re-running that count when the export is refreshed.
+    """
+    try:
+        return {char: count for char, count in json.loads(USAGE.read_text(encoding="utf-8"))}
+    except (OSError, ValueError):
+        return {}
+
+
+def by_usage(rows: list[dict] = None) -> list[dict]:
+    """The catalogue with the most-used objects first, unused ones after."""
+    rows = rows if rows is not None else load()
+    counts = usage()
+    return sorted(rows, key=lambda r: (-counts.get(r["char"], 0), r["name"]))
+
+
 def load() -> list[dict]:
     """The catalogue as built. Falls back to an empty list rather than raising:
     a missing file must not stop the panel from loading."""
