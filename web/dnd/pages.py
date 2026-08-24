@@ -116,15 +116,13 @@ def campaigns_html(bot, guild, guild_scope: str, viewer_id: int) -> str:
     # that do not have a control yet.
     counts = catalogue.summary()
     admin = f"""
-<div class="ttadmin">
-  <h2>Admin</h2>
-  <p class="paramlink"><a href="/guild/{guild.id}/tabletop/parameters">
-    📐 <b>List of parameters</b></a>
-  <span class="muted small">— all {counts['total']} of them: what each one does,
-  what else it moves, its default and range, and where it can be set.
-  {counts['baked']} are still baked into the source with no control, and they are
-  listed too.</span></p>
-</div>""" if can_configure else ""
+<h2>Admin</h2>
+<p><a class="chip static" href="/guild/{guild.id}/tabletop/parameters">
+  📐 List of parameters</a></p>
+<p class="muted small">All {counts['total']} of them: what each one does, what
+else it moves, its default and range, and where it can be set.
+{counts['baked']} are still baked into the source with no control, and they are
+listed too.</p>""" if can_configure else ""
 
     enabled = bot.visibility.cog_enabled(guild.id, "dnd")
     # The switch lives in the Engine section below, not on the main cog page —
@@ -1827,132 +1825,149 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
 # --------------------------------------------------------------------------- #
 #  Handlers
 # --------------------------------------------------------------------------- #
-_STATUS_CHIP = {
-    catalogue.STATUS_TUNABLE: '<span class="chip">tunable</span>',
-    catalogue.STATUS_DATA: '<span class="chip">editable table</span>',
-    catalogue.STATUS_BAKED: '<span class="parambaked">baked in — not yet exposed</span>',
+_LAYER_TEXT = {
+    catalogue.LAYER_CAMPAIGN: "campaign \u2192 server \u2192 default",
+    catalogue.LAYER_SERVER: "server \u2192 default",
+    catalogue.LAYER_DATA: "campaign \u2192 server \u2192 shipped file",
+    catalogue.LAYER_CODE: "nowhere \u2014 a constant in the source",
 }
 
-_LAYER_TEXT = {
-    catalogue.LAYER_CAMPAIGN: "campaign → server → built-in default",
-    catalogue.LAYER_SERVER: "server → built-in default",
-    catalogue.LAYER_DATA: "campaign → server → shipped data file",
-    catalogue.LAYER_CODE: "nowhere — it is a constant in the source",
+_STATUS_CHIP = {
+    catalogue.STATUS_TUNABLE: '<span class="chip static">tunable</span>',
+    catalogue.STATUS_DATA: '<span class="chip static">editable table</span>',
+    catalogue.STATUS_BAKED: '<span class="chip static">baked in</span>',
 }
 
 
 def _param_row(entry) -> str:
-    """One parameter, with everything needed to decide whether to touch it."""
-    related = ""
+    """One parameter, in the same shape as a tuning row.
+
+    Deliberately not a table. The tuning page worked this out first: a
+    description that has to wrap inside a narrow column is a description nobody
+    reads, and `tunelabel` already caps itself at a comfortable measure.
+    """
+    lines = ""
+    # The authored cross-system note, where there is one. This is the most
+    # valuable text on the row — the spec's own description says what a setting
+    # is, and this says what happens elsewhere when you move it.
+    if entry.note and entry.status != catalogue.STATUS_BAKED:
+        lines += (f'<div class="muted small tunedesc">'
+                  f'{_emphasise(_escape(entry.note))}</div>')
     if entry.affects:
-        related = (
-            '<div class="paramrel"><b>Also moves:</b> '
+        lines += (
+            '<div class="muted small tunedesc"><b>Also moves:</b> '
             + ", ".join(f"<code>{_escape(k)}</code>" for k in entry.affects)
             + "</div>"
         )
-    siblings = ""
     if entry.siblings:
-        shown = list(entry.siblings)[:8]
-        more = f" and {len(entry.siblings) - len(shown)} more" \
-            if len(entry.siblings) > len(shown) else ""
-        siblings = (
-            '<div class="paramsib"><b>Combines with:</b> '
+        shown = list(entry.siblings)[:6]
+        more = (f" and {len(entry.siblings) - len(shown)} more"
+                if len(entry.siblings) > len(shown) else "")
+        lines += (
+            '<div class="muted small tunedesc"><b>Combines with:</b> '
             + ", ".join(f"<code>{_escape(k)}</code>" for k in shown)
             + _escape(more) + "</div>"
         )
-    planned = ""
-    if entry.planned and entry.status == catalogue.STATUS_BAKED:
-        planned = (f'<div class="paramplan"><b>Should live in:</b> '
-                   f'<code>{_escape(entry.planned)}</code></div>')
-    note = (f'<div class="paramnote">{_emphasise(_escape(entry.note))}</div>'
-            if entry.note else "")
+    if entry.status == catalogue.STATUS_BAKED and entry.planned:
+        lines += (f'<div class="tuneblocked">{_emphasise(_escape(entry.note))} '
+                  f'Should live in <code>{_escape(entry.planned)}</code>.</div>')
 
+    where = _escape(entry.where) if entry.where else ""
     return f"""
-<tr class="paramrow{' paramrow-baked' if entry.status == catalogue.STATUS_BAKED else ''}">
-  <td class="paramkey">
+<div class="paramrow tunerow">
+  <div class="tunelabel">
     <b>{_escape(entry.label)}</b> {_STATUS_CHIP.get(entry.status, '')}
-    <div class="muted small"><code>{_escape(entry.key)}</code></div>
-  </td>
-  <td class="paramdesc">
-    <div>{_emphasise(_escape(entry.description))}</div>
-    {note}{related}{siblings}{planned}
-  </td>
-  <td class="paramval"><code>{_escape(entry.default)}</code></td>
-  <td class="paramspan">{_escape(entry.span)}</td>
-  <td class="paramwhere">
-    <div>{_escape(_LAYER_TEXT.get(entry.layer, entry.layer))}</div>
-    <div class="muted small">read by <code>{_escape(entry.where or '—')}</code></div>
-  </td>
-</tr>"""
+    <div class="muted small tunedesc">{_emphasise(_escape(entry.description))}</div>
+    {lines}
+    <div class="muted small tunemeta">
+      <code>{_escape(entry.key)}</code>
+      <span>{_escape(_LAYER_TEXT.get(entry.layer, entry.layer))}</span>
+      {f'<code>{where}</code>' if where else ''}
+    </div>
+  </div>
+  <div class="tunectl">
+    <code>{_escape(entry.default)}</code>
+    <span class="muted small">{_escape(entry.span)}</span>
+  </div>
+</div>"""
 
 
 def parameters_html(guild) -> str:
     """Every parameter in the engine, in one page.
 
     The owner's standing rule is that **everything is a tweakable parameter
-    visible to the bot owner**, and this is where that is checkable rather than
-    asserted. It deliberately lists what is *not* exposed as well: a constant
-    that shapes behaviour and has no control is a defect, and a defect nobody
-    can see is one nobody fixes.
+    visible to the bot owner**, and this is where that becomes checkable rather
+    than asserted. It lists what is *not* exposed as well: a constant that shapes
+    behaviour and has no control is a defect, and a defect nobody can see is one
+    nobody fixes.
     """
     counts = catalogue.summary()
-    sections, nav = "", ""
+    nav, panels = "", ""
     for index, (group, rows) in enumerate(catalogue.grouped()):
         exposed = sum(1 for row in rows if row.exposed)
         baked = len(rows) - exposed
-        slug = "".join(c if c.isalnum() else "-" for c in group.lower())
-        nav += f"""
-<a class="navrow{' active' if index == 0 else ''}" href="#param-{slug}"
-   data-panel="param-{slug}">
-  <span class="navemoji">{_GROUP_EMOJI.get(group, '📐')}</span>
-  <span class="navlabel">{_escape(group)}</span>
-  <span class="navhint">{exposed} tunable{'' if exposed == 1 else 's'}"""
-        nav += (f", {baked} baked in" if baked else "") + "</span></a>"
+        key = "param-" + "".join(c if c.isalnum() else "-" for c in group.lower())
 
-        body = "".join(_param_row(row) for row in rows)
-        sections += f"""
-<section class="panel{'' if index == 0 else ' hidden'}" id="param-{slug}">
-  <h2 class="panelhead">{_GROUP_EMOJI.get(group, '📐')} {_escape(group)}</h2>
-  <table class="paramtable">
-    <thead><tr><th>Parameter</th><th>What it does, and what it touches</th>
-      <th>Default</th><th>Range</th><th>Where it can be set</th></tr></thead>
-    <tbody>{body}</tbody>
-  </table>
+        hint = f"{exposed} tunable{'' if exposed == 1 else 's'}"
+        if baked:
+            hint += f" \u00b7 {baked} baked in"
+        nav += f"""
+<a class="sidenavitem{' active' if index == 0 else ''}" href="#{key}" data-panel="{key}">
+  <span class="navemoji">{_GROUP_EMOJI.get(group, '\U0001F4D0')}</span>
+  <span class="navlabel">{_escape(group)}</span>
+  <span class="navhint">{hint}</span></a>"""
+
+        panels += f"""
+<section class="sidepanel" data-panel="{key}"{'' if index == 0 else ' hidden'}>
+  <h2 class="panelhead">{_GROUP_EMOJI.get(group, '\U0001F4D0')} {_escape(group)}</h2>
+  {''.join(_param_row(row) for row in rows)}
 </section>"""
 
     return f"""
-<p><a href="/guild/{guild.id}/tabletop">← Tabletop</a></p>
-<h1>📐 Parameters</h1>
+<p class="back"><a href="/guild/{guild.id}/tabletop">\u2190 Tabletop</a></p>
+<h1>\U0001F4D0 Parameters</h1>
 <p class="muted">Every number that shapes how this engine behaves, what it
 touches, and where it can be changed. <b>{counts['total']}</b> in total:
 <b>{counts['tunable']}</b> settings you can change per campaign or per server,
 <b>{counts['data']}</b> editable tables, and <b>{counts['baked']}</b> still
 written into the source with no control yet.</p>
-<p class="muted small">The last number is the point of this page. A constant
-that shapes behaviour and cannot be changed is a black box, and one that is not
-written down anywhere is a black box nobody knows about. Those rows name the
-file and the current value, so the list is a work queue rather than an
-admission. <b>Adding a parameter here is part of adding a parameter</b> — the
-test suite fails if a new constant appears and this page does not know about
-it.</p>
+<p class="muted small">That last number is the point of this page. A constant
+that shapes behaviour and cannot be changed is a black box, and one written down
+nowhere is a black box nobody knows about \u2014 so those rows name the file and
+the live value, and the list is a work queue rather than an admission.
+<b>Adding a parameter here is part of adding a parameter</b>: the suite fails if
+a new constant appears and this page does not know about it.</p>
 <div class="tunepage sidepanels">
   <aside class="sidebar sidenav">{nav}</aside>
-  <main class="content">{sections}</main>
+  <main class="content">{panels}</main>
 </div>
 <script>
 (function () {{
-  // Same one-panel-at-a-time behaviour as the tuning page, scoped to this one.
-  const rows = document.querySelectorAll(".sidenav .navrow[data-panel]");
-  rows.forEach((row) => {{
-    row.addEventListener("click", (event) => {{
-      event.preventDefault();
-      rows.forEach((other) => other.classList.remove("active"));
-      row.classList.add("active");
-      document.querySelectorAll("main.content .panel").forEach((panel) => {{
-        panel.classList.toggle("hidden", panel.id !== row.dataset.panel);
-      }});
+  // The same contract the tuning menu uses: panels carry `data-panel` and are
+  // toggled with the `hidden` property, `sidenavitem` gets `.active`.
+  var page = document.querySelector(".tunepage");
+  if (!page) return;
+  var items = Array.prototype.slice.call(page.querySelectorAll(".sidenavitem"));
+  var panels = Array.prototype.slice.call(page.querySelectorAll(".sidepanel"));
+  if (!items.length) return;
+  function show(key) {{
+    if (!panels.some(function (p) {{ return p.dataset.panel === key; }})) {{
+      key = panels[0].dataset.panel;
+    }}
+    panels.forEach(function (p) {{ p.hidden = p.dataset.panel !== key; }});
+    items.forEach(function (a) {{
+      a.classList.toggle("active", a.dataset.panel === key);
+    }});
+    return key;
+  }}
+  items.forEach(function (item) {{
+    item.addEventListener("click", function (e) {{
+      e.preventDefault();
+      history.replaceState(null, "", "#" + show(item.dataset.panel));
     }});
   }});
+  var wanted = (location.hash || "").replace("#", "");
+  if (panels.some(function (p) {{ return p.dataset.panel === wanted; }})) show(wanted);
 }})();
 </script>"""
 

@@ -819,7 +819,17 @@ def entries() -> list[Entry]:
             status=STATUS_TUNABLE,
             layer=LAYER_SERVER if spec["scope"] == "server" else LAYER_CAMPAIGN,
             where=CONSUMED_BY.get(view, ""), view=view,
-            siblings=tuple(k for k in by_view.get(view, ()) if k != key),
+            # Only the siblings in a **different section**. Parameters that
+            # combine into the same typed view and sit under the same heading
+            # are already next to each other on the page, and listing them turns
+            # every row in a large group into the same six names. The ones worth
+            # naming are the ones filed elsewhere — `stability_gist` lives under
+            # Memory and arrives in the same view as `memory_decay_rate` under
+            # Forgetting, and nothing on the page would otherwise say so.
+            siblings=tuple(
+                k for k in by_view.get(view, ())
+                if k != key and BY_KEY[k]["group"] != spec["group"]
+            ),
             affects=related, note=note,
         ))
 

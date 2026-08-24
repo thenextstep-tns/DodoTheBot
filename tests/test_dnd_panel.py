@@ -310,6 +310,36 @@ def test_tuning_section() -> None:
           pages._interactions_section(guild, campaign,
                                       minds.tuning_for(store, campaign), False) == "")
 
+    # --- every class the pages use must actually be styled ----------------- #
+    # The parameters page shipped inventing `paramtable`, `paramkey`, `navrow`
+    # and eight more that had no CSS behind them at all: the side menu wrapped
+    # into unstyled text and a five-column table overflowed its container. The
+    # panel already had `sidenavitem`, `tunerow` and `tunelabel` doing exactly
+    # this job. A class with no rule is the same defect as a control wired to
+    # nothing, and it is just as invisible to an assertion on HTML strings.
+    import re as _re
+
+    stylesheet = open("web/static/panel.css", encoding="utf-8").read()
+    pages_html = {
+        "campaign": pages.campaign_html(FakeBot(), guild, campaign, access.CAMPAIGN_GM),
+        "parameters": pages.parameters_html(guild),
+    }
+    for page_name, html in pages_html.items():
+        used = set()
+        for match in _re.finditer(r'class="([^"]+)"', html):
+            used.update(match.group(1).split())
+        # A class earns its place one of two ways: the stylesheet paints it, or
+        # the page's own script selects on it. Neither, and it does nothing at
+        # all — which is what `paramtable` and `navrow` were doing.
+        dead = sorted(
+            name for name in used
+            if f".{name}" not in stylesheet and f'"{name}' not in html
+            and f".{name}" not in html and f"'{name}" not in html
+        )
+        check(f"panel: no dead classes on the {page_name} page", not dead,
+              detail="" if not dead
+              else f"neither styled nor selected: {', '.join(dead[:8])}")
+
     # Every group needs an icon, or it renders with a bare heading in the panel
     # and a bullet in the side menu while every other group has a face. Cosmetic,
     # and invisible to every other assertion here — `Remembering` shipped without
