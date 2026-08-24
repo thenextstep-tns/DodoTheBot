@@ -26,6 +26,9 @@ The panel shows the same count, so the work left is never in doubt.
 
 from __future__ import annotations
 
+import json
+import pathlib as _pathlib
+
 
 def L(text: str, **stats: int) -> tuple:
     return (text, {k: v for k, v in stats.items() if v})
@@ -992,7 +995,32 @@ def line_for(char: str, class_key: str):
     line = written_for(char, class_key)
     if line is not None:
         return line[0], dict(line[1]), "written"
+    cell = seeded().get(normalise(char), {}).get(class_key)
+    if cell:
+        return cell[0], dict(cell[1]), "seeded"
     fallback = UNSURE.get(class_key)
     if fallback is None:
         return "", {}, "empty"
     return fallback[0], dict(fallback[1]), "unsure"
+
+# --------------------------------------------------------------------------- #
+#  Seeded cells
+# --------------------------------------------------------------------------- #
+# Every object not written above, filled in once so there is something concrete
+# in every cell to edit rather than a blank. These are starting points, not
+# finished lines: they know what the object is called and roughly what the class
+# would do with it, and nothing more. Editing one in the panel replaces it for
+# good, and an object promoted into WRITTEN above stops reading from here.
+SEEDED_PATH = _pathlib.Path(__file__).resolve().parent / "data" / "reaction_seed.json"
+_SEEDED: dict = {}
+
+
+def seeded() -> dict:
+    global _SEEDED
+    if not _SEEDED:
+        try:
+            raw = json.loads(SEEDED_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        _SEEDED = {normalise(char): cells for char, cells in raw.items()}
+    return _SEEDED

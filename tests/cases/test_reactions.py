@@ -58,9 +58,14 @@ print("an untouched cell answers from what somebody wrote for it")
 # Everything the seed does not name still answers, from the written flavour
 # layer, because a blank cell in a fight is a cat doing nothing at all.
 blankest = reactions.grid(GUILD, ["🪗"], ["alley"])["🪗"]["alley"]
-assert blankest["source"] == "unsure" and blankest["text"], blankest
-assert "accordion" not in blankest["text"], "a placeholder must not pretend to know the object"
-print("an unwritten object makes the cat unsure, and says so")
+assert blankest["source"] == "seeded" and blankest["text"], blankest
+print("an unwritten object has a seeded starting point to edit, not a blank")
+
+# Every cell in the whole grid holds something editable.
+from helpers import reaction_written as _rw  # noqa: E402
+_sources = {_rw.line_for(r["char"], k)[2] for r in rows for k in [c["key"] for c in routes_classes()]}
+assert "empty" not in _sources, "a blank cell is nothing to edit"
+print("no cell in the grid is blank: %s" % ", ".join(sorted(_sources)))
 
 # Hand-written cells are marked apart from stand-ins, so the panel can show what
 # still needs a person rather than reporting the grid as finished.
