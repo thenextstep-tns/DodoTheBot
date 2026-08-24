@@ -33,23 +33,20 @@ witnesses and drift are opt-in because they read as instrumentation.
 
 from __future__ import annotations
 
+from helpers.dnd import verbs as verb_data
 from helpers.dnd.mind import relationships as rel_mod
+from helpers.dnd.world import verb as verb_model
 from helpers.dnd.tuning import DEFAULT_GIST, DEFAULT_REPORT, GistTuning, ReportTuning
 
 # What an action reads as when nothing narrates it. Moved here from ``minds`` in
 # P4, where it was already doing this module's job from inside the orchestration
 # layer; ``minds`` re-exports it so nothing that imported it from there breaks.
-ACTED_PHRASES = {
-    "attack": "went for", "take": "took from", "give": "gave something to",
-    "speak": "spoke to", "flee": "got out", "hide": "went to ground",
-    "move": "moved off", "use": "used what they had", "wait": "did nothing",
-    "watch": "hung back and watched",
-}
+ACTED_PHRASES = verb_model.as_report_phrases(verb_data.built_in())
 
 # The verbs that are not really *doing* anything — `rules.ruleset.UNCOMMITTED`.
 # Named here rather than imported so the pure layer keeps its single dependency,
 # and asserted equal to the ruleset's pair in the suite so they cannot drift.
-UNCOMMITTED = ("wait", "watch")
+UNCOMMITTED = verb_model.uncommitted(verb_data.built_in())
 
 # What a relieved need is called in a sentence. Blunt on purpose, exactly as
 # blunt as ``minds.relieve_needs`` itself: there is no item model, so this says
@@ -122,14 +119,7 @@ ROLE_WITNESS = "witness"   # they saw it happen to somebody else
 
 # What an undirected act reads as. Written with ``{a}`` rather than ``{name}``
 # so the actor's own memory can say *I* and a bystander's can say who it was.
-ACT_GISTS = {
-    "flee": "{a} got out",
-    "hide": "{a} went to ground",
-    "move": "{a} moved off",
-    "use": "{a} used what {a_had}",
-    "wait": "{a} did nothing",
-    "watch": "{a} hung back and watched",
-}
+ACT_GISTS = verb_model.as_gists(verb_data.built_in())
 
 # (subject-position, object-position, possessive) for the person remembering,
 # and for anybody else.

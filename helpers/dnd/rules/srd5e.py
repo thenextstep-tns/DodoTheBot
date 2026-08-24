@@ -179,8 +179,16 @@ class Srd5e:
         # is not incapacitated — including the prone and the grappled, who can
         # still see perfectly well.
         allowed = {ruleset.WAIT, ruleset.WATCH}
+        # Perception is not an action in the SRD's economy and costs nothing a
+        # condition takes away, so both of these survive prone, grappled and
+        # restrained. Blindness would cost accuracy on a check, not the option.
+        allowed.add(ruleset.LISTEN)
+        allowed.add(ruleset.SEARCH)
         if situation.others:
             allowed.add(ruleset.SPEAK)
+            # Speaking and threatening go together here: the SRD gags a
+            # character with `incapacitated`, which has already returned above.
+            allowed.add(ruleset.THREATEN)
 
         # Speed 0. You keep your action; you do not get to leave.
         immobile = any(c in IMMOBILISING for c in conditions)
@@ -188,11 +196,20 @@ class Srd5e:
             allowed.add(ruleset.MOVE)          # prone still counts — you crawl
             if not situation.sealed:
                 allowed.add(ruleset.FLEE)
+            # Keeping up with somebody needs the speed that `grappled` and
+            # `restrained` take away, which is exactly what `immobile` covers.
+            if situation.others:
+                allowed.add(ruleset.FOLLOW)
 
         # Attacks, and anything else needing a free hand, survive being prone or
         # grappled; blindness costs accuracy, not the option.
         if situation.reachable:
             allowed.add(ruleset.ATTACK)
+            allowed.add(ruleset.HELP)
+            # Interposing is the SRD's *Protect* reaction in spirit: you need a
+            # body to cover and a third party to cover them from.
+            if len(situation.others) > 1:
+                allowed.add(ruleset.PROTECT)
             if situation.carrying:
                 allowed.add(ruleset.GIVE)
             if situation.anyone_carrying:

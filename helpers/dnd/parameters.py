@@ -148,6 +148,24 @@ def set_interactions(guild_id: Optional[int], interactions: dict) -> None:
     )
 
 
+def verb_overrides(guild_id: Optional[int]) -> dict:
+    """Every server-level verb for a guild.
+
+    Same document and the same reasoning as :func:`pack_overrides` and
+    :func:`interaction_overrides`: what a character may decide to do, and what
+    it is worth to them, is configuration.
+    """
+    doc = TUNING_COLLECTION.find_one({"guild_id": guild_id})
+    return (doc or {}).get("verbs", {})
+
+
+def set_verbs(guild_id: Optional[int], verbs: dict) -> None:
+    """Replace a guild's server-level verbs wholesale."""
+    TUNING_COLLECTION.update_one(
+        {"guild_id": guild_id}, {"$set": {"verbs": dict(verbs or {})}}, upsert=True
+    )
+
+
 def set_tuning(guild_id: Optional[int], key: str, value) -> None:
     """Set one server-level tunable. ``None`` clears it back to the default."""
     if value is None:

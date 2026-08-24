@@ -32,6 +32,7 @@ from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd import minds
 from helpers.dnd import interactions as interaction_registry
+from helpers.dnd import verbs as verb_registry
 from helpers.dnd import packs as pack_registry
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT
 from helpers.dnd.world import goal as goal_model
@@ -350,6 +351,80 @@ async def api_dnd_safety(request: web.Request):
         f"on {campaign.name}",
     )
     return web.json_response({"ok": True, "lines": lines})
+
+
+async def api_dnd_verb(request: web.Request):
+    """Add, edit or remove one verb for a campaign.
+
+    ``{campaign_id, action, key, label, report, description, risk, norm,
+    social_sign}`` where action is ``save`` or ``remove``.
+
+    Only the three scoring scalars and the wording are editable from the panel;
+    the trait leanings, the goal map and which needs a verb answers stay in the
+    data file. That is a scope decision rather than a principle — those three
+    are maps rather than numbers and want a bigger form than this — and the
+    parameters page says so rather than pretending otherwise.
+
+    An override **inherits everything it does not carry** from the shipped verb,
+    so saving a slider cannot silently blank out the half the form does not show.
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    action = str(data.get("action", "")).strip().lower()
+    settings = dict(campaign.settings or {})
+    own = dict(settings.get("verbs") or {})
+
+    if action == "remove":
+        key = str(data.get("key", "")).strip().lower()
+        if key not in own:
+            return _bad("This campaign has not changed that verb.")
+        own.pop(key)
+        settings["verbs"] = own
+        store.campaigns.save_settings(campaign.id, settings)
+        await _record_change(
+            request, "dnd_verb", key, "campaign", None,
+            f"removed the campaign's **{key}** verb",
+        )
+        return web.json_response({"ok": True, "key": key})
+
+    if action != "save":
+        return _bad("Unknown action.")
+
+    key = str(data.get("key", "")).strip().lower()
+    # Start from whatever is currently in force, so the fields this form does
+    # not show survive the round trip. A save that quietly emptied `traits`
+    # would make the verb unreachable — which is the exact silent failure the
+    # verb registry exists to stop.
+    base = verb_registry.Verbs.for_campaign(request["guild"].id, campaign).get(key)
+    doc = dict(base.to_doc()) if base is not None else {}
+    doc["key"] = key
+    for field in ("label", "report", "description"):
+        if data.get(field) is not None:
+            doc[field] = data[field]
+    for field in ("risk", "norm", "social_sign"):
+        if data.get(field) is not None:
+            doc[field] = data[field]
+
+    clean, problem = verb_registry.validate(doc)
+    if clean is None:
+        return _bad(problem)
+
+    settled = clean["key"]
+    was = "campaign" if settled in own else \
+        verb_registry.Verbs().source_of(settled)
+    own[settled] = clean
+    settings["verbs"] = own
+    store.campaigns.save_settings(campaign.id, settings)
+    await _record_change(
+        request, "dnd_verb", settled, was, "campaign",
+        f"changed what **{clean['label']}** costs in this campaign",
+    )
+    return web.json_response({"ok": True, "key": settled})
 
 
 async def api_dnd_interaction(request: web.Request):

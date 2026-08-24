@@ -66,16 +66,67 @@ KIND_LABELS = {
 # Every verb here is one of ``rules.ruleset.AFFORDANCES``. A goal that asked for
 # a verb no ruleset grants would be a goal nobody could ever pursue, and there is
 # a test that says so.
-SERVED_BY: dict[str, dict[str, float]] = {
-    ACQUIRE:  {"take": 1.0, "use": 0.4, "speak": 0.3},
-    AVOID:    {"flee": 1.0, "hide": 0.8, "move": 0.5, "watch": 0.2},
-    HARM:     {"attack": 1.0, "take": 0.3},
-    PROTECT:  {"attack": 0.6, "move": 0.5, "give": 0.4, "speak": 0.3,
-               "watch": 0.5},
-    REACH:    {"move": 1.0, "flee": 0.5},
-    LEARN:    {"watch": 1.0, "speak": 0.9, "use": 0.4, "hide": 0.3},
-    BEFRIEND: {"speak": 1.0, "give": 0.9},
-}
+# **Derived from `helpers/dnd/data/verbs.json`.** Stored per verb there, because
+# a verb should be one record; read per goal here, because scoring a candidate
+# against a goal has to be a lookup and a multiply — that is the cheap half of
+# GOAP and the reason `06-DECISION-ENGINE.md` §1 could rule search out entirely.
+#
+# **Filled on first read, not at import**, and that is not a style choice:
+# `world/__init__.py` imports this module eagerly, so anything that imports any
+# model under `world/` drags this in with it — and the verb registry imports
+# `world.verb`. Reaching for the registry at module level here therefore made
+# the registry import itself. A dict that populates itself the first time
+# somebody looks keeps every existing read working, including
+# `behaviour.py`'s `from ... import SERVED_BY as SERVED`.
+class _ServedBy(dict):
+    """The goal→verb table, loaded the first time it is actually read."""
+
+    _loaded = False
+
+    def _fill(self):
+        if self._loaded:
+            return
+        # Imported here rather than at the top: see the note above.
+        from helpers.dnd import verbs as verb_data
+        from helpers.dnd.world import verb as verb_model
+
+        self._loaded = True
+        super().update(verb_model.as_served_by(verb_data.built_in()))
+
+    def __getitem__(self, key):
+        self._fill()
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        self._fill()
+        return super().get(key, default)
+
+    def __iter__(self):
+        self._fill()
+        return super().__iter__()
+
+    def __len__(self):
+        self._fill()
+        return super().__len__()
+
+    def __contains__(self, key):
+        self._fill()
+        return super().__contains__(key)
+
+    def items(self):
+        self._fill()
+        return super().items()
+
+    def keys(self):
+        self._fill()
+        return super().keys()
+
+    def values(self):
+        self._fill()
+        return super().values()
+
+
+SERVED_BY: dict[str, dict[str, float]] = _ServedBy()
 
 # How a goal ended up in someone's head. Kept because "why does she want this"
 # is the first question a GM asks of a decision trace.

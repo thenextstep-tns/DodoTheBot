@@ -19,6 +19,9 @@ failed and the fix belongs here rather than at the call site.
 
 from __future__ import annotations
 
+from helpers.dnd import verbs as verb_data
+from helpers.dnd.world import verb as verb_model
+
 from dataclasses import dataclass, field
 from random import Random
 from typing import Protocol, runtime_checkable
@@ -48,6 +51,10 @@ DEGREES = (FAIL, COST, SUCCESS, TRIUMPH)
 #  Deliberately about *physical possibility*, not willingness or belief. Whether
 #  an NPC would ever attack is the scorer's business; whether they could is this.
 # --------------------------------------------------------------------------- #
+# The named ones, kept as constants because the rulesets read them by name when
+# they decide what a scene physically permits. Everything *about* a verb —
+# what it costs, who reaches for it, what it records as — is data now
+# (`helpers/dnd/data/verbs.json`); this is only the vocabulary.
 ATTACK = "attack"
 FLEE = "flee"
 SPEAK = "speak"
@@ -58,13 +65,22 @@ WAIT = "wait"
 WATCH = "watch"
 USE = "use"
 MOVE = "move"
+# Added when verbs became data, which is the point: six new ones were six JSON
+# objects and two grants each, where before they would have been forty edits
+# across eight tables in five modules.
+HELP = "help"
+PROTECT = "protect"
+THREATEN = "threaten"
+FOLLOW = "follow"
+SEARCH = "search"
+LISTEN = "listen"
 
-AFFORDANCES = (ATTACK, FLEE, SPEAK, GIVE, TAKE, HIDE, WAIT, WATCH, USE, MOVE)
+# **Derived from the data file, not listed here.** A verb that ships in
+# `verbs.json` is one a ruleset may grant; the closed list this used to be is
+# what made adding one a hunt through five modules.
+AFFORDANCES = verb_model.keys(verb_data.built_in())
 
-AFFORDANCE_LABELS = {
-    ATTACK: "Attack", FLEE: "Flee", SPEAK: "Speak", GIVE: "Give", TAKE: "Take",
-    HIDE: "Hide", WAIT: "Wait", WATCH: "Watch", USE: "Use", MOVE: "Move",
-}
+AFFORDANCE_LABELS = verb_model.labels(verb_data.built_in())
 
 # The two that are always on the table for anyone still conscious, and the
 # reason a decision never comes down to "commit or nothing":
@@ -78,7 +94,7 @@ AFFORDANCE_LABELS = {
 #
 # ``wait`` alone has no switch; ``watch`` has one like every other verb, because
 # a campaign may legitimately want everyone forced to act.
-UNCOMMITTED = (WAIT, WATCH)
+UNCOMMITTED = verb_model.uncommitted(verb_data.built_in())
 
 
 @dataclass(frozen=True)

@@ -40,6 +40,8 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
 | P3 | ✅ **complete** | World tick, faction clocks, rumours — and the whole decision engine: what an NPC may see, what a scene permits, what they want, who they are, how they choose, what happens when they do, and the cheap paths for everybody nobody is watching |
 | P4 | ◐ started | Voice. **Its first half needs no model at all**; two of its four pieces are built and live — the turn report (§8a) and episode gists (§8b). No model has been installed and none is needed yet |
+| — | ✅ live | **Verbs as data, and six more of them** (§8e) — eleven tables in six modules became one file; `protect` and `threaten` finally exist |
+| — | ✅ live | **The parameter catalogue** (§8d) — one list of every knob, and a test that fails when a new constant is not in it |
 | — | ✅ live | **Interaction kinds as data** (§8c) — off-roadmap, asked for directly. Four hand-maintained Python tables became one editable file |
 
 **P0–P2 have now been played through by a human**, act by act, using
@@ -72,7 +74,7 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**2,862 tests** across **seven** suites, all passing. `test_dnd_catalogue.py` is the newest: it is
+**2,022 tests** across **seven** suites, all passing. `test_dnd_catalogue.py` is the newest: it is
 mostly one assertion per parameter, which is why the number jumped. `test_dnd_p4.py`
 is the Voice phase's, and is where the null-backend suite will go:
 
@@ -80,7 +82,7 @@ is the Voice phase's, and is where the null-backend suite will go:
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py && py tests/test_dnd_catalogue.py
 ```
 
-The count is 4 + 95 + 52 + 542 + 68 + 195 + 1906, **measured** — `test_command_names.py`
+The count is 4 + 95 + 52 + 544 + 70 + 310 + 947, **measured** — `test_command_names.py`
 prints no total, so its four checks have to be counted by eye. See §9.
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
@@ -157,14 +159,15 @@ away from everything else.
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/tuning.py   121 tunables, resolved default → server → campaign
+helpers/dnd/tuning.py   127 tunables, resolved default → server → campaign
 helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
 helpers/dnd/interactions.py  what one person can do to another, same three layers
+helpers/dnd/verbs.py         what anybody can decide to do, same three layers
 helpers/dnd/catalogue.py     every parameter there is, exposed or not
 helpers/dnd/narrate.py  saying what happened — turn report and the words a
                         memory carries, no model anywhere     (pure, no RNG)
 helpers/dnd/data/       what ships as data rather than as code
-                        (packs.json, interactions.json)
+                        (packs.json, interactions.json, verbs.json)
 helpers/dnd/mind/       traits, needs, memory, relationships, stakes,
                         goals, behaviour (propose), decide (score + select)
                                                              (pure, seeded)
@@ -623,7 +626,7 @@ mid-scene degrades to templates without interrupting play.
 * **Six command slots left** (94/100). Discord's cap is hard and hitting it takes
   the *whole cog* offline — it has happened twice. P4 wants commands. Group new
   ones under `/gm` or an existing group, where a whole group costs one slot.
-* **121 tunables in 16 groups.** Every one is justified and "everything
+* **127 tunables in 16 groups.** Every one is justified and "everything
   tweakable" is settled — this is not a case for removing any. But the panel
   could fold the ones nobody should ever touch behind an *advanced* disclosure,
   the way the trait override already is, before the number doubles.
@@ -931,6 +934,101 @@ The 82 are not equal. In the order they should be done:
    value: it is the part a GM is least likely to want to change, and the SRD
    numbers are the SRD's.
 5. The loose scalars, which can simply become tunables in their existing groups.
+
+## 8e. Verbs as data, and six more of them ✅ built
+
+**Asked for directly:** *"Go with the verb parser, but make sure there are more
+than 10 affordance verbs."* Doing the second half first turned out to be the
+whole job — and the ordering was not a detour, it was the fix.
+
+### Why adding a verb was expensive
+
+A verb was written down in **eleven** places across six modules:
+
+| Where | What |
+| --- | --- |
+| `rules/ruleset.py` | `AFFORDANCES`, `AFFORDANCE_LABELS`, `UNCOMMITTED` |
+| `mind/decide.py` | `RISK`, `NORM`, `SOCIAL_SIGN`, `TRAIT_AFFINITY`, `RELATION_READS`, `NEEDS_SERVED` |
+| `world/goal.py` | `SERVED_BY` |
+| `mind/behaviour.py` | `DIRECTED` |
+| `minds.py` | `ACT_AS_RELATION` |
+| `narrate.py` | `ACTED_PHRASES`, `ACT_GISTS` |
+| `data/packs.json` | a weight per archetype |
+
+**Missing one never raised.** It produced a verb that was unreachable, or
+weightless, or aimed at nobody, or unrememberable — and *"the NPCs are boring"*
+is very hard to trace back to a dictionary that was one key short.
+
+`world/verb.py`'s docstring originally claimed eight tables. It was wrong, and
+the P4 suite found the ninth the honest way: **`Marla helped` with no target**,
+because `behaviour.DIRECTED` was a fourth hardcoded tuple. The undercount is the
+argument for the file.
+
+### What shipped
+
+`helpers/dnd/data/verbs.json` — one record per verb, resolved built-in → server
+→ campaign — plus `world/verb.py`, `helpers/dnd/verbs.py`, a **What anybody can
+do** section on the campaign page, and 106 more checks in `test_dnd_p4.py`.
+
+Every one of those eleven tables now *derives* from the file and keeps its name
+and shape, so no caller changed. Tests assert each still matches.
+
+**Sixteen verbs**, the ten at their exact prior values plus:
+
+| Verb | What it fills |
+| --- | --- |
+| `protect` | Interposing. The verb the intent-parser example turns on — *I put myself between Rook and Ondry* — and there was no way to express it at all |
+| `threaten` | Violence promised rather than done. It had been a **relationship kind since P2**, so people could be recorded as having been threatened and no NPC could ever choose to do it |
+| `help` | The cheap warm act, next to `give` |
+| `follow` | Going after somebody. Records nothing on its own |
+| `search` | The undirected half of curiosity; `watch` is appraising people |
+| `listen` | Attending to something in particular. **Not** one of the uncommitted pair — a choice, not the floor |
+
+`protected` was added to `interactions.json` as one row, which is what that file
+being data buys.
+
+### Things worth not undoing
+
+* **`world/goal.py::SERVED_BY` loads on first read, not at import.**
+  `world/__init__.py` imports `goal` eagerly, so anything importing any model
+  under `world/` drags it in — and the verb registry imports `world.verb`.
+  Reaching for the registry at module level there made the registry import
+  itself. Do not "tidy" the lazy dict away.
+* **The hostility check reads `social_sign < 0`** rather than naming attack and
+  take, which is how `threaten` gets the same treatment for free.
+* **Archetype weights were part of the change, not housekeeping.** A verb no
+  archetype reaches for is never proposed. Two of the six sharpened archetypes
+  that were vague: the loyalist now leads with `protect` (1.0, above everything
+  else it does) and the opportunist with `search` (0.95).
+* **An override inherits what the form does not show.** The panel edits three
+  scalars and the wording; saving one must not blank the trait map, or the verb
+  becomes unreachable — the exact silent failure this file exists to stop.
+
+### One test changed shape, and the new one is better
+
+`deciding: the best option usually wins` asserted the argmax wins **more than 15
+in 60**. With ten verbs it did; with sixteen it wins nine, and the failure looked
+like a regression. It is not: a softmax over a longer candidate list is flatter
+at the same temperature, and the distribution is still correctly ranked — over
+400 draws `speak` took 67 at 2× uniform while `attack` took 4. The threshold had
+silently encoded how many verbs existed when it was written.
+
+It now asserts the **property**: the best option is the modal choice, beats an
+even draw by half again, and does not always win. All three hold at any list
+length. **Prefer this shape** — a percentage in a test about a distribution is a
+number that will drift under somebody else.
+
+### What is still not done
+
+The **verb parser** itself — `/check`'s free text resolving to one of the
+sixteen. That was the original ask and it is now the cheap half: the vocabulary
+is fixed, every verb carries a label and a report phrase, and `validate` refuses
+one nothing can reach for. Next increment.
+
+Also: the panel edits `risk`, `norm`, `social_sign` and the wording. The trait
+leanings, the goal map and which needs a verb answers are shown read-only and
+edited in the JSON. That is a scope decision, not a principle, and the
+parameters page says so rather than pretending otherwise.
 
 ## 9. Keeping this file honest
 

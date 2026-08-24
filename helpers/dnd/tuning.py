@@ -464,6 +464,38 @@ TUNABLES: list[dict] = [
     _spec("affordance_move", "Actions", "Moving",
           "Whether a character may reposition inside a scene. Off pins everyone where they stand.",
           True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_help", "Actions", "Helping",
+          "Whether a character may lend a hand to somebody who needs one. Cheap, "
+          "warm, and it puts the other person in their debt.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_protect", "Actions", "Stepping in",
+          "Whether a character may put themselves between somebody and what is "
+          "coming at them. Needs a third body in the room — with only two people "
+          "present there is nothing to step between. The costliest of the warm "
+          "verbs: it is the one that gets people hurt on purpose.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_threaten", "Actions", "Threatening",
+          "Whether a character may promise violence rather than do it. Carries "
+          "across a room, unlike attacking — the promise is the point, not the "
+          "reach. **Off and a cornered NPC has nothing between talking and "
+          "swinging**, which is the gap this fills.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_follow", "Actions", "Following",
+          "Whether a character may go after somebody, or stay with them. Records "
+          "nothing between the two of them on its own — being followed is not "
+          "something done *to* you until something comes of it.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_search", "Actions", "Searching",
+          "Whether a character may go through the place properly. The undirected "
+          "half of curiosity: *watching* is appraising the people, this is "
+          "turning over what is here.",
+          True, kind="bool", minimum=0, maximum=1),
+    _spec("affordance_listen", "Actions", "Listening",
+          "Whether a character may attend to something in particular and wait it "
+          "out. Distinct from watching, which is reading the room; this is "
+          "waiting *for* something. Not one of the always-available pair — it is "
+          "a choice, not the floor a decision falls back to.",
+          True, kind="bool", minimum=0, maximum=1),
 
     # --- Goals (P3) -------------------------------------------------------- #
     _spec("goal_attention", "Goals", "Attention to spend",

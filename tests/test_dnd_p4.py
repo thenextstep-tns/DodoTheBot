@@ -70,6 +70,12 @@ from helpers.dnd.mind import decide as decide_math  # noqa: E402
 from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
 from helpers.dnd.mind import stakes as stakes_math  # noqa: E402
 from helpers.dnd import interactions as interaction_registry  # noqa: E402
+from helpers.dnd import packs as pack_registry  # noqa: E402
+from helpers.dnd import verbs as verb_registry  # noqa: E402
+from helpers.dnd.mind import behaviour as behaviour_math  # noqa: E402
+from helpers.dnd.mind import needs as needs_mod  # noqa: E402
+from helpers.dnd.world import goal as goal_model  # noqa: E402
+from helpers.dnd.world import verb as verb_model  # noqa: E402
 from helpers.dnd.world import interaction as interaction_model  # noqa: E402
 from helpers.dnd import tuning as tuning_registry  # noqa: E402
 from helpers.dnd.tuning import GistTuning, TUNABLES, ReportTuning, Tuning  # noqa: E402
@@ -794,6 +800,175 @@ def test_kinds_reach_the_simulation() -> None:
           detail="`requires` is per-kind data now and must still hold the line")
 
 
+# --------------------------------------------------------------------------- #
+#  7. Verbs as data — the eleven tables that were one thing
+# --------------------------------------------------------------------------- #
+def test_verbs_are_one_record() -> None:
+    """Every table a verb used to appear in now derives from `verbs.json`.
+
+    There were **eleven**, across six modules, and `world/verb.py` originally
+    claimed eight — the undercount is the argument. Missing one never raised: it
+    produced a verb that was unreachable, or weightless, or aimed at nobody.
+    """
+    shipped = verb_registry.built_in()
+    check("verbs: the shipped file parses and is not empty", len(shipped) >= 16,
+          detail=f"{len(shipped)} verbs")
+
+    check("verbs: the affordance list IS the file",
+          tuple(rs.AFFORDANCES) == tuple(shipped))
+    check("verbs: and so are the labels",
+          rs.AFFORDANCE_LABELS == verb_model.labels(shipped))
+    check("verbs: and the uncommitted pair",
+          tuple(rs.UNCOMMITTED) == verb_model.uncommitted(shipped)
+          == tuple(narrate.UNCOMMITTED))
+
+    for table, builder in (
+        (decide_math.RISK, verb_model.as_risk),
+        (decide_math.NORM, verb_model.as_norm),
+        (decide_math.SOCIAL_SIGN, verb_model.as_social_sign),
+        (decide_math.NEEDS_SERVED, verb_model.as_needs_served),
+        (decide_math.TRAIT_AFFINITY, verb_model.as_trait_affinity),
+        (decide_math.RELATION_READS, verb_model.as_relation_reads),
+    ):
+        check(f"verbs: the scorer's {builder.__name__} table is the file",
+              table == builder(shipped))
+
+    check("verbs: the goal table is the file",
+          dict(goal_model.SERVED_BY) == verb_model.as_served_by(shipped))
+    check("verbs: what a verb records as is the file",
+          minds.ACT_AS_RELATION == verb_model.as_records(shipped))
+    check("verbs: the report wording is the file",
+          narrate.ACTED_PHRASES == verb_model.as_report_phrases(shipped))
+    check("verbs: the memory wording is the file",
+          narrate.ACT_GISTS == verb_model.as_gists(shipped))
+    check("verbs: WHICH ONES ARE AIMED AT A PERSON is the file",
+          tuple(behaviour_math.DIRECTED) == verb_model.directed(shipped),
+          detail="the ninth table, and the one that shipped `help` at nobody")
+
+    # Every verb has to be reachable, or it is a silent no-op.
+    for key, verb in shipped.items():
+        check(f"verbs: '{key}' can be reached for",
+              bool(verb.goals or verb.traits),
+              detail="no archetype leans toward it and no goal is served by it")
+        check(f"verbs: '{key}' reads back in words",
+              bool(verb.report) and (verb.directed or bool(verb.gist)),
+              detail="an undirected verb needs a gist; a directed one takes the "
+                     "interaction kind's wording")
+        if verb.records:
+            check(f"verbs: '{key}' records as a kind that exists",
+                  verb.records in interaction_registry.built_in(),
+                  detail=f"{verb.records!r} is not in interactions.json")
+        for name in verb.needs:
+            check(f"verbs: '{key}' answers a real need",
+                  name in needs_mod.NEEDS, detail=name)
+
+    # Archetypes must be able to propose them, or nothing ever does.
+    reachable = set()
+    for pack in pack_registry.built_in().values():
+        reachable.update(k for k, w in pack.weights.items() if w > 0)
+    unreachable = sorted(set(shipped) - reachable - set(rs.UNCOMMITTED))
+    check("verbs: EVERY VERB IS REACHED FOR BY SOME ARCHETYPE", not unreachable,
+          detail=f"nothing proposes: {unreachable}")
+
+
+def test_the_six_new_verbs() -> None:
+    """The ones the owner asked for, and that the eleven tables made expensive."""
+    shipped = verb_registry.built_in()
+    for key in ("help", "protect", "threaten", "follow", "search", "listen"):
+        check(f"verbs: '{key}' exists", key in shipped)
+
+    check("verbs: threaten is hostile and carries across a room",
+          shipped["threaten"].social_sign < 0 and shipped["threaten"].directed
+          and shipped["threaten"].records == "threatened",
+          detail="it was a relationship kind since P2 that nobody could choose")
+    check("verbs: protect is the costliest warm verb",
+          shipped["protect"].risk > shipped["help"].risk
+          and shipped["protect"].social_sign > 0,
+          detail="it is the one that gets people hurt on purpose")
+    check("verbs: search and listen are undirected",
+          not shipped["search"].directed and not shipped["listen"].directed)
+    check("verbs: listen is not one of the uncommitted pair",
+          not shipped["listen"].uncommitted,
+          detail="it is a choice, not the floor a decision falls back to")
+
+    # A campaign may add one the engine has never heard of.
+    invented, problem = verb_registry.validate({
+        "label": "Bargain", "traits": {"greed": 0.6},
+        "goals": {"acquire": 0.9}, "risk": 0.2, "report": "haggled with",
+    })
+    check("verbs: A GM CAN ADD ONE THAT DID NOT EXIST",
+          invented is not None and invented["key"] == "bargain", detail=problem)
+    check("verbs: and it resolves like any other",
+          verb_registry.Verbs(campaign={"bargain": invented})
+          .get("bargain").goals == {"acquire": 0.9})
+    check("verbs: one nothing could ever reach for is refused",
+          verb_registry.validate({"label": "Loiter"})[0] is None,
+          detail="no disposition leans toward it and no goal is served by it")
+
+    # Layering, same as archetypes and interaction kinds.
+    bolder = dict(shipped["attack"].to_doc(), risk=0.2)
+    layered = verb_registry.Verbs(server={"attack": bolder},
+                                  campaign={"attack": dict(bolder, risk=0.05)})
+    check("verbs: campaign beats server beats shipped",
+          layered.get("attack").risk == 0.05
+          and verb_registry.Verbs(server={"attack": bolder}).get("attack").risk == 0.2
+          and shipped["attack"].risk == 0.9)
+
+
+def test_new_verbs_reach_a_scene() -> None:
+    """Offered, chosen, committed — with a target, a memory and a relationship."""
+    campaign, store = _campaign(9404, "Verbs")
+    # Three people: `protect` needs somebody to shield **and** somebody to
+    # shield them from, so a two-hander never offers it.
+    people = [
+        minds.spawn_npc(store, name=name, role=role, culture="city",
+                        world_time=0, rng=Random(40 + i))
+        for i, (name, role) in enumerate(
+            [("Marla", "thief"), ("Ondry", "guard"), ("Cass", "scribe")])
+    ]
+    scene = store.scenes.create(Scene(
+        guild_id=campaign.guild_id, campaign_id=campaign.id, channel_id=1,
+        title="the tap room", present=[p.id for p in people], lighting="dim",
+    ))
+    tuning = minds.tuning_for(store, campaign)
+    marla = store.entities.get(people[0].id)
+
+    offered = minds.candidates_for(store, marla, scene, world_time=0,
+                                   campaign=campaign, tuning=tuning)
+    verbs = {c.verb for c in offered}
+    for key in ("help", "protect", "threaten", "follow", "search", "listen"):
+        check(f"scene: '{key}' is actually offered", key in verbs,
+              detail="a verb no ruleset grants is a verb nobody can ever choose")
+
+    aimed = [c for c in offered if c.verb in ("help", "protect", "threaten",
+                                              "follow")]
+    check("scene: EVERY DIRECTED NEW VERB HAS SOMEBODY TO AIM AT",
+          aimed and all(c.target_id is not None for c in aimed),
+          detail="`help` shipped aimed at nobody, which formed a memory of "
+                 "somebody helping no one and moved no relationship at all")
+
+    # Commit a protect and check all three consequences.
+    shield = next(c for c in offered if c.verb == "protect")
+    decision = decide_math.Decision(
+        chosen=decide_math.Scored(verb="protect", target_id=shield.target_id,
+                                  utility=1.0, terms={"trait": 1.0}),
+        considered=(decide_math.Scored(verb="protect",
+                                       target_id=shield.target_id),),
+    )
+    report = minds.commit_decision(store, marla, scene, decision,
+                                   world_time=500, rng=Random(9),
+                                   campaign=campaign, tuning=tuning)
+    bond = store.relations.between(report["target_id"], marla.id)
+    check("scene: protecting somebody moves how they feel",
+          bond.affinity > 0 and bond.debt > 0,
+          detail=f"affinity {bond.affinity:+.2f} debt {bond.debt:+d}")
+    check("scene: and they remember it from their own side",
+          any("stepped in front of me" in m.gist
+              for m in store.memories.for_entity(report["target_id"])),
+          detail=str([m.gist for m in
+                      store.memories.for_entity(report["target_id"])][:3]))
+
+
 def test_reexports() -> None:
     """``describe_act`` moved into ``narrate``; ``minds`` still answers for it."""
     check("moved: minds.describe_act is narrate's",
@@ -821,6 +996,9 @@ def main() -> int:
         test_one_table_not_four,
         test_kinds_are_editable,
         test_kinds_reach_the_simulation,
+        test_verbs_are_one_record,
+        test_the_six_new_verbs,
+        test_new_verbs_reach_a_scene,
         test_reexports,
     ):
         test()

@@ -46,7 +46,9 @@ from dataclasses import dataclass, field
 from random import Random
 from typing import Any
 
+from helpers.dnd import verbs as verb_data
 from helpers.dnd.mind import goals as goal_math
+from helpers.dnd.world import verb as verb_model
 from helpers.dnd.tuning import (
     DEFAULT_DECISION,
     DEFAULT_GOALS,
@@ -77,76 +79,39 @@ def clamp01(value: float) -> float:
 #  scattered through nine functions cannot be reasoned about by the person who
 #  has to explain an NPC's behaviour at the table.
 # --------------------------------------------------------------------------- #
+# All six of these are **derived from `helpers/dnd/data/verbs.json`**, which is
+# one record per verb rather than six dicts keyed by the same strings. They keep
+# their names and their shapes so every caller below is unchanged, and a test
+# asserts each one still matches the file.
+#
+# What this replaced is the argument for it: adding a verb meant editing six
+# tables here, one in `world/goal.py`, one in `minds.py`, two in `narrate.py`
+# and the affordance list in `rules/ruleset.py` — and missing any of them never
+# raised. It silently produced a verb that was unreachable, or weightless, or
+# unrememberable, and "the NPCs are boring" is very hard to trace back to a
+# dictionary that was one key short.
+_VERBS = verb_data.built_in()
+
 # Which needs an action plausibly answers.
-NEEDS_SERVED = {
-    "take":   ("hunger", "thirst"),
-    "use":    ("hunger", "thirst", "pain", "warmth"),
-    "flee":   ("safety",),
-    "hide":   ("safety",),
-    "move":   ("warmth", "safety"),
-    "speak":  ("belonging", "desire"),
-    "give":   ("belonging", "desire"),
-    "attack": ("safety",),
-    "wait":   ("fatigue",),
-    "watch":  ("safety",),
-}
+NEEDS_SERVED = verb_model.as_needs_served(_VERBS)
 
 # How much of a gamble each verb is, before anything about the person.
-RISK = {
-    "attack": 0.9, "take": 0.6, "flee": 0.35, "hide": 0.2, "use": 0.2,
-    "move": 0.1, "speak": 0.1, "give": 0.1, "watch": 0.05, "wait": 0.0,
-}
+RISK = verb_model.as_risk(_VERBS)
 
 # Which way an action points socially. Used twice: to read a formative memory
 # about somebody onto a choice about them, and to weigh what it would look like.
-SOCIAL_SIGN = {
-    "attack": -1.0, "take": -0.8, "hide": -0.3, "flee": -0.3,
-    "speak": 0.8, "give": 1.0, "use": 0.0, "move": 0.0, "wait": 0.0,
-    # Watching somebody is not friendly and not hostile. It is *appraisal*, and
-    # giving it a social sign either way would make it read as a move against
-    # them, which is precisely what it is not.
-    "watch": 0.0,
-}
+SOCIAL_SIGN = verb_model.as_social_sign(_VERBS)
 
 # What a room thinks of it. Negative is "not done here".
-NORM = {
-    "attack": -0.85, "take": -0.6, "hide": -0.35, "flee": -0.25,
-    "speak": 0.3, "give": 0.45, "use": 0.0, "move": 0.0, "wait": 0.05,
-    # Nobody minds you looking. That is why it is the thing people do.
-    "watch": 0.1,
-}
+NORM = verb_model.as_norm(_VERBS)
 
 # Which dispositions reach for which verb. **This is where `boldness` finally
-# does something** — declared in P2, stored, displayed, and until now read by no
-# code anywhere in the project.
-TRAIT_AFFINITY = {
-    "attack": {"boldness": 0.6, "warmth": -0.5, "volatility": 0.4},
-    "flee":   {"boldness": -0.7, "fear_of_death": 0.5},
-    "hide":   {"boldness": -0.5, "openness": -0.2, "honour": -0.2},
-    "speak":  {"warmth": 0.5, "openness": 0.4, "belonging": 0.3},
-    "give":   {"warmth": 0.6, "greed": -0.5, "honour": 0.3},
-    "take":   {"greed": 0.7, "honour": -0.5, "boldness": 0.2},
-    "use":    {"diligence": 0.4, "curiosity": 0.3},
-    "move":   {"curiosity": 0.2},
-    "wait":   {"diligence": 0.3, "volatility": -0.4, "boldness": -0.2},
-    "watch":  {"diligence": 0.5, "curiosity": 0.5, "openness": 0.3,
-               "volatility": -0.3},
-}
+# does something** — declared in P2, stored, displayed, and until the decision
+# engine read by no code anywhere in the project.
+TRAIT_AFFINITY = verb_model.as_trait_affinity(_VERBS)
 
 # How the axes of a relationship argue for an action about that person.
-RELATION_READS = {
-    "attack": {"affinity": -0.6, "trust": -0.3, "fear": 0.3, "respect": -0.2},
-    "take":   {"affinity": -0.4, "trust": -0.3, "respect": -0.3},
-    # `desire` sits at 0 in every campaign that has not switched it on, so it
-    # contributes exactly nothing there rather than needing a branch here.
-    "speak":  {"affinity": 0.5, "familiarity": 0.3, "trust": 0.2, "desire": 0.4},
-    "give":   {"affinity": 0.6, "trust": 0.3, "debt": 0.4, "desire": 0.3},
-    "flee":   {"fear": 0.6, "trust": -0.2},
-    "hide":   {"fear": 0.5},
-    # You watch the people you have not made your mind up about: unfamiliar,
-    # and not yet trusted.
-    "watch":  {"familiarity": -0.4, "trust": -0.3, "fear": 0.2},
-}
+RELATION_READS = verb_model.as_relation_reads(_VERBS)
 
 DEBT_SCALE = 5.0
 
@@ -308,8 +273,11 @@ def risk_term(view, verb: str, target_id, tuning: DecisionTuning = DEFAULT_DECIS
     it. That curve is the whole reason cowardice reads as cowardice.
     """
     danger = RISK.get(verb, 0.2)
-    if target_id is not None and verb in ("attack", "take"):
-        # Picking a fight with someone who frightens you is a worse idea.
+    if target_id is not None and SOCIAL_SIGN.get(verb, 0.0) < 0:
+        # Picking a fight with someone who frightens you is a worse idea. Read
+        # off the verb's own social sign rather than naming two verbs, which is
+        # how `threaten` would otherwise have been free to aim at anybody: the
+        # question is whether the act is hostile, and the data already says.
         danger = clamp01(danger + 0.4 * clamp01(view.of(target_id).fear))
     # Kept inside 0..1 by construction rather than by clamping. A multiplier that
     # runs past 1 and is then clipped is not a curve, it is a curve with its top

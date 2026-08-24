@@ -18,6 +18,7 @@ from typing import Any
 
 from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import narrate
+from helpers.dnd import verbs as verb_data
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd.mind import behaviour
@@ -43,6 +44,7 @@ from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world import goal as goal_model
 from helpers.dnd.world import interaction as interaction_model
+from helpers.dnd.world import verb as verb_model
 from helpers.dnd.world import pack as pack_model
 from helpers.dnd.world import view as view_model
 from helpers.dnd.rules import ruleset as ruleset_model
@@ -539,23 +541,12 @@ def decide_for(
 # Which of the nine verbs is a thing done *to* somebody, and what a relationship
 # calls it (``mind/relationships.py``). A verb absent here still happens and is
 # still remembered — it simply does not move how two people stand.
-ACT_AS_RELATION = {
-    "attack": "attacked",
-    "take": "stole",
-    "give": "gifted",
-    "speak": "talked",
-}
+ACT_AS_RELATION = verb_model.as_records(verb_data.built_in())
 
-# What an undirected act reads as, so something that nobody described still
-# forms a memory somebody could tell back.
-ACT_PHRASES = {
-    "flee": "{name} got out",
-    "hide": "{name} went to ground",
-    "move": "{name} moved off",
-    "use": "{name} used what they had",
-    "wait": "{name} did nothing",
-    "watch": "{name} hung back and watched",
-}
+# `ACT_PHRASES` lived here and is gone: the wording moved to
+# `narrate.ACT_GISTS` when memories learned to say *I* (P4 §8b), and this copy
+# has been read by nothing since. It was still listed in the parameter
+# catalogue, which is how it was noticed.
 
 
 def commit_decision(

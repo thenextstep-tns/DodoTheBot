@@ -44,6 +44,7 @@ from typing import Any
 
 from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import packs as pack_registry
+from helpers.dnd import verbs as verb_registry
 from helpers.dnd.tuning import BY_KEY, GROUPS, TUNABLES
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -326,37 +327,6 @@ class Baked:
 BAKED_IN: tuple = (
     # --- the decision engine's per-verb tables. The biggest black box here:
     # every one of these is read on every scoring pass, for every candidate.
-    Baked("helpers/dnd/mind/decide.py", "RISK",
-          "How much of a gamble each verb is",
-          "Before anything about the person. The risk term then bends it by "
-          "their fear of death, so this is the shared baseline everyone's "
-          "courage is measured against.",
-          "data/verbs.json", ("decide_risk_curve",)),
-    Baked("helpers/dnd/mind/decide.py", "NORM",
-          "How acceptable each verb is",
-          "What a person's own sense of propriety says about doing it, before "
-          "the specific situation. Saturates rather than scaling linearly.",
-          "data/verbs.json"),
-    Baked("helpers/dnd/mind/decide.py", "SOCIAL_SIGN",
-          "Whether a verb is friendly or hostile",
-          "Signs the relationship term: doing something warm to somebody you "
-          "like scores well, doing something hostile to them does not.",
-          "data/verbs.json"),
-    Baked("helpers/dnd/mind/decide.py", "TRAIT_AFFINITY",
-          "Which disposition reaches for which verb",
-          "The term that finally made `boldness` matter — declared in P2, "
-          "rolled, stored, displayed, and read by nothing until this table.",
-          "data/verbs.json"),
-    Baked("helpers/dnd/mind/decide.py", "RELATION_READS",
-          "How a verb reads against a relationship",
-          "Which axes of how you feel about somebody push you toward or away "
-          "from doing a given thing to them.",
-          "data/verbs.json"),
-    Baked("helpers/dnd/mind/decide.py", "NEEDS_SERVED",
-          "Which needs each verb answers",
-          "Drives both the need term in scoring and, via "
-          "`minds.relieve_needs`, what acting actually settles.",
-          "data/verbs.json", ("act_need_relief",)),
     Baked("helpers/dnd/mind/decide.py", "DEBT_SCALE",
           "What counts as a large debt",
           "The divisor that turns a debt count into a −1…1 term. At 5, owing "
@@ -366,9 +336,12 @@ BAKED_IN: tuple = (
     # --- goals
     Baked("helpers/dnd/mind/goals.py", "SUPPORTED_BY",
           "Which feelings re-weigh which ambitions",
-          "Maps relationship axes onto goal kinds, so a grudge cools when the "
-          "feeling behind it does. Always a pull, never a jump.",
-          "data/verbs.json", ("goal_reweigh", "goal_reweigh_step")),
+          "Maps relationship **axes** onto goal kinds, so a grudge cools when "
+          "the feeling behind it does. Not to be confused with the verb→goal "
+          "table that used to sit beside it — that one is data now "
+          "(`data/verbs.json`), and this is about how you feel rather than what "
+          "you do. Always a pull, never a jump.",
+          "data/axes.json", ("goal_reweigh", "goal_reweigh_step")),
     Baked("helpers/dnd/mind/goals.py", "DEBT_SCALE",
           "What counts as a large debt (goals)",
           "A second copy of the scorer's constant, in a second module. Both "
@@ -568,12 +541,6 @@ BAKED_IN: tuple = (
 
     # --- wording. Lower stakes than the weights, but a campaign in its own
     # setting should be able to say things its own way.
-    Baked("helpers/dnd/narrate.py", "ACT_GISTS",
-          "What an undirected act reads as in a memory", 
-          "*I went to ground* against *Marla went to ground*. The commonest memory anybody holds about themselves.", "data/verbs.json"),
-    Baked("helpers/dnd/narrate.py", "ACTED_PHRASES",
-          "What an act reads as in the turn report", 
-          "The verbs `/gm advance` uses. Separate from the memory wording because a report and a recollection are different registers.", "data/verbs.json"),
     Baked("helpers/dnd/narrate.py", "NEED_EASED",
           "What a settled need is called in a sentence", 
           "*that settled their hunger a little*. Blunt on purpose - there is no item model, so it never says what they ate.", "data/needs.json"),
@@ -588,12 +555,6 @@ BAKED_IN: tuple = (
     Baked("helpers/dnd/narrate.py", "_TONES",
           "How a forgotten stretch felt, in a word", 
           "bad / hard / quiet / good / fine, chosen by the mean valence of the memories being folded.", "data/needs.json"),
-    Baked("helpers/dnd/minds.py", "ACT_AS_RELATION",
-          "Which verb counts as which interaction kind",
-          "The join between what an NPC *does* and what the relationship "
-          "system records. A verb missing here still happens and is still "
-          "remembered — it simply does not move how two people stand.",
-          "data/verbs.json"),
     Baked("helpers/dnd/minds.py", "_SEEDS",
           "The backstory events a new NPC may be given",
           "Seeded history. Note the known bug: these are dated at most ~14 "
@@ -844,7 +805,8 @@ def entries() -> list[Entry]:
         default=f"{len(pack_registry.built_in())} archetypes", span="editable",
         group="Behaviour", status=STATUS_DATA, layer=LAYER_DATA,
         where="mind/behaviour.py", view="behaviour",
-        affects=("pack_count", "pack_drift", "pack_shaping", "candidate_cap"),
+        affects=("pack_count", "pack_drift", "pack_shaping", "candidate_cap",
+                 "data/verbs.json"),
         note="Resolved built-in → server → campaign, like the tunables.",
     ))
     out.append(Entry(
@@ -863,6 +825,29 @@ def entries() -> list[Entry]:
     ))
 
     live = live_values()
+    out.append(Entry(
+        key="data/verbs.json", label="What anybody can decide to do",
+        description=(
+            "Per verb: how much of a gamble it is, what a room thinks of it, "
+            "which way it points socially, which dispositions reach for it, how "
+            "it reads against a relationship, which needs it answers, which "
+            "ambitions it serves, what it records as, and two ways of putting "
+            f"it into words. {len(verb_registry.built_in())} ship; all editable, "
+            "and a campaign may add one the engine has never heard of."
+        ),
+        default=f"{len(verb_registry.built_in())} verbs", span="editable",
+        group="Deciding", status=STATUS_DATA, layer=LAYER_DATA,
+        where="mind/decide.py, mind/behaviour.py, rules/ruleset.py, world/goal.py",
+        view="decision",
+        affects=("candidate_cap", "decide_temperature", "pack_count",
+                 "data/packs.json", "data/interactions.json"),
+        note=(
+            "Replaced **eleven** hand-maintained tables across six modules. "
+            "Whether a *scene* permits a verb is still the ruleset's job, and "
+            "the two rulesets deliberately disagree."
+        ),
+    ))
+
     for baked in BAKED_IN:
         already = baked.planned.startswith("(already exposed as ")
         here = (baked.path, baked.name)

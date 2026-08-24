@@ -155,10 +155,28 @@ class Freeform:
             if situation.obscured or situation.features:
                 allowed.add(ruleset.HIDE)
 
+        # Attending to the room rather than to a person. Both want senses and
+        # nothing else, so being pinned does not stop either — a bound character
+        # can still listen, and looking through what is within reach is the one
+        # useful thing left to them.
+        allowed.add(ruleset.LISTEN)
+        allowed.add(ruleset.SEARCH)
+
         if situation.others:
             allowed.add(ruleset.SPEAK)
+            # Threatening carries across a room; it is the promise that matters,
+            # not the reach. That is the whole difference from attacking.
+            allowed.add(ruleset.THREATEN)
+            if not pinned:
+                allowed.add(ruleset.FOLLOW)
         if situation.reachable:
             allowed.add(ruleset.ATTACK)
+            allowed.add(ruleset.HELP)
+            # Interposing needs somebody to shield *and* something to shield
+            # them from, so it wants a third body in the room. With only two
+            # people present there is nothing to step between.
+            if len(situation.others) > 1:
+                allowed.add(ruleset.PROTECT)
             if situation.carrying:
                 allowed.add(ruleset.GIVE)
         if situation.anyone_carrying or situation.features:

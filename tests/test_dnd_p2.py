@@ -2070,11 +2070,31 @@ def test_deciding() -> None:
     # --- 6. Softmax: usually the best, sometimes not ---------------------- #
     picks = [decide_math.decide(view, candidates, Random(seed), tuning=tuning.decision(),
                                 goals=tuning.goals(), needs=tuning.needs())
-             for seed in range(60)]
+             for seed in range(240)]
     best = max(candidates, key=lambda c: decide_math.score(
         view, c, shares={}, onlookers=1, tuning=tuning.decision()).utility)
-    top_wins = sum(1 for d in picks if d.chosen.verb == best.verb)
-    check("deciding: the best option usually wins", top_wins > 15, f"{top_wins}/60")
+    tally: dict = {}
+    for decision in picks:
+        tally[decision.chosen.verb] = tally.get(decision.chosen.verb, 0) + 1
+    top_wins = tally.get(best.verb, 0)
+    uniform = len(picks) / max(1, len(candidates))
+
+    # Asserted as a *property*, not as a percentage. A softmax over a longer
+    # candidate list is flatter at the same temperature, so a hard threshold
+    # here silently encodes how many verbs existed when it was written — this
+    # one said "more than 15 in 60", which was true of ten verbs and false of
+    # sixteen, and the failure looked like a regression rather than like a stale
+    # number. Both of these hold whatever the list length.
+    check("deciding: THE BEST OPTION IS THE ONE MOST OFTEN TAKEN",
+          top_wins == max(tally.values()),
+          detail=f"{best.verb} {top_wins}, modal "
+                 f"{max(tally, key=lambda v: tally[v])} {max(tally.values())}")
+    check("deciding: and clearly beats an even draw",
+          top_wins > uniform * 1.5,
+          detail=f"{top_wins} vs {uniform:.0f} uniform across {len(candidates)}")
+    check("deciding: but does not always win",
+          top_wins < len(picks),
+          detail="argmax would make every character a machine")
     check("deciding: BUT NOT ALWAYS, so people surprise you",
           len({d.chosen.verb for d in picks}) > 1,
           str(sorted({d.chosen.verb for d in picks})))

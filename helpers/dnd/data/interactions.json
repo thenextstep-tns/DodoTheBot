@@ -179,6 +179,20 @@
    "requires": ""
   },
   {
+   "key": "protected",
+   "label": "Stepped in front of them",
+   "phrase": "stepped in front of",
+   "description": "Put themselves in the way of something coming at you. Lighter than being saved outright - the danger was taken on, not necessarily taken away - but it is the same kind of debt.",
+   "magnitude": 0.75,
+   "deltas": {
+    "affinity": 0.28,
+    "trust": 0.22,
+    "respect": 0.25,
+    "debt": 1
+   },
+   "requires": ""
+  },
+  {
    "key": "rebuffed",
    "label": "Turned down",
    "phrase": "turned down",

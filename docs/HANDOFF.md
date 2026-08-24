@@ -66,8 +66,9 @@ ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "cd /root/DodoTheBot && git log --o
 
 Two separate worlds, for historical reasons that are fine:
 
-**The bot's own suite** — `tests/cases/`, 34 scripts, stdlib only, run in
-separate processes so one crash cannot take the rest with it:
+**The bot's own suite** — one script per case in `tests/cases/`, stdlib only,
+run in separate processes so one crash cannot take the rest with it. The runner
+prints the count; do not write one down here, it drifts:
 
 ```bash
 py tests/run_tests.py
@@ -105,7 +106,7 @@ web/routes.py           the control panel - ~3,900 lines, and the one file to
 web/dnd/                tabletop's panel pages, kept out of routes.py
 web/static/panel.css    the panel's whole stylesheet
 docs/                   this file, plus one per subsystem
-tests/cases/            the bot's suite, 34 scripts
+tests/cases/            the bot's suite, one script per case
 ```
 
 ### The four ways a server is configured
@@ -209,6 +210,7 @@ Two panel rules worth knowing before writing any HTML:
 | `helpers/events.py` | "When X happens, post Y in Z" |
 | `helpers/sheets.py` | Google Sheets ingestion for raid setups |
 | `helpers/singleton.py` | Single-instance guard - two bots on one token is a bad afternoon |
+| `helpers/scrap.py` | The cat-fight engine (**design in progress**, no command yet). Pure - no Discord, no Mongo - so the panel sandbox and the eventual command run the same code |
 
 ### Adding a command, end to end
 
@@ -233,6 +235,7 @@ Each of these is the real handoff for its area:
 | Control panel setup | `docs/CONTROL_PANEL_SETUP.md` |
 | Per-server parameters | `docs/PER_SERVER_PARAMETERS.md` |
 | The test suite | `tests/README.md` - has a table of what each case protects |
+| Cat fights (in design) | `docs/SCRAP_DESIGN.md` |
 
 **What has no document:** the games and economy cogs, which are most of the bot
 by volume. `pumpkin` alone is 1,529 lines with no design note anywhere. If you

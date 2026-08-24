@@ -25,6 +25,7 @@ from helpers.dnd import registry as dnd_registry
 from helpers.dnd import minds
 from helpers.dnd import catalogue
 from helpers.dnd import interactions as interaction_registry
+from helpers.dnd import verbs as verb_registry
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd import tuning as tuning_registry
@@ -293,6 +294,11 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
         sections.append(
             ("packs", "🧭", "Archetypes", "what people reach for",
              _packs_section(guild, campaign, store, is_gm))
+        )
+        sections.append(
+            ("verbs", "🎬", "What anybody can do",
+             "and what each choice costs",
+             _verbs_section(guild, campaign, is_gm))
         )
         sections.append(
             ("kinds", "↔️", "What people do to each other",
@@ -792,6 +798,32 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
       if (data.ok) location.reload();
     }});
   }}
+  // Verbs. Only the three scoring scalars are editable here; the trait
+  // leanings and the goal map are shown but live in the data file.
+  document.querySelectorAll(".dndverb-save").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const card = el.closest(".packcard");
+      const body = {{
+        campaign_id: cid, action: "save", key: el.dataset.key,
+        label: (card.querySelector(".verbname") || {{}}).value || el.dataset.key,
+        report: (card.querySelector(".verbreport") || {{}}).value || "",
+        description: (card.querySelector(".verbdesc") || {{}}).value || "",
+      }};
+      card.querySelectorAll("input[data-field]").forEach((i) => {{
+        const n = parseFloat(i.value);
+        if (!isNaN(n)) body[i.dataset.field] = n;
+      }});
+      const data = await post(`/api/guild/${{gid}}/dnd/verb`, body);
+      if (data.ok) location.reload();
+    }});
+  }});
+  document.querySelectorAll(".dndverb-remove").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/verb`,
+        {{campaign_id: cid, action: "remove", key: el.dataset.key}});
+      if (data.ok) location.reload();
+    }});
+  }});
   // Goals: the one part of a mind the panel is *meant* to author.
   const goalAdd = document.getElementById("goaladd");
   if (goalAdd) {{
@@ -1627,6 +1659,133 @@ def _interactions_section(guild, campaign, tuning, is_gm: bool) -> str:
     <div class="packweights" id="kindnewdeltas">{_delta_sliders(None)}</div>
     <button id="kindadd">Add it</button>
   </details>"""
+
+
+def _verb_sliders(verb) -> str:
+    """The three scalars that decide how a verb scores, as sliders.
+
+    Risk runs 0..1 — an act cannot be safer than safe. Norm and social sign run
+    -1..1, because their negative halves are real states rather than the absence
+    of the positive one: *not done here* is a different claim from *nobody
+    minds*, and hostile is not the lack of friendly.
+    """
+    rows = (
+        ("risk", "How much of a gamble", 0.0,
+         "Before anything about the person. Their fear of death then bends it."),
+        ("norm", "What a room thinks", -1.0,
+         "Negative is <i>not done here</i>."),
+        ("social_sign", "Friendly or hostile", -1.0,
+         "Signs the relationship term: -1 hostile, +1 warm."),
+    )
+    out = ""
+    for field, label, low, hint in rows:
+        value = float(getattr(verb, field, 0.0) or 0.0)
+        out += (
+            f'<label class="packweight"><span>{_escape(label)}</span>'
+            f'<input type="range" step="0.05" min="{low}" max="1" '
+            f'data-field="{field}" value="{value:.2f}" '
+            f'oninput="this.nextElementSibling.value = (+this.value).toFixed(2)">'
+            f'<output>{value:.2f}</output></label>'
+        )
+    return out
+
+
+def _verbs_section(guild, campaign, is_gm: bool) -> str:
+    """What anybody in this campaign can decide to do, and what it costs them.
+
+    The third table to stop being Python, after archetypes and interaction
+    kinds — and the one that had spread furthest. A verb was written down in
+    **eleven** places across six modules, and missing one never raised: it made
+    the verb unreachable, or weightless, or aimed at nobody. Six new verbs
+    landed as six JSON objects and two ruleset grants each, which is the
+    difference the file makes.
+    """
+    if not is_gm:
+        return ""
+
+    registry = verb_registry.Verbs.for_campaign(guild.id, campaign)
+    shipped = verb_registry.built_in()
+    kinds = interaction_registry.Interactions.for_campaign(
+        guild.id, campaign).available()
+
+    cards = ""
+    for key, verb in registry.available().items():
+        source_layer = registry.source_of(key)
+        badge = (
+            f'<span class="chip">only in {_escape(campaign.name)}</span>'
+            if source_layer == "campaign"
+            else '<span class="muted small">ships with the bot</span>'
+            if source_layer == "builtin"
+            else '<span class="muted small">set for this server</span>'
+        )
+        reset = (
+            f'<button class="dndverb-remove ghost" data-key="{_escape(key)}">'
+            f'Back to the shipped one</button>'
+            if source_layer == "campaign" and key in shipped else ""
+        )
+
+        notes = []
+        if verb.directed:
+            recorded = kinds.get(verb.records)
+            notes.append(
+                f'aimed at a person, and recorded as <b>'
+                f'{_escape(recorded.label if recorded else verb.records or "nothing")}'
+                f'</b>' if verb.records
+                else "aimed at a person, but moves nothing between them"
+            )
+        if verb.uncommitted:
+            notes.append("one of the two always on the table")
+        if not verb.switchable:
+            notes.append("<b>cannot be switched off</b> — it is the floor every "
+                         "decision falls back to")
+
+        # What the scorer reads that is not a slider here. Shown rather than
+        # hidden: a GM deciding whether to retune a verb needs to know a
+        # disposition already leans toward it.
+        leanings = ", ".join(
+            f"{_escape(axis)} {weight:+.2f}"
+            for axis, weight in sorted(verb.traits.items(),
+                                       key=lambda kv: -abs(kv[1]))[:4]
+        ) or "nothing in particular"
+        serves = ", ".join(
+            f"{_escape(kind)} {weight:.2f}"
+            for kind, weight in sorted(verb.goals.items(),
+                                       key=lambda kv: -kv[1])[:4]
+        ) or "no goal directly"
+
+        cards += f"""
+<details class="packcard" data-key="{_escape(key)}">
+  <summary><b>{_escape(verb.label)}</b> {badge}
+    <span class="muted small">&ldquo;{_escape(verb.report)}&rdquo; · risk
+    {verb.risk:.2f}</span></summary>
+  {f'<div class="tuneblocked">{" · ".join(notes)}</div>' if notes else ""}
+  <input type="text" class="verbname" value="{_escape(verb.label)}" maxlength="40"
+         placeholder="what to call it">
+  <input type="text" class="verbreport" value="{_escape(verb.report)}" maxlength="60"
+         placeholder="how it reads in the turn report — &quot;went for&quot;">
+  <input type="text" class="verbdesc" value="{_escape(verb.description)}" maxlength="240"
+         placeholder="what this is, in a sentence">
+  <div class="packweights">{_verb_sliders(verb)}</div>
+  <p class="muted small">Reached for by: {leanings}.
+  Serves: {serves}.
+  <span class="muted">Those two, and which needs it answers, are edited in
+  <code>helpers/dnd/data/verbs.json</code> for now.</span></p>
+  <button class="dndverb-save" data-key="{_escape(key)}">Save for this campaign</button>
+  {reset}
+</details>"""
+
+    return f"""
+  <p class="muted small">Every choice a character can make comes from this list.
+  A scene decides which of them are physically possible — that is the ruleset's
+  job and the two rulesets deliberately disagree — and then an archetype decides
+  which of <i>those</i> the character would think of. This table decides what
+  each one is worth once it is on the table.</p>
+  <p class="muted small">Switching a verb off entirely is under
+  <i>This game's rules → Actions</i>. This is where you change what it costs.</p>
+  <p class="packlayer">You are editing <b>{_escape(campaign.name)}</b>. Saving
+  here changes a verb for this campaign only, and <i>Back to the shipped one</i>
+  undoes an override.</p>
+  {cards}"""
 
 
 def _inspector_html(bot, guild, campaign, entity, store) -> str:

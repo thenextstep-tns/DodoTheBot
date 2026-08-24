@@ -45,6 +45,8 @@ from helpers.dnd.world.pack import Assignment, BehaviourPack
 # one about what a goal is for, or an NPC would want different things off-screen
 # than on it.
 from helpers.dnd.world.goal import SERVED_BY as SERVED  # noqa: E402
+from helpers.dnd import verbs as verb_data  # noqa: E402
+from helpers.dnd.world import verb as verb_model  # noqa: E402
 
 NEEDS_ANSWERED_BY: dict[str, tuple] = {}
 
@@ -67,7 +69,12 @@ def _index_needs() -> None:
 # Verbs that are done *to* somebody. A candidate for one of these without a
 # target is not an action, it is a category — so these fan out over whoever the
 # actor can actually see, and the rest get a single target-less candidate.
-DIRECTED = ("attack", "give", "take", "speak")
+# **Derived from the verb data.** This was a fourth hardcoded tuple, and the
+# one that caught out the six verbs added when verbs became data: `help` was
+# proposed with no target, so it never reached `interact`, moved no
+# relationship, and formed a memory of somebody helping nobody. A verb that is
+# `directed` in `verbs.json` is aimed at a person, everywhere.
+DIRECTED = verb_model.directed(verb_data.built_in())
 
 # Always available, always proposed, never weighted away entirely.
 WAIT = "wait"
