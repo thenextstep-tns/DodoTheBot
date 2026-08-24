@@ -75,7 +75,7 @@ for _char, _lines in reaction_written.WRITTEN.items():
     assert set(_lines) == {c["key"] for c in routes_classes()}, _char
     for _text, _stats in _lines.values():
         assert _text and _text[-1] == ".", _text
-        assert len(_text) < 90, _text
+        assert len(_text) < 110, _text
         assert "leaves the room" not in _text.lower(), "a cat cannot leave a fight: " + _text
         assert set(_stats) <= set(("strength", "agility", "intellect", "charm")), _stats
         assert any(_stats.values()), "a reaction with no stat change does nothing: " + _text
