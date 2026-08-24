@@ -16,6 +16,7 @@ from __future__ import annotations
 from random import Random
 from typing import Any
 
+from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import narrate
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
@@ -41,6 +42,7 @@ from helpers.dnd.world import belief as belief_model
 from helpers.dnd.world import clock as clock_model
 from helpers.dnd.world import event as events
 from helpers.dnd.world import goal as goal_model
+from helpers.dnd.world import interaction as interaction_model
 from helpers.dnd.world import pack as pack_model
 from helpers.dnd.world import view as view_model
 from helpers.dnd.rules import ruleset as ruleset_model
@@ -323,6 +325,18 @@ def packs_for(store, campaign=None) -> pack_registry.Packs:
     if campaign is None:
         campaign = store.campaigns.get(store.campaign_id)
     return pack_registry.Packs.for_campaign(store.guild_id, campaign)
+
+
+def interactions_for(store, campaign=None) -> interaction_registry.Interactions:
+    """What one person can do to another in this campaign, and what it is worth.
+
+    Same three layers as the tuning and the archetypes, and resolved at the same
+    edge: the pure layers take the numbers as arguments and never reach for this
+    themselves.
+    """
+    if campaign is None:
+        campaign = store.campaigns.get(store.campaign_id)
+    return interaction_registry.Interactions.for_campaign(store.guild_id, campaign)
 
 
 def packs_of(entity: Entity) -> list:
@@ -1538,6 +1552,8 @@ def relate(
     description: str = "",
     rng: Random | None = None,
     source_event_seq: int | None = None,
+    campaign=None,
+    available_kinds: dict | None = None,
 ) -> Relationship:
     """Record that something happened between two entities.
 
@@ -1552,10 +1568,17 @@ def relate(
     it only the relationship moves, which is what the pure-arithmetic tests want.
     """
     tuning = tuning or tuning_for(store)
-    # A table that did not switch desire on cannot have a romance recorded
-    # between its characters, by a command or by the engine. Refusing here
-    # rather than filtering the deltas means it never half-happens.
-    if kind in rel_mod.ROMANTIC and not romance_allowed(tuning):
+    catalogue = (available_kinds if available_kinds is not None
+                 else interactions_for(store, campaign).available())
+    # A table that did not switch an optional need on cannot have the acts that
+    # belong to it recorded between its characters, by a command or by the
+    # engine. Refusing here rather than filtering the deltas means it never
+    # half-happens. `requires` is per-kind data, so a campaign that invents an
+    # act of its own says for itself which need it belongs to.
+    defined = catalogue.get(kind)
+    needed = defined.requires if defined else (
+        "desire" if kind in rel_mod.ROMANTIC else "")
+    if needed and not tuning.permits_need(needed):
         return store.relations.between(from_entity.id, to_entity.id)
 
     relationship = store.relations.between(from_entity.id, to_entity.id)
@@ -1565,7 +1588,8 @@ def relate(
         traits=traits_of(from_entity),
         intensity=intensity,
         world_time=world_time,
-        deltas=deltas,
+        deltas=deltas if deltas is not None
+        else (dict(defined.deltas) if defined else None),
         tuning=tuning.relationships(),
     )
     if familiarity_bonus:
@@ -1631,6 +1655,8 @@ def interact(
     witnesses: list[Entity] | None = None,
     source_event_seq: int | None = None,
     tuning: Tuning | None = None,
+    campaign=None,
+    available_kinds: dict | None = None,
 ) -> dict:
     """One act, and what it was worth to each person it touched.
 
@@ -1657,13 +1683,22 @@ def interact(
     tuning = tuning or tuning_for(store)
     stake_tuning = tuning.stakes()
 
-    size = stakes.default_magnitude(kind) if magnitude is None else magnitude
+    # What this campaign says an act of this kind is: how big, how it moves the
+    # two of them, how it reads. Resolved here at the edge, once, and handed to
+    # the pure maths — `helpers/dnd/interactions.py`.
+    catalogue = (available_kinds if available_kinds is not None
+                 else interactions_for(store, campaign).available())
+    defined = catalogue.get(kind)
+
+    size = magnitude
+    if size is None:
+        size = defined.magnitude if defined else stakes.default_magnitude(kind)
     # The GM's own words, if they wrote any, go to everyone unchanged — authored
     # text is not ours to re-person. Otherwise each party's memory is worded from
     # their own side of it, below, in the loop that already knows their role.
     told = description.strip()
     gist_tuning = tuning.gists()
-    base_valence = rel_mod.felt_valence(kind)
+    base_valence = defined.felt_valence() if defined else rel_mod.felt_valence(kind)
 
     # Who was touched, how aware each is, and how much of the event was theirs.
     # Who it happened *to*. Salience weighs being a participant far above having
@@ -1699,15 +1734,19 @@ def interact(
         # which way it moves depends on which end of the act you were on.
         if awareness > 0 and not stake.negligible:
             if role == "subject":
-                deltas = None                      # the table as written
+                # The definition as written — it is already from their side.
+                deltas = dict(defined.deltas) if defined else None
             elif role == "actor":
-                deltas = rel_mod.actor_view(kind, stake_tuning.actor_echo)
+                deltas = (defined.actor_view(stake_tuning.actor_echo) if defined
+                          else rel_mod.actor_view(kind, stake_tuning.actor_echo))
             else:
                 # A bystander thinks better or worse of whoever did it, but
                 # nobody owes anybody anything for a thing they merely watched.
+                base_deltas = (defined.deltas if defined
+                               else rel_mod.DELTAS.get(kind) or {})
                 deltas = {
                     axis: base * stake_tuning.actor_echo
-                    for axis, base in (rel_mod.DELTAS.get(kind) or {}).items()
+                    for axis, base in base_deltas.items()
                     if axis != "debt"
                 }
             relate(
@@ -1715,6 +1754,7 @@ def interact(
                 world_time=world_time,
                 intensity=stake.weight,
                 deltas=deltas,
+                available_kinds=catalogue,
                 # Knowing someone is not a flat +0.02 whatever happened. The
                 # night a man saved your life you know him far better than after
                 # a conversation, so how far you close the distance follows what
@@ -1732,7 +1772,8 @@ def interact(
             holder,
             told or narrate.episode_gist(
                 kind, actor.identity.name, subject.identity.name,
-                role=role, tuning=gist_tuning,
+                role=role, phrases=interaction_model.as_phrases(catalogue),
+                tuning=gist_tuning,
             ),
             world_time=world_time,
             rng=rng,

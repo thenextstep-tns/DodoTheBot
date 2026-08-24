@@ -319,6 +319,24 @@ TUNABLES: list[dict] = [
           "come to feel about the person who did it. Off by default: it is the "
           "engine showing its working.",
           False, kind="bool", minimum=0, maximum=1),
+    # Where the stake band's lines fall. What an act was worth is reported in
+    # words rather than as a weight, and which word is a judgement about a
+    # table's register — a game where everything is life and death wants
+    # *everything to them* set high, a quiet one wants it low.
+    _spec("stake_everything", "Reporting", "Line: it was everything to them",
+          "A stake at or above this reads as **it was everything to them**. The "
+          "top band, and how often it fires decides whether the report sounds "
+          "like a chronicle or like melodrama.",
+          0.70, minimum=0.0, maximum=1.0),
+    _spec("stake_mattered", "Reporting", "Line: it mattered to them",
+          "A stake at or above this reads as **it mattered to them**.",
+          0.40, minimum=0.0, maximum=1.0),
+    _spec("stake_noted", "Reporting", "Line: they took note",
+          "A stake at or above this reads as **they took note**; anything below "
+          "reads as *barely noticed*. Below-noticing acts form no memory at all, "
+          "so the bottom band is about the ones that only just registered.",
+          0.15, minimum=0.0, maximum=1.0),
+
     _spec("report_witnesses", "Reporting", "Say who will remember",
           "Add how many people formed a memory of it. Useful for seeing whether "
           "something happened in front of anyone; noise the rest of the time.",
@@ -873,6 +891,9 @@ class Tuning:
             witnesses=bool(self.get("report_witnesses")),
             drift=bool(self.get("report_drift")),
             offscreen=bool(self.get("report_offscreen")),
+            stake_everything=self.get("stake_everything"),
+            stake_mattered=self.get("stake_mattered"),
+            stake_noted=self.get("stake_noted"),
         )
 
     def rumours(self) -> "RumourTuning":
@@ -1094,6 +1115,10 @@ class ReportTuning:
     witnesses: bool = False
     drift: bool = False
     offscreen: bool = True
+    # Where the stake band's lines fall, highest first.
+    stake_everything: float = 0.70
+    stake_mattered: float = 0.40
+    stake_noted: float = 0.15
 
     @property
     def off(self) -> bool:

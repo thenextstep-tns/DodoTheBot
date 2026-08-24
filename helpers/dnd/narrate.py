@@ -69,11 +69,17 @@ NEED_EASED = {
 # Bands, not a number: "0.62" is instrumentation and "it mattered to Ondry" is a
 # report. The low band says *barely noticed* rather than saying nothing, because
 # an act landing on somebody who does not care is itself a fact about the room.
-STAKE_BANDS = (
-    (0.70, "it was everything to {who}"),
-    (0.40, "it mattered to {who}"),
-    (0.15, "{who} took note"),
-    (0.00, "{who} barely noticed"),
+#
+# The **thresholds are tunable** (`stake_band_*`, group *Reporting*): where the
+# line between *mattered* and *was everything* falls is a judgement about a
+# particular table's register, not a constant. The wording is not — these are
+# four phrases, and a campaign that wants its own vocabulary is asking for
+# something bigger than three numbers.
+STAKE_PHRASES = (
+    "it was everything to {who}",
+    "it mattered to {who}",
+    "{who} took note",
+    "{who} barely noticed",
 )
 
 
@@ -135,7 +141,7 @@ def _speaker(name: str, first_person: bool) -> tuple[str, str, str]:
 
 
 def episode_gist(kind: str, actor_name: str, subject_name: str, *,
-                 role: str = ROLE_WITNESS,
+                 role: str = ROLE_WITNESS, phrases: dict | None = None,
                  tuning: GistTuning = DEFAULT_GIST) -> str:
     """What one person's memory of a directed act says.
 
@@ -143,8 +149,14 @@ def episode_gist(kind: str, actor_name: str, subject_name: str, *,
     — the act is the same act. With ``perspective`` switched off this returns
     the flat third-person phrasing every memory used to carry, which is also
     what a caller should use when it has no idea whose memory it is.
+
+    ``phrases`` is a campaign's resolved wording (``helpers/dnd/interactions.py``);
+    without it the shipped table is used. A campaign that renamed an act must
+    have the memory of it renamed too, or the inspector and the relationship log
+    describe the same event with different words.
     """
-    verb = rel_mod.PHRASES.get(kind, str(kind).replace("_", " "))
+    table = rel_mod.PHRASES if phrases is None else phrases
+    verb = table.get(kind, str(kind).replace("_", " "))
     if not tuning.perspective:
         return f"{actor_name} {verb} {subject_name}"
     actor = _speaker(actor_name, role == ROLE_ACTOR)
@@ -244,7 +256,8 @@ def _drift_note(report: dict, packs: dict | None) -> str:
     return f"and turned from *{_label_for(was, packs)}* toward *{now}*"
 
 
-def _stake_note(report: dict, names: dict | None) -> str:
+def _stake_note(report: dict, names: dict | None,
+                tuning: ReportTuning = DEFAULT_REPORT) -> str:
     """What the act was worth to the person it was done to.
 
     Deliberately the **target**, not a scan for whoever scored highest. Two
@@ -271,7 +284,8 @@ def _stake_note(report: dict, names: dict | None) -> str:
     who = ((names or {}).get(target_id) or {}).get("name") or ""
     if not who:
         return ""
-    for floor, phrase in STAKE_BANDS:
+    floors = (tuning.stake_everything, tuning.stake_mattered, tuning.stake_noted, 0.0)
+    for floor, phrase in zip(floors, STAKE_PHRASES):
         if weight >= floor:
             return phrase.format(who=f"**{who}**")
     return ""
@@ -303,7 +317,7 @@ def notes_for(report: dict, *, names: dict | None = None,
     if tuning.needs:
         out.append(_need_note(report))
     if tuning.stakes:
-        out.append(_stake_note(report, names))
+        out.append(_stake_note(report, names, tuning))
     if tuning.witnesses:
         out.append(_witness_note(report))
     if tuning.drift:

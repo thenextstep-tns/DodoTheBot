@@ -68,6 +68,9 @@ from helpers.dnd.store import scenes as scenes_module  # noqa: E402
 from helpers.dnd.rules import ruleset as rs  # noqa: E402
 from helpers.dnd.mind import decide as decide_math  # noqa: E402
 from helpers.dnd.mind import relationships as rel_mod  # noqa: E402
+from helpers.dnd.mind import stakes as stakes_math  # noqa: E402
+from helpers.dnd import interactions as interaction_registry  # noqa: E402
+from helpers.dnd.world import interaction as interaction_model  # noqa: E402
 from helpers.dnd import tuning as tuning_registry  # noqa: E402
 from helpers.dnd.tuning import GistTuning, TUNABLES, ReportTuning, Tuning  # noqa: E402
 from helpers.dnd.world.campaign import Campaign  # noqa: E402
@@ -307,11 +310,28 @@ def test_drift_is_only_news_when_it_turns() -> None:
 #  3. Tuning: nothing baked in, and the panel can reach all of it
 # --------------------------------------------------------------------------- #
 def test_tunables() -> None:
-    keys = {t["key"] for t in TUNABLES if t["group"] == "Reporting"}
+    # Not a naming convention — a behavioural one. Every tunable in the group
+    # must actually move a field of the dataclass, and every field must be moved
+    # by some tunable. Either half failing is a control wired to nothing, which
+    # is this project's most expensive recurring bug.
+    keys = [t["key"] for t in TUNABLES if t["group"] == "Reporting"]
     fields = set(ReportTuning().__dataclass_fields__)
-    check("tuning: every Reporting field has a tunable",
-          {f"report_{f}" for f in fields} == keys,
-          detail=f"{sorted(keys)} vs {sorted(fields)}")
+    base = Tuning().report()
+    moved = set()
+    for key in keys:
+        spec = next(t for t in TUNABLES if t["key"] == key)
+        other = (not spec["default"]) if spec["type"] == "bool" else (
+            float(spec["default"]) + 1 if spec["type"] != "bool" else 0)
+        changed = {
+            field for field in fields
+            if getattr(Tuning(campaign={key: other}).report(), field)
+            != getattr(base, field)
+        }
+        check(f"tuning: '{key}' reaches the report", bool(changed),
+              detail="" if changed else "the control posts, nothing reads it")
+        moved |= changed
+    check("tuning: every Reporting field is reachable from the panel",
+          moved == fields, detail=f"unreachable: {sorted(fields - moved)}")
 
     # Invariant 2: a tunable ships with a panel control in the same phase as the
     # feature, and a control with no label or no range is not one.
@@ -614,6 +634,166 @@ def test_gists_end_to_end() -> None:
           not any("things that no longer" in s for s in summaries))
 
 
+# --------------------------------------------------------------------------- #
+#  6. Interaction kinds as data — what an act is worth, written down once
+# --------------------------------------------------------------------------- #
+# Here rather than in the P2 suite because the failure being guarded against is
+# this suite's subject: a number that shapes the world with nowhere to read or
+# change it. Stakes are P2 mechanics; *the stakes being editable* is P4 work.
+def test_one_table_not_four() -> None:
+    """The set of interaction kinds is defined in exactly one place.
+
+    It used to be four — ``DELTAS``, ``PHRASES`` and ``ROMANTIC`` in
+    ``mind/relationships.py`` and ``KIND_MAGNITUDE`` in ``mind/stakes.py`` — all
+    keyed by the same strings and edited by hand. They had already drifted: the
+    five romantic kinds went into three of the four and were never given a
+    magnitude, so ``lay_with`` fell through to the 0.4 default and was worth
+    exactly as much as ``lied``.
+    """
+    shipped = interaction_registry.built_in()
+    check("kinds: the shipped file parses and is not empty", len(shipped) >= 21,
+          detail=f"{len(shipped)} kinds")
+
+    check("kinds: EVERY KIND HAS A MAGNITUDE OF ITS OWN",
+          all(key in stakes_math.KIND_MAGNITUDE for key in shipped),
+          detail="the drift that started this")
+    check("kinds: including the romance-gated ones",
+          stakes_math.default_magnitude("lay_with")
+          != stakes_math.default_magnitude("lied"),
+          detail=f"lay_with {stakes_math.default_magnitude('lay_with')} vs "
+                 f"lied {stakes_math.default_magnitude('lied')}")
+
+    # The old module-level tables now *derive* from the file, so there is still
+    # exactly one place the numbers live and old callers still work.
+    check("kinds: the deltas table is the file",
+          rel_mod.DELTAS == interaction_model.as_deltas(shipped))
+    check("kinds: so is the phrase table",
+          rel_mod.PHRASES == interaction_model.as_phrases(shipped))
+    check("kinds: and so is the list of gated ones",
+          set(rel_mod.ROMANTIC)
+          == set(interaction_model.requiring(shipped, "desire")))
+
+    for key, kind in shipped.items():
+        check(f"kinds: '{key}' is complete",
+              bool(kind.label and kind.phrase and kind.description) and kind.deltas,
+              detail="a kind with no phrase renders as its key in a memory")
+        check(f"kinds: '{key}' only names real axes",
+              set(kind.deltas) <= set(interaction_model.DELTA_FIELDS),
+              detail=str(sorted(set(kind.deltas) - set(interaction_model.DELTA_FIELDS))))
+
+
+def test_kinds_are_editable() -> None:
+    """Built-in → server → campaign, and a GM may add one the engine never had."""
+    shipped = interaction_registry.built_in()
+
+    plain = interaction_registry.Interactions()
+    check("kinds: with no overrides you get the shipped set",
+          plain.available().keys() == shipped.keys()
+          and plain.source_of("saved") == "builtin")
+
+    tweaked = dict(shipped["saved"].to_doc(), magnitude=0.5)
+    layered = interaction_registry.Interactions(
+        server={"saved": tweaked},
+        campaign={"saved": dict(tweaked, magnitude=0.2)},
+    )
+    check("kinds: CAMPAIGN BEATS SERVER BEATS SHIPPED",
+          layered.get("saved").magnitude == 0.2
+          and interaction_registry.Interactions(server={"saved": tweaked})
+          .get("saved").magnitude == 0.5
+          and shipped["saved"].magnitude == 1.0)
+    check("kinds: and the panel can say which layer won",
+          layered.source_of("saved") == "campaign"
+          and layered.source_of("betrayed") == "builtin")
+
+    invented, problem = interaction_registry.validate(
+        {"label": "Swore an oath to", "deltas": {"trust": 0.4}, "magnitude": 0.6}
+    )
+    check("kinds: A GM CAN ADD ONE THAT DID NOT EXIST",
+          invented is not None and invented["key"] == "swore_an_oath_to",
+          detail=problem)
+    with_new = interaction_registry.Interactions(campaign={invented["key"]: invented})
+    check("kinds: and it resolves like any other",
+          with_new.get("swore_an_oath_to").magnitude == 0.6
+          and "swore_an_oath_to" in with_new.keys())
+
+    # Renaming must edit, not fork — the bug archetypes shipped with.
+    renamed, _ = interaction_registry.validate(
+        {"key": "saved", "label": "Pulled them out of it", "deltas": {"trust": 0.3}}
+    )
+    check("kinds: renaming edits in place", renamed["key"] == "saved",
+          detail="a rename that forks leaves the original in force")
+
+    check("kinds: an act that changes nothing is refused",
+          interaction_registry.validate({"label": "Nodded at", "deltas": {}})[0] is None)
+    check("kinds: an unnamed one is refused",
+          interaction_registry.validate({"deltas": {"trust": 0.2}})[0] is None)
+    check("kinds: a typo'd axis is dropped, not carried",
+          "trsut" not in interaction_registry.validate(
+              {"label": "X", "deltas": {"trust": 0.2, "trsut": 0.9}})[0]["deltas"])
+
+
+def test_kinds_reach_the_simulation() -> None:
+    """The proof that editable means *takes effect*, not merely *stored*."""
+    campaign, store = _campaign(9403, "Kinds")
+
+    def retune(**settings):
+        campaign.settings.update(settings)
+        campaigns_for(campaign.guild_id).save_settings(campaign.id, campaign.settings)
+
+    def run(guild_seed):
+        a = minds.spawn_npc(store, name=f"A{guild_seed}", world_time=0,
+                            rng=Random(30 + guild_seed))
+        b = minds.spawn_npc(store, name=f"B{guild_seed}", world_time=0,
+                            rng=Random(60 + guild_seed))
+        out = minds.interact(store, a, b, "saved", world_time=100, rng=Random(2),
+                             campaign=campaign,
+                             tuning=minds.tuning_for(store, campaign))
+        return out, a, b
+
+    retune(interactions={})
+    shipped_out, _a, shipped_b = run(1)
+
+    # Halve what being saved is worth, and the person it happened to should feel
+    # it correspondingly less.
+    lighter = dict(interaction_registry.built_in()["saved"].to_doc(), magnitude=0.3)
+    retune(interactions={"saved": lighter})
+    light_out, _a2, light_b = run(2)
+
+    check("kinds: A CAMPAIGN'S OWN MAGNITUDE CHANGES THE STAKE",
+          light_out["stakes"][light_b.id].weight
+          < shipped_out["stakes"][shipped_b.id].weight,
+          detail=f"{light_out['stakes'][light_b.id].weight:.3f} vs "
+                 f"{shipped_out['stakes'][shipped_b.id].weight:.3f}")
+
+    # Reword it, and the memory of it is reworded too.
+    reworded = dict(interaction_registry.built_in()["saved"].to_doc(),
+                    phrase="pulled")
+    retune(interactions={"saved": reworded})
+    worded_out, _a3, worded_b = run(3)
+    check("kinds: AND ITS WORDING CHANGES THE MEMORY",
+          "pulled me" in worded_out["memories"][worded_b.id].gist,
+          detail=worded_out["memories"][worded_b.id].gist)
+
+    # Change the deltas, and the relationship moves differently.
+    colder = dict(interaction_registry.built_in()["saved"].to_doc(),
+                  deltas={"affinity": -0.4, "debt": 1})
+    retune(interactions={"saved": colder})
+    _cold_out, cold_a, cold_b = run(4)
+    check("kinds: and its deltas move the relationship",
+          store.relations.between(cold_b.id, cold_a.id).affinity < 0,
+          detail="being saved now costs affinity, because this campaign says so")
+
+    # The safety gate is data too, and it still refuses.
+    retune(interactions={})
+    gated_a = minds.spawn_npc(store, name="G1", world_time=0, rng=Random(91))
+    gated_b = minds.spawn_npc(store, name="G2", world_time=0, rng=Random(92))
+    minds.relate(store, gated_a, gated_b, "lay_with", world_time=100,
+                 campaign=campaign, tuning=minds.tuning_for(store, campaign))
+    check("kinds: a gated act is still refused when the need is off",
+          store.relations.between(gated_a.id, gated_b.id).familiarity == 0.0,
+          detail="`requires` is per-kind data now and must still hold the line")
+
+
 def test_reexports() -> None:
     """``describe_act`` moved into ``narrate``; ``minds`` still answers for it."""
     check("moved: minds.describe_act is narrate's",
@@ -638,6 +818,9 @@ def main() -> int:
         test_episode_gists,
         test_summary_gists,
         test_gists_end_to_end,
+        test_one_table_not_four,
+        test_kinds_are_editable,
+        test_kinds_reach_the_simulation,
         test_reexports,
     ):
         test()

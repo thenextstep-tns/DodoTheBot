@@ -23,6 +23,7 @@ from helpers import panel_access
 from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
 from helpers.dnd import minds
+from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
 from helpers.dnd import tuning as tuning_registry
@@ -30,6 +31,7 @@ from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd.rules.ruleset import AFFORDANCES, AFFORDANCE_LABELS
 from helpers.dnd.world.entity import KIND_FACTION, KIND_NPC, KIND_PC
 from helpers.dnd.mind import behaviour as behaviour_math
+from helpers.dnd.world import interaction as interaction_model
 from helpers.dnd.mind import decide as decide_math
 from helpers.dnd.mind import goals as goal_math
 from helpers.dnd.mind import needs as needs_mod
@@ -276,6 +278,12 @@ def campaign_html(bot, guild, campaign, scope: str) -> str:
         sections.append(
             ("packs", "🧭", "Archetypes", "what people reach for",
              _packs_section(guild, campaign, store, is_gm))
+        )
+        sections.append(
+            ("kinds", "↔️", "What people do to each other",
+             "and what each of them is worth",
+             _interactions_section(guild, campaign,
+                                   minds.tuning_for(store, campaign), is_gm))
         )
         sections.append(
             ("safety", "🛑", "Lines", "what never appears",
@@ -712,6 +720,59 @@ def _dnd_script(guild_id: int, campaign_id: str = "", entity_id: str = "") -> st
         label: document.getElementById("packlabel").value,
         description: document.getElementById("packdesc").value,
         weights: packWeights(document.getElementById("packnewweights")),
+      }});
+      if (data.ok) location.reload();
+    }});
+  }}
+  // What people do to each other. Same card-scoped shape as the archetypes
+  // above; the deltas differ in running -1..1, and zero means "this axis is not
+  // part of this act" rather than "this act does nothing to it".
+  const kindDeltas = (root) => {{
+    const out = {{}};
+    root.querySelectorAll("input[data-axis]").forEach((i) => {{
+      const n = parseFloat(i.value);
+      if (!isNaN(n) && n !== 0) out[i.dataset.axis] = n;
+    }});
+    return out;
+  }};
+  const kindMagnitude = (root, id) => {{
+    const el = root ? root.querySelector(".kindmagnitude")
+                    : document.getElementById(id);
+    const n = el ? parseFloat(el.value) : NaN;
+    return isNaN(n) ? 0.4 : n;
+  }};
+  document.querySelectorAll(".dndkind-save").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const card = el.closest(".packcard");
+      const data = await post(`/api/guild/${{gid}}/dnd/interaction`, {{
+        campaign_id: cid, action: "save", key: el.dataset.key,
+        label: (card.querySelector(".kindname") || {{}}).value || el.dataset.key,
+        phrase: (card.querySelector(".kindphrase") || {{}}).value || "",
+        description: (card.querySelector(".kinddesc") || {{}}).value || "",
+        magnitude: kindMagnitude(card),
+        deltas: kindDeltas(card),
+      }});
+      if (data.ok) location.reload();
+    }});
+  }});
+  document.querySelectorAll(".dndkind-remove").forEach((el) => {{
+    el.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/interaction`,
+        {{campaign_id: cid, action: "remove", key: el.dataset.key}});
+      if (data.ok) location.reload();
+    }});
+  }});
+  const kindAdd = document.getElementById("kindadd");
+  if (kindAdd) {{
+    // No key, same as a new archetype: named once, and the server slugs it.
+    kindAdd.addEventListener("click", async () => {{
+      const data = await post(`/api/guild/${{gid}}/dnd/interaction`, {{
+        campaign_id: cid, action: "save",
+        label: document.getElementById("kindlabel").value,
+        phrase: document.getElementById("kindphrase").value,
+        description: document.getElementById("kinddesc").value,
+        magnitude: kindMagnitude(null, "kindmagnitude"),
+        deltas: kindDeltas(document.getElementById("kindnewdeltas")),
       }});
       if (data.ok) location.reload();
     }});
@@ -1422,6 +1483,134 @@ def _packs_section(guild, campaign, store, is_gm: bool) -> str:
            placeholder="who this is, in a sentence">
     <div class="packweights" id="packnewweights">{_pack_sliders(None)}</div>
     <button id="packadd">Add it</button>
+  </details>"""
+
+
+def _delta_sliders(kind) -> str:
+    """What one act does to the two people in it, per axis.
+
+    Same shape as the archetype weights next door, and for the same reason: six
+    number boxes is a spreadsheet. Unlike a weight these run **−1…1**, because
+    the negative half is a real state and not the absence of the positive one —
+    an act that costs trust is not an act that fails to build it.
+    """
+    out = ""
+    for axis in interaction_model.DELTA_FIELDS:
+        value = float((kind.deltas if kind is not None else {}).get(axis, 0) or 0)
+        if axis == "debt":
+            # Debt is a count people tally, not a feeling they hold, so it gets
+            # a box. Whole numbers, and the sign is the whole meaning: positive
+            # is *this person now owes the other*.
+            out += (
+                f'<label class="packweight"><span>Debt incurred</span>'
+                f'<input type="number" step="1" min="-5" max="5" data-axis="debt" '
+                f'value="{int(value)}"><output>{int(value):+d}</output></label>'
+            )
+            continue
+        out += (
+            f'<label class="packweight">'
+            f'<span>{_escape(axis.title())}</span>'
+            f'<input type="range" step="0.05" min="-1" max="1" data-axis="{axis}" '
+            f'value="{value:.2f}" oninput="this.nextElementSibling.value = '
+            f'(+this.value).toFixed(2)">'
+            f'<output>{value:.2f}</output></label>'
+        )
+    return out
+
+
+def _interactions_section(guild, campaign, tuning, is_gm: bool) -> str:
+    """What one person can do to another here, and what each of those is worth.
+
+    This is the second table to stop being Python (archetypes were the first).
+    It replaced **four** hand-maintained dicts keyed by the same strings — the
+    deltas, the phrasing, the magnitudes and the list of romance-gated kinds —
+    which had already drifted apart: the five romantic kinds were never added to
+    the magnitude table, so lying to someone and spending the night with them
+    were worth exactly the same.
+    """
+    if not is_gm:
+        return ""
+
+    registry = interaction_registry.Interactions.for_campaign(guild.id, campaign)
+    shipped = interaction_registry.built_in()
+
+    cards = ""
+    for key, kind in registry.available().items():
+        source = registry.source_of(key)
+        badge = (
+            f'<span class="chip">only in {_escape(campaign.name)}</span>'
+            if source == "campaign"
+            else '<span class="muted small">ships with the bot</span>'
+            if source == "builtin"
+            else '<span class="muted small">set for this server</span>'
+        )
+        reset = (
+            f'<button class="dndkind-remove ghost" data-key="{_escape(key)}">'
+            f'Back to the shipped one</button>'
+            if source == "campaign" and key in shipped else ""
+        )
+        # A kind belonging to an optional need the campaign has not switched on
+        # is not editable-but-inert, it is refused outright — say so, or the
+        # sliders read as settings that do nothing.
+        gate = ""
+        if kind.requires and not tuning.permits_need(kind.requires):
+            gate = (
+                f'<div class="tuneblocked">This campaign has not switched on '
+                f'<b>{_escape(kind.requires)}</b>, so nothing can record this at '
+                f'all — not a command, not the engine. Clear the matching line '
+                f'under <i>Lines</i> and switch the need on under '
+                f'<i>This game\'s rules</i>.</div>'
+            )
+        cards += f"""
+<details class="packcard" data-key="{_escape(key)}">
+  <summary><b>{_escape(kind.label)}</b> {badge}
+    <span class="muted small">"{_escape(kind.phrase)}" · worth
+    {kind.magnitude:.2f}</span></summary>
+  {gate}
+  <input type="text" class="kindname" value="{_escape(kind.label)}" maxlength="40"
+         placeholder="what to call it">
+  <input type="text" class="kindphrase" value="{_escape(kind.phrase)}" maxlength="60"
+         placeholder="how it reads in a memory — &quot;kept their word to&quot;">
+  <input type="text" class="kinddesc" value="{_escape(kind.description)}" maxlength="200"
+         placeholder="what this is, in a sentence">
+  <label class="packweight kindmag"><span><b>How big it is</b></span>
+    <input type="range" step="0.05" min="0" max="1" class="kindmagnitude"
+           value="{kind.magnitude:.2f}" oninput="this.nextElementSibling.value =
+           (+this.value).toFixed(2)"><output>{kind.magnitude:.2f}</output></label>
+  <div class="packweights">{_delta_sliders(kind)}</div>
+  <button class="dndkind-save" data-key="{_escape(key)}">Save for this campaign</button>
+  {reset}
+</details>"""
+
+    return f"""
+  <p class="muted small">Every time one person does something to another, this
+  table decides what it was. <b>How big it is</b> is the act before anybody's
+  circumstances apply — saving a life is large however rich you are, talking is
+  small however poor — and the engine scales it per person by what they can
+  absorb and what they need, which is how the same favour is the end of one
+  man's troubles and an afternoon the other has already forgotten.</p>
+  <p class="muted small">The sliders are written <b>from the side of the person
+  it happened to</b>. Debt is positive when they now owe the other. The person
+  who <i>did</i> it gets an echo of the feeling and the opposite sign of the
+  debt, automatically.</p>
+  <p class="packlayer">You are editing <b>{_escape(campaign.name)}</b>. Saving
+  here changes an act for this campaign only, and <i>Back to the shipped one</i>
+  undoes an override.</p>
+  {cards}
+  <details class="packcard packnew">
+    <summary><b>Add something people can do to each other</b></summary>
+    <input type="text" class="kindname" id="kindlabel" maxlength="40"
+           placeholder="what to call it — Swore an oath to, Sold out">
+    <input type="text" class="kindphrase" id="kindphrase" maxlength="60"
+           placeholder="how it reads in a memory — &quot;swore an oath to&quot;">
+    <input type="text" class="kinddesc" id="kinddesc" maxlength="200"
+           placeholder="what this is, in a sentence">
+    <label class="packweight kindmag"><span><b>How big it is</b></span>
+      <input type="range" step="0.05" min="0" max="1" id="kindmagnitude"
+             value="0.40" oninput="this.nextElementSibling.value =
+             (+this.value).toFixed(2)"><output>0.40</output></label>
+    <div class="packweights" id="kindnewdeltas">{_delta_sliders(None)}</div>
+    <button id="kindadd">Add it</button>
   </details>"""
 
 

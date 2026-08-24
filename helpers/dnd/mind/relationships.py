@@ -15,100 +15,52 @@ from __future__ import annotations
 
 from helpers.dnd.mind.traits import Traits
 from helpers.dnd.tuning import DEFAULT_RELATIONSHIPS, RelationshipTuning
+from helpers.dnd import interactions as interaction_data
+from helpers.dnd.world import interaction as interaction_model
 from helpers.dnd.world.relationship import AXES, OPTIONAL_AXES, Relationship
 
-# Base deltas per event kind. Tuned so a single act moves a relationship
-# noticeably but not decisively — except betrayal, which should.
-# **Written from the point of view of the person it happened TO.** Debt is
-# positive when *this* person owes the other: being helped puts you in someone's
-# debt. It read -1 before, which `summary()` renders as "is owed", so the man
-# whose debt had just been cleared was recorded as the creditor.
+# The kinds themselves are **data** now — `helpers/dnd/data/interactions.json`,
+# resolved built-in -> server -> campaign by `helpers/dnd/interactions.py`. What
+# used to live here as three hand-maintained tables (`DELTAS`, `PHRASES`,
+# `ROMANTIC`), alongside a fourth in `mind/stakes.py`, is one definition per
+# kind in one file.
+#
+# These module-level names survive as the **built-in** view of that file, so the
+# many callers that only ever wanted the shipped numbers keep working and there
+# is still exactly one place the numbers are written. Anything that should
+# respect a campaign's own social physics takes the resolved table as an
+# argument instead — this module is pure and does not read configuration.
+DELTAS: dict[str, dict] = interaction_model.as_deltas(interaction_data.built_in())
+PHRASES: dict[str, str] = interaction_model.as_phrases(interaction_data.built_in())
+
 # The acts that only exist in a campaign that asked for them.
-ROMANTIC = ("flirted", "courted", "rebuffed", "lay_with", "repelled")
-
-DELTAS: dict[str, dict] = {
-    "helped":     {"affinity": +0.15, "trust": +0.10, "debt": +1},
-    "saved":      {"affinity": +0.35, "trust": +0.25, "respect": +0.20, "debt": +2},
-    "gifted":     {"affinity": +0.10, "debt": +1},
-    "healed":     {"affinity": +0.20, "trust": +0.15, "debt": +1},
-    "praised":    {"affinity": +0.10, "respect": +0.05},
-    "kept_word":  {"trust": +0.20, "respect": +0.10},
-
-    "betrayed":   {"affinity": -0.50, "trust": -0.70, "fear": +0.20, "desire": -0.25},
-    "attacked":   {"affinity": -0.35, "fear": +0.35, "trust": -0.25},
-    "threatened": {"fear": +0.30, "respect": +0.10, "affinity": -0.20},
-    "stole":      {"affinity": -0.25, "trust": -0.40},
-    "lied":       {"trust": -0.30},
-    "insulted":   {"affinity": -0.15, "respect": -0.10},
-    "bested":     {"respect": +0.20, "fear": +0.15, "affinity": -0.05},
-
-    # Romance-shaped acts. Only usable when the campaign has switched desire on
-    # (`mind/needs.OPTIONAL`); `helpers/dnd/minds.py` refuses them otherwise, so
-    # a table that did not opt in cannot have one recorded by accident.
-    "flirted":    {"affinity": +0.08, "familiarity": +0.05, "desire": +0.12},
-    "courted":    {"affinity": +0.15, "trust": +0.05, "desire": +0.20},
-    "rebuffed":   {"affinity": -0.10, "respect": -0.05, "desire": -0.30},
-    # Repulsion proper: not a courtship that failed, but somebody who turns your
-    # stomach. Reachable by being turned down often enough — sour grapes are
-    # real — and directly, when a GM says so or a character does something vile.
-    "repelled":   {"affinity": -0.20, "respect": -0.10, "desire": -0.50},
-    "lay_with":   {"affinity": +0.20, "trust": +0.10, "familiarity": +0.30,
-                   "desire": -0.25},
-
-    "met":        {"familiarity": +0.10},
-    "talked":     {"familiarity": +0.05, "affinity": +0.02},
-    "travelled":  {"familiarity": +0.15, "affinity": +0.05},
-}
-
-# How each kind reads as a sentence, so an event that nobody described still
-# forms a memory someone could tell back. "Ondry helped Marla", not
-# "Ondry kept_word Marla".
-PHRASES: dict[str, str] = {
-    "helped": "helped", "saved": "saved", "gifted": "gave something to",
-    "healed": "healed", "praised": "praised", "kept_word": "kept their word to",
-    "betrayed": "betrayed", "attacked": "attacked", "threatened": "threatened",
-    "stole": "stole from", "lied": "lied to", "insulted": "insulted",
-    "bested": "bested", "met": "met", "talked": "talked with",
-    "flirted": "flirted with", "courted": "made their interest plain to",
-    "rebuffed": "turned down", "lay_with": "spent the night with",
-    "repelled": "was repelled by",
-    "travelled": "travelled with",
-}
+ROMANTIC = interaction_model.requiring(interaction_data.built_in(), "desire")
 
 
-def phrase(kind: str, actor: str, subject: str) -> str:
-    """One line describing what happened, for a memory nobody wrote a gist for."""
-    return f"{actor} {PHRASES.get(kind, kind.replace('_', ' '))} {subject}"
+def phrase(kind: str, actor: str, subject: str,
+           phrases: dict | None = None) -> str:
+    """One line describing what happened, for a memory nobody wrote a gist for.
+
+    ``phrases`` is a campaign's resolved wording; without it the shipped table
+    is used, which is right for anything that has no campaign in hand.
+    """
+    table = PHRASES if phrases is None else phrases
+    return f"{actor} {table.get(kind, kind.replace('_', ' '))} {subject}"
 
 
-def actor_view(kind: str, echo: float = 0.3) -> dict:
+def actor_view(kind: str, echo: float = 0.3, deltas: dict | None = None) -> dict:
     """The same act, from the side of the person who *did* it.
 
-    ``DELTAS`` is written from the point of view of the person it happened to,
-    and applying it unchanged to the actor produces nonsense: a lord who settles
-    a stranger's debt ends up liking and trusting that stranger exactly as much
-    as the stranger likes him, and both of them are recorded as the creditor.
-    Teo was saved and came out indifferent while Vashen came out *"fond of them,
-    and is owed 4"*.
-
-    Two changes, and they are the whole asymmetry:
-
-    * **Debt inverts.** If I helped you, you owe me. Same number, other sign.
-    * **Feeling is an echo, not a mirror.** Doing someone a kindness warms you to
-      them a little (and wronging them cools you a little — people devalue those
-      they have harmed), but nothing like as much as receiving it. ``echo``
-      scales that and at 0 the actor's feelings simply do not move.
+    The asymmetry itself lives on :class:`~helpers.dnd.world.interaction.Interaction`
+    so there is one implementation of it; this is the by-kind way in, kept
+    because callers had it first. ``deltas`` overrides the shipped table with a
+    campaign's own.
     """
-    deltas = DELTAS.get(kind)
-    if not deltas:
+    table = DELTAS if deltas is None else deltas
+    base = table.get(kind)
+    if not base:
         return {}
-    out = {}
-    for axis, base in deltas.items():
-        if axis == "debt":
-            out[axis] = -int(base)
-        elif echo:
-            out[axis] = base * echo
-    return out
+    return interaction_model.Interaction(key=kind, deltas=base).actor_view(echo)
 
 
 def deepen(relationship, amount: float):
@@ -124,22 +76,17 @@ def deepen(relationship, amount: float):
     return relationship
 
 
-def felt_valence(kind: str) -> float:
+def felt_valence(kind: str, deltas: dict | None = None) -> float:
     """How an event of this kind feels, derived from the deltas rather than a
     second table that could drift out of step with them.
 
-    Affinity is the emotional axis, so it leads; trust carries the kinds that
-    are about reliability rather than warmth (``kept_word``, ``lied``), and
-    familiarity covers the neutral ones. Doubled because the deltas are sized
-    for a relationship axis, and a memory's valence spans the full -1..1.
+    The derivation is on the model; this is the by-kind way in.
     """
-    deltas = DELTAS.get(kind)
-    if not deltas:
+    table = DELTAS if deltas is None else deltas
+    base = table.get(kind)
+    if not base:
         return 0.0
-    for axis in ("affinity", "trust", "familiarity"):
-        if axis in deltas:
-            return _clamp(float(deltas[axis]) * 2.0)
-    return 0.0
+    return interaction_model.Interaction(key=kind, deltas=base).felt_valence()
 
 
 # Which trait sharpens which axis, and how much. Applied on top of the base.
@@ -236,8 +183,9 @@ def affinity_map(relationships: list[Relationship]) -> dict:
     return {r.to_id: r.affinity for r in relationships}
 
 
-def kinds() -> list[str]:
-    return sorted(DELTAS)
+def kinds(catalogue: dict | None = None) -> list[str]:
+    """Every kind that can be recorded. The shipped set unless given one."""
+    return sorted(DELTAS if catalogue is None else catalogue)
 
 
 # --------------------------------------------------------------------------- #

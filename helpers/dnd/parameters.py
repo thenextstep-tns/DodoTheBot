@@ -130,6 +130,24 @@ def set_packs(guild_id: Optional[int], packs: dict) -> None:
     )
 
 
+def interaction_overrides(guild_id: Optional[int]) -> dict:
+    """Every server-level interaction kind for a guild.
+
+    Same document and the same reasoning as :func:`pack_overrides`: what an act
+    is worth is configuration, layered the way all configuration here is.
+    """
+    doc = TUNING_COLLECTION.find_one({"guild_id": guild_id})
+    return (doc or {}).get("interactions", {})
+
+
+def set_interactions(guild_id: Optional[int], interactions: dict) -> None:
+    """Replace a guild's server-level interaction kinds wholesale."""
+    TUNING_COLLECTION.update_one(
+        {"guild_id": guild_id},
+        {"$set": {"interactions": dict(interactions or {})}}, upsert=True
+    )
+
+
 def set_tuning(guild_id: Optional[int], key: str, value) -> None:
     """Set one server-level tunable. ``None`` clears it back to the default."""
     if value is None:

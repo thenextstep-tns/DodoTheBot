@@ -34,6 +34,7 @@ Do **not** read all sixteen documents. They are reference, not onboarding.
 | P2+ | ✅ live | **Stakes** — an act is worth different amounts to each person in it; emergent roles; scene consolidation. All of it came out of the playtest |
 | P3 | ✅ **complete** | World tick, faction clocks, rumours — and the whole decision engine: what an NPC may see, what a scene permits, what they want, who they are, how they choose, what happens when they do, and the cheap paths for everybody nobody is watching |
 | P4 | ◐ started | Voice. **Its first half needs no model at all**; two of its four pieces are built and live — the turn report (§8a) and episode gists (§8b). No model has been installed and none is needed yet |
+| — | ✅ live | **Interaction kinds as data** (§8c) — off-roadmap, asked for directly. Four hand-maintained Python tables became one editable file |
 
 **P0–P2 have now been played through by a human**, act by act, using
 `PLAYTEST.md`. That run found **seven real bugs that all 305 tests missed**, and
@@ -65,14 +66,14 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**875 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
+**956 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
 Voice phase has its own, and it is where the null-backend suite will go:
 
 ```bash
 py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py
 ```
 
-The count is 4 + 95 + 52 + 542 + 62 + 120, **measured** — `test_command_names.py`
+The count is 4 + 95 + 52 + 542 + 68 + 195, **measured** — `test_command_names.py`
 prints no total, so its four checks have to be counted by eye. See §9.
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
@@ -150,11 +151,13 @@ ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min'
 ```
 cogs/dnd/, web/dnd/     surfaces
 helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer, writes back
-helpers/dnd/tuning.py   118 tunables, resolved default → server → campaign
+helpers/dnd/tuning.py   121 tunables, resolved default → server → campaign
 helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
+helpers/dnd/interactions.py  what one person can do to another, same three layers
 helpers/dnd/narrate.py  saying what happened — turn report and the words a
                         memory carries, no model anywhere     (pure, no RNG)
-helpers/dnd/data/       what ships as data rather than as code (packs.json)
+helpers/dnd/data/       what ships as data rather than as code
+                        (packs.json, interactions.json)
 helpers/dnd/mind/       traits, needs, memory, relationships, stakes,
                         goals, behaviour (propose), decide (score + select)
                                                              (pure, seeded)
@@ -564,13 +567,13 @@ is a standing-rule violation looking for an owner.
   is not wired — a cheap next job.
 - **`PYTHONIOENCODING=utf-8` is needed** to run the suites in this shell, or the
   clock faces and arrows crash the Windows console rather than the code.
-- **Prior tables are still Python** — the role and culture ones, at least.
-  Behaviour archetypes are now data a GM can edit (§6 step 3b), and the same
-  treatment is what `04-ENTITIES.md` §9 step 1 wants for these: they could
-  move into `helpers/dnd/data/` and layer through `campaign.settings` with
-  the machinery packs already built.
+- **The role and culture prior tables are still Python** — the last of them.
+  Behaviour archetypes went to data first (§6 step 3b) and **interaction kinds
+  followed** (§8c), so the machinery, the layering, the panel shape and the
+  rename-edits-in-place rule are all established and proven twice.
+  `04-ENTITIES.md` §9 step 1 wants exactly the same treatment here.
   `role_prior_weight` makes them switchable but not *editable* — a GM still
-  cannot add a trade.
+  cannot add a trade. **This is the next item the owner has queued** (§8, item 4).
 - **Rulesets do not model wealth**, so `standing` is set by hand. Deriving it
   from the sheet is the natural next step (`04-ENTITIES.md` §2b).
 
@@ -613,7 +616,7 @@ mid-scene degrades to templates without interrupting play.
 * **Six command slots left** (94/100). Discord's cap is hard and hitting it takes
   the *whole cog* offline — it has happened twice. P4 wants commands. Group new
   ones under `/gm` or an existing group, where a whole group costs one slot.
-* **118 tunables in 16 groups.** Every one is justified and "everything
+* **121 tunables in 16 groups.** Every one is justified and "everything
   tweakable" is settled — this is not a case for removing any. But the panel
   could fold the ones nobody should ever touch behind an *advanced* disclosure,
   the way the trait override already is, before the number doubles.
@@ -774,6 +777,82 @@ remaining no-model item that touches the *"too convoluted to play"* verdict
 directly, and the vocabulary it maps onto is already fixed by `rules/ruleset.py`.
 Item 4, name and culture tables as data, is the other and is pure plumbing —
 the archetype machinery in `helpers/dnd/packs.py` is the pattern to copy.
+
+## 8c. Interaction kinds as data ✅ built
+
+**Not a roadmap item — the owner asked for it directly**: *"I need those stakes
+written down and editable somewhere, make sure that is the case."* They were
+not. Now they are `helpers/dnd/data/interactions.json`, resolved built-in →
+server → campaign, with a **What people do to each other** section on the
+campaign page.
+
+### What was actually wrong
+
+The set of interaction kinds was written down **four times**, all keyed by the
+same strings and all maintained by hand:
+
+| Table | Where | What it held |
+| --- | --- | --- |
+| `DELTAS` | `mind/relationships.py` | how each kind moves the two people |
+| `PHRASES` | `mind/relationships.py` | how it reads in a memory |
+| `ROMANTIC` | `mind/relationships.py` | which are gated behind an optional need |
+| `KIND_MAGNITUDE` | `mind/stakes.py` | how big it is before circumstances |
+
+They had already drifted. The five romantic kinds were added to three of the
+four and **never given a magnitude**, so they fell through to the 0.4 default:
+`lay_with` was worth exactly as much as `lied`. No test could have caught it,
+because there was nowhere the set of kinds was defined as one thing. The shipped
+file now gives them real numbers (`lay_with` 0.7, `courted` 0.5, `repelled` 0.5,
+`rebuffed` 0.4, `flirted` 0.25), and a test asserts every kind has its own.
+
+### How it is put together
+
+* **`world/interaction.py`** is the model, and it owns the two derivations that
+  used to be loose functions — `felt_valence()` (how an act feels, taken *from*
+  the deltas rather than stored as a second number that could disagree) and
+  `actor_view()` (debt inverts, feeling is an echo not a mirror).
+* **`interactions.py`** is the registry: `built_in()`, `Interactions`,
+  `validate`, exactly mirroring `packs.py`. It also exposes `deltas()`,
+  `phrases()` and `magnitudes()` — the shapes each pure module wants, built at
+  the edge and passed in, because `mind/` never reaches for a registry itself.
+* **The old module-level tables still exist and now *derive* from the file**, so
+  the many callers that only ever wanted the shipped numbers are untouched and
+  there is still exactly one place a number is written. Tests assert the
+  equality, so the derivation cannot rot into a copy.
+* `interact` and `relate` take `campaign=` / `available_kinds=`; `minds`
+  resolves the catalogue once per call and hands it down.
+* **`requires` replaced `ROMANTIC`.** A kind names the optional need it belongs
+  to, so a campaign inventing an act of its own says for itself which need gates
+  it, and the gate now reads `tuning.permits_need(...)` — the canonical two-gate
+  check (setting *and* line) rather than a second path to the same question.
+* **`requires` is deliberately not editable from the panel.** A control that can
+  clear it is a control that walks round the safety gate; an override inherits it
+  from the shipped kind.
+
+### The stake bands, the other half of the ask
+
+The four phrases the turn report uses (*it was everything to them* … *barely
+noticed*) had their thresholds hardcoded in `narrate.py` — something I shipped
+in §8a and which was an invariant-1 violation the moment it landed. The three
+lines are now tunables (`stake_everything`, `stake_mattered`, `stake_noted`, in
+*Reporting*). The **wording** is not tunable: four phrases is a vocabulary, not
+three numbers, and a campaign that wants its own is asking for something bigger.
+
+### The test that changed shape
+
+`test_tunables` asserted every `ReportTuning` field had a tunable named
+`report_<field>` — a **naming** convention, which the stake bands promptly broke
+by being named sensibly. It now asserts the **behavioural** thing: every tunable
+in the group must actually move a field, and every field must be moved by some
+tunable. Either half failing is a control wired to nothing, which is this
+project's most expensive recurring bug. Prefer this shape.
+
+Verified by clicking: 21 cards render, `saved` shows its real deltas and a
+magnitude of 1.00, the five gated kinds carry a note naming the need holding
+them, and Save posts `{key, label, phrase, magnitude, deltas}` with the guild id
+intact as a string and zero-valued axes omitted. Server side exercised
+separately — validate, layer, resolve, and a brand-new kind
+(`swore_an_oath_to`) resolving like any other.
 
 ## 9. Keeping this file honest
 

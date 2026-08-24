@@ -52,6 +52,7 @@ from helpers.dnd.store import memories as memories_module  # noqa: E402
 from helpers.dnd.store import relations as relations_module  # noqa: E402
 from helpers.dnd import minds  # noqa: E402
 from helpers.dnd import tuning as tuning_registry  # noqa: E402
+from helpers.dnd import interactions as interaction_registry  # noqa: E402
 from helpers.dnd import parameters as dnd_parameters  # noqa: E402
 from web.dnd import access, pages  # noqa: E402
 
@@ -288,6 +289,26 @@ def test_tuning_section() -> None:
     player_page = pages.campaigns_html(FakeBot(), guild, panel_access.SCOPE_STATS, 2)
     check("tuning: an admin gets the server defaults", "Simulation defaults" in admin_page)
     check("tuning: a player does not", "Simulation defaults" not in player_page)
+
+    # --- what people do to each other, and what it is worth ---------------- #
+    kinds_html = pages._interactions_section(
+        guild, campaign, minds.tuning_for(store, campaign), True
+    )
+    check("kinds: the section renders", "How big it is" in kinds_html)
+    check("kinds: every shipped kind has a card",
+          all(f'data-key="{key}"' in kinds_html
+              for key in interaction_registry.built_in()))
+    check("kinds: a delta slider spans the negative half",
+          'min="-1" max="1" data-axis="affinity"' in kinds_html,
+          detail="an act that costs trust is not an act that fails to build it")
+    check("kinds: debt gets a whole-number box, not a slider",
+          'data-axis="debt"' in kinds_html and 'step="1"' in kinds_html)
+    check("kinds: a gated kind says which need is holding it",
+          "has not switched on" in kinds_html,
+          detail="sliders on an act nothing can record read as broken controls")
+    check("kinds: a player sees none of it",
+          pages._interactions_section(guild, campaign,
+                                      minds.tuning_for(store, campaign), False) == "")
 
     # Every group needs an icon, or it renders with a bare heading in the panel
     # and a bullet in the side menu while every other group has a face. Cosmetic,

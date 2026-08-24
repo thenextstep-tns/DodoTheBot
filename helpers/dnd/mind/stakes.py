@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from helpers.dnd import interactions as interaction_data
+from helpers.dnd.world import interaction as interaction_model
 from helpers.dnd.tuning import DEFAULT_STAKES, StakesTuning
 
 
@@ -119,12 +121,16 @@ def default_magnitude(kind: str, table: dict[str, float] | None = None) -> float
 # How much an act of each kind is intrinsically worth, before capacity and need
 # scale it per person. Saving a life is a large thing however rich you are;
 # talking is small however poor.
-KIND_MAGNITUDE: dict[str, float] = {
-    "saved": 1.0, "betrayed": 0.9, "attacked": 0.8, "healed": 0.7,
-    "threatened": 0.6, "stole": 0.6, "helped": 0.5, "gifted": 0.5,
-    "kept_word": 0.4, "lied": 0.4, "bested": 0.4, "insulted": 0.3,
-    "praised": 0.3, "travelled": 0.3, "talked": 0.2, "met": 0.2,
-}
+#
+# **Data now**, not a table here: `helpers/dnd/data/interactions.json`, resolved
+# built-in -> server -> campaign. This was one of four separate Python tables
+# keyed by the same strings, and it was the one that had drifted — the five
+# romantic kinds were never added to it, so `lay_with` fell through to the 0.4
+# default and was worth as much as `lied`. `default_magnitude` still takes a
+# `table`, which is how a campaign's own numbers get in.
+KIND_MAGNITUDE: dict[str, float] = interaction_model.as_magnitudes(
+    interaction_data.built_in()
+)
 
 
 # --------------------------------------------------------------------------- #

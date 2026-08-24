@@ -26,6 +26,7 @@ def dnd_routes() -> list:
         api_dnd_entity_goals,
         api_dnd_entity_traits,
         api_dnd_lore,
+        api_dnd_interaction,
         api_dnd_pack,
         api_dnd_safety,
         api_dnd_param,
@@ -59,6 +60,7 @@ def dnd_routes() -> list:
         web.post("/api/guild/{gid}/dnd/entity-goals", view(api_dnd_entity_goals)),
         # Behaviour archetypes are campaign data a GM authors, not a table that
         # ships in a Python module and can never be added to.
+        web.post("/api/guild/{gid}/dnd/interaction", view(api_dnd_interaction)),
         web.post("/api/guild/{gid}/dnd/pack", view(api_dnd_pack)),
         # A campaign's lines. Not tuning: a line outranks a setting.
         web.post("/api/guild/{gid}/dnd/safety", view(api_dnd_safety)),

@@ -31,6 +31,7 @@ from helpers.dnd import registry as dnd_registry
 from helpers.dnd import tuning as tuning_registry
 from helpers.dnd.store import campaign_store, campaigns_for
 from helpers.dnd import minds
+from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import packs as pack_registry
 from helpers.dnd.mind.traits import DRIVES, FACULTIES, TEMPERAMENT
 from helpers.dnd.world import goal as goal_model
@@ -349,6 +350,73 @@ async def api_dnd_safety(request: web.Request):
         f"on {campaign.name}",
     )
     return web.json_response({"ok": True, "lines": lines})
+
+
+async def api_dnd_interaction(request: web.Request):
+    """Add, edit or remove one interaction kind for a campaign.
+
+    ``{campaign_id, action, key, label, phrase, description, magnitude, deltas}``
+    where action is ``save`` or ``remove``.
+
+    Saving under the key of a shipped kind **overrides** it for this campaign
+    only; removing such an override puts the shipped one back. Exactly the shape
+    of :func:`api_dnd_pack`, because this is the same layering.
+    """
+    from web.routes import _record_change
+
+    data = await request.json()
+    campaign, store, error = await _gm_context(request, data)
+    if error is not None:
+        return error
+
+    action = str(data.get("action", "")).strip().lower()
+    settings = dict(campaign.settings or {})
+    own = dict(settings.get("interactions") or {})
+
+    if action == "remove":
+        key = str(data.get("key", "")).strip().lower()
+        if key not in own:
+            return _bad("This campaign has not changed that.")
+        own.pop(key)
+        settings["interactions"] = own
+        store.campaigns.save_settings(campaign.id, settings)
+        await _record_change(
+            request, "dnd_interaction", key, "campaign", None,
+            f"removed the campaign's **{key}** interaction",
+        )
+        return web.json_response({"ok": True, "key": key})
+
+    if action != "save":
+        return _bad("Unknown action.")
+
+    clean, problem = interaction_registry.validate({
+        "key": data.get("key"),
+        "label": data.get("label"),
+        "phrase": data.get("phrase"),
+        "description": data.get("description"),
+        "magnitude": data.get("magnitude"),
+        "deltas": data.get("deltas") or {},
+        # `requires` is not editable from the panel on purpose. It is what keeps
+        # an optional need's acts out of a campaign that did not opt in, and a
+        # control that can clear it is a control that can walk round the safety
+        # gate. An override inherits it from the shipped kind below.
+    })
+    if clean is None:
+        return _bad(problem)
+
+    key = clean["key"]
+    shipped = interaction_registry.built_in().get(key)
+    if shipped is not None:
+        clean["requires"] = shipped.requires
+    was = "campaign" if key in own else interaction_registry.Interactions().source_of(key)
+    own[key] = clean
+    settings["interactions"] = own
+    store.campaigns.save_settings(campaign.id, settings)
+    await _record_change(
+        request, "dnd_interaction", key, was, "campaign",
+        f"set what **{clean['label']}** is worth in this campaign",
+    )
+    return web.json_response({"ok": True, "key": key})
 
 
 async def api_dnd_pack(request: web.Request):
