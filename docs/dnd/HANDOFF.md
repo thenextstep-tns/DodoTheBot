@@ -1,4 +1,10 @@
-# Handoff — start here in a new session
+# Handoff — Dodo Tabletop
+
+**This file is about the tabletop engine only.** The bot as a whole — the shell,
+the deploy, the command cap, the test runners, the repo-wide traps — is
+`docs/HANDOFF.md`, and it is short. Read that one first if you have never
+touched this repo; read this one if you are picking up simulation work.
+
 
 Everything through **P3 is built, tested and live** — the whole simulation:
 memory, belief, needs, goals, archetypes, decisions, and a world that moves when
@@ -66,14 +72,15 @@ Two lessons are now conventions (`14-CONVENTIONS.md` §5a/5b): **click it and
 read the console before reasoning about the source**, and **a green suite proves
 whatever the fixture encodes** — three of those bugs had tests defending them.
 
-**956 tests** across **six** suites, all passing. `test_dnd_p4.py` is new — the
-Voice phase has its own, and it is where the null-backend suite will go:
+**2,862 tests** across **seven** suites, all passing. `test_dnd_catalogue.py` is the newest: it is
+mostly one assertion per parameter, which is why the number jumped. `test_dnd_p4.py`
+is the Voice phase's, and is where the null-backend suite will go:
 
 ```bash
-py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py
+py tests/test_command_names.py && py tests/test_dnd_p0.py && py tests/test_dnd_p1.py && py tests/test_dnd_p2.py && py tests/test_dnd_panel.py && py tests/test_dnd_p4.py && py tests/test_dnd_catalogue.py
 ```
 
-The count is 4 + 95 + 52 + 542 + 68 + 195, **measured** — `test_command_names.py`
+The count is 4 + 95 + 52 + 542 + 68 + 195 + 1906, **measured** — `test_command_names.py`
 prints no total, so its four checks have to be counted by eye. See §9.
 
 No pytest, no mongomock — `tests/fake_mongo.py` swaps the collections for an
@@ -126,25 +133,24 @@ each stated more than once, so treat them as settled:
 
 ## 4. Things that bit us — do not rediscover them
 
+**The repo-wide traps are in `docs/HANDOFF.md` §2** and are not repeated here:
+`py` rather than `python`, `PYTHONIOENCODING=utf-8`, bash heredocs mangling
+patch scripts, and Discord's hard cap of 100 top-level slash commands. All four
+have cost this project time and two of them caused outages. Go and read them.
+
+What follows is the tabletop-specific half:
+
 | Trap | What happens | Guard |
 | --- | --- | --- |
-| **100 slash commands** is a hard Discord cap | `CommandLimitReached` at load — the *whole cog* goes offline | `tests/test_command_names.py` fails at 96. Currently 95. **Group under `/gm`; a group costs one slot.** |
-| Duplicate top-level command name | `CommandAlreadyRegistered`, same outcome | Same test |
 | `cogs/dnd/__init__.py` can't hold `setup()` | `load_all_cogs` skips `__`-prefixed files | Entry point is `cogs/dnd/cog.py` |
 | Command groups built in `__init__` | Subcommands report no cog, so the per-guild switch is bypassed | Groups are **class attributes** |
 | `os.walk` yields `cogs.dnd`, not `cogs.dnd.` | DnD modules listed as cogs with dead Load buttons | `registry.is_dnd_extension` matches both |
-| Bash heredocs choke on this codebase's content | Silent truncation or parse errors | Write a `.py` patch script to the scratchpad and run it with `py` |
-| A `
-` inside a patch script's replacement string | Becomes a real newline and splits the target's source string in two — cost three separate repairs in one session, and later **a production outage**: `lang_dnd.py` shipped unparseable and the cog would not load | **Use the Edit tool** for any replacement containing an escape or `"""`. This trap was already written down and got walked into anyway, which is why the guard is now a test rather than a paragraph |
-| `python` ≠ `py` on this machine | `ModuleNotFoundError: discord` | Always use `py` |
+| Duplicate top-level command name | `CommandAlreadyRegistered` — the *whole cog* goes offline | `tests/test_command_names.py` |
+| Tabletop is near the command cap | Same outcome | **Group under `/gm`.** Currently 94 of 100 used across the whole bot |
 
-**A cog that loads fine in isolation can still fail in production.** Both outages
-this project has had were invisible to a single-cog smoke test. After any push
-that adds a command, check:
-
-```bash
-ssh -i ~/.ssh/id_dodo_vps root@45.141.76.118 "journalctl -u dodo --since '-3min' --no-pager | grep -iE \"loaded cog 'cogs.dnd|failed to load\""
-```
+The command cap is shared with every other cog, so it is a repo-wide budget that
+tabletop happens to spend most of. Adding a top-level command here takes a slot
+away from everything else.
 
 ## 5. The architecture, in one screen
 
@@ -154,6 +160,7 @@ helpers/dnd/minds.py    orchestration — resolves tuning, calls the pure layer,
 helpers/dnd/tuning.py   121 tunables, resolved default → server → campaign
 helpers/dnd/packs.py    behaviour archetypes, resolved built-in → server → campaign
 helpers/dnd/interactions.py  what one person can do to another, same three layers
+helpers/dnd/catalogue.py     every parameter there is, exposed or not
 helpers/dnd/narrate.py  saying what happened — turn report and the words a
                         memory carries, no model anywhere     (pure, no RNG)
 helpers/dnd/data/       what ships as data rather than as code
@@ -854,6 +861,77 @@ intact as a string and zero-valued axes omitted. Server side exercised
 separately — validate, layer, resolve, and a brand-new kind
 (`swore_an_oath_to`) resolving like any other.
 
+## 8d. The parameter catalogue ✅ built
+
+**Asked for directly, and it started as a complaint:** *"I don't like that you
+are deviating from my initial sacred dogma of EVERYTHING IS A TWEAKABLE
+PARAMETER VISIBLE TO THE BOT OWNER. I absolutely don't need a black box system
+with some baked in weights."*
+
+That was fair, and the scale of it was worse than it looked. An AST walk over
+`helpers/dnd` found **82 constants that shape behaviour with no control of any
+kind** — including `RISK`, `NORM`, `SOCIAL_SIGN`, `TRAIT_AFFINITY`,
+`RELATION_READS` and `NEEDS_SERVED`, which between them are *the entire per-verb
+weighting the decision engine scores with*. The rule had been kept for anything
+anybody thought to call a tunable and quietly broken everywhere else, and it was
+invisible because **there was no list for a constant to be missing from**.
+
+### What shipped
+
+* **`helpers/dnd/catalogue.py`** — one entry per parameter, 205 in total: 121
+  tunables, 2 editable data files, 82 baked in. Each row carries a label, a
+  description, its default, its range, which layer it can be set at, which
+  module reads it, what it combines with, and what else moves when it moves.
+* **Tabletop → Admin → List of parameters** (`/guild/{gid}/tabletop/parameters`,
+  admin-scoped) renders it, grouped, one section at a time.
+* **`tests/test_dnd_catalogue.py`** — 1,906 checks, and the point of the whole
+  exercise.
+
+### Three decisions worth keeping
+
+1. **It lists what is *not* exposed, on the same page, flagged.** A defect
+   nobody can see is one nobody fixes, so the baked-in rows name the file, the
+   live value and where it should end up. The page is the work queue.
+2. **It never stores a copy of a value.** `live_values()` reads them out of the
+   source at render time. The first draft did store copies and the suite caught
+   four transcribed wrong within minutes — a catalogue with its own copy of a
+   number is just one more hand-maintained table that can drift.
+3. **Cross-relations are derived where possible.** Which typed view a tunable
+   arrives in is read out of `tuning.py`'s own AST rather than maintained by
+   hand; only the relations that reach *across* a boundary are authored, in
+   `AFFECTS`. It would be absurd for this file to be the parallel list it exists
+   to prevent.
+
+### The rule is now a test
+
+`14-CONVENTIONS.md` invariant **1a** and the first line of the §6 checklist.
+The suite walks every module and fails on any behaviour-shaping constant that is
+not a tunable, not a row in a data file, and not in `BAKED_IN`. It also fails if
+a listed constant has moved, been deleted, or become a tunable without being
+reclassified — so the queue cannot silently contain finished work.
+
+**Adding a parameter now means adding it to the catalogue.** That is not a
+convention any more, it is a failing test.
+
+### The queue, in priority order
+
+The 82 are not equal. In the order they should be done:
+
+1. **`data/verbs.json`** — the decision engine's six per-verb tables plus the
+   goal map. The biggest black box, and **a prerequisite for adding verbs**:
+   every new verb needs an entry in all six, so doing this first turns *adding a
+   verb* into a data edit. The owner has asked for five new ones (help/aid,
+   follow, search/examine, wait-for/listen, threaten), which is the next
+   increment after this.
+2. **`data/priors.json`** — role and culture tables. The long-standing "a GM
+   cannot add a trade" gap, now the oldest thing on the list.
+3. **`data/axes.json`**, **`data/needs.json`**, **`data/values.json`** — trait
+   modifiers, attraction weights, need schedules, and the wording tables.
+4. **`data/rulesets.json`** — SRD class tables and both default DCs. Lowest
+   value: it is the part a GM is least likely to want to change, and the SRD
+   numbers are the SRD's.
+5. The loose scalars, which can simply become tunables in their existing groups.
+
 ## 9. Keeping this file honest
 
 It was updated in **twelve separate commits** on the day P3 was built, once per
@@ -880,18 +958,15 @@ So, when updating this file:
 
 ## 10. Working preferences
 
-- **Ship one complete, checkable thing at a time.** Not a phase, not a batch —
-  the smallest increment the user can actually exercise. Then stop, say plainly
-  what to check and how, and *wait for them to confirm* before continuing. A
-  phase delivered whole is a phase where every part can be broken at once, and
-  the user pays for the whole thing before finding out.
-- **Verify the increment yourself first**, at the level it will be used. For a
-  panel control that means clicking it (`14-CONVENTIONS.md` §5a). "The tests
-  pass" and "the cog loaded" are not evidence that a feature works — an earlier
-  version of this list said they were, and on the strength of it a switch that
-  had never once functioned was reported as verified twice.
-- Do not spawn subagents or run deep research unless asked.
-- Commit messages describe the *effect*, not the mechanics. See `git log`.
-- Push after every commit.
-- **Scope your `git add`.** A blanket `git add -A` once swept an unrelated
-  in-progress edit of the user's into a deploy.
+**Moved to `docs/HANDOFF.md` §7**, because they are how the owner wants the
+whole repo worked on rather than anything to do with simulation: one complete
+checkable increment at a time, verify at the level it will be used, click it and
+read the console, push after every commit, scope your `git add`, and everything
+is a tweakable parameter.
+
+Two that are tabletop's own:
+
+- **Do not spawn subagents or run deep research** unless asked.
+- **Read `14-CONVENTIONS.md` §4 before changing anything in `helpers/dnd/`.**
+  The twelve invariants are review gates, and two of them exist because
+  production broke.

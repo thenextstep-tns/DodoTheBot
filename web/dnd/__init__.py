@@ -33,7 +33,9 @@ def dnd_routes() -> list:
         api_dnd_tune,
         api_dnd_tune_server,
     )
-    from web.dnd.pages import campaign_page, entity_page, tabletop_page
+    from web.dnd.pages import (
+        campaign_page, entity_page, parameters_page, tabletop_page,
+    )
     from web.routes import require_scope
 
     # Pages are stats-scoped so players can see their own campaign; which
@@ -44,6 +46,9 @@ def dnd_routes() -> list:
     configure = require_scope(panel_access.SCOPE_FULL)
     return [
         web.get("/guild/{gid}/tabletop", view(tabletop_page)),
+        # The parameter catalogue. Server configuration rather than one
+        # game's business, so it takes the same scope the settings page does.
+        web.get("/guild/{gid}/tabletop/parameters", configure(parameters_page)),
         web.get("/guild/{gid}/tabletop/{cid}", view(campaign_page)),
         # The inspector is GM-only, enforced inside the handler.
         web.get("/guild/{gid}/tabletop/{cid}/entity/{eid}", view(entity_page)),

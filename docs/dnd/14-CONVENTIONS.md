@@ -64,6 +64,24 @@ Breaking any of these is a review failure, not a style preference.
    also be switchable off entirely (decay rate 0 = frozen memory). A magic number
    in a simulation file is a review failure. Standing project rule, not a
    tabletop one — see the `everything-tweakable` memory.
+
+   **1a. And it goes in the catalogue.** `helpers/dnd/catalogue.py` is the one
+   list of every parameter in the engine, rendered at **Tabletop → Admin → List
+   of parameters**. Adding a parameter means adding it there, with what it
+   does, what else it moves, its default, its range and where it can be set.
+   `tests/test_dnd_catalogue.py` walks every module in `helpers/dnd` and **fails
+   on any constant that shapes behaviour and is not in the catalogue** — either
+   as a tunable, as a row in an editable data file, or listed in `BAKED_IN` with
+   the reason it is not exposed yet.
+
+   This is a test rather than a paragraph because the paragraph above it did not
+   work: the rule was written down twice and quietly broken **eighty-two times**,
+   including the whole per-verb weight table the decision engine scores with. It
+   was invisible precisely because there was no list for it to be missing from.
+
+   The catalogue never stores a copy of a value — it reads the live one out of
+   the source. A first draft did store copies and the suite caught four of them
+   transcribed wrong within minutes, which is the argument in miniature.
 2. **The panel is the configuration surface, not Discord.** Every tunable and
    setting ships with a panel control **in the same phase as the feature**, with
    a description, a range, the current value, where it was inherited from, and a
@@ -198,6 +216,13 @@ that it is deployed but untested.
 
 Every feature added to this module should ask:
 
+- [ ] **Did it introduce a number?** → then it is a parameter, and it needs a
+      spec in `helpers/dnd/tuning.py`, a control on the campaign page, **and a
+      row in `helpers/dnd/catalogue.py`** (invariant 1a). If it genuinely cannot
+      be exposed yet, it still goes in `catalogue.BAKED_IN` with the reason and
+      where it should end up. The suite will not let it through otherwise. This
+      is the first question, not the last, because it is the one that has been
+      skipped most.
 - [ ] Does it need a per-guild tunable? → add a spec to
       `helpers/dnd/parameters.py` (**not** the shared registry) and render it in
       the Engine section of the DnD panel page.

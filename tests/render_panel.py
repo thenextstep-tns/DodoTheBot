@@ -109,6 +109,9 @@ def main() -> None:
     # Last, so the archetype counts and the cast are of a populated campaign
     # rather than of an empty one.
     _write("campaign.html", pages.campaign_html(bot, guild, campaign, access.CAMPAIGN_GM))
+    # The parameter catalogue. Rendered here so the one page whose whole job
+    # is to be complete can actually be looked at.
+    _write("parameters.html", pages.parameters_html(guild))
 
     print(f"\nguild id in the pages: {guild.id} (a real snowflake, on purpose)")
     print("now: py -m http.server 8899 --directory .preview — then click things")

@@ -23,6 +23,7 @@ from helpers import panel_access
 from helpers.dnd import parameters as dnd_parameters
 from helpers.dnd import registry as dnd_registry
 from helpers.dnd import minds
+from helpers.dnd import catalogue
 from helpers.dnd import interactions as interaction_registry
 from helpers.dnd import packs as pack_registry
 from helpers.dnd import rules
@@ -110,6 +111,21 @@ def campaigns_html(bot, guild, guild_scope: str, viewer_id: int) -> str:
     settings = _engine_settings(bot, guild) if can_configure else ""
     script = _dnd_script(guild.id) if can_configure else ""
 
+    # Admin tools that are about the engine rather than about one game. The
+    # catalogue is the owner's view of every knob there is, including the ones
+    # that do not have a control yet.
+    counts = catalogue.summary()
+    admin = f"""
+<div class="ttadmin">
+  <h2>Admin</h2>
+  <p class="paramlink"><a href="/guild/{guild.id}/tabletop/parameters">
+    📐 <b>List of parameters</b></a>
+  <span class="muted small">— all {counts['total']} of them: what each one does,
+  what else it moves, its default and range, and where it can be set.
+  {counts['baked']} are still baked into the source with no control, and they are
+  listed too.</span></p>
+</div>""" if can_configure else ""
+
     enabled = bot.visibility.cog_enabled(guild.id, "dnd")
     # The switch lives in the Engine section below, not on the main cog page —
     # tabletop is filtered out of that page entirely.
@@ -128,6 +144,7 @@ def campaigns_html(bot, guild, guild_scope: str, viewer_id: int) -> str:
   {warning}
   <p class="muted small">Campaigns are per server and per group: you see the ones you run or
   play in. Anyone with Manage Server sees all of them.</p>
+  {admin}
   {cards}
   {settings}
 </div>{script}"""
@@ -1810,6 +1827,150 @@ def _inspector_html(bot, guild, campaign, entity, store) -> str:
 # --------------------------------------------------------------------------- #
 #  Handlers
 # --------------------------------------------------------------------------- #
+_STATUS_CHIP = {
+    catalogue.STATUS_TUNABLE: '<span class="chip">tunable</span>',
+    catalogue.STATUS_DATA: '<span class="chip">editable table</span>',
+    catalogue.STATUS_BAKED: '<span class="parambaked">baked in — not yet exposed</span>',
+}
+
+_LAYER_TEXT = {
+    catalogue.LAYER_CAMPAIGN: "campaign → server → built-in default",
+    catalogue.LAYER_SERVER: "server → built-in default",
+    catalogue.LAYER_DATA: "campaign → server → shipped data file",
+    catalogue.LAYER_CODE: "nowhere — it is a constant in the source",
+}
+
+
+def _param_row(entry) -> str:
+    """One parameter, with everything needed to decide whether to touch it."""
+    related = ""
+    if entry.affects:
+        related = (
+            '<div class="paramrel"><b>Also moves:</b> '
+            + ", ".join(f"<code>{_escape(k)}</code>" for k in entry.affects)
+            + "</div>"
+        )
+    siblings = ""
+    if entry.siblings:
+        shown = list(entry.siblings)[:8]
+        more = f" and {len(entry.siblings) - len(shown)} more" \
+            if len(entry.siblings) > len(shown) else ""
+        siblings = (
+            '<div class="paramsib"><b>Combines with:</b> '
+            + ", ".join(f"<code>{_escape(k)}</code>" for k in shown)
+            + _escape(more) + "</div>"
+        )
+    planned = ""
+    if entry.planned and entry.status == catalogue.STATUS_BAKED:
+        planned = (f'<div class="paramplan"><b>Should live in:</b> '
+                   f'<code>{_escape(entry.planned)}</code></div>')
+    note = (f'<div class="paramnote">{_emphasise(_escape(entry.note))}</div>'
+            if entry.note else "")
+
+    return f"""
+<tr class="paramrow{' paramrow-baked' if entry.status == catalogue.STATUS_BAKED else ''}">
+  <td class="paramkey">
+    <b>{_escape(entry.label)}</b> {_STATUS_CHIP.get(entry.status, '')}
+    <div class="muted small"><code>{_escape(entry.key)}</code></div>
+  </td>
+  <td class="paramdesc">
+    <div>{_emphasise(_escape(entry.description))}</div>
+    {note}{related}{siblings}{planned}
+  </td>
+  <td class="paramval"><code>{_escape(entry.default)}</code></td>
+  <td class="paramspan">{_escape(entry.span)}</td>
+  <td class="paramwhere">
+    <div>{_escape(_LAYER_TEXT.get(entry.layer, entry.layer))}</div>
+    <div class="muted small">read by <code>{_escape(entry.where or '—')}</code></div>
+  </td>
+</tr>"""
+
+
+def parameters_html(guild) -> str:
+    """Every parameter in the engine, in one page.
+
+    The owner's standing rule is that **everything is a tweakable parameter
+    visible to the bot owner**, and this is where that is checkable rather than
+    asserted. It deliberately lists what is *not* exposed as well: a constant
+    that shapes behaviour and has no control is a defect, and a defect nobody
+    can see is one nobody fixes.
+    """
+    counts = catalogue.summary()
+    sections, nav = "", ""
+    for index, (group, rows) in enumerate(catalogue.grouped()):
+        exposed = sum(1 for row in rows if row.exposed)
+        baked = len(rows) - exposed
+        slug = "".join(c if c.isalnum() else "-" for c in group.lower())
+        nav += f"""
+<a class="navrow{' active' if index == 0 else ''}" href="#param-{slug}"
+   data-panel="param-{slug}">
+  <span class="navemoji">{_GROUP_EMOJI.get(group, '📐')}</span>
+  <span class="navlabel">{_escape(group)}</span>
+  <span class="navhint">{exposed} tunable{'' if exposed == 1 else 's'}"""
+        nav += (f", {baked} baked in" if baked else "") + "</span></a>"
+
+        body = "".join(_param_row(row) for row in rows)
+        sections += f"""
+<section class="panel{'' if index == 0 else ' hidden'}" id="param-{slug}">
+  <h2 class="panelhead">{_GROUP_EMOJI.get(group, '📐')} {_escape(group)}</h2>
+  <table class="paramtable">
+    <thead><tr><th>Parameter</th><th>What it does, and what it touches</th>
+      <th>Default</th><th>Range</th><th>Where it can be set</th></tr></thead>
+    <tbody>{body}</tbody>
+  </table>
+</section>"""
+
+    return f"""
+<p><a href="/guild/{guild.id}/tabletop">← Tabletop</a></p>
+<h1>📐 Parameters</h1>
+<p class="muted">Every number that shapes how this engine behaves, what it
+touches, and where it can be changed. <b>{counts['total']}</b> in total:
+<b>{counts['tunable']}</b> settings you can change per campaign or per server,
+<b>{counts['data']}</b> editable tables, and <b>{counts['baked']}</b> still
+written into the source with no control yet.</p>
+<p class="muted small">The last number is the point of this page. A constant
+that shapes behaviour and cannot be changed is a black box, and one that is not
+written down anywhere is a black box nobody knows about. Those rows name the
+file and the current value, so the list is a work queue rather than an
+admission. <b>Adding a parameter here is part of adding a parameter</b> — the
+test suite fails if a new constant appears and this page does not know about
+it.</p>
+<div class="tunepage sidepanels">
+  <aside class="sidebar sidenav">{nav}</aside>
+  <main class="content">{sections}</main>
+</div>
+<script>
+(function () {{
+  // Same one-panel-at-a-time behaviour as the tuning page, scoped to this one.
+  const rows = document.querySelectorAll(".sidenav .navrow[data-panel]");
+  rows.forEach((row) => {{
+    row.addEventListener("click", (event) => {{
+      event.preventDefault();
+      rows.forEach((other) => other.classList.remove("active"));
+      row.classList.add("active");
+      document.querySelectorAll("main.content .panel").forEach((panel) => {{
+        panel.classList.toggle("hidden", panel.id !== row.dataset.panel);
+      }});
+    }});
+  }});
+}})();
+</script>"""
+
+
+async def parameters_page(request: web.Request):
+    """Admin-level: the whole parameter catalogue."""
+    from web.routes import _page
+
+    guild, scope = request["guild"], request["scope"]
+    return _page(
+        f"Parameters · {guild.name}",
+        parameters_html(guild),
+        scope=scope,
+        guild=guild,
+        current="tabletop",
+    )
+
+
 async def tabletop_page(request: web.Request):
     from web.routes import _page   # imported lazily; see the module docstring
 
