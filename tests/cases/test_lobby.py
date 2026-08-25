@@ -21,7 +21,7 @@ class Cats(FakeCollection):
 
 cats, dogs, rosters = Cats(), Cats(), Cats()
 config_py.catcollection, config_py.dogcollection = cats, dogs
-scrap_lobby._collections = lambda: {"cat": cats, "dog": dogs}
+scrap_lobby._collections = lambda: {"cat": cats}
 scrap_lobby._roster_collection = lambda: rosters
 
 FOX = 309719542115074049
@@ -84,11 +84,21 @@ cats.docs = [d for d in cats.docs if d["_id"] != "spare5"]
 assert all(p["name"] != "Spare5" for p in scrap_lobby.roster(FOX))
 print("a cat lost to a pink slip leaves the roster instead of breaking the join")
 
-# --- dogs count as fighters too ----------------------------------------------
+# --- dogs are not fighters ---------------------------------------------------
+# "Pick my best" used to reach into the dog collection and put a Working Dog on
+# a cat's roster. It is a cat fight; dogs get thrown in as objects instead.
 other = 645590542125629470
 add("Nugget", total_bias=40, owner=other, collection=dogs)
-assert scrap_lobby.join(other)["best"]["name"] == "Nugget"
-print("a dog can be sent in, which is the first job dogs have ever had")
+add("Tiddles", owner=other)
+assert scrap_lobby.join(other)["best"]["name"] == "Tiddles", "a dog must never be picked"
+assert all(p["name"] != "Nugget" for p in scrap_lobby.owned(other))
+print("the best-cat pick never reaches into the dog collection")
+
+# And the real, unpatched map is cats only, which is what production uses.
+import importlib  # noqa: E402
+_fresh = importlib.reload(importlib.import_module("helpers.scrap_lobby"))
+assert set(_fresh._collections()) == {"cat"}, set(_fresh._collections())
+print("the shipped collection map is cats only")
 
 # --- the engine takes what this hands it -------------------------------------
 fighter = scrap_lobby.as_fighter(scrap_lobby.best_of(scrap_lobby.owned(FOX)))
@@ -107,5 +117,15 @@ assert GLOVE in config_py.pet_actions, "the glove has to be offered, or nobody c
 assert set(config_py.pet_actions) >= {"🐟", "💪", GLOVE}
 assert hasattr(pet_cog.Pet, "enrol_for_fights"), "the glove needs somewhere to land"
 print("summon offers fish, gym and glove, and the glove has a handler")
+
+# --- the glove is a toggle, like the fish and the dumbbell beside it ---------
+rosters.docs.clear()
+scrap_lobby.enrol(FOX, "bobo")
+assert [p["name"] for p in scrap_lobby.roster(FOX)] == ["Bobo"]
+scrap_lobby.release(FOX, "bobo")
+assert scrap_lobby.roster(FOX) == [], "pressing the glove again must take the cat off"
+scrap_lobby.enrol(FOX, "bobo")
+assert [p["name"] for p in scrap_lobby.roster(FOX)] == ["Bobo"], "and put it back on"
+print("the roster supports taking a cat off, not only adding it")
 
 print("PASS")

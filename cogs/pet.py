@@ -377,15 +377,30 @@ class Pet(commands.Cog, name="pet"):
             await context.send(lang.PET_SUMMON_UNKNOWN_ACTION)
 
     async def enrol_for_fights(self, context: Context, pet: dict) -> None:
-        """Put the summoned pet on the owner's fighting roster.
+        """Toggle the summoned pet on or off the owner's fighting roster.
 
-        The roster is capped, and the cap is the interesting part: filling it
-        pushes the oldest cat off the end rather than refusing, because being
+        A toggle, exactly like the fish and the dumbbell beside it. Pressing it
+        again used to quietly re-add the same cat and shuffle it to the front,
+        so there was no way to take a cat *off* the roster from the one screen
+        that talks about the roster.
+
+        The cap pushes the oldest cat off the end rather than refusing: being
         told "no, go and remove one first" three clicks into a joke is how
         people stop playing.
         """
-        result = scrap_lobby.enrol(context.author.id, str(pet["_id"]))
-        roster = scrap_lobby.roster(context.author.id)
+        ident = str(pet["_id"])
+        owner = context.author.id
+        on_roster = any(str(entry["_id"]) == ident for entry in scrap_lobby.roster(owner))
+
+        if on_roster:
+            scrap_lobby.release(owner, ident)
+            roster = scrap_lobby.roster(owner)
+            await context.send(lang.PET_ROSTER_REMOVED.format(
+                name=pet.get("name"), roster=scrap_lobby.describe_roster(roster)))
+            return
+
+        result = scrap_lobby.enrol(owner, ident)
+        roster = scrap_lobby.roster(owner)
         await context.send(lang.PET_ROSTER_ADDED.format(
             name=pet.get("name"), roster=scrap_lobby.describe_roster(roster)))
         if result["dropped"]:

@@ -32,31 +32,69 @@ from helpers import checks, messages, reactions, scrap, scrap_embed, scrap_lobby
 
 
 class _SignUp(discord.ui.View):
-    """The minute before the bell."""
+    """The minute before the bell. Lives on the fight message itself."""
 
     def __init__(self, cog: "Fight", timeout: float):
         super().__init__(timeout=timeout)
         self.cog = cog
+        self.fight_id: int = 0          # set once the message exists
 
     @discord.ui.button(label="Send a cat to fight", style=discord.ButtonStyle.blurple, emoji="🥊")
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.take_signup(interaction, auto=False)
-
-    @discord.ui.button(label="Just pick my best", style=discord.ButtonStyle.grey, emoji="⭐")
-    async def best(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.take_signup(interaction, auto=True)
+        await self.cog.take_signup(interaction, self.fight_id)
 
 
 class _PickBest(discord.ui.View):
     """Offered privately to somebody who owns cats but has never chosen one."""
 
-    def __init__(self, cog: "Fight", timeout: float = 60):
+    def __init__(self, cog: "Fight", fight_id: int, timeout: float = 60):
         super().__init__(timeout=timeout)
-        self.cog = cog
+        self.cog, self.fight_id = cog, fight_id
 
     @discord.ui.button(label="Send my best cat", style=discord.ButtonStyle.green, emoji="⭐")
     async def best(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.take_signup(interaction, auto=True, edit=True)
+        await self.cog.send_best(interaction, self.fight_id)
+
+
+class _FighterButton(discord.ui.Button):
+    """One cat off the roster, sent in by name."""
+
+    def __init__(self, cog: "Fight", fight_id: int, pet: dict, row: int):
+        super().__init__(label=str(pet.get("name"))[:70], style=discord.ButtonStyle.blurple,
+                         emoji="\U0001F408", row=row)
+        self.cog, self.fight_id, self.ident = cog, fight_id, str(pet["_id"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.cog.send_one(interaction, self.fight_id, self.ident)
+
+
+class _OtherBestButton(discord.ui.Button):
+    """The next best cat that is not already on the roster."""
+
+    def __init__(self, cog: "Fight", fight_id: int, row: int):
+        super().__init__(label="Pick my other best cat", style=discord.ButtonStyle.green,
+                         emoji="\u2B50", row=row)
+        self.cog, self.fight_id = cog, fight_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.cog.send_best(interaction, self.fight_id, beyond_roster=True)
+
+
+def _chooser(cog: "Fight", fight_id: int, roster: list, already: set) -> discord.ui.View:
+    """A private button per cat you have picked, plus the shortcut.
+
+    Pressing "send a cat to fight" used to just throw the whole roster in, which
+    takes the choice away from the one person who has actually thought about it.
+    """
+    view = discord.ui.View(timeout=60)
+    row = 0
+    for index, pet in enumerate(roster):
+        if str(pet["_id"]) in already:
+            continue
+        view.add_item(_FighterButton(cog, fight_id, pet, row=min(4, index // 3)))
+        row = min(4, index // 3)
+    view.add_item(_OtherBestButton(cog, fight_id, row=min(4, row + 1)))
+    return view
 
 
 class Fight(commands.Cog, name="fight"):
@@ -82,13 +120,13 @@ class Fight(commands.Cog, name="fight"):
             await context.defer()
         seconds = int(self._param(context, "fight_signup_seconds"))
         view = _SignUp(self, seconds)
-        embed = messages.embed(lang.FIGHT_SIGNUP.format(seconds=seconds),
-                               title=lang.FIGHT_SIGNUP_TITLE)
-        message = await context.send(embed=embed, view=view)
+        state = {"sides": {"A": [], "B": []}, "owners": {}, "guild": context.guild, "shows": []}
+        message = await context.send(embed=self._signup_embed(state, seconds), view=view)
+        view.fight_id = message.id
+        state["message"] = message
+        self.live[message.id] = state
 
-        self.live[message.id] = {"sides": {"A": [], "B": []}, "owners": {},
-                                 "message": message, "guild": context.guild, "shows": []}
-        await self._countdown(message, seconds, embed)
+        await self._countdown(message, seconds, state)
         view.stop()
 
         state = self.live.get(message.id)
@@ -98,60 +136,114 @@ class Fight(commands.Cog, name="fight"):
             return
         await self._run(message, state)
 
-    async def _countdown(self, message, seconds: int, embed) -> None:
-        """Tick the sign-up clock down in place, once a second."""
+    def _signup_embed(self, state: dict, seconds: int) -> discord.Embed:
+        """The sign-up card, including who has actually turned up.
+
+        The roster is the point: a sign-up window with no visible list is a
+        minute of people wondering whether their click did anything.
+        """
+        embed = messages.embed(lang.FIGHT_SIGNUP.format(seconds=max(0, seconds)),
+                               title=lang.FIGHT_SIGNUP_TITLE)
+        for side, label in (("A", lang.FIGHT_SIDE_A), ("B", lang.FIGHT_SIDE_B)):
+            fighters = state["sides"][side]
+            if fighters:
+                lines = "\n".join(
+                    f"{scrap.classify(f).emoji} **{f['name']}** · {state['owners'].get(f['ident'], '?')}"
+                    for f in fighters)
+            else:
+                lines = lang.FIGHT_SIDE_EMPTY
+            embed.add_field(name=f"{label} ({len(fighters)})", value=lines, inline=True)
+        return embed
+
+    async def _refresh(self, state: dict, seconds: int) -> None:
+        try:
+            await state["message"].edit(embed=self._signup_embed(state, seconds))
+        except (discord.HTTPException, KeyError):
+            pass
+
+    async def _countdown(self, message, seconds: int, state: dict) -> None:
+        """Tick the sign-up clock down in place, redrawing the roster with it."""
         for remaining in range(seconds, 0, -1):
+            state["seconds_left"] = remaining
+            # Every second would breach the per-channel edit limit; this is
+            # often enough to feel live, and a join redraws it immediately.
             if remaining % 5 == 0 or remaining <= 5:
-                embed.description = lang.FIGHT_SIGNUP.format(seconds=remaining)
-                try:
-                    await message.edit(embed=embed)
-                except discord.HTTPException:
-                    pass
+                await self._refresh(state, remaining)
             await asyncio.sleep(1)
 
-    def _state_for(self, interaction: discord.Interaction) -> dict | None:
-        return self.live.get(interaction.message.id if interaction.message else 0)
+    def _already(self, state: dict) -> set:
+        return {f["ident"] for side in state["sides"].values() for f in side}
 
-    async def take_signup(self, interaction: discord.Interaction, *, auto: bool, edit: bool = False) -> None:
-        """Somebody pressed the button. Work out what they actually have."""
-        state = self._state_for(interaction)
+    async def take_signup(self, interaction: discord.Interaction, fight_id: int) -> None:
+        """Somebody pressed the button. Offer them their own cats, by name."""
+        state = self.live.get(fight_id)
         if state is None:
             await interaction.response.send_message(lang.FIGHT_OVER_ALREADY, ephemeral=True)
             return
 
-        already = [f["ident"] for side in state["sides"].values() for f in side]
-        result = scrap_lobby.join(interaction.user.id, already=already, auto=auto)
-        if result["status"] != scrap_lobby.READY:
-            # Never a wall of instructions: one sentence, and a button if there
-            # is anything to press.
-            view = _PickBest(self) if result["status"] == scrap_lobby.NO_ROSTER else None
-            text = scrap_lobby.explain(result)
-            if edit:
-                await interaction.response.edit_message(content=text, view=None)
-            else:
-                await interaction.response.send_message(text, view=view, ephemeral=True)
+        already = self._already(state)
+        roster = [p for p in scrap_lobby.roster(interaction.user.id) if str(p["_id"]) not in already]
+        if roster:
+            await interaction.response.send_message(
+                lang.FIGHT_CHOOSE.format(hint=lang.FIGHT_SUMMON_HINT),
+                view=_chooser(self, fight_id, roster, already), ephemeral=True)
             return
 
-        # Balance as they arrive: whichever side has fewer cats takes the next one.
+        result = scrap_lobby.join(interaction.user.id, already=already)
+        view = _PickBest(self, fight_id) if result["status"] == scrap_lobby.NO_ROSTER else None
+        await interaction.response.send_message(scrap_lobby.explain(result),
+                                                view=view, ephemeral=True)
+
+    async def send_best(self, interaction: discord.Interaction, fight_id: int,
+                        *, beyond_roster: bool = False) -> None:
+        """Enrol the best cat they own and send it in.
+
+        ``beyond_roster`` skips the cats already on the roster, so "my other best
+        cat" means the next one down rather than the one already fighting.
+        """
+        state = self.live.get(fight_id)
+        if state is None:
+            await interaction.response.edit_message(content=lang.FIGHT_OVER_ALREADY, view=None)
+            return
+
+        skip = self._already(state)
+        if beyond_roster:
+            skip |= {str(p["_id"]) for p in scrap_lobby.roster(interaction.user.id)}
+        pets = [p for p in scrap_lobby.owned(interaction.user.id) if str(p["_id"]) not in skip]
+        best = scrap_lobby.best_of(pets)
+        if best is None:
+            await interaction.response.edit_message(content=lang.FIGHT_NO_MORE_CATS, view=None)
+            return
+
+        scrap_lobby.enrol(interaction.user.id, str(best["_id"]))
+        await self._put_in(interaction, state, best)
+
+    async def send_one(self, interaction: discord.Interaction, fight_id: int, ident: str) -> None:
+        """Send one named cat off the roster."""
+        state = self.live.get(fight_id)
+        if state is None:
+            await interaction.response.edit_message(content=lang.FIGHT_OVER_ALREADY, view=None)
+            return
+        pet = next((p for p in scrap_lobby.owned(interaction.user.id) if str(p["_id"]) == ident), None)
+        if pet is None:
+            await interaction.response.edit_message(content=lang.FIGHT_CAT_GONE, view=None)
+            return
+        await self._put_in(interaction, state, pet)
+
+    async def _put_in(self, interaction: discord.Interaction, state: dict, pet: dict) -> None:
+        """Place one cat on the thinner side and redraw the roster."""
         cap = int(scrap.TUNING["roster_max"])
-        added = []
-        for pet in result["cats"]:
-            side = "A" if len(state["sides"]["A"]) <= len(state["sides"]["B"]) else "B"
-            if len(state["sides"][side]) >= cap:
-                break
-            fighter = scrap_lobby.as_fighter(pet)
-            state["sides"][side].append(fighter)
-            state["owners"][fighter["ident"]] = interaction.user.display_name
-            added.append(fighter["name"])
-        if not added:
-            await interaction.response.send_message(lang.FIGHT_SIDES_FULL, ephemeral=True)
+        side = "A" if len(state["sides"]["A"]) <= len(state["sides"]["B"]) else "B"
+        if len(state["sides"][side]) >= cap:
+            await interaction.response.edit_message(content=lang.FIGHT_SIDES_FULL, view=None)
             return
 
-        line = lang.FIGHT_JOINED.format(names=", ".join(added))
-        if edit:
-            await interaction.response.edit_message(content=line, view=None)
-        else:
-            await interaction.response.send_message(line, ephemeral=True)
+        fighter = scrap_lobby.as_fighter(pet)
+        state["sides"][side].append(fighter)
+        state["owners"][fighter["ident"]] = interaction.user.display_name
+        await interaction.response.edit_message(
+            content=lang.FIGHT_JOINED.format(names=fighter["name"]), view=None)
+        await self._refresh(state, state.get("seconds_left", 0))
 
     # ------------------------------------------------------------------ #
     #  The fight

@@ -34,7 +34,13 @@ ALREADY_IN = "already_in"       # this cat is already on the sand
 
 
 def _collections() -> dict:
-    return {"cat": config_py.catcollection, "dog": config_py.dogcollection}
+    """Cats only. It is a cat fight.
+
+    Dogs used to be in here and "pick my best" happily reached into the dog
+    collection, which is how a Working Dog ended up on a cat's roster. Dogs get
+    thrown *into* a fight as an object; they do not enter one as a fighter.
+    """
+    return {"cat": config_py.catcollection}
 
 
 def _roster_collection():
