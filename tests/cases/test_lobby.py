@@ -23,6 +23,9 @@ cats, dogs, rosters = Cats(), Cats(), Cats()
 config_py.catcollection, config_py.dogcollection = cats, dogs
 scrap_lobby._collections = lambda: {"cat": cats}
 scrap_lobby._roster_collection = lambda: rosters
+# The real one asks Mongo whether the id is a cat; these fixtures use plain
+# string ids, so stand in for it with the same question against the fake.
+scrap_lobby.is_fighter = lambda ident: any(d["_id"] == str(ident) for d in cats.docs)
 
 FOX = 309719542115074049
 
@@ -94,10 +97,14 @@ assert scrap_lobby.join(other)["best"]["name"] == "Tiddles", "a dog must never b
 assert all(p["name"] != "Nugget" for p in scrap_lobby.owned(other))
 print("the best-cat pick never reaches into the dog collection")
 
-# And the real, unpatched map is cats only, which is what production uses.
-import importlib  # noqa: E402
-_fresh = importlib.reload(importlib.import_module("helpers.scrap_lobby"))
-assert set(_fresh._collections()) == {"cat"}, set(_fresh._collections())
+# And the shipped map is cats only, which is what production uses. Checked by
+# reading the source rather than reloading the module: a reload throws away
+# every fake set up above, and everything after it would run against the live
+# database. That is not hypothetical, it happened, and it wrote junk into a real
+# roster before anybody noticed.
+_source = (_pathlib.Path(scrap_lobby.__file__)).read_text(encoding="utf-8")
+_body = _source.split("def _collections()")[1].split("def ")[0]
+assert "catcollection" in _body and "dogcollection" not in _body, _body
 print("the shipped collection map is cats only")
 
 # --- the engine takes what this hands it -------------------------------------
@@ -121,11 +128,22 @@ print("summon offers fish, gym and glove, and the glove has a handler")
 # --- the glove is a toggle, like the fish and the dumbbell beside it ---------
 rosters.docs.clear()
 scrap_lobby.enrol(FOX, "bobo")
+assert scrap_lobby.on_roster(FOX, "bobo"), "the toggle has to see what was stored"
 assert [p["name"] for p in scrap_lobby.roster(FOX)] == ["Bobo"]
 scrap_lobby.release(FOX, "bobo")
-assert scrap_lobby.roster(FOX) == [], "pressing the glove again must take the cat off"
+assert not scrap_lobby.on_roster(FOX, "bobo"), "pressing the glove again takes the cat off"
 scrap_lobby.enrol(FOX, "bobo")
-assert [p["name"] for p in scrap_lobby.roster(FOX)] == ["Bobo"], "and put it back on"
-print("the roster supports taking a cat off, not only adding it")
+assert scrap_lobby.on_roster(FOX, "bobo"), "and puts it back on"
+print("the roster toggles a cat off as well as on")
+
+# --- a dog can never reach the roster, whoever asks --------------------------
+# A dog id used to go in and never resolve back out, so "is it on the roster"
+# answered no forever and the toggle could only ever add.
+dog = add("Rover", owner=FOX, collection=dogs)
+refused = scrap_lobby.enrol(FOX, "rover")
+assert refused["refused"] is True, refused
+assert not scrap_lobby.on_roster(FOX, "rover"), "nothing was written"
+assert all(p["name"] != "Rover" for p in scrap_lobby.roster(FOX))
+print("the roster refuses a dog outright instead of swallowing the id")
 
 print("PASS")

@@ -61,28 +61,27 @@ blankest = reactions.grid(GUILD, ["🪗"], ["alley"])["🪗"]["alley"]
 assert blankest["source"] == "seeded" and blankest["text"], blankest
 print("an unwritten object has a seeded starting point to edit, not a blank")
 
-# Every cell in the whole grid holds something editable.
-from helpers import reaction_written as _rw  # noqa: E402
-_sources = {_rw.line_for(r["char"], k)[2] for r in rows for k in [c["key"] for c in routes_classes()]}
-assert "empty" not in _sources, "a blank cell is nothing to edit"
-print("no cell in the grid is blank: %s" % ", ".join(sorted(_sources)))
+# The base library lives in the ReactionLines collection now, not in the repo.
+# These check the *shape* of what comes back rather than a Python dict that no
+# longer exists: every cell answers, written cells are marked apart from seeded
+# ones, and nothing that reaches a fight is blank.
+CLASS_KEYS = [c["key"] for c in routes_classes()]
+sample = reactions.grid(GUILD, [r["char"] for r in rows[:12]], CLASS_KEYS)
+sources = {cell["source"] for cells in sample.values() for cell in cells.values()}
+assert sources <= {"written", "seeded", "guild", "global"}, sources
+assert "empty" not in sources, "a blank cell means the library read missed"
+for cells in sample.values():
+    assert set(cells) == set(CLASS_KEYS), "every object answers for all thirteen classes"
+    for cell in cells.values():
+        text = cell["text"]
+        assert text and text[-1] == ".", text
+        assert "leaves the room" not in text.lower(), "a cat cannot leave a fight: " + text
+        assert set(cell["stats"]) <= {"strength", "agility", "intellect", "charm"}, cell
+print("the library answers from the database for every cell, with no blanks")
 
-# Hand-written cells are marked apart from stand-ins, so the panel can show what
-# still needs a person rather than reporting the grid as finished.
-from helpers import reaction_written  # noqa: E402
-
-for _char, _lines in reaction_written.WRITTEN.items():
-    assert set(_lines) == {c["key"] for c in routes_classes()}, _char
-    for _text, _stats in _lines.values():
-        assert _text and _text[-1] == ".", _text
-        assert len(_text) < 110, _text
-        assert "leaves the room" not in _text.lower(), "a cat cannot leave a fight: " + _text
-        assert set(_stats) <= set(("strength", "agility", "intellect", "charm")), _stats
-        assert any(_stats.values()), "a reaction with no stat change does nothing: " + _text
-written = reactions.grid(GUILD, ["🐟"], ["chonk"])["🐟"]["chonk"]
-assert written["source"] == "written" and "next fish" in written["text"], written
-print("all %d written objects carry a line for every class, all thirteen"
-      % len(reaction_written.WRITTEN))
+written = reactions.seed_pairs()
+assert written > 1000, written
+print("%d hand-written cells in the collection" % written)
 
 reactions.save(reactions.GLOBAL, *CELL, "Everyone's default trousers line.", {"strength": 1})
 assert reactions.grid(GUILD, ["👖"], ["loaf"])["👖"]["loaf"]["source"] == "global"

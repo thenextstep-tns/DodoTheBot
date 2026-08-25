@@ -550,6 +550,7 @@ PET_SUMMON_PLACEHOLDER = "Pick a pet"
 PET_ROSTER_NOT_YOURS = "That is somebody else's cat to send."
 PET_ROSTER_ADDED = "**{name}** is on your fighting roster." + chr(10) + "{roster}"
 PET_ROSTER_REMOVED = "**{name}** is off your fighting roster." + chr(10) + "{roster}"
+PET_ROSTER_NOT_A_CAT = "**{name}** is not a cat, and this is a cat fight. Dogs get thrown *into* one, they do not enter one."
 PET_ROSTER_PLACEHOLDER = "Choose up to {cap} cats to fight for you"
 PET_ROSTER_FULL = "That is {cap} cats fighting for you, so the oldest one stood down."
 

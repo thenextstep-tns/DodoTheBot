@@ -84,10 +84,34 @@ def roster(owner_id: int, limit: int = None) -> list[dict]:
     return [by_id[i] for i in idents if i in by_id][:limit]
 
 
+def is_fighter(ident: str) -> bool:
+    """Whether this pet id belongs to a cat, and can therefore be rostered.
+
+    Summon finds cats, dogs and waifus, so the roster has to say no to two of
+    them. Without this a dog id could be written into a roster that only ever
+    reads cats back, which is not a refusal, it is a silent hole: the id goes
+    in, never resolves, and the toggle that checks "is it on the roster" is
+    answered "no" forever.
+    """
+    try:
+        object_id = bson.ObjectId(ident)
+    except (bson.errors.InvalidId, TypeError):
+        return False
+    return config_py.catcollection.find_one({"_id": object_id}, {"_id": 1}) is not None
+
+
 def enrol(owner_id: int, ident: str, limit: int = None) -> dict:
-    """Put a cat on the roster, which is what summoning it now does."""
+    """Put a cat on the roster, which is what the boxing glove does.
+
+    Returns ``refused`` rather than raising: the caller is a Discord button and
+    needs something to say, not an exception.
+    """
     limit = int(scrap.TUNING["roster_max"] if limit is None else limit)
     ident = str(ident)
+    if not is_fighter(ident):
+        return {"idents": [i for i in ((_roster_collection().find_one({"owner": owner_id}) or {})
+                                       .get("idents") or [])],
+                "dropped": [], "full": False, "refused": True}
     row = _roster_collection().find_one({"owner": owner_id}) or {}
     idents = [i for i in (row.get("idents") or []) if i != ident]
     idents.insert(0, ident)
@@ -95,7 +119,18 @@ def enrol(owner_id: int, ident: str, limit: int = None) -> dict:
     idents = idents[:limit]
     _roster_collection().update_one({"owner": owner_id},
                                     {"$set": {"idents": idents}}, upsert=True)
-    return {"idents": idents, "dropped": dropped, "full": len(idents) >= limit}
+    return {"idents": idents, "dropped": dropped, "full": len(idents) >= limit, "refused": False}
+
+
+def on_roster(owner_id: int, ident: str) -> bool:
+    """Whether this exact pet is currently fighting for this owner.
+
+    Read from the stored ids rather than from :func:`roster`, which drops
+    anything it cannot resolve to a cat. A toggle that asks "is it on?" must
+    get the truth about what is stored, or it can never turn anything off.
+    """
+    row = _roster_collection().find_one({"owner": owner_id}) or {}
+    return str(ident) in (row.get("idents") or [])
 
 
 def release(owner_id: int, ident: str) -> None:

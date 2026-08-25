@@ -10,7 +10,7 @@ Three layers answer for any cell, nearest first:
 
 1. what this server's admins wrote (``EmojiReactions`` with their ``guild_id``)
 2. what was written for everyone (the same collection with ``guild_id`` 0)
-3. :mod:`helpers.reaction_written`, the cells written one at a time
+3. the ``ReactionLines`` collection, which holds the whole base library
 Nothing generates a line. An object nobody has written about does nothing when
 it is shown, which is honest and also the point: the game reacts to the objects
 that have had a person think about them, and no others.
@@ -27,21 +27,50 @@ from __future__ import annotations
 import datetime
 
 import config_py
-from helpers import emoji_catalogue, reaction_written
+from helpers import emoji_catalogue
 
 GLOBAL = 0                      # the "for everyone" layer's guild_id
 ATTRS = ("strength", "agility", "intellect", "charm")
 
 
 def seed_pairs() -> int:
-    """How many cells are written by hand, wherever they live."""
-    return sum(len(v) for v in reaction_written.WRITTEN.values())
+    """How many cells in the base library were written by hand."""
+    return _collection_lines().count_documents({"written": True})
 
 
 # --------------------------------------------------------------------------- #
 #  Storage
 # --------------------------------------------------------------------------- #
 _INDEX: dict[str, dict] = {}
+_LIBRARY: dict[tuple, dict] = {}
+VARIATION = chr(0xFE0F)
+
+
+def normalise(char: str) -> str:
+    """Emoji with and without the variation selector are the same object.
+
+    Discord sends some reactions with a trailing U+FE0F while the catalogue
+    stores bare codepoints, so the two spellings of one spider have to collapse
+    or half the library is never found.
+    """
+    return (char or "").replace(VARIATION, "")
+
+
+def _collection_lines():
+    return config_py.reaction_lines
+
+
+def library(refresh: bool = False) -> dict[tuple, dict]:
+    """The whole base library, keyed ``(emoji, class)``.
+
+    Loaded once and kept. It is read on every cell of every grid page and every
+    object shown in a fight, and a round trip per cell would make both unusable.
+    """
+    global _LIBRARY
+    if refresh or not _LIBRARY:
+        _LIBRARY = {(row["emoji"], row["cls"]): row
+                    for row in _collection_lines().find({}, {"_id": 0})}
+    return _LIBRARY
 
 
 def _catalogue_index() -> dict[str, dict]:
@@ -81,8 +110,11 @@ def resolve(emoji: str, cls: str, guild_rows: dict, global_rows: dict) -> dict:
     row = global_rows.get((emoji, cls))
     if row is not None:
         return {"text": row.get("text", ""), "stats": row.get("stats", {}), "source": "global"}
-    text, stats, source = reaction_written.line_for(emoji, cls)
-    return {"text": text, "stats": stats, "source": source}
+    row = library().get((normalise(emoji), cls))
+    if row is not None:
+        return {"text": row.get("text", ""), "stats": dict(row.get("stats") or {}),
+                "source": "written" if row.get("written") else "seeded"}
+    return {"text": "", "stats": {}, "source": "empty"}
 
 
 def grid(guild_id: int, emojis: list[str], classes: list[str]) -> dict:
@@ -133,8 +165,7 @@ def coverage(guild_id: int, total_emoji: int, total_classes: int) -> dict:
     pairs = set()
     for gid in (GLOBAL, guild_id):
         pairs.update(stored(gid).keys())
-    pairs.update((emoji, cls) for emoji, cells in reaction_written.WRITTEN.items()
-                 for cls in cells)
+    pairs.update(key for key, row in library().items() if row.get("written"))
     cells = total_emoji * total_classes
     return {"filled": len(pairs), "cells": cells,
             "percent": round(len(pairs) / cells * 100, 1) if cells else 0.0}

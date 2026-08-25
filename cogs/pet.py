@@ -390,9 +390,14 @@ class Pet(commands.Cog, name="pet"):
         """
         ident = str(pet["_id"])
         owner = context.author.id
-        on_roster = any(str(entry["_id"]) == ident for entry in scrap_lobby.roster(owner))
 
-        if on_roster:
+        # Summon reaches into cats, dogs and waifus; only one of those fights.
+        if pet.get("collection", "cat") != "cat" or not scrap_lobby.is_fighter(ident):
+            await context.send(lang.PET_ROSTER_NOT_A_CAT.format(name=pet.get("name")))
+            return
+
+        # Ask what is stored, not what resolves: see scrap_lobby.on_roster.
+        if scrap_lobby.on_roster(owner, ident):
             scrap_lobby.release(owner, ident)
             roster = scrap_lobby.roster(owner)
             await context.send(lang.PET_ROSTER_REMOVED.format(
