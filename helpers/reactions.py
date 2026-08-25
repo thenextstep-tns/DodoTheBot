@@ -171,6 +171,21 @@ def coverage(guild_id: int, total_emoji: int, total_classes: int) -> dict:
             "percent": round(len(pairs) / cells * 100, 1) if cells else 0.0}
 
 
+def random_written(count: int = 1) -> list[str]:
+    """A few emoji that somebody actually wrote lines for.
+
+    Dodo interferes with objects that have real reactions behind them; picking
+    from the seeded majority would mostly produce the flatter placeholder lines
+    and make the bot look like it is not paying attention.
+    """
+    rows = _collection_lines().aggregate([
+        {"$match": {"written": True}},
+        {"$group": {"_id": "$emoji"}},
+        {"$sample": {"size": max(1, count)}},
+    ])
+    return [row["_id"] for row in rows]
+
+
 def guild_emoji_rows(guild) -> list[dict]:
     """This server's own custom emoji, in the same shape as the catalogue.
 

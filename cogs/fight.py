@@ -21,6 +21,7 @@ almost nothing else.
 """
 
 import asyncio
+import random
 
 import discord
 from discord.ext import commands
@@ -130,11 +131,40 @@ class Fight(commands.Cog, name="fight"):
         view.stop()
 
         state = self.live.get(message.id)
-        if not state or not state["sides"]["A"] or not state["sides"]["B"]:
+        if not state or not (state["sides"]["A"] or state["sides"]["B"]):
             self.live.pop(message.id, None)
             await message.edit(embed=messages.warning(lang.FIGHT_NOBODY_CAME), view=None)
             return
+
+        # One player and nobody to fight is not a fight. Dodo finds somebody.
+        if not state["sides"]["A"] or not state["sides"]["B"]:
+            if not await self._draft(state):
+                self.live.pop(message.id, None)
+                await message.edit(embed=messages.warning(lang.FIGHT_NO_OPPONENT), view=None)
+                return
         await self._run(message, state)
+
+    async def _draft(self, state: dict) -> bool:
+        """Borrow a cat off a player who is not here, to make up the numbers.
+
+        It fights for real and its stats move for the duration, but nothing is
+        at stake for it: no record, no spoils either way. It belongs to somebody
+        who never agreed to be in this.
+        """
+        thin = "A" if not state["sides"]["A"] else "B"
+        owners = {f.get("owner") for side in state["sides"].values() for f in side}
+        idents = self._already(state)
+        pet = scrap_lobby.draft_opponent(exclude_owners=owners, exclude_idents=idents)
+        if pet is None:
+            return False
+
+        fighter = scrap_lobby.as_fighter(pet, stakes=False)
+        state["sides"][thin].append(fighter)
+        state["owners"][fighter["ident"]] = lang.FIGHT_BOT_OWNER
+        state["borrowed"] = state.get("borrowed", set()) | {fighter["ident"]}
+        await state["message"].channel.send(
+            lang.FIGHT_DRAFTED.format(name=fighter["name"]))
+        return True
 
     def _signup_embed(self, state: dict, seconds: int) -> discord.Embed:
         """The sign-up card, including who has actually turned up.
@@ -273,7 +303,7 @@ class Fight(commands.Cog, name="fight"):
             pass
 
         while not fight.over():
-            shows = await self._collect(message, fight, teams, seconds)
+            shows = await self._collect(message, fight, teams, seconds, guild)
             snapshot = fight.step(shows)
             await message.edit(embed=self._embed(fight, snapshot, teams, 0,
                                                  events=snapshot["events"]))
@@ -281,7 +311,7 @@ class Fight(commands.Cog, name="fight"):
 
         await self._finish(message, fight, teams)
 
-    async def _collect(self, message, fight, teams, seconds: int) -> list:
+    async def _collect(self, message, fight, teams, seconds: int, guild=None) -> list:
         """Watch for emoji during a round, ticking the clock as it goes.
 
         Anything anybody reacts with counts, including emoji nobody has written a
@@ -304,6 +334,15 @@ class Fight(commands.Cog, name="fight"):
                 shown.append((str(reaction.emoji), user.display_name))
             except (asyncio.TimeoutError, TimeoutError):
                 continue
+
+        # Dodo joins in, more often when the crowd is quiet, so a fight with one
+        # player in it still has things happening to it.
+        chance = float(self._param(guild, "fight_dodo_interference"))
+        if not shown:
+            chance = min(100.0, chance * 2)
+        if random.random() * 100 < chance:
+            for emoji in reactions.random_written(1):
+                shown.append((emoji, lang.FIGHT_BOT_OWNER))
         return shown
 
     def _blank(self, fight) -> dict:

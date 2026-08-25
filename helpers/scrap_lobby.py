@@ -165,10 +165,30 @@ def join(owner_id: int, *, already: list = None, auto: bool = False) -> dict:
     return {"status": NO_ROSTER, "cats": [], "best": best, "owned": len(pets)}
 
 
-def as_fighter(pet: dict) -> dict:
+def draft_opponent(exclude_owners=(), exclude_idents=()) -> dict | None:
+    """A random cat from a random player, to make up the numbers.
+
+    Borrowed, not conscripted: whoever owns this cat is not here and has not
+    agreed to anything, so it fights with nothing at stake. See ``stakes`` in
+    :func:`as_fighter` and the accounting in ``scrap.Scrap.outcome``.
+
+    Sampled server-side rather than by reading every cat and choosing one, since
+    one of these collections has several thousand documents in it.
+    """
+    skip_owners = [o for o in exclude_owners if o is not None]
+    skip_idents = {str(i) for i in exclude_idents}
+    match = {"owner": {"$nin": skip_owners}} if skip_owners else {}
+    pipeline = ([{"$match": match}] if match else []) + [{"$sample": {"size": 5}}]
+    for pet in config_py.catcollection.aggregate(pipeline):
+        if str(pet["_id"]) not in skip_idents:
+            return pet
+    return None
+
+
+def as_fighter(pet: dict, *, stakes: bool = True) -> dict:
     """A pet document in the shape the engine wants."""
     fighter = {"name": pet.get("name") or "cat", "ident": str(pet.get("_id") or ""),
-               "owner": pet.get("owner")}
+               "owner": pet.get("owner"), "stakes": stakes}
     for attribute in scrap.ATTRIBUTES:
         fighter[attribute] = int(pet.get(attribute, 0) or 0)
     return fighter

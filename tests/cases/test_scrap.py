@@ -148,4 +148,44 @@ same.show("x", "@Fox")
 assert same.history[-1].count("sits on it") == 1, same.history[-1]
 print("three cats doing the same thing get one sentence, not three")
 
+# --- a borrowed cat has nothing at stake -------------------------------------
+# Dodo makes up the numbers by borrowing a cat off somebody who is not here.
+# It fights for real, but its owner never agreed to any of this, so it must
+# leave with exactly the stats it arrived with.
+mine = cat("Mine", strength=40, agility=40, intellect=40, charm=40)
+loaned = dict(cat("Loaned", strength=6), stakes=False)
+
+for seed in range(40):
+    result = scrap.simulate([mine], [loaned], seed=seed)
+    out = result["outcome"]
+    assert all(r["name"] != "Loaned" for r in out["records"]), "no record against a borrowed cat"
+    for t in out["transfers"]:
+        assert t["from"] != "Loaned" and t["to"] != "Loaned", t
+print("a borrowed cat never appears in a record or a transfer, won or lost")
+
+# The human still settles up, in both directions, against a borrowed opponent.
+# Evenly matched on purpose, so both results actually occur.
+even_mine = cat("Mine")
+even_loan = dict(cat("Loaned"), stakes=False)
+won = lost = 0
+for seed in range(80):
+    out = scrap.simulate([even_mine], [even_loan], seed=seed)["outcome"]
+    names = {t["to"] for t in out["transfers"]} | {t["from"] for t in out["transfers"]}
+    assert "Mine" in names, out["transfers"]
+    assert "Loaned" not in names, out["transfers"]
+    won += out["winner"] == "A"
+    lost += out["winner"] == "B"
+assert won and lost, (won, lost)
+print("the human gains on a win and loses on a loss, %d-%d, borrowed cat untouched"
+      % (won, lost))
+
+# But its stats still move during the fight, like everybody else's.
+LOAN = {("x", "alley"): {"text": "reacts", "stats": {"strength": 3}}}
+bout = scrap.Scrap([mine], [dict(loaned)], lookup=lambda e, c: LOAN.get((e, c)))
+bout.show("x")
+borrowed = bout.fighters[1]
+assert borrowed.mods["strength"] != 0, "mid-fight stats still apply to a borrowed cat"
+assert borrowed.base["strength"] == 6, "and its stored stats are still untouched"
+print("a borrowed cat is still affected mid-fight, just never permanently")
+
 print("PASS")

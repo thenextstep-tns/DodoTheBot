@@ -176,6 +176,7 @@ class Fighter:
     ident: str = None                       # the pet's database id, for writing results back
     base: dict = field(default_factory=dict)
     mods: dict = field(default_factory=dict)   # this fight only, wiped when it ends
+    stakes: bool = True                        # False for a cat fighting on loan
     hp: float = 0.0
     max_hp: float = 0.0
     cat_class: CatClass = None
@@ -185,7 +186,8 @@ class Fighter:
         base = {a: int(raw.get(a, 0) or 0) for a in ATTRIBUTES}
         fighter = cls(name=str(raw.get("name") or "cat"), side=side,
                       owner=raw.get("owner"), ident=str(raw.get("_id") or raw.get("ident") or ""),
-                      base=base, mods={a: 0 for a in ATTRIBUTES})
+                      base=base, mods={a: 0 for a in ATTRIBUTES},
+                      stakes=bool(raw.get("stakes", True)))
         fighter.cat_class = (CLASS_BY_KEY[raw["class"]] if raw.get("class") in CLASS_BY_KEY
                              else classify(base))
         fighter.max_hp = round(tuning["hp_base"] + fighter.total(tuning) * tuning["hp_per_total"])
@@ -208,7 +210,7 @@ class Fighter:
             "name": self.name, "side": self.side, "hp": max(0, round(self.hp)),
             "max_hp": round(self.max_hp), "class": self.cat_class.key,
             "class_name": self.cat_class.name, "emoji": self.cat_class.emoji,
-            "alive": self.alive, "total": self.total(tuning),
+            "alive": self.alive, "total": self.total(tuning), "stakes": self.stakes,
             "stats": {a: self.stat(a, tuning) for a in ATTRIBUTES},
             "mods": {a: v for a, v in self.mods.items() if v},
         }
@@ -439,18 +441,29 @@ class Scrap:
         winners = [f for f in self.fighters if f.side == winning]
         losers = [f for f in self.fighters if f.side == losing]
 
-        records = ([{"name": f.name, "ident": f.ident, "owner": f.owner, "won": True} for f in winners]
-                   + [{"name": f.name, "ident": f.ident, "owner": f.owner, "won": False} for f in losers])
+        # A cat fighting on loan has nothing at stake: no record is written
+        # against it and it neither gives up nor collects a point. It belongs to
+        # somebody who is not here and did not agree to any of this.
+        records = ([{"name": f.name, "ident": f.ident, "owner": f.owner, "won": True}
+                    for f in winners if f.stakes]
+                   + [{"name": f.name, "ident": f.ident, "owner": f.owner, "won": False}
+                      for f in losers if f.stakes])
 
         transfers = []
         step = int(self.tuning["spoils_per_cat"])
         for index, loser in enumerate(losers):
             taker = winners[index % len(winners)] if winners else None
             attrs = list(loser.cat_class.governing)
+            # Either half can be missing. Beating a borrowed cat still pays,
+            # because the win was real; losing to one still costs, for the same
+            # reason. The borrowed cat simply is not part of the accounting.
             transfers.append({
-                "from": loser.name, "from_ident": loser.ident,
-                "to": taker.name if taker else None, "to_ident": taker.ident if taker else None,
+                "from": loser.name if loser.stakes else None,
+                "from_ident": loser.ident if loser.stakes else None,
+                "to": taker.name if taker and taker.stakes else None,
+                "to_ident": taker.ident if taker and taker.stakes else None,
                 "attributes": attrs, "amount": step,
+                "borrowed": not loser.stakes or not (taker and taker.stakes),
             })
         return {"winner": winning, "records": records, "transfers": transfers}
 

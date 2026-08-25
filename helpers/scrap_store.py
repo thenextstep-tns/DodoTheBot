@@ -71,25 +71,36 @@ def apply_outcome(outcome: dict, *, floor: int = None) -> dict:
 
         loser_col, loser = _find(transfer.get("from_ident"))
         winner_col, winner = _find(transfer.get("to_ident"))
-        if loser is None or winner is None:
+
+        # One half may be absent when a borrowed cat was involved: it fights but
+        # nothing is at stake for it, so the other side still settles up alone.
+        borrowed = transfer.get("borrowed")
+        if not borrowed and (loser is None or winner is None):
             changed["missing"].append(transfer.get("from") if loser is None else transfer.get("to"))
+            continue
+        if loser is None and winner is None:
             continue
 
         # Take only what the loser can actually give. A cat already at the floor
         # has nothing left to lose, and the winner must not be paid for it.
-        taken = {}
-        for attribute in attributes:
-            have = int(loser.get(attribute, 0) or 0)
-            give = max(0, min(amount, have - floor))
-            if give:
-                taken[attribute] = give
-        if not taken:
-            continue
+        if loser is not None:
+            taken = {}
+            for attribute in attributes:
+                have = int(loser.get(attribute, 0) or 0)
+                give = max(0, min(amount, have - floor))
+                if give:
+                    taken[attribute] = give
+            if not taken:
+                continue
+        else:
+            # Nobody lost anything, so the winner collects the flat amount.
+            taken = {attribute: amount for attribute in attributes}
 
-        loser_col.update_one({"_id": loser["_id"]},
-                             {"$inc": {a: -v for a, v in taken.items()}})
-        winner_col.update_one({"_id": winner["_id"]},
-                              {"$inc": dict(taken)})
+        if loser is not None:
+            loser_col.update_one({"_id": loser["_id"]},
+                                 {"$inc": {a: -v for a, v in taken.items()}})
+        if winner is not None:
+            winner_col.update_one({"_id": winner["_id"]}, {"$inc": dict(taken)})
         changed["transfers"] += 1
 
     return changed

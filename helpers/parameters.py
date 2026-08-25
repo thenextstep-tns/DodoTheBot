@@ -93,6 +93,8 @@ PARAMETERS: list[dict] = [
     # --- fight (cat scraps) ---
     {"key": "fight_signup_seconds", "cog": "fight", "type": "int", "default": 60,
      "label": "Sign-up window (s)", "description": "How long people get to send a cat in before the bell."},
+    {"key": "fight_dodo_interference", "cog": "fight", "type": "float", "default": 25.0,
+     "label": "Dodo interference %", "description": "Chance per round that Dodo throws something in herself. Doubled in a round where nobody else did."},
     {"key": "fight_round_seconds", "cog": "fight", "type": "int", "default": 5,
      "label": "Round length (s)", "description": "Seconds per round to react with objects. The clock ticks in the embed."},
     # --- cheese (co-op cheese-stretch minigame; listener feature) ---
