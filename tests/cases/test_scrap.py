@@ -188,4 +188,30 @@ assert borrowed.mods["strength"] != 0, "mid-fight stats still apply to a borrowe
 assert borrowed.base["strength"] == 6, "and its stored stats are still untouched"
 print("a borrowed cat is still affected mid-fight, just never permanently")
 
+# --- the scoreboard is readable text, not a code block -----------------------
+from helpers import scrap_embed  # noqa: E402
+
+board = scrap.Scrap([cat("Steak"), cat("Bobo")], [cat("Cheeky Pumpkin")], seed=2)
+snap = board.step()
+owner_map = {"Steak": "Fox", "Bobo": "Fox", "Cheeky Pumpkin": "Dodo"}
+view = scrap_embed.scoreboard(snap, seconds_left=3, owners=owner_map, events=snap["events"])
+
+assert "```" not in view, "a code block hides every emoji in it, which is the whole board"
+for name, owner in owner_map.items():
+    assert scrap_embed._clip(name) in view and owner in view, name
+assert any(cls.emoji in view for cls in scrap.CLASSES), "cats show their class emoji"
+assert "▰" in view or "▱" in view, "health is visible"
+longest = max(len(line) for line in view.split(chr(10)))
+assert longest < 120, "a line this long wraps into nonsense on a phone: %d" % longest
+print("the board is plain text with emoji, widest line %d characters" % longest)
+
+# An uneven side leaves a blank rather than pairing a cat against nothing.
+assert len(scrap_embed.battlefield(snap, owner_map).split(chr(10))) == 2
+print("uneven teams still line up one row per pairing")
+
+# The line above the embed says who threw what in.
+assert scrap_embed.shown_line({"Fox": ["🥒"]}).startswith("**Fox** added")
+assert scrap_embed.shown_line({}) == ""
+print("the added line names the thrower and their objects")
+
 print("PASS")

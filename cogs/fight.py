@@ -293,25 +293,27 @@ class Fight(commands.Cog, name="fight"):
         guild = state["guild"]
         fight = scrap.Scrap(state["sides"]["A"], state["sides"]["B"],
                             lookup=self._lookup(guild))
-        teams = self._team_names(state)
+        owners = self._owner_map(state)
+        state["added"] = {}
         seconds = int(self._param(guild, "fight_round_seconds"))
 
-        await message.edit(content=None, embed=self._embed(fight, None, teams, seconds), view=None)
+        await message.edit(content=None, embed=self._embed(fight, None, owners, seconds), view=None)
         try:
             await message.clear_reactions()
         except discord.HTTPException:
             pass
 
         while not fight.over():
-            shows = await self._collect(message, fight, teams, seconds, guild)
+            shows = await self._collect(message, fight, owners, seconds, guild, state)
             snapshot = fight.step(shows)
-            await message.edit(embed=self._embed(fight, snapshot, teams, 0,
+            await message.edit(content=scrap_embed.shown_line(state["added"]) or None,
+                               embed=self._embed(fight, snapshot, owners, 0,
                                                  events=snapshot["events"]))
             await asyncio.sleep(1)
 
-        await self._finish(message, fight, teams)
+        await self._finish(message, fight, owners, state)
 
-    async def _collect(self, message, fight, teams, seconds: int, guild=None) -> list:
+    async def _collect(self, message, fight, owners, seconds: int, guild=None, state=None) -> list:
         """Watch for emoji during a round, ticking the clock as it goes.
 
         Anything anybody reacts with counts, including emoji nobody has written a
@@ -325,15 +327,25 @@ class Fight(commands.Cog, name="fight"):
         for remaining in range(seconds, 0, -1):
             snapshot = fight.rounds[-1] if fight.rounds else self._blank(fight)
             try:
-                await message.edit(embed=self._embed(fight, snapshot, teams, remaining))
+                await message.edit(embed=self._embed(fight, snapshot, owners, remaining))
             except discord.HTTPException:
                 pass
             try:
                 reaction, user = await asyncio.wait_for(
                     self.bot.wait_for("reaction_add", check=check), timeout=1.0)
-                shown.append((str(reaction.emoji), user.display_name))
             except (asyncio.TimeoutError, TimeoutError):
                 continue
+
+            emoji = str(reaction.emoji)
+            shown.append((emoji, user.display_name))
+            # Taken straight back off, so the message never accumulates a row of
+            # spent reactions and the same emoji can be thrown again next round.
+            try:
+                await reaction.remove(user)
+            except discord.HTTPException:
+                pass
+            if state is not None:
+                state.setdefault("added", {}).setdefault(user.display_name, []).append(emoji)
 
         # Dodo joins in, more often when the crowd is quiet, so a fight with one
         # player in it still has things happening to it.
@@ -343,6 +355,9 @@ class Fight(commands.Cog, name="fight"):
         if random.random() * 100 < chance:
             for emoji in reactions.random_written(1):
                 shown.append((emoji, lang.FIGHT_BOT_OWNER))
+                if state is not None:
+                    state.setdefault("added", {}).setdefault(
+                        lang.FIGHT_BOT_OWNER, []).append(emoji)
         return shown
 
     def _blank(self, fight) -> dict:
@@ -350,29 +365,27 @@ class Fight(commands.Cog, name="fight"):
                 "cats": [f.public(fight.tuning) for f in fight.fighters],
                 "events": [], "history": list(fight.history)}
 
-    def _team_names(self, state: dict) -> tuple:
-        names = {"A": [], "B": []}
-        for side, fighters in state["sides"].items():
-            for fighter in fighters:
-                owner = state["owners"].get(fighter["ident"])
-                if owner and owner not in names[side]:
-                    names[side].append(owner)
-        return (", ".join(names["A"]) or "Side A", ", ".join(names["B"]) or "Side B")
+    def _owner_map(self, state: dict) -> dict:
+        """Cat name -> owner display name, for the scoreboard rows."""
+        return {f["name"]: state["owners"].get(f["ident"], "?")
+                for side in state["sides"].values() for f in side}
 
-    def _embed(self, fight, snapshot, teams, seconds, events=None) -> discord.Embed:
+    def _embed(self, fight, snapshot, owners, seconds, events=None,
+               finished: bool = False) -> discord.Embed:
         snapshot = snapshot or self._blank(fight)
         body = scrap_embed.scoreboard(snapshot, seconds_left=seconds or None,
-                                      teams=teams, events=events)
+                                      owners=owners, events=events, finished=finished)
         return messages.embed(body, title=lang.FIGHT_TITLE)
 
-    async def _finish(self, message, fight, teams) -> None:
+    async def _finish(self, message, fight, owners, state=None) -> None:
         outcome = fight.outcome()
         snapshot = fight.rounds[-1]
-        body = scrap_embed.scoreboard(snapshot, teams=teams, finished=True)
+        body = scrap_embed.scoreboard(snapshot, owners=owners, finished=True)
 
         winner = outcome["winner"]
-        lines = [lang.FIGHT_WINNER.format(team=teams[0] if winner == "A" else teams[1])
-                 if winner else lang.FIGHT_NO_WINNER]
+        standing = [c["name"] for c in snapshot["cats"] if c["side"] == winner and c["alive"]]
+        who = ", ".join(dict.fromkeys(owners.get(name, "?") for name in standing)) or "Nobody"
+        lines = [lang.FIGHT_WINNER.format(team=who) if winner else lang.FIGHT_NO_WINNER]
         lines.extend(scrap_store.describe(outcome))
         try:
             scrap_store.apply_outcome(outcome)

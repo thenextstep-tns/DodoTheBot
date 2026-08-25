@@ -1,106 +1,110 @@
 """
 What a scrap looks like while it is happening.
 
-Plain text in, plain text out — no discord objects — so the preview page and the
-tests render exactly what the channel will see. The cog's only job is to put
-:func:`render` into an embed description and edit the message once a second.
+Plain text in, plain text out — no discord objects — so the preview and the
+tests render exactly what the channel sees. The cog puts :func:`scoreboard` in
+an embed description and edits the message once a second.
 
-The layout is a monospace block because the whole point is two teams facing each
-other: names left, names right, health between them, and the middle strip
-showing where something just happened. Proportional text cannot line that up,
-and a column that does not line up reads as noise rather than as a battlefield.
+This used to be a monospace code block, on the theory that two teams facing each
+other need columns that line up. That was wrong twice over: emoji do not render
+inside a code block, so every cat was a blank, and the line was far too wide for
+a phone so it wrapped into nonsense. It is ordinary embed text now, one line per
+pairing, reading left to right the way the fight does:
+
+    **Fox** · Steak 🍞 ▰▰▰▱▱ 12  💥  13 ▱▱▰▰▰ 🐅 Bobo · **Lyna**
 """
 
 from __future__ import annotations
 
-BAR_WIDTH = 8
-FIELD_WIDTH = 44          # the middle strip, between the two health bars
-NAME_WIDTH = 12
+BAR = 5
+NAME = 11
 
-INVITE = "Show them something. Any emoji, anything at all. It happens to every cat in the room."
+INVITE = "React with anything at all. Whatever you show them, every cat in the ring reacts."
 
-
-def _bar(hp: int, max_hp: int, *, flip: bool = False) -> str:
-    filled = 0 if max_hp <= 0 else max(0, min(BAR_WIDTH, round(hp / max_hp * BAR_WIDTH)))
-    bar = "█" * filled + "·" * (BAR_WIDTH - filled)
-    return bar[::-1] if flip else bar
+# What happened on a row this round, in the order it is worth reporting.
+MARKS = {"ko": "🪦", "crit": "💥", "hit": "⚔️", "miss": "💨"}
+QUIET = "⋯"
 
 
-def _clip(name: str, width: int = NAME_WIDTH) -> str:
+def _clip(name: str, width: int = NAME) -> str:
+    name = str(name or "")
     return name if len(name) <= width else name[:width - 1] + "…"
 
 
-def _middle(left, right, events: list[dict]) -> str:
-    """The strip between two cats: quiet, or showing what just landed there."""
-    names = {e.get("target") for e in events}
-    marks = []
-    for event in events:
-        if event.get("target") in (getattr(left, "name", None), getattr(right, "name", None)):
-            marks.append({"crit": "💥", "hit": "✳", "ko": "🪦", "miss": "·"}.get(event["kind"], ""))
-    token = "".join(dict.fromkeys(m for m in marks if m)) or ""
-    if not token:
-        return "─" * FIELD_WIDTH
-    pad = FIELD_WIDTH - len(token) * 2
-    side = max(1, pad // 2)
-    return "─" * side + token + "─" * max(1, FIELD_WIDTH - side - len(token) * 2)
+def _bar(hp: int, max_hp: int, *, flip: bool = False) -> str:
+    """A short block bar. The left side fills toward the middle, so the two
+    teams lean into each other rather than both pointing the same way."""
+    filled = 0 if max_hp <= 0 else max(0, min(BAR, round(hp / max_hp * BAR)))
+    bar = "▰" * filled + "▱" * (BAR - filled)
+    return bar[::-1] if flip else bar
 
 
-class _Slot:
-    """A cat, or an empty place opposite one — so uneven teams still line up."""
-
-    def __init__(self, cat: dict = None):
-        self.cat = cat
-        self.name = cat["name"] if cat else None
-
-    def left(self) -> str:
-        if not self.cat:
-            return " " * (NAME_WIDTH + BAR_WIDTH + 6)
-        state = "" if self.cat["alive"] else "†"
-        return (f"{_clip(self.cat['name']):<{NAME_WIDTH}} "
-                f"{_bar(self.cat['hp'], self.cat['max_hp'], flip=True)} "
-                f"{self.cat['hp']:>3}{state:<1}")
-
-    def right(self) -> str:
-        if not self.cat:
-            return ""
-        state = "" if self.cat["alive"] else "†"
-        return (f"{state:>1}{self.cat['hp']:<3} "
-                f"{_bar(self.cat['hp'], self.cat['max_hp'])} "
-                f"{_clip(self.cat['name'])}")
+def _mark(cat: dict, events: list) -> str:
+    """The single most interesting thing that happened to this cat this round."""
+    if cat is None:
+        return ""
+    kinds = {e.get("kind") for e in (events or []) if e.get("target") == cat["name"]}
+    for kind, glyph in MARKS.items():
+        if kind in kinds:
+            return glyph
+    return ""
 
 
-def battlefield(state: dict, events: list[dict] = None) -> str:
-    """The two teams facing each other, one row per pairing."""
+def _side(cat: dict, owner: str, *, left: bool) -> str:
+    name = _clip(cat["name"])
+    if not cat["alive"]:
+        name = f"~~{name}~~"
+    who = f"**{_clip(owner or '?')}**"
+    if left:
+        return f"{who} · {name} {cat['emoji']} {_bar(cat['hp'], cat['max_hp'], flip=True)} `{cat['hp']:>3}`"
+    return f"`{cat['hp']:<3}` {_bar(cat['hp'], cat['max_hp'])} {cat['emoji']} {name} · {who}"
+
+
+def battlefield(state: dict, owners: dict = None, events: list = None) -> str:
+    """Both teams facing each other, one line per pairing."""
+    owners = owners or {}
     left = [c for c in state["cats"] if c["side"] == "A"]
     right = [c for c in state["cats"] if c["side"] == "B"]
+
     rows = []
     for index in range(max(len(left), len(right))):
-        a = _Slot(left[index] if index < len(left) else None)
-        b = _Slot(right[index] if index < len(right) else None)
-        rows.append(f"{a.left()} {_middle(a, b, events or [])} {b.right()}".rstrip())
+        a = left[index] if index < len(left) else None
+        b = right[index] if index < len(right) else None
+        middle = _mark(a, events) or _mark(b, events) or QUIET
+        parts = [
+            _side(a, owners.get(a["name"]), left=True) if a else "​",
+            middle,
+            _side(b, owners.get(b["name"]), left=False) if b else "​",
+        ]
+        rows.append("  ".join(parts))
     return "\n".join(rows)
 
 
-def scoreboard(state: dict, *, seconds_left: int = None, teams: tuple = ("Side A", "Side B"),
-               events: list[dict] = None, finished: bool = False) -> str:
+def scoreboard(state: dict, *, seconds_left: int = None, owners: dict = None,
+               events: list = None, finished: bool = False) -> str:
     """The whole live view: invitation, clock, battlefield, recent moves."""
-    head = [INVITE, ""]
     if finished:
-        head.append(f"Round {state['round']} · over")
+        head = f"**Round {state['round']}** · over"
     elif seconds_left is not None:
-        # A bare number counts down more legibly than a progress bar, and it is
-        # one character to edit each second rather than a redrawn widget.
-        head.append(f"Round {state['round']} · ends in {max(0, int(seconds_left))}s")
+        head = f"**Round {state['round']}** · ends in **{max(0, int(seconds_left))}s**"
     else:
-        head.append(f"Round {state['round']}")
+        head = f"**Round {state['round']}**"
 
-    left_name, right_name = teams
-    header = f"{_clip(left_name, NAME_WIDTH + 12):<{NAME_WIDTH + 12}}{right_name:>{FIELD_WIDTH}}"
-    block = "```\n" + header + "\n" + battlefield(state, events) + "\n```"
+    lines = [INVITE, "", head, "", battlefield(state, owners, events)]
 
-    lines = head + [block]
     history = state.get("history") or []
     if history:
-        lines.append("**Last moves**")
-        lines.extend(history)
+        lines += ["", "**Last moves**"] + list(history)
     return "\n".join(lines)
+
+
+def shown_line(added: dict) -> str:
+    """Who has thrown what in, for the line above the embed.
+
+    Reactions are taken off the message as they arrive, so this is the only
+    record of them: without it a fight is a wall of cat noise with no sign of
+    who caused any of it.
+    """
+    if not added:
+        return ""
+    return "\n".join(f"**{who}** added {' '.join(emoji)}" for who, emoji in added.items())

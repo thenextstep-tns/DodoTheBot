@@ -304,17 +304,25 @@ class Scrap:
         being readable at exactly the moment a group fight makes it interesting.
         """
         who = f"{shower}'s " if shower else ""
-        grouped: dict[str, list[str]] = {}
+        # Cats that reacted identically *and* took the same hit are named
+        # together; five of one class otherwise produce five identical lines.
+        grouped: dict[tuple, list[str]] = {}
         for reaction in reactions:
-            grouped.setdefault(reaction["text"], []).append(reaction["cat"])
+            key = (reaction["text"], tuple(sorted((reaction.get("stats") or {}).items())))
+            grouped.setdefault(key, []).append(reaction["cat"])
+
         parts = []
-        for text, names in grouped.items():
+        for (text, stats), names in grouped.items():
             if len(names) > 2:
                 subject = f"{', '.join(names[:-1])} and {names[-1]}"
             else:
                 subject = " and ".join(names)
-            parts.append(f"**{subject}**: {text}")
-        return f"{who}{emoji} → " + " ".join(parts)
+            # The numbers lead. They are the part that changes the fight, and
+            # burying them behind a sentence makes them invisible at a glance.
+            swing = " ".join(f"{'+' if value > 0 else ''}{value} {ATTR_SHORT[attr]}"
+                             for attr, value in stats if value)
+            parts.append(f"**{subject}**: {swing + '. ' if swing else ''}{text}")
+        return f"{who}{emoji} → " + "  ".join(parts)
 
     # -- combat -------------------------------------------------------------- #
     def underdog(self, attacker: Fighter, target: Fighter) -> float:
