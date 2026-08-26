@@ -97,6 +97,8 @@ PARAMETERS: list[dict] = [
      "label": "Dodo interference %", "description": "Chance per round that Dodo throws something in herself. Doubled in a round where nobody else did."},
     {"key": "fight_round_seconds", "cog": "fight", "type": "int", "default": 5,
      "label": "Round length (s)", "description": "Seconds per round to react with objects. The clock ticks in the embed."},
+    {"key": "fight_rounds", "cog": "fight", "type": "int", "default": 6,
+     "label": "Rounds", "description": "How many rounds a scrap lasts before it is decided on remaining health."},
     # --- cheese (co-op cheese-stretch minigame; listener feature) ---
     {"key": "cheese_drop_threshold", "cog": "cheese", "type": "int", "default": 985,
      "label": "Drop threshold", "description": "0–1000 roll; a 🧀 drops when the roll is above this (higher = rarer)."},

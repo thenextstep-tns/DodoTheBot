@@ -22,6 +22,7 @@ almost nothing else.
 
 import asyncio
 import random
+import time
 
 import discord
 from discord.ext import commands
@@ -292,7 +293,8 @@ class Fight(commands.Cog, name="fight"):
     async def _run(self, message, state: dict) -> None:
         guild = state["guild"]
         fight = scrap.Scrap(state["sides"]["A"], state["sides"]["B"],
-                            lookup=self._lookup(guild))
+                            lookup=self._lookup(guild),
+                            tuning={"rounds": int(self._param(guild, "fight_rounds"))})
         owners = self._owner_map(state)
         state["added"] = {}
         seconds = int(self._param(guild, "fight_round_seconds"))
@@ -324,15 +326,33 @@ class Fight(commands.Cog, name="fight"):
         def check(reaction, user):
             return (reaction.message.id == message.id and not user.bot)
 
-        for remaining in range(seconds, 0, -1):
-            snapshot = fight.rounds[-1] if fight.rounds else self._blank(fight)
-            try:
-                await message.edit(embed=self._embed(fight, snapshot, owners, remaining))
-            except discord.HTTPException:
-                pass
+        # Against the clock, not against a loop counter. This used to run a
+        # fixed number of one-second waits, and a wait ends the moment a
+        # reaction arrives, so a busy round burned through all of them in a
+        # couple of seconds and "10 seconds" was 10 seconds only if nobody
+        # played.
+        snapshot = fight.rounds[-1] if fight.rounds else self._blank(fight)
+        deadline = time.monotonic() + max(1, seconds)
+        drawn = None
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            # Redraw only when the number on screen would actually change.
+            tick = int(remaining) + 1
+            if tick != drawn:
+                drawn = tick
+                try:
+                    await message.edit(embed=self._embed(fight, snapshot, owners, tick))
+                except discord.HTTPException:
+                    pass
+
             try:
                 reaction, user = await asyncio.wait_for(
-                    self.bot.wait_for("reaction_add", check=check), timeout=1.0)
+                    self.bot.wait_for("reaction_add", check=check),
+                    timeout=min(1.0, remaining))
             except (asyncio.TimeoutError, TimeoutError):
                 continue
 

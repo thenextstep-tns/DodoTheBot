@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 # --------------------------------------------------------------------------- #
 TUNING: dict[str, float] = {
     "rounds": 6,
-    "round_seconds": 5,
     # Bodies and swings, from the stat TOTAL only. This is what makes every
     # class and every class combination a coin flip before anybody shows
     # anything, which is the whole point of the redesign.

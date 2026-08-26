@@ -214,4 +214,11 @@ assert scrap_embed.shown_line({"Fox": ["🥒"]}).startswith("**Fox** added")
 assert scrap_embed.shown_line({}) == ""
 print("the added line names the thrower and their objects")
 
+# --- the round count is a setting, not a constant ----------------------------
+tough = lambda n: dict(name=n, strength=90, agility=1, intellect=1, charm=1, ident=n.lower())
+short = scrap.simulate([tough("A")], [tough("B")], tuning={"rounds": 3}, seed=5)
+assert len(short["rounds"]) == 3, len(short["rounds"])
+assert "round_seconds" not in scrap.TUNING,     "the engine must not carry a second round length that nothing reads"
+print("the round count comes from tuning, and there is only one round length")
+
 print("PASS")
