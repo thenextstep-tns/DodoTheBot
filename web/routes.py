@@ -20,6 +20,7 @@ import functools
 import html
 import io
 import os
+import re
 import secrets
 import time
 from functools import wraps
@@ -30,7 +31,7 @@ import discord
 
 from config import guild_config
 from config.secrets import WEB_PUBLIC_URL
-from helpers import audit_log, cog_categories, events, health, names, panel_access, parameters, share_tokens, stats, validate
+from helpers import audit_log, cog_categories, event_log, events, health, names, panel_access, parameters, share_tokens, stats, validate
 from helpers.chat import activity as chat_activity
 from helpers.chat import triggers as chat_triggers
 from helpers.dnd import registry as dnd_registry
@@ -289,6 +290,9 @@ def _guild_nav(guild, scope: str, current: str) -> str:
              # which campaigns they actually see is decided per campaign.
              ("tabletop", "🎲 Tabletop", panel_access.SCOPE_STATS),
              ("stats", "📊 Stats", panel_access.SCOPE_STATS),
+             # Two logs, deliberately apart: the server log is what Discord did,
+             # the change log is what this panel did.
+             ("serverlog", "📜 Server log", panel_access.SCOPE_CONFIG),
              ("log", "📝 Change log", panel_access.SCOPE_CONFIG),
              # Tribes is bot-owner tooling: the rule engine can hand out any role.
              ("tribes", "🏅 Tribes", panel_access.SCOPE_OWNER)]
@@ -344,6 +348,8 @@ def _nav_chips(guild_id: int, scope: str, current: str) -> str:
     # got a chip that 403s.
     if panel_access.at_least(scope, panel_access.SCOPE_OWNER) and current != "tribes":
         links.append((f"/guild/{guild_id}/tribes", "🏅 Tribes"))
+    if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "serverlog":
+        links.append((f"/guild/{guild_id}/serverlog", "📜 Server log"))
     if panel_access.at_least(scope, panel_access.SCOPE_CONFIG) and current != "log":
         links.append((f"/guild/{guild_id}/log", "📝 Change log"))
     return "".join(f'<a class="chip" href="{href}">{label}</a>' for href, label in links)
@@ -2300,6 +2306,171 @@ def _log_html(bot, guild, data: dict, scope: str, *, kind: str = "", actor: str 
 
 
 # --------------------------------------------------------------------------- #
+#  Server log page
+# --------------------------------------------------------------------------- #
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*", re.S)
+_MD_CODE = re.compile(r"`([^`]+)`")
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_MD_USER = re.compile(r"&lt;@!?(\d{15,25})&gt;")
+_MD_ROLE = re.compile(r"&lt;@&amp;(\d{15,25})&gt;")
+_MD_CHANNEL = re.compile(r"&lt;#(\d{15,25})&gt;")
+# Discord's own timestamp token. The row already carries a When column, so a
+# repeat of it inside every description is noise rather than information.
+_MD_TIME = re.compile(r"&lt;t:\d+(?::[a-zA-Z])?&gt;")
+
+
+def _discord_markup(guild, text: str) -> str:
+    """Render one stored log description as HTML.
+
+    Escaped first and matched afterwards, so the pattern for a mention runs
+    against ``&lt;@123&gt;`` and there is no path by which a message somebody
+    typed in Discord becomes markup on this page. Every deleted message ever
+    sent passes through here, so that ordering is the whole safety story.
+    """
+    out = html.escape(str(text or ""))
+    out = _MD_TIME.sub("", out)
+
+    def user(match):
+        member = guild.get_member(int(match.group(1)))
+        return (f'<span class="mention">@{html.escape(member.display_name)}</span>'
+                if member is not None else
+                f'<span class="mention gone">@{match.group(1)}</span>')
+
+    def role(match):
+        found = guild.get_role(int(match.group(1)))
+        return (f'<span class="mention role">@{html.escape(found.name)}</span>'
+                if found is not None else '<span class="mention gone">@deleted role</span>')
+
+    def channel(match):
+        found = guild.get_channel_or_thread(int(match.group(1)))
+        return (f'<span class="mention chan">#{html.escape(found.name)}</span>'
+                if found is not None else '<span class="mention gone">#deleted</span>')
+
+    # Roles before users: a role mention is <@&id>, which the user pattern would
+    # otherwise eat because it does not require the ampersand.
+    out = _MD_ROLE.sub(role, out)
+    out = _MD_USER.sub(user, out)
+    out = _MD_CHANNEL.sub(channel, out)
+    out = _MD_LINK.sub(lambda m: f'<a href="{m.group(2)}" rel="noopener noreferrer" '
+                                 f'target="_blank">{m.group(1)}</a>', out)
+    out = _MD_BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", out)
+    out = _MD_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
+    return out.replace("\n", "<br>").strip()
+
+
+def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str:
+    """The event log: what Discord did here, and the filters to find it again."""
+    # Nothing is recorded while the feature is off, and nothing is recorded
+    # without a log channel either: every listener resolves the channel first
+    # and gives up when there isn't one. An empty page is a question, so it
+    # gets the answer rather than leaving somebody to find this in the source.
+    warning = ""
+    if bot is not None:
+        live = bot.visibility.feature_active(guild.id, "audit_log", "log")
+        cog = bot.get_cog("log")
+        wired = bool((cog.guild_log_channels(guild) or {}).get("channel_id")) if cog else True
+        if not live:
+            warning = ('<p class="warnline">⚠️ Audit logging is switched off for this '
+                       'server, so nothing new is being recorded. Turn it back on under '
+                       '<b>Cogs &amp; commands</b> to start filling this in again.</p>')
+        elif not wired:
+            warning = ('<p class="warnline">⚠️ No log channel is set for this server. '
+                       "Every listener resolves the channel first and stops when "
+                       "there is none, so nothing is being recorded. Set one with "
+                       "<code>/setlogchannel</code>.</p>")
+    rows = ""
+    for entry in data["rows"]:
+        stamp = str(entry.get("timestamp") or "")[:16].replace("T", " ") or "—"
+        kind = entry.get("event_type") or ""
+        label = event_log.EVENT_LABELS.get(kind, kind.replace("_", " ").title())
+        group = event_log.GROUP_OF.get(kind, "Server")
+        body = _discord_markup(guild, entry.get("description"))
+        for name, value in (entry.get("fields") or {}).items():
+            body += (f'<div class="logfield"><span class="logfieldname">'
+                     f"{html.escape(str(name))}</span> "
+                     f"{_discord_markup(guild, value)}</div>")
+        rows += (
+            f'<tr><td class="muted small nowrap">{html.escape(stamp)}</td>'
+            f'<td><span class="chip static" title="{html.escape(kind)}">'
+            f"{html.escape(label)}</span>"
+            f'<div class="muted small">{html.escape(group)}</div></td>'
+            f'<td class="logbody">{body}</td></tr>'
+        )
+    rows = rows or '<tr><td colspan="3" class="muted">Nothing matches.</td></tr>'
+
+    # Only the types this guild has actually produced. A server that has never
+    # scheduled an event should not scroll past three kinds of them.
+    type_options = '<option value="">Any event</option>'
+    for group, names in event_log.EVENT_GROUPS:
+        present = [n for n in names if n in options["types"]]
+        if not present:
+            continue
+        # The group is selectable too, so "every message event" is one choice
+        # rather than three separate searches.
+        type_options += (f'<option value="g:{html.escape(group)}"'
+                         f'{" selected" if chosen["group"] == group else ""}>'
+                         f"{html.escape(group)} (all)</option>")
+        for name in present:
+            type_options += (
+                f'<option value="{name}"{" selected" if chosen["type"] == name else ""}>'
+                f'&nbsp;&nbsp;{html.escape(event_log.EVENT_LABELS.get(name, name))}'
+                f' ({options["types"][name]})</option>')
+
+    user_options = '<option value="">Anyone</option>'
+    for uid in options["people"]:
+        member = guild.get_member(uid)
+        name = member.display_name if member is not None else f"{uid} (left)"
+        user_options += (f'<option value="{uid}"'
+                         f'{" selected" if chosen["user"] == uid else ""}>'
+                         f"{html.escape(name)}</option>")
+
+    channel_options = '<option value="">Anywhere</option>'
+    for cid in options["channels"]:
+        found = guild.get_channel_or_thread(cid)
+        name = f"#{found.name}" if found is not None else f"{cid} (deleted)"
+        channel_options += (f'<option value="{cid}"'
+                            f'{" selected" if chosen["channel"] == cid else ""}>'
+                            f"{html.escape(name)}</option>")
+
+    # Every filter travels with the page links, or paging past page one quietly
+    # drops the search that produced the list.
+    carried = "&amp;".join(
+        f"{key}={html.escape(str(value))}" for key, value in (
+            ("type", chosen["type"]),
+            ("type", f'g:{chosen["group"]}' if chosen["group"] else ""),
+            ("user", chosen["user"] or ""), ("channel", chosen["channel"] or ""),
+            ("from", chosen["from"]), ("to", chosen["to"])) if value)
+    base = f"/guild/{guild.id}/serverlog?{carried}"
+
+    return f"""
+<div class="logpage" data-guild="{guild.id}">
+  <div class="statshead">
+    <div><h1>Server log <span class="muted">&middot; {data["total"]:,} event(s)</span></h1></div>
+  </div>
+  <p class="muted">Everything the bot watches on this server, newest first: role changes,
+  message edits and deletions, threads, joins, bans, invites and voice. The same events
+  that go to the log channel, kept here so they can be searched.</p>
+  {warning}
+  <form class="logfilters" method="get" action="/guild/{guild.id}/serverlog">
+    <select name="type">{type_options}</select>
+    <select name="user">{user_options}</select>
+    <select name="channel">{channel_options}</select>
+    <label class="datefield">from <input type="date" name="from"
+      value="{html.escape(chosen["from"])}"></label>
+    <label class="datefield">to <input type="date" name="to"
+      value="{html.escape(chosen["to"])}"></label>
+    <button type="submit">Filter</button>
+    <a class="chip" href="/guild/{guild.id}/serverlog">Clear</a>
+  </form>
+  <table class="stats logtable"><thead><tr><th>When (UTC)</th><th>Event</th>
+    <th>What happened</th></tr></thead><tbody>{rows}</tbody></table>
+  {_pager(base, "p", data["page"], data["pages"])}
+</div>
+<p id="status" class="status"></p>
+"""
+
+
+# --------------------------------------------------------------------------- #
 #  Stats page
 # --------------------------------------------------------------------------- #
 def _pager(base: str, param: str, page: int, pages: int) -> str:
@@ -3409,6 +3580,56 @@ async def guild_log_page(request: web.Request):
                  scope=scope, guild=guild, current="log")
 
 
+@require_scope(panel_access.SCOPE_CONFIG)
+async def guild_server_log_page(request: web.Request):
+    """The Discord event log for one guild, filtered.
+
+    Every read here is blocking pymongo against a collection that only grows, so
+    the page, the counts and all three dropdowns are gathered in one worker-thread
+    call rather than four round trips on the bot's own event loop.
+    """
+    bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
+
+    def _int(name: str) -> int:
+        value = request.query.get(name, "")
+        return int(value) if value.isdigit() else 0
+
+    try:
+        page = max(1, int(request.query.get("p", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    # One dropdown offers both a single type and a whole group, so one parameter
+    # carries both: "g:Messages" is the group, anything else is the type.
+    picked = request.query.get("type", "")
+    group = picked[2:] if picked.startswith("g:") else ""
+    if group not in dict(event_log.EVENT_GROUPS):
+        group = ""
+    kind = "" if picked.startswith("g:") else (
+        picked if picked in event_log.EVENT_LABELS else "")
+    chosen = {
+        "type": kind, "group": group,
+        "user": _int("user"), "channel": _int("channel"),
+        "from": event_log.valid_day(request.query.get("from", "")),
+        "to": event_log.valid_day(request.query.get("to", "")),
+    }
+
+    def read():
+        data = bot.event_log.page(
+            guild.id, page=page, event_type=chosen["type"], group=chosen["group"],
+            user_id=chosen["user"], channel_id=chosen["channel"],
+            since=chosen["from"], until=chosen["to"])
+        return data, {
+            "types": {row["value"]: row["count"] for row in bot.event_log.types(guild.id)},
+            "people": bot.event_log.people(guild.id),
+            "channels": bot.event_log.channels(guild.id),
+        }
+
+    data, options = await bot.loop.run_in_executor(None, read)
+    return _page(f"{guild.name} · server log",
+                 _server_log_html(bot, guild, data, options, chosen),
+                 scope=scope, guild=guild, current="serverlog")
+
+
 @require_scope(panel_access.SCOPE_STATS)
 async def guild_stats_page(request: web.Request):
     """Activity stats for one guild. The aggregations are blocking pymongo calls,
@@ -4230,6 +4451,7 @@ def create_app(bot) -> web.Application:
             web.get("/guild/{gid}/settings", guild_settings_page),
             web.get("/guild/{gid}/events", guild_events_page),
             web.get("/guild/{gid}/log", guild_log_page),
+            web.get("/guild/{gid}/serverlog", guild_server_log_page),
             web.get("/guild/{gid}/tribes", guild_tribes_page),
             web.get("/guild/{gid}/trials", guild_trials_page),
             web.get("/guild/{gid}/reactions", guild_reactions_page),

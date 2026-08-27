@@ -487,6 +487,33 @@ main:has(.logpage) { max-width: 1180px; }
 .logfilters select { padding: 7px 9px; font: inherit; font-size: 13px; }
 .logfilters button { margin: 0; }
 .logpage table.stats td { vertical-align: top; }
+
+/* --- server log: what Discord did ------------------------------------- */
+.logfilters .datefield { display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--color-muted); }
+.logfilters input[type="date"] { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.logfilters a.chip { align-self: center; }
+.nowrap { white-space: nowrap; }
+/* The description column takes the slack; the other two are as wide as their
+   content and no wider, or a long edit pushes the timestamp off the screen. */
+.logtable { table-layout: auto; }
+.logtable th:first-child, .logtable td:first-child { width: 1%; }
+.logtable th:nth-child(2), .logtable td:nth-child(2) { width: 1%; }
+.logbody { line-height: 1.5; word-break: break-word; }
+.logfield { margin-top: 4px; padding-left: 10px;
+  border-left: 2px solid var(--color-hairline); }
+.logfieldname { font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--color-muted); margin-right: 6px; }
+/* Mentions read as mentions rather than as raw snowflakes, and a deleted one
+   says so instead of showing an id nobody can look up. */
+.mention { padding: 0 4px; border-radius: var(--radius-sm);
+  background: var(--color-surface-soft); color: var(--color-primary); }
+.mention.role { color: var(--color-warning); }
+.mention.chan { color: var(--color-body); }
+.mention.gone { color: var(--color-muted-soft); background: transparent;
+  text-decoration: line-through; }
 select.coglevel { margin-left: auto; margin-right: 10px; padding: 4px 8px; font-size: 12px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }

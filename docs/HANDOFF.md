@@ -206,6 +206,7 @@ Two panel rules worth knowing before writing any HTML:
 | `helpers/state_machine.py` | `PersistentFlow` - multi-step flows that survive a restart |
 | `helpers/lang_manager.py` | Layered string resolution with a fallback chain |
 | `helpers/audit_log.py` | `_record_change` - the panel's audit trail. Call it from any endpoint that changes configuration |
+| `helpers/event_log.py` | Reads the `Logs` collection the log cog writes, for the panel's **Server log** page. Read-only: the cog still owns the writing |
 | `helpers/share_tokens.py` | Capability links: a URL that is itself the credential |
 | `helpers/events.py` | "When X happens, post Y in Z" |
 | `helpers/sheets.py` | Google Sheets ingestion for raid setups |
@@ -277,3 +278,39 @@ The same discipline the tabletop handoff learned the hard way:
   editing.
 - **Update it before the session ends**, as part of finishing rather than as an
   afterthought.
+
+---
+
+## The two logs
+
+They answer different questions and live on different pages, which is why there
+are two.
+
+| Page | What it shows | Written by | Read by |
+| --- | --- | --- | --- |
+| **📜 Server log** (`/guild/<id>/serverlog`) | What Discord did: role changes, message edits and deletions, threads, joins, bans, invites, voice | `cogs/log.py` into `Logs` | `helpers/event_log.py` |
+| **📝 Change log** (`/guild/<id>/log`) | What this panel did: every setting anybody changed, with its old value | `_record_change` into `ConfigAudit` | `helpers/audit_log.py` |
+
+Things worth knowing before touching the server log:
+
+- **The events were always being stored.** `send_log` has written every event to
+  `Logs` since long before anything could read them. The page is a reader, not a
+  new pipeline, and it shows history going back as far as the collection does.
+- **Ids are extracted from the rendered text**, in `send_log`, via
+  `event_log.subjects`. There are thirty-odd listeners and one `send_log`, so
+  this is the only version of it that cannot be half-done. It works because
+  every `LOG_*` template in `lang.py` opens with the subject's mention.
+- **Rows written before that extraction have no `user_ids`.** Every id filter is
+  an `$or`: the indexed field, or a description regex for rows that never had
+  the field. Drop the `$exists: False` guard and new rows match twice while old
+  ones stop matching at all.
+- **Date filters compare the `timestamp` string**, which is ISO-8601 UTC on
+  every row ever written, so a lexicographic compare is a chronological one.
+  Ordering is by `_id`, whose leading bytes are the insertion time.
+- **Escape before substituting, never after.** Every deleted message on the
+  server passes through `_discord_markup`. It escapes first and then matches
+  `&lt;@123&gt;`, so there is no path from something typed in Discord to markup
+  on an admin's page. There is a test that tries.
+- **Nothing is recorded with the feature off or no log channel set.** Both
+  produce an empty page, so the page says which one is true rather than leaving
+  somebody to find it in the source.

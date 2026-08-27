@@ -38,6 +38,7 @@ from helpers.chat.activity import ChatActivity
 from helpers.panel_access import PanelAccessManager
 from helpers.audit_notify import OwnerNotifier
 from helpers.audit_log import AuditLog
+from helpers.event_log import EventLogStore
 from helpers.tribes import TribeManager
 from helpers.trial_ranks import TrialRankManager
 from helpers.health import HealthMonitor, SAMPLE_MINUTES
@@ -128,6 +129,9 @@ class DodoBot(commands.Bot):
         # changes now bind everyone, owners included (see helpers/visibility.py).
         # Durable record of every panel change (owner's included).
         self.audit_log = AuditLog(config_py.config_audit)
+        # The other log: what Discord did, which the log cog has been writing
+        # to Logs all along with nothing able to read it back.
+        self.event_log = EventLogStore(config_py.logs)
         # Role rules ("tribes") built on the panel; applied hourly by cogs/tribes.py.
         self.tribes = TribeManager(config_py.tribes, config_py.tribe_members)
         # Trial ranking: clears/achievements -> points -> rank role.

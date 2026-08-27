@@ -15,6 +15,7 @@ from discord.ext.commands import Context
 
 import config_py
 import lang
+from helpers import event_log
 
 # Colors for consistent visual logging
 COLOR_JOIN = 0x43b581     # Green
@@ -175,12 +176,20 @@ class Log(commands.Cog, name="log"):
         await self.log_queue.put({"channel": channel, "embed": embed})
 
         # Prepare and execute the DB insertion without blocking the event loop
+        fields = {field.name: field.value for field in embed.fields}
+        # Who and where, pulled out of the rendered text rather than passed in by
+        # each listener: there are thirty-odd listeners and one of this, so this
+        # is the version that cannot be half-done. It is what lets the panel's
+        # server log filter by person and by channel.
+        named = event_log.subjects(embed.description, fields)
         db_data = {
             "guild_id": guild.id,
             "event_type": event_type,
             "description": embed.description,
-            "fields": {field.name: field.value for field in embed.fields},
-            "timestamp": discord.utils.utcnow().isoformat()
+            "fields": fields,
+            "timestamp": discord.utils.utcnow().isoformat(),
+            "user_ids": named["user_ids"],
+            "channel_ids": named["channel_ids"],
         }
         self.bot.loop.run_in_executor(None, self._insert_db, db_data)
 
