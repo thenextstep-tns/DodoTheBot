@@ -994,6 +994,19 @@ class TrialRankManager:
         self._enrollment.delete_one({"guild_id": int(guild_id), "user_id": int(user_id)})
         self._enrolled_cache.pop(int(guild_id), None)
 
+    def states(self, guild_id: int) -> dict[int, str]:
+        """Every recorded answer in this guild, user id to stage.
+
+        Distinct from :meth:`roster`, which is capped and sorted for a table. A
+        sweep over the whole server has to see every decision that exists, and
+        needs one field of each.
+        """
+        if self._enrollment is None:
+            return {}
+        return {int(doc["user_id"]): doc.get("state") or ""
+                for doc in self._enrollment.find({"guild_id": int(guild_id)},
+                                                 {"user_id": 1, "state": 1})}
+
     def roster(self, guild_id: int, limit: int = 500) -> list[dict]:
         """Everyone the conversion has touched, whatever stage they reached."""
         if self._enrollment is None:

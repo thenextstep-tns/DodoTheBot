@@ -115,6 +115,27 @@ for label, req in (("bad token", Req(42, token + "x")),
     print(f"   {label:12} -> {resp.status} {resp.text!r}")
     assert resp.status == 404 and resp.text == "Not found."
 
+# Opening a row has to answer the same question /rank answers, off the same
+# numbers. With a rung still ahead, that means the ladder position, the gap and
+# what would close it.
+R["Myth"] = Role(102, "Myth", 0)
+R["vOC HM"] = Role(103, "vOC HM")
+guild.roles = list(R.values())
+CFG["points"][str(rid("vOC HM"))] = 30
+CFG["ranks"].append({"role_id": rid("Myth"), "min_points": 100, "name": "Myth"})
+second = tokens.issue(42, kind=KIND_PUBLIC)
+payload = json.loads(re.search(
+    r'id="board-data">(.*?)</script>',
+    asyncio.run(routes.public_leaderboard(Req(42, second))).text, re.S).group(1))
+mobi = payload["players"][0]
+assert (mobi["position"], mobi["rungs"]) == (1, 2), mobi   # the star row
+assert mobi["nextrank"] == "Myth" and mobi["ceiling"] == 100, mobi
+assert mobi["needed"] == 60, mobi                          # 100 - 40
+assert [(x["name"], x["gain"]) for x in mobi["steps"]] == [("vOC HM", 30)], mobi
+assert 0 < mobi["fraction"] < 1, mobi
+print("the opened row carries what /rank would say:", mobi["position"], "/",
+      mobi["rungs"], "-", mobi["needed"], "more for", mobi["nextrank"])
+
 # Revoking kills the live link.
 tokens.revoke_all(42, kind=KIND_PUBLIC)
 assert asyncio.run(routes.public_leaderboard(Req(42, token))).status == 404

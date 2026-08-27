@@ -601,6 +601,13 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 .pilotadd input { flex: 1 1 240px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 13px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+/* The everyone-at-once row. Set apart from the one-person box above it and
+   marked in the warning colour: it is the only control on this page that
+   overrides an answer somebody already gave. */
+.pilotall { padding-top: 10px; border-top: 1px dashed var(--color-hairline); }
+.pilotall button { border-color: var(--color-warning); }
+.pilotall .small { flex: 1 1 320px; }
+
 /* A slot's score sits with its role: mapping a clear and pricing it are one job. */
 .slotcell { display: flex; flex-direction: column; gap: 4px; }
 .slotpoints { width: 100%; padding: 5px 8px; font: inherit; font-size: 13px;
@@ -1021,6 +1028,26 @@ body.board { background: var(--color-surface-soft); }
   background: var(--color-canvas); border: 1px solid var(--color-hairline); }
 .bchip.superseded { color: var(--color-muted-soft); text-decoration: line-through; }
 .bchip.record { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* The opened row: the same card /rank sends, laid out for a page rather than
+   for a Discord embed. Same numbers, same order, so the two never read as two
+   different systems. */
+.bcard { display: flex; flex-direction: column; gap: 8px; }
+.bcardhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.bcardrank { font-size: 15px; font-weight: var(--weight-semibold); color: var(--color-ink); }
+.bstars { font-size: 12px; letter-spacing: 1px; }
+.bcardabout { margin: 0; font-size: 13px; color: var(--color-body); }
+.bprog { height: 6px; border-radius: var(--radius-full); overflow: hidden;
+  background: var(--color-canvas); border: 1px solid var(--color-hairline); }
+.bprog > span { display: block; height: 100%; background: var(--color-primary); }
+.bprognums { font-size: 12px; color: var(--color-body);
+  font-variant-numeric: tabular-nums; }
+.bcardsub { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--color-muted); margin-top: 4px; }
+.bsteps { margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-body); }
+.bsteps li { margin: 2px 0; }
+.bsteps b { color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.bnothing { margin: 0; font-size: 13px; color: var(--color-muted); }
 
 .bpick { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .bpick select { flex: 1 1 0; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;

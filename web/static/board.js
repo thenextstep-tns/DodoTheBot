@@ -35,32 +35,97 @@
   fill(rankSel, [...new Set(players.map((p) => p.rank).filter((r) => r && r !== "—"))].sort());
   fill(achSel, roles.map((r) => r.name));
 
+  // The ladder as stars, exactly as the /rank card draws it: past twelve rungs
+  // a star row stops being readable and becomes a count instead.
+  const MAX_STARS = 12;
+  const stars = (position, total) => {
+    if (total <= 0) return "";
+    if (total > MAX_STARS) return "⭐ " + position + "/" + total;
+    return "⭐".repeat(position) + "⚪".repeat(Math.max(0, total - position));
+  };
+
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  // Opening a row shows what /rank shows: which rung, how far along it, what
+  // would move them up, and the clears the total came from. Same numbers from
+  // the same function, so the board and the card can never tell two stories.
   const breakdownRow = (player, span) => {
     const tr = document.createElement("tr");
     tr.className = "bdetail";
     const td = document.createElement("td");
     td.colSpan = span;
-    if (!player.held.length && !player.bonus) {
-      td.className = "none";
-      td.textContent = "No scoring clears yet.";
+    const card = el("div", "bcard");
+
+    const head = el("div", "bcardhead");
+    const rank = el("span", "bcardrank", player.rank && player.rank !== "—"
+                    ? player.rank : "No rank yet");
+    if (player.colour) rank.style.color = player.colour;
+    head.append(rank);
+    const row = stars(player.position || 0, player.rungs || 0);
+    if (row) head.append(el("span", "bstars", row));
+    card.append(head);
+
+    if (player.about) card.append(el("p", "bcardabout", player.about));
+
+    // Points, not a percentage: "1%" right after a rank-up tells nobody
+    // anything, while "252 → 375" is the question actually being asked.
+    const bar = el("div", "bprog");
+    const fill = el("span", "");
+    fill.style.width = Math.round((player.fraction || 0) * 100) + "%";
+    bar.append(fill);
+    card.append(bar);
+    const numbers = el("div", "bprognums");
+    if (player.nextrank) {
+      numbers.append(el("b", "", player.score + " → " + player.ceiling));
+      numbers.append(document.createTextNode(
+        "  ·  " + player.needed + " more to reach " + player.nextrank));
     } else {
-      const wrap = document.createElement("div");
-      wrap.className = "bchips";
+      numbers.append(document.createTextNode(
+        player.score + " points · top of the ladder 🏆"));
+    }
+    card.append(numbers);
+
+    if (player.nextrank) {
+      card.append(el("div", "bcardsub", "Next steps"));
+      if ((player.steps || []).length) {
+        const list = el("ul", "bsteps");
+        player.steps.forEach((step) => {
+          const item = el("li", "");
+          item.append(el("b", "", "+" + step.gain));
+          item.append(document.createTextNode(" " + step.name));
+          list.append(item);
+        });
+        card.append(list);
+      } else {
+        card.append(el("p", "bnothing",
+                       "Nothing on the board is priced for them yet."));
+      }
+    }
+
+    card.append(el("div", "bcardsub", "Clears counted"));
+    if (!player.held.length && !player.bonus) {
+      card.append(el("p", "bnothing", "No scoring clears yet."));
+    } else {
+      const wrap = el("div", "bchips");
       player.held.forEach((name) => {
-        const chip = document.createElement("span");
         const counted = player.has.indexOf(name) >= 0;
-        chip.className = "bchip" + (counted ? "" : " superseded");
-        chip.textContent = counted ? name : name + " (superseded)";
+        const chip = el("span", "bchip" + (counted ? "" : " superseded"),
+                        counted ? name : name + " (superseded)");
         wrap.appendChild(chip);
       });
       if (player.bonus) {
-        const chip = document.createElement("span");
-        chip.className = "bchip record";
-        chip.textContent = "World records · " + player.bonus;
-        wrap.appendChild(chip);
+        wrap.appendChild(el("span", "bchip record",
+                            "World records · " + player.bonus));
       }
-      td.appendChild(wrap);
+      card.append(wrap);
     }
+
+    td.appendChild(card);
     tr.appendChild(td);
     return tr;
   };

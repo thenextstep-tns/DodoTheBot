@@ -173,5 +173,8 @@ assert 'class="mpick"' in html and 'id="wruser"' in html
 # Enrolled members get a per-person recalculate button; nobody else does.
 assert html.count('pilotrecalc') == 1, 'only the enrolled member has one'
 assert html.count('pilotdel') == 2, 'but everyone can be taken off'
+# The whole-server button. Asserted because the page rendering fine without it
+# is exactly how it went missing: nothing here looked at it.
+assert 'id="pilotenrolall"' in html, 'the mass-enrol button is on the Users panel'
 print("world records tab OK, member picker carries", len(_members), "people")
 print("PASS")

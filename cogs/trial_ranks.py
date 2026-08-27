@@ -413,6 +413,22 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 member.remove_roles, to_remove, "Trial rank changed", "remove"))
         return out
 
+    async def switch_on(self, member, config: dict, *, source: str) -> dict:
+        """Record the consent and bring one person up to date. Says nothing.
+
+        The half of :meth:`enrol` that touches data rather than the log channel,
+        so a sweep over the whole server can reuse it without posting one embed
+        per member into a channel nobody would then read.
+        """
+        self.bot.trial_ranks.set_state(
+            member.guild.id, member.id, trial_ranks.STATE_ENROLLED,
+            name=member.display_name, source=source)
+        outcome = await self.apply(member, config)
+        await self.bot.loop.run_in_executor(
+            None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
+            member.display_name, outcome["score"], outcome["rank_name"])
+        return outcome
+
     async def enrol(self, member, *, source: str, actor=None) -> dict:
         """Switch one person onto the automated system, and bring them up to date.
 
@@ -422,13 +438,7 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         because the listener only acts on enrolled members.
         """
         config = self.bot.trial_ranks.get(member.guild.id)
-        self.bot.trial_ranks.set_state(
-            member.guild.id, member.id, trial_ranks.STATE_ENROLLED,
-            name=member.display_name, source=source)
-        outcome = await self.apply(member, config)
-        await self.bot.loop.run_in_executor(
-            None, self.bot.trial_ranks.save_standing, member.guild.id, member.id,
-            member.display_name, outcome["score"], outcome["rank_name"])
+        outcome = await self.switch_on(member, config, source=source)
 
         if actor is not None:
             by = f" (enrolled by {actor.mention})"
@@ -451,6 +461,99 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             lines.extend(f"• {problem}" for problem in outcome["errors"])
         await self.log_event(member.guild, "\n".join(lines), title="Trial ranks: enrolled")
         return outcome
+
+    def enrol_plan(self, guild) -> dict:
+        """Who "turn it on for everyone" would touch, without touching anybody.
+
+        Split out from the sweep so the panel can put the numbers in front of
+        whoever is about to press it. Overwriting a recorded "no" is exactly the
+        kind of thing that wants counting beforehand rather than discovering
+        afterwards, so the two groups are kept apart: people who have never
+        answered, and people who answered no.
+        """
+        states = self.bot.trial_ranks.states(guild.id)
+        plan = {"already": [], "declined": [], "fresh": [], "unreachable": []}
+        me = guild.me
+        for member in guild.members:
+            if member.bot:
+                continue
+            state = states.get(member.id)
+            if state == trial_ranks.STATE_ENROLLED:
+                plan["already"].append(member)
+            elif state == trial_ranks.STATE_DISMISSED:
+                plan["declined"].append(member)
+            else:
+                plan["fresh"].append(member)
+            # Enrolling somebody the bot can't touch produces the failure that
+            # looks like success: a card promising a rank they were never given.
+            # Counted here so the confirmation can say so before it happens.
+            if me is not None and (member.id == getattr(guild, "owner_id", None)
+                                   or member.top_role >= me.top_role):
+                plan["unreachable"].append(member)
+        return plan
+
+    async def enrol_everyone(self, guild, *, actor=None,
+                             include_declined: bool = True) -> dict:
+        """Switch the whole server onto automatic ranking in one pass.
+
+        The same path a single enrolment takes, once per person: consent
+        recorded, superseded clears tidied, score worked out, rank granted.
+
+        Two things it does differently, both because four hundred is not one.
+        The log channel gets a single summary rather than one embed each, and
+        the pass stops at ``MAX_EDITS`` role edits. Stopping leaves the people
+        it never reached un-enrolled rather than enrolled-but-unranked, so
+        pressing the button again continues from where it gave up instead of
+        leaving a card promising a rank nobody was given.
+        """
+        config = self.bot.trial_ranks.get(guild.id)
+        plan = self.enrol_plan(guild)
+        targets = list(plan["fresh"]) + (list(plan["declined"]) if include_declined else [])
+        summary = {"enrolled": 0, "already": len(plan["already"]),
+                   "declined": len(plan["declined"]),
+                   "overruled": len(plan["declined"]) if include_declined else 0,
+                   "ranked": 0, "granted": 0, "removed": 0, "cleared": 0,
+                   "remaining": 0, "targets": len(targets), "errors": []}
+        edits = 0
+        for member in targets:
+            if edits >= MAX_EDITS:
+                summary["remaining"] = len(targets) - summary["enrolled"]
+                break
+            outcome = await self.switch_on(member, config, source="panel: everyone")
+            summary["enrolled"] += 1
+            summary["granted"] += outcome["granted"]
+            summary["removed"] += outcome["removed"]
+            summary["cleared"] += outcome.get("cleared", 0)
+            if outcome["score"]:
+                summary["ranked"] += 1
+            # Distinct problems only. One misplaced role produces the identical
+            # complaint for every member it blocks, and four hundred copies of
+            # it help nobody.
+            for problem in outcome["errors"]:
+                if problem not in summary["errors"]:
+                    summary["errors"].append(problem)
+            if outcome["granted"] or outcome["removed"] or outcome.get("cleared"):
+                edits += 1
+                await asyncio.sleep(EDIT_PAUSE)
+
+        by = f" by {actor.mention}" if actor is not None else ""
+        lines = [f"**{summary['enrolled']}** member(s) were switched onto automatic "
+                 f"ranking at once{by}.",
+                 f"{summary['ranked']} scored above zero · {summary['granted']} rank role(s) "
+                 f"granted · {summary['removed']} replaced · "
+                 f"{summary['cleared']} superseded clear role(s) removed."]
+        if summary["overruled"]:
+            lines.append(f"⚠️ {summary['overruled']} of them had previously declined, and "
+                         f"were enrolled anyway.")
+        if summary["remaining"]:
+            lines.append(f"Stopped after {MAX_EDITS} role edits with "
+                         f"{summary['remaining']} still to go. Run it again to continue.")
+        if summary["errors"]:
+            lines.append("⚠️ **Some roles were not changed:**")
+            lines.extend(f"• {problem}" for problem in summary["errors"][:10])
+        await self.log_event(guild, chr(10).join(lines),
+                             title="Trial ranks: enrolled everyone")
+        return summary
 
     async def run_for_guild(self, guild, *, edit: bool = True) -> dict:
         config = self.bot.trial_ranks.get(guild.id)

@@ -1864,6 +1864,12 @@ def _pilot_html(bot, guild, config: dict) -> str:
       <button id="pilotenrol">Turn trial ranks on for this user</button>
       <span class="muted small">Exact tag only, not a nickname. This edits their roles.</span>
     </div>
+    <div class="pilotadd pilotall">
+      <button id="pilotenrolall">Turn trial ranks on for everyone</button>
+      <span class="muted small">Every member of this server at once, including anyone who
+      said no before. It edits their roles, so it asks first and tells you exactly who it
+      would touch.</span>
+    </div>
     <table class="stats"><thead><tr><th>Who</th><th>Stage</th><th>How</th><th>When</th><th></th></tr></thead>
       <tbody id="pilotrows">{rows}</tbody></table>
 
@@ -2665,15 +2671,20 @@ async def public_leaderboard(request: web.Request):
             continue
         held = {role.id for role in member.roles}
         record = holders.get(member.id)
-        score = trial_ranks.score_for(held, points, trials=trials) + trial_ranks.wr_points(record)
-        rank = trial_ranks.rank_for(score, ranks)
+        bonus = trial_ranks.wr_points(record)
+        # The same call /rank makes, so the row and the card can't disagree:
+        # score, where it sits on the ladder, and what would move it next.
+        view = trial_ranks.missing_for_next(guild, held, points, ranks,
+                                            trials=trials, bonus=bonus)
+        score, rank = view["score"], view["current"]
         role = guild.get_role(int((rank or {}).get("role_id") or 0)) if rank else None
         breakdown = trial_ranks.breakdown_for(guild, held, points, trials)
+        upcoming = view["next"]
         rows.append({
             "name": member.display_name,
             "tag": member.name,
             "score": score,
-            "bonus": trial_ranks.wr_points(record),
+            "bonus": bonus,
             "medals": trial_ranks.wr_medals(record),
             "wr": bool(record and (int(record.get("current") or 0)
                                    or int(record.get("former") or 0))),
@@ -2682,6 +2693,17 @@ async def public_leaderboard(request: web.Request):
             # What they hold, and what it was worth after superseding.
             "has": [b["name"] for b in breakdown if b.get("counted")],
             "held": [b["name"] for b in breakdown],
+            # Everything /rank puts on the card beyond the total, so opening a
+            # row answers "where am I and what's next" without asking the bot.
+            "about": (rank or {}).get("description") or "",
+            "position": view["position"],
+            "rungs": view["total"],
+            "fraction": round(float(view["fraction"]), 4),
+            "needed": view["needed"],
+            "ceiling": view["ceiling"],
+            "nextrank": trial_ranks.rank_name(upcoming, guild) if upcoming else "",
+            "steps": [{"name": step["name"], "gain": step["gain"]}
+                      for step in view["steps"]],
         })
     rows.sort(key=lambda r: (-r["score"], r["name"].lower()))
 
@@ -2973,10 +2995,39 @@ async def api_guild_trials(request: web.Request):
                                   "channel": channel.name if channel else ""})
 
     # ---- the rollout: who the automation is allowed to touch ----
-    if action in ("enrol", "unenrol", "announce", "recalc_one"):
+    if action in ("enrol", "unenrol", "announce", "recalc_one",
+                  "enrol_all_plan", "enrol_all"):
         cog = bot.get_cog("trial_ranks")
         if cog is None:
             return _bad("The trial_ranks cog isn't loaded.")
+
+        # ---- the whole server at once, counted first and then done ----
+        # Two actions rather than one with a flag: the numbers have to be in
+        # front of whoever presses the button *before* it runs, because this is
+        # the one path that overrides an answer somebody already gave.
+        if action in ("enrol_all_plan", "enrol_all"):
+            include_declined = data.get("include_declined", True) is not False
+            if action == "enrol_all_plan":
+                plan = cog.enrol_plan(guild)
+                return web.json_response({
+                    "ok": True,
+                    "already": len(plan["already"]),
+                    "declined": len(plan["declined"]),
+                    "fresh": len(plan["fresh"]),
+                    "unreachable": len(plan["unreachable"]),
+                    "targets": len(plan["fresh"]) + (len(plan["declined"])
+                                                     if include_declined else 0),
+                })
+            actor = guild.get_member(request.get("uid")) if request.get("uid") else None
+            summary = await cog.enrol_everyone(guild, actor=actor,
+                                               include_declined=include_declined)
+            await _record_change(
+                request, audit_log.KIND_TRIAL, "enrol everyone", None,
+                f"{summary['enrolled']} enrolled",
+                f"Trial ranks turned on for **{summary['enrolled']}** member(s) at once"
+                + (f", overriding {summary['overruled']} previous decline(s)"
+                   if summary["overruled"] else ""))
+            return web.json_response({"ok": True, "summary": summary})
 
         if action == "enrol":
             tag = str(data.get("tag") or "").strip()

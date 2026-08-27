@@ -1044,6 +1044,56 @@ if (_trialsPage) {
     tag.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
   }
 
+  // --- the rollout: turning it on for the whole server ---
+  // Two round trips on purpose. The first only counts, so the confirmation can
+  // name how many people it is about to enrol and how many of them had already
+  // said no. This is the only control on the page that overrides an answer
+  // somebody gave, so it is not going to do that behind a generic "are you
+  // sure?".
+  const enrolAll = document.getElementById("pilotenrolall");
+  if (enrolAll) {
+    enrolAll.addEventListener("click", async () => {
+      enrolAll.disabled = true;
+      const plan = await post(`/api/guild/${guildId}/trials`, { action: "enrol_all_plan" });
+      if (!plan.ok) { enrolAll.disabled = false; flash(plan.error || "Failed", false); return; }
+      if (!plan.targets) {
+        enrolAll.disabled = false;
+        flash("everyone is already on the new system", true);
+        return;
+      }
+      const lines = [`Turn trial ranks on for ${plan.targets} member(s)?`, ""];
+      lines.push(`• ${plan.fresh} have never answered`);
+      if (plan.declined) lines.push(`• ${plan.declined} said no before and will be enrolled anyway`);
+      if (plan.already) lines.push(`• ${plan.already} are already on and will be left alone`);
+      if (plan.unreachable) {
+        lines.push("", `⚠️ ${plan.unreachable} of them sit at or above my role, so Discord `
+                     + "won't let me change any of their roles. They'll be enrolled with "
+                     + "nothing applied.");
+      }
+      lines.push("", "This edits roles. It can't be undone in one press.");
+      if (!confirm(lines.join("\n"))) { enrolAll.disabled = false; return; }
+
+      const was = enrolAll.textContent;
+      enrolAll.textContent = "working…";
+      const res = await post(`/api/guild/${guildId}/trials`, { action: "enrol_all" });
+      enrolAll.disabled = false;
+      enrolAll.textContent = was;
+      if (!res.ok) { flash(res.error || "Failed", false); return; }
+      const s = res.summary || {};
+      if (s.errors && s.errors.length) {
+        // Enrolled, ranks worked out, roles refused. Saying "done" over that is
+        // exactly how it went unnoticed the first time.
+        alert(`${s.enrolled} enrolled, but some roles could not be changed:\n\n`
+              + s.errors.map((e) => "• " + e.split("**").join("")).join("\n"));
+      } else {
+        flash(`${s.enrolled} enrolled: ${s.granted || 0} rank(s) granted, `
+              + `${s.cleared || 0} superseded clear(s) removed ✓`
+              + (s.remaining ? ` — ${s.remaining} left, press it again` : ""), true);
+      }
+      setTimeout(() => window.location.reload(), s.errors && s.errors.length ? 300 : 1500);
+    });
+  }
+
   // A rank worked out but not applied is a failure, and "done" over the top of
   // it is how it goes unnoticed. Shared by enrolling and by recalculating.
   function refusal(res) {

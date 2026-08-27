@@ -1,6 +1,6 @@
 # Trial ranks — handoff
 
-State of the trial-ranking system as of 17 Aug 2026, branch `refactor`.
+State of the trial-ranking system as of 27 Aug 2026, branch `refactor`.
 Written for whoever (or whatever) picks this up next.
 
 ---
@@ -17,6 +17,16 @@ Two moments trigger a recalculation, and only two:
 
 1. a scoring role changes on an enrolled member (`on_member_update`);
 2. that member asks where they stand (`/rank`, or the announcement button).
+
+**The panel can enrol the whole server at once** ("Turn trial ranks on for
+everyone", under Users). It counts first and shows the numbers in a confirmation
+before it touches anybody: how many have never answered, how many said no and
+will be enrolled anyway, and how many sit above the bot and so can be enrolled
+but not ranked. It is the only control that overrides a recorded "no", which is
+why the confirmation names that count instead of asking "are you sure?". The
+pass stops at `MAX_EDITS` role edits and leaves the people it never reached
+*un-enrolled*, so pressing it again continues rather than leaving somebody
+enrolled with a card promising a rank they were never given.
 
 **New members are enrolled on join**, without being asked. The consent flow was
 written for people who already had a rank set by hand; somebody joining today
@@ -38,7 +48,7 @@ hadn't. `run_for_guild` still exists for the panel's **Recalculate now**.
 | `helpers/trial_image.py` | The shareable PNG chart |
 | `helpers/share_tokens.py` | Capability links (hashed at rest) |
 | `helpers/health.py` | Gateway sampling behind the dashboard status board |
-| `cogs/trial_ranks.py` | Runtime: apply, listener, `/rank`, `/interest`, consent flow |
+| `cogs/trial_ranks.py` | Runtime: apply, listener, `/rank`, `/interest`, consent flow, the sweep |
 | `web/routes.py` | Panel pages + the public board |
 | `web/static/board.js` | The public leaderboard's behaviour |
 | `web/static/panel.js` | Panel behaviour (trials, strings, dashboard) |
@@ -91,6 +101,13 @@ above the bot, missing permission, member outranks the bot, server owner). The
 rule that actually bites: **a member whose top role is at or above the bot's
 cannot have *any* role changed**, however low the target role sits.
 
+**The public board's opened row is the `/rank` card.** Same call
+(`missing_for_next`), so the two can never tell different stories: rung and star
+row, the rank's description, the bar with `score → threshold`, what is still
+needed for the next rung, the next steps with their marginal gains, then the
+clears the total came from. Adding a field to the card means adding it in both
+places or it will drift.
+
 **Strings resolve through a chain.** `bot.lang.get(key, guild=, locale=)` walks
 guild+locale → guild+default → global+locale → global+default → `lang.py`.
 `lang.KEY` still works and means the global/default layer. Per-guild and
@@ -142,11 +159,14 @@ issued.
 ## Testing
 
 ```bash
-py -3 tests/run_tests.py        # 31 cases, no dependencies
+py -3 tests/run_tests.py        # 40 cases, no dependencies
 py -3 tests/run_tests.py -v     # with what each one checked
 ```
 
 See `tests/README.md`. The cases came out of this build and each one protects
 something that actually broke: divider independence, the role-hierarchy
 refusals, the preset write paths, the capability-token properties, and the
-string resolver fallback chain.
+string resolver fallback chain. `test_massenrol` covers the sweep: that
+counting enrols nobody, that "asked but never answered" is not a decline, that
+an overridden decline is reported, and that hitting the edit cap leaves the
+remainder un-enrolled rather than enrolled-but-unranked.
