@@ -338,6 +338,24 @@ Things worth knowing before touching the server log:
   submits; a half-typed name is never a choice. Several ids mean *any* of them.
   `tests/render_serverlog.py` exists to click it, since nothing in the suite
   runs a page's JavaScript.
+- **The layout is tuned for rows per screen.** One line of chrome per event: the
+  date sits over the time in a 1%-wide column, the type chip is `nowrap` (it was
+  breaking into "Message" / "edited"), and the group name moved from a second
+  line under every chip into that chip's tooltip. Field labels sit in a fixed
+  74px gutter so several of them line up rather than each starting wherever the
+  last name ended.
+- **The filter row is a grid, not a wrap.** Four "what" filters on the top line,
+  dates and buttons underneath. Left to flex-wrap it broke wherever it ran out
+  of pixels and stranded "to" beside the buttons.
+- **Under 760px the table stops being a table.** Rows become cards: the date and
+  the type share a header line, the body goes underneath, and the filters go one
+  per line. Note that `.logtable td { display: block }` outranks a bare
+  `.logwhen`, so the mobile overrides are qualified with `.logtable` - without
+  that they silently lose and the header line stacks.
+- **`||spoilers||` stay hidden and `<:emoji:id>` renders as `:emoji:`.** A
+  spoiler was hidden when it was posted; the page is read by moderators but the
+  screen may not be theirs alone, so it takes a click. Custom emoji images live
+  on Discord's CDN, which this page has no business fetching from.
 - **Nothing is recorded with the feature off or no log channel set.** Both
   produce an empty page, so the page says which one is true rather than leaving
   somebody to find it in the source.

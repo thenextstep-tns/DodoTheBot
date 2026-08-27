@@ -221,6 +221,22 @@ assert "<img" not in nasty and "<script>" not in nasty, nasty
 assert "&lt;img" in nasty and "&lt;script&gt;" in nasty, nasty
 print("a message that is markup stays text")
 
+# Discord tokens that used to arrive as raw noise in the middle of a sentence.
+emoji = routes._discord_markup(guild, "nice <:gasm:922235451937542194> one")
+assert ">:gasm:<" in emoji and "922235451937542194" not in emoji, emoji
+animated = routes._discord_markup(guild, "<a:spin:922235451937542194>")
+assert ">:spin:<" in animated, animated
+print("custom emoji:", emoji)
+
+# A spoiler was hidden when it was posted, so it stays hidden here.
+hidden = routes._discord_markup(guild, "it was ||Sovereign himself|| all along")
+assert 'class="spoiler"' in hidden and "Sovereign himself" in hidden, hidden
+assert "||" not in hidden, hidden
+# And an unpaired bar is just a bar, not the start of a span that eats the rest.
+lone = routes._discord_markup(guild, "a || b")
+assert "spoiler" not in lone, lone
+print("spoiler:", hidden)
+
 # A mention typed by hand as literal text cannot smuggle a tag either, because
 # the substitution only ever produces a span it built itself.
 typed = routes._discord_markup(guild, "<@111111111111111111> said <b>hi</b>")
@@ -257,12 +273,21 @@ assert 'value="MESSAGE_DELETE" selected' in page, "the chosen type comes back se
 # The person filter is a chip, not a selected option, and it carries the name.
 assert 'class="ms-chip" data-id="111111111111111111"' in page, "the choice comes back"
 assert ">Mido<" in page, "and reads as a name rather than as a snowflake"
-assert '<input type="date" name="from"\n      value="2026-08-01">' in page, page[:0] or "date kept"
+# Whitespace-insensitive: this asserted the exact indentation once and broke on
+# a wrapper div, which says nothing about whether the date survived.
+assert re.search(r'name="from"\s+value="2026-08-01"', page), "the chosen date comes back"
 # Every filter has to travel with the pager or page two silently drops the search.
 assert "type=MESSAGE_DELETE" in page
 assert "subject=111111111111111111" in page and "from=2026-08-01" in page
 # The field name and its value both render.
 assert "Content" in page and "hello" in page
+# The event chip must not break mid-phrase, and the date and time are separate
+# so the column can be narrow and still readable.
+assert 'class="logkind"' in page and 'class="logwhen"' in page, "layout hooks"
+assert '<span class="logday">2026-08-27</span><span class="logclock">10:15</span>' in page
+# The group moved into the tooltip rather than costing a line under every chip.
+assert 'title="Messages &middot; MESSAGE_DELETE"' in page, "group is a tooltip now"
+assert "<div class=\"muted small\">Messages</div>" not in page, "and not a second line"
 print("page renders with filters preserved")
 
 # --- the options come from the server, not from what the log happens to hold - #

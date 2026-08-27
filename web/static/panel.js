@@ -2254,6 +2254,22 @@ function bindMemberPicker(pick, members) {
 }
 
 
+// --- Spoilers in the server log ---------------------------------------------
+// A spoiler was hidden when it was posted, so the log keeps it hidden. Delegated
+// from the body because the rows are rendered server-side and there is nothing
+// to bind per row.
+document.addEventListener("click", (e) => {
+  const hidden = e.target.closest(".spoiler");
+  if (hidden) hidden.classList.toggle("open");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const hidden = e.target.closest && e.target.closest(".spoiler");
+  if (!hidden) return;
+  e.preventDefault();
+  hidden.classList.toggle("open");
+});
+
 // --- Type-to-find picker that keeps several choices --------------------------
 // The single-choice `.mpick` above answers "which member"; this answers "which
 // of these", which is a different control and not a flag on the first one.

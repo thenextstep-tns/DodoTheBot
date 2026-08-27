@@ -519,31 +519,110 @@ main:has(.logpage) { max-width: 1180px; }
 .ms-empty { padding: 8px 10px; font-size: 13px; color: var(--color-muted); }
 
 /* --- server log: what Discord did ------------------------------------- */
-.logfilters .datefield { display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--color-muted); }
-.logfilters input[type="date"] { padding: 6px 8px; font: inherit; font-size: 13px;
+/* A log is read by scanning, so the layout is tuned for rows-per-screen: one
+   line of chrome per event, everything else given to what actually happened. */
+
+/* The filter row is a grid, so where it breaks is a decision rather than
+   whatever the widths happened to add up to. What is being looked for goes on
+   the top line; when, and the buttons, go underneath. Before this the row wrapped
+   wherever it ran out of pixels and left "to" stranded beside the buttons. */
+.logfilters { display: grid; gap: 6px; align-items: stretch;
+  grid-template-columns: minmax(140px, .9fr) repeat(3, minmax(150px, 1fr)); }
+.logfilters select, .logfilters button, .logfilters input[type="date"] {
+  height: 34px; padding: 0 9px; font-size: 13px; }
+.logfilters .mspick { min-height: 34px; padding: 2px 6px; }
+.logdates { grid-column: 1 / -1; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px; }
+.logactions { display: flex; gap: 6px; margin-left: auto; }
+.logfilters .datefield { display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+.logfilters input[type="date"] { font: inherit; font-size: 13px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
-.logfilters a.chip { align-self: center; }
+.logfilters button { margin: 0; }
+.logfilters a.chip { display: flex; align-items: center; }
 .nowrap { white-space: nowrap; }
-/* The description column takes the slack; the other two are as wide as their
-   content and no wider, or a long edit pushes the timestamp off the screen. */
+
+/* The description takes every pixel the other two do not need. */
 .logtable { table-layout: auto; }
-.logtable th:first-child, .logtable td:first-child { width: 1%; }
-.logtable th:nth-child(2), .logtable td:nth-child(2) { width: 1%; }
-.logbody { line-height: 1.5; word-break: break-word; }
-.logfield { margin-top: 4px; padding-left: 10px;
+.logtable td { padding: 7px 10px; vertical-align: top; }
+.logtable th { padding: 7px 10px; }
+.logtable tr:hover td { background: var(--color-surface-soft); }
+
+/* Date over time: half the width of one long string, and the pair drops back
+   onto a single line on a narrow screen. */
+.logwhen { width: 1%; white-space: nowrap; }
+.logday, .logclock { display: block; font-size: 12px;
+  font-variant-numeric: tabular-nums; line-height: 1.35; }
+.logday { color: var(--color-muted); }
+.logclock { color: var(--color-body); font-weight: var(--weight-semibold); }
+
+/* The chip used to wrap mid-phrase ("Message" / "edited") because the column is
+   as narrow as its content and nothing stopped it breaking. */
+.logkind { width: 1%; }
+.logkind .chip { white-space: nowrap; font-size: 11px; padding: 2px 8px; }
+
+.logbody { line-height: 1.45; font-size: 13px; word-break: break-word; }
+/* The raw snowflake after a name is there to be copied, not read. */
+.logbody code { font-size: 11px; color: var(--color-muted-soft); }
+.logbody a { color: var(--color-primary); }
+
+/* Attached values (before/after, content) hang off a rule, with the label as a
+   gutter so several of them line up down the left rather than each starting
+   wherever its own name ended. */
+.logfield { display: flex; gap: 8px; margin-top: 3px; padding-left: 8px;
   border-left: 2px solid var(--color-hairline); }
-.logfieldname { font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--color-muted); margin-right: 6px; }
+.logfieldname { flex: 0 0 74px; font-size: 10px; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--color-muted); line-height: 1.7; }
+
 /* Mentions read as mentions rather than as raw snowflakes, and a deleted one
    says so instead of showing an id nobody can look up. */
 .mention { padding: 0 4px; border-radius: var(--radius-sm);
-  background: var(--color-surface-soft); color: var(--color-primary); }
+  background: var(--color-surface-soft); color: var(--color-primary);
+  white-space: nowrap; }
 .mention.role { color: var(--color-warning); }
 .mention.chan { color: var(--color-body); }
 .mention.gone { color: var(--color-muted-soft); background: transparent;
   text-decoration: line-through; }
+/* A custom emoji has no image here, so it reads as the name people call it. */
+.cemoji { padding: 0 3px; border-radius: var(--radius-sm); font-size: 12px;
+  background: var(--color-surface-soft); color: var(--color-muted); }
+/* Hidden when it was posted, so hidden here. Click or tab-and-enter to reveal. */
+.spoiler { border-radius: var(--radius-sm); background: var(--color-muted-soft);
+  color: transparent; cursor: pointer; }
+.spoiler.open { background: var(--color-surface-soft); color: inherit; }
+
+/* Below this the three columns stop being columns. A log row is a timestamp, a
+   label and a paragraph; on a phone that is a card, not a table. */
+@media (max-width: 760px) {
+  .logtable, .logtable tbody, .logtable tr, .logtable td { display: block;
+    width: auto; }
+  .logtable thead { display: none; }
+  .logtable tr { padding: 9px 11px; border-bottom: 1px solid var(--color-hairline-soft); }
+  .logtable tr:last-child { border-bottom: 0; }
+  .logtable td { padding: 0; border: 0; width: auto; }
+  /* Time and kind share the card's header line. Qualified by .logtable so they
+     outrank the `.logtable td { display: block }` above, which is a stronger
+     selector and was quietly stacking them. */
+  .logtable .logwhen, .logtable .logkind { display: inline-block;
+    vertical-align: middle; }
+  .logtable .logwhen { margin-right: 8px; }
+  .logday, .logclock { display: inline; }
+  .logday { margin-right: 5px; }
+  .logbody { margin-top: 5px; }
+  .logfield { flex-direction: column; gap: 1px; margin-top: 5px; }
+  .logfieldname { flex: none; line-height: 1.4; }
+  /* One filter per line: three pickers side by side on a phone are three boxes
+     too narrow to show what is in any of them. */
+  .logfilters { grid-template-columns: 1fr; }
+  .logdates { display: grid; grid-template-columns: 1fr 1fr; }
+  .logactions { grid-column: 1 / -1; margin-left: 0; }
+  .logactions > * { flex: 1 1 0; justify-content: center; }
+  .logfilters .datefield { justify-content: space-between; }
+  .logfilters input[type="date"] { flex: 1 1 auto; min-width: 0; }
+  .logpage .statshead h1 { font-size: 20px; }
+}
+
 select.coglevel { margin-left: auto; margin-right: 10px; padding: 4px 8px; font-size: 12px;
   background: var(--color-canvas); color: var(--color-ink);
   border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }

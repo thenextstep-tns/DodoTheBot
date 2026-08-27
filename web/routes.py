@@ -2317,6 +2317,11 @@ _MD_CHANNEL = re.compile(r"&lt;#(\d{15,25})&gt;")
 # Discord's own timestamp token. The row already carries a When column, so a
 # repeat of it inside every description is noise rather than information.
 _MD_TIME = re.compile(r"&lt;t:\d+(?::[a-zA-Z])?&gt;")
+# A custom emoji arrives as <:name:id> (or <a:name:id> animated). The image is
+# on Discord's CDN and this page has no business fetching from it, so it renders
+# as :name:, which is what the token means and what people call it anyway.
+_MD_EMOJI = re.compile(r"&lt;a?:([A-Za-z0-9_]{2,32}):\d{15,25}&gt;")
+_MD_SPOILER = re.compile(r"\|\|(.+?)\|\|", re.S)
 
 
 def _discord_markup(guild, text: str) -> str:
@@ -2353,8 +2358,15 @@ def _discord_markup(guild, text: str) -> str:
     out = _MD_CHANNEL.sub(channel, out)
     out = _MD_LINK.sub(lambda m: f'<a href="{m.group(2)}" rel="noopener noreferrer" '
                                  f'target="_blank">{m.group(1)}</a>', out)
+    out = _MD_EMOJI.sub(lambda m: f'<span class="cemoji">:{m.group(1)}:</span>', out)
     out = _MD_BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", out)
     out = _MD_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
+    # A spoiler was hidden when it was posted, so it stays hidden here. The page
+    # is read by moderators, not by the people who agreed to be surprised, but
+    # showing it by default puts an unmarked spoiler on a screen somebody else
+    # can be standing behind. Click to reveal.
+    out = _MD_SPOILER.sub(
+        lambda m: f'<span class="spoiler" role="button" tabindex="0">{m.group(1)}</span>', out)
     return out.replace("\n", "<br>").strip()
 
 
@@ -2463,11 +2475,18 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
             body += (f'<div class="logfield"><span class="logfieldname">'
                      f"{html.escape(str(name))}</span> "
                      f"{_discord_markup(guild, value)}</div>")
+        # Date over time rather than one long string: it halves the width of the
+        # column, and on a narrow screen the two sit back on one line.
+        day, _, clock = stamp.partition(" ")
+        # The group moves into the tooltip with the raw type. It was a second
+        # line under every chip, which is a lot of vertical space spent saying
+        # "Messages" under "Message edited".
         rows += (
-            f'<tr><td class="muted small nowrap">{html.escape(stamp)}</td>'
-            f'<td><span class="chip static" title="{html.escape(kind)}">'
-            f"{html.escape(label)}</span>"
-            f'<div class="muted small">{html.escape(group)}</div></td>'
+            f'<tr><td class="logwhen"><span class="logday">{html.escape(day)}</span>'
+            f'<span class="logclock">{html.escape(clock)}</span></td>'
+            f'<td class="logkind"><span class="chip static" '
+            f'title="{html.escape(group)} &middot; {html.escape(kind)}">'
+            f"{html.escape(label)}</span></td>"
             f'<td class="logbody">{body}</td></tr>'
         )
     rows = rows or '<tr><td colspan="3" class="muted">Nothing matches.</td></tr>'
@@ -2530,12 +2549,16 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
     {subject_picker}
     {actor_picker}
     {channel_picker}
-    <label class="datefield">from <input type="date" name="from"
-      value="{html.escape(chosen["from"])}"></label>
-    <label class="datefield">to <input type="date" name="to"
-      value="{html.escape(chosen["to"])}"></label>
-    <button type="submit">Filter</button>
-    <a class="chip" href="/guild/{guild.id}/serverlog">Clear</a>
+    <div class="logdates">
+      <label class="datefield">from <input type="date" name="from"
+        value="{html.escape(chosen["from"])}"></label>
+      <label class="datefield">to <input type="date" name="to"
+        value="{html.escape(chosen["to"])}"></label>
+      <span class="logactions">
+        <button type="submit">Filter</button>
+        <a class="chip" href="/guild/{guild.id}/serverlog">Clear</a>
+      </span>
+    </div>
   </form>
   <table class="stats logtable"><thead><tr><th>When (UTC)</th><th>Event</th>
     <th>What happened</th></tr></thead><tbody>{rows}</tbody></table>

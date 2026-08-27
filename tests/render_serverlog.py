@@ -77,19 +77,38 @@ guild = Guild()
 mido, fox = MEMBERS[0], MEMBERS[1]
 general = CHANNELS[0]
 
+# Real shapes, taken from the live page: a long edit with a spoiler and a custom
+# emoji, a short deletion, a role change. Density is only judgeable against the
+# content that actually caused the complaint.
+LONG = ("I'm gonna have to go with Sovereign class Reapers, ||or Sovereign himself|| "
+        "because it was such a damn cool introduction to what Reapers are. And it "
+        "looks so badass. And I love the whole concept of what they are. ||And that "
+        "first conversation with Sovereign was <:gasm:922235451937542194> ||")
+
 DOCS = [
     {"_id": 3, "guild_id": guild.id, "event_type": "MESSAGE_DELETE",
      "timestamp": "2026-08-27T10:15:00+00:00",
      "description": f"\U0001f5d1 **<@{mido.id}>** (`{mido.id}`) message deleted "
                     f"in <#{general.id}> - <t:1756290000:f>",
-     "fields": {"Content": "was this <@" + str(fox.id) + "> ok? <b>not markup</b>"},
-     "user_ids": [mido.id, fox.id], "channel_ids": [general.id]},
+     "fields": {"Content": LONG, "Attachments": "tumblr_nsa0c2wcti1r2rogso2_r1_540.webp"},
+     "user_ids": [mido.id, fox.id], "channel_ids": [general.id],
+     "subject_id": mido.id, "actor_id": None},
+    {"_id": 4, "guild_id": guild.id, "event_type": "MESSAGE_EDIT",
+     "timestamp": "2026-08-27T20:09:00+00:00",
+     "description": f"✏️ **<@{mido.id}>** (`{mido.id}`) edited a message "
+                    f"in <#{CHANNELS[1].id}> - <t:1756290000:f> "
+                    f"[Jump](https://discord.com/channels/1/2/3)",
+     "fields": {"Before": LONG, "After": LONG.replace("to what Reapers are. ", "")},
+     "user_ids": [mido.id], "channel_ids": [CHANNELS[1].id],
+     "subject_id": mido.id, "actor_id": None},
     {"_id": 2, "guild_id": guild.id, "event_type": "MEMBER_ROLE_UPDATE",
      "timestamp": "2026-08-27T09:02:00+00:00",
      "description": f"\U0001f464 **<@{fox.id}>** (`{fox.id}`) roles updated "
                     f"by <@{mido.id}> - <t:1756290000:f>",
-     "fields": {"Roles added": "<@&987654321098765432>"},
-     "user_ids": [fox.id, mido.id], "channel_ids": []},
+     "fields": {"Roles added": "<@&987654321098765432>",
+                "Roles removed": "<@&987654321098765433>"},
+     "user_ids": [fox.id, mido.id], "channel_ids": [],
+     "subject_id": fox.id, "actor_id": mido.id},
     {"_id": 1, "guild_id": guild.id, "event_type": "THREAD_CREATE",
      "timestamp": "2026-08-26T18:40:00+00:00",
      "description": f"\U0001f9f5 **Thread Created:** <#{THREADS[0].id}> (`vOC prog talk`)"
