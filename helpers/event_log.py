@@ -104,33 +104,60 @@ _CHANNEL_MENTION = re.compile(r"<#(\d{15,25})>")
 # The templates put the subject's raw id in backticks right after their mention,
 # which is the one id present even when the mention fails to resolve.
 _BARE_ID = re.compile(r"`(\d{15,25})`")
+# "by" immediately before a mention, seen through bold markers and whitespace.
+# This one pattern is the whole of how an actor is told from a subject.
+_TRAILING_BY = re.compile(r"\bby\b[\s*(]*$", re.I)
 
 
 def subjects(description: str, fields: dict = None) -> dict:
-    """Every user and channel a log entry names, in the order they appear.
+    """Who and what a log entry names, and which of them did it to which.
 
     Read out of the rendered text rather than passed in by each listener: there
-    are thirty-odd listeners and one of this, so this is the version that cannot
-    be half-done. The first user mentioned is the subject by construction, since
-    every template in ``lang.py`` opens with it.
+    are thirty-seven ``send_log`` calls and one of this, so this is the version
+    that cannot end up half-applied.
+
+    The two roles are told apart by one rule: **the actor is the mention that
+    follows the word "by"**. Every template in ``lang.py`` that names one writes
+    it that way, whether the word comes from the template ("was kicked by
+    {actor}") or from the listener (``f" by {entry.user.mention}"``). The
+    subject is then the first user named who is not the actor, because no
+    template names the actor first.
+
+    That is a dependency on wording, so it is pinned rather than hoped for:
+    ``test_serverlog`` fails if any ``LOG_*`` template carrying an actor stops
+    saying "by" in front of it. Quietly swapping who did what to whom is the
+    exact failure this rule exists to prevent.
     """
     blob = str(description or "")
     for value in (fields or {}).values():
         blob += "\n" + str(value)
-    users, channels = [], []
+
+    users, actor = [], None
     for match in _USER_MENTION.finditer(blob):
         value = int(match.group(1))
+        # What sits immediately before the mention: " by ", "(Deleted by " and
+        # " by **" all end in the word we are looking for.
+        if actor is None and _TRAILING_BY.search(blob[max(0, match.start() - 12):match.start()]):
+            actor = value
         if value not in users:
             users.append(value)
+    # The raw id in backticks right after the subject's mention, which is the
+    # one id present even when the mention itself fails to resolve.
     for match in _BARE_ID.finditer(blob):
         value = int(match.group(1))
         if value not in users:
             users.append(value)
+
+    channels = []
     for match in _CHANNEL_MENTION.finditer(blob):
         value = int(match.group(1))
         if value not in channels:
             channels.append(value)
-    return {"user_ids": users, "channel_ids": channels}
+    # Both roles are stored even when absent, so a row written today never falls
+    # through to the description regex meant for rows written before they were.
+    return {"user_ids": users, "channel_ids": channels,
+            "subject_id": next((v for v in users if v != actor), None),
+            "actor_id": actor}
 
 
 def day_bounds(since: str, until: str) -> dict:
@@ -180,6 +207,10 @@ class EventLogStore:
                                    background=True)
             self._col.create_index([("guild_id", 1), ("user_ids", 1), ("_id", -1)],
                                    background=True)
+            self._col.create_index([("guild_id", 1), ("subject_id", 1), ("_id", -1)],
+                                   background=True)
+            self._col.create_index([("guild_id", 1), ("actor_id", 1), ("_id", -1)],
+                                   background=True)
             self._col.create_index([("guild_id", 1), ("channel_ids", 1), ("_id", -1)],
                                    background=True)
             self._col.create_index([("guild_id", 1), ("timestamp", -1)], background=True)
@@ -204,8 +235,8 @@ class EventLogStore:
         ]}
 
     def _query(self, guild_id: int, *, event_type: str = "", group: str = "",
-               user_ids: list = None, channel_ids: list = None,
-               since: str = "", until: str = "") -> dict:
+               subject_ids: list = None, actor_ids: list = None,
+               channel_ids: list = None, since: str = "", until: str = "") -> dict:
         query: dict = {"guild_id": int(guild_id)}
         if event_type:
             query["event_type"] = event_type
@@ -214,11 +245,23 @@ class EventLogStore:
             if names:
                 query["event_type"] = {"$in": list(names)}
         clauses = []
-        users = [int(value) for value in (user_ids or ()) if value]
-        if users:
+        # Two separate questions, and conflating them was the bug: filtering by
+        # a moderator returned every role change they had ever made, which is
+        # not what "show me this person" means to somebody looking for what
+        # happened *to* them.
+        subject = [int(value) for value in (subject_ids or ()) if value]
+        if subject:
+            # The subject's mention is the bolded one; the actor's never is.
             clauses.append(self._id_clause(
-                "user_ids", users,
-                lambda ids: "[<`]@?!?(?:" + "|".join(str(i) for i in ids) + ")[>`]"))
+                "subject_id", subject,
+                lambda ids: r"\*\*<@!?(?:" + "|".join(str(i) for i in ids) + ")>"))
+        actor = [int(value) for value in (actor_ids or ()) if value]
+        if actor:
+            # And the actor's is the one after the word "by", which is the same
+            # rule the extraction uses, so old rows answer the same way.
+            clauses.append(self._id_clause(
+                "actor_id", actor,
+                lambda ids: r"[Bb]y \*{0,2}<@!?(?:" + "|".join(str(i) for i in ids) + ")>"))
         channels = [int(value) for value in (channel_ids or ()) if value]
         if channels:
             clauses.append(self._id_clause(

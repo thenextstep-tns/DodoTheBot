@@ -311,6 +311,21 @@ Things worth knowing before touching the server log:
   server passes through `_discord_markup`. It escapes first and then matches
   `&lt;@123&gt;`, so there is no path from something typed in Discord to markup
   on an admin's page. There is a test that tries.
+- **Subject and actor are different questions and different filters.** "Done
+  to" matches `subject_id`, "Done by" matches `actor_id`. One combined person
+  filter looked reasonable and was not: picking a moderator returned every role
+  change they had ever handed out to somebody else.
+- **The actor is the mention that follows the word "by".** Every `LOG_*`
+  template writes it that way, whether the word comes from the template ("was
+  kicked by {actor}") or from the listener (`f" by {entry.user.mention}"`); the
+  subject is then the first user named who is not the actor. That is a
+  dependency on wording, so `test_serverlog` formats twelve real templates and
+  fails if any of them stops saying it. The same rule is what the fallback
+  regexes use, so old rows answer the two questions the same way.
+- **Filter names must not collide.** "Done to" and the date "to" were briefly
+  both `to`, which a form resolves by silently discarding one. The person
+  filters are `subject` and `actor`; the dates keep `from` and `to`. There is a
+  test asserting every filter has its own name.
 - **The person and channel filters are built from the guild, not from the log.**
   They were built by aggregating the extracted ids once, which was wrong in a
   way that looked like working code: a server of hundreds offered the two people

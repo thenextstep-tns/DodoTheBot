@@ -110,8 +110,11 @@ def main() -> None:
                          "MEMBER_ROLE_UPDATE": 74, "THREAD_CREATE": 12,
                          "MEMBER_JOIN": 28},
                "people": [999999999999999999], "channels": [888888888888888888]}
-    chosen = {"type": "", "group": "", "user": [mido.id, fox.id],
-              "channel": [general.id], "from": "2026-08-01", "to": ""}
+    # Done to one person, by another: the question the single "who" box could
+    # not ask, and the reason there are now two.
+    chosen = {"type": "", "group": "", "subject": [mido.id],
+              "actor": [fox.id], "channel": [general.id],
+              "from": "2026-08-01", "to": ""}
 
     body = routes._server_log_html(None, guild, data, options, chosen)
     response = routes._page(f"{guild.name} · server log", body,

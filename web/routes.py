@@ -2492,7 +2492,13 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
 
     people = _log_people(guild, options["people"])
     channels = _log_channels(guild, options["channels"])
-    user_picker = _multipick("user", "log-people", "Anyone", chosen["user"], people)
+    # Two person filters, not one. A single "who" box answered a question nobody
+    # was asking: picking a moderator returned every role change they had ever
+    # handed out, mixed in with the handful of things done to them.
+    subject_picker = _multipick("subject", "log-people", "Done to anyone",
+                                chosen["subject"], people)
+    actor_picker = _multipick("actor", "log-people", "By anyone",
+                              chosen["actor"], people)
     channel_picker = _multipick("channel", "log-channels", "Anywhere",
                                 chosen["channel"], channels)
 
@@ -2502,7 +2508,8 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
         f"{key}={html.escape(str(value))}" for key, value in (
             ("type", chosen["type"]),
             ("type", f'g:{chosen["group"]}' if chosen["group"] else ""),
-            ("user", ",".join(str(v) for v in chosen["user"])),
+            ("subject", ",".join(str(v) for v in chosen["subject"])),
+            ("actor", ",".join(str(v) for v in chosen["actor"])),
             ("channel", ",".join(str(v) for v in chosen["channel"])),
             ("from", chosen["from"]), ("to", chosen["to"])) if value)
     base = f"/guild/{guild.id}/serverlog?{carried}"
@@ -2520,7 +2527,8 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
   {warning}
   <form class="logfilters" method="get" action="/guild/{guild.id}/serverlog">
     <select name="type">{type_options}</select>
-    {user_picker}
+    {subject_picker}
+    {actor_picker}
     {channel_picker}
     <label class="datefield">from <input type="date" name="from"
       value="{html.escape(chosen["from"])}"></label>
@@ -3684,7 +3692,13 @@ async def guild_server_log_page(request: web.Request):
         picked if picked in event_log.EVENT_LABELS else "")
     chosen = {
         "type": kind, "group": group,
-        "user": _ids("user"), "channel": _ids("channel"),
+        # The person filters cannot be called "to" and "by": the date range
+        # already owns "to" in this query string, and one name for two filters
+        # is a bug that only shows up once somebody uses both.
+        # "user" is what this page shipped with before the roles were told
+        # apart, and it meant "done to", which is what it was used for.
+        "subject": _ids("subject") or _ids("user"), "actor": _ids("actor"),
+        "channel": _ids("channel"),
         "from": event_log.valid_day(request.query.get("from", "")),
         "to": event_log.valid_day(request.query.get("to", "")),
     }
@@ -3692,7 +3706,8 @@ async def guild_server_log_page(request: web.Request):
     def read():
         data = bot.event_log.page(
             guild.id, page=page, event_type=chosen["type"], group=chosen["group"],
-            user_ids=chosen["user"], channel_ids=chosen["channel"],
+            subject_ids=chosen["subject"], actor_ids=chosen["actor"],
+            channel_ids=chosen["channel"],
             since=chosen["from"], until=chosen["to"])
         return data, {
             "types": {row["value"]: row["count"] for row in bot.event_log.types(guild.id)},

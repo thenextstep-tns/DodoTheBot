@@ -28,8 +28,11 @@ row = event_log.subjects(
     "by <@222222222222222222> - <t:1756300000:f>",
     {"Roles added": "<@&333333333333333333>"})
 print("extracted:", row)
-# The subject first, then the actor. Both, because "everything about this person"
-# has to include the kicks they handed out, not only the ones they received.
+# The subject and the actor are told apart, not lumped together. Conflating them
+# was the bug: filtering on a moderator returned every role change they had ever
+# handed out to somebody else.
+assert row["subject_id"] == 111111111111111111, row
+assert row["actor_id"] == 222222222222222222, row
 assert row["user_ids"] == [111111111111111111, 222222222222222222], row
 # A role id is not a user id, even though the backtick pattern would take any
 # number: it arrives as <@&…>, which the user pattern deliberately does not match.
@@ -68,31 +71,87 @@ class _Cur(list):
 
 col = Col()
 store = event_log.EventLogStore(col)
-store.page(42, page=1, user_ids=[777888999000111222])
+store.page(42, page=1, subject_ids=[777888999000111222])
 clause = col.queries[0]["$and"][0]["$or"]
 # The indexed field is tried first; the text it came from is the fallback, and
 # it only applies to rows that never had the field. Without the $exists guard a
 # new row would be matched twice and an old one not at all.
-assert clause[0] == {"user_ids": {"$in": [777888999000111222]}}, clause
-assert clause[1]["user_ids"] == {"$exists": False}, clause
+assert clause[0] == {"subject_id": {"$in": [777888999000111222]}}, clause
+assert clause[1]["subject_id"] == {"$exists": False}, clause
 assert "777888999000111222" in clause[1]["description"]["$regex"], clause
-print("a user filter reaches rows written before ids were extracted")
+print("a subject filter reaches rows written before the roles were told apart")
 
 # Several people means any of them, not all of them: nobody picks two names to
 # see only the events that name both.
 col = Col()
 store = event_log.EventLogStore(col)
-store.page(42, user_ids=[111111111111111111, 222222222222222222],
+store.page(42, subject_ids=[111111111111111111, 222222222222222222],
            channel_ids=[444444444444444444])
 both = col.queries[0]["$and"]
 assert len(both) == 2, both
-assert both[0]["$or"][0]["user_ids"]["$in"] == [111111111111111111, 222222222222222222]
+assert both[0]["$or"][0]["subject_id"]["$in"] == [111111111111111111, 222222222222222222]
 pattern = both[0]["$or"][1]["description"]["$regex"]
 assert "111111111111111111|222222222222222222" in pattern, pattern
-assert re.search(pattern, "roles for <@222222222222222222> changed"), pattern
-assert not re.search(pattern, "roles for <@555555555555555555> changed"), pattern
 assert both[1]["$or"][0]["channel_ids"]["$in"] == [444444444444444444]
 print("several ids match any of them, in the index and in the fallback")
+
+# The fallback patterns have to keep the two roles apart on old rows too, or
+# the answer changes depending on how long ago the event happened.
+col = Col()
+store = event_log.EventLogStore(col)
+store.page(42, subject_ids=[111111111111111111])
+subject_pattern = col.queries[0]["$and"][0]["$or"][1]["description"]["$regex"]
+col = Col()
+store = event_log.EventLogStore(col)
+store.page(42, actor_ids=[111111111111111111])
+actor_pattern = col.queries[0]["$and"][0]["$or"][1]["description"]["$regex"]
+
+DONE_TO = "👤 **<@111111111111111111>** (`111111111111111111`) roles updated by <@222222222222222222>"
+DONE_BY = "👤 **<@222222222222222222>** (`222222222222222222`) roles updated by <@111111111111111111>"
+assert re.search(subject_pattern, DONE_TO), "the bolded mention is the subject"
+assert not re.search(subject_pattern, DONE_BY), "the one after 'by' is not"
+assert re.search(actor_pattern, DONE_BY), "the mention after 'by' is the actor"
+assert not re.search(actor_pattern, DONE_TO), "the bolded one is not"
+print("old rows answer 'done to' and 'done by' as two different questions")
+
+# The rule the whole split rests on: every template that names an actor puts the
+# word "by" in front of it. If one stops, this fails rather than the filter
+# quietly swapping who did what to whom.
+import lang
+A, B = "111111111111111111", "222222222222222222"
+TEMPLATES = {
+    "LOG_MEMBER_KICK": dict(mention=f"<@{A}>", actor=f"<@{B}>", now=1, reason="x"),
+    "LOG_MEMBER_BAN": dict(mention=f"<@{A}>", actor=f"<@{B}>", now=1, reason="x"),
+    "LOG_MEMBER_UNBAN": dict(mention=f"<@{A}>", actor=f"<@{B}>", now=1),
+    "LOG_NICK_CHANGE": dict(mention=f"<@{A}>", id=A, actor=f"<@{B}>", now=1, old="a", new="b"),
+    "LOG_TIMEOUT_ADD": dict(mention=f"<@{A}>", id=A, actor=f"<@{B}>", now=1, until=2, reason="x"),
+    "LOG_TIMEOUT_REMOVE": dict(mention=f"<@{A}>", id=A, actor=f"<@{B}>", now=1, reason="x"),
+    "LOG_VOICE_MUTE": dict(mention=f"<@{A}>", id=A, action="muted", actor=f"<@{B}>",
+                           channel="<#444444444444444444>", now=1),
+    "LOG_VOICE_DEAFEN": dict(mention=f"<@{A}>", id=A, action="deafened", actor=f"<@{B}>",
+                             channel="<#444444444444444444>", now=1),
+}
+for name, kwargs in TEMPLATES.items():
+    found = event_log.subjects(getattr(lang, name).format(**kwargs))
+    assert found["actor_id"] == int(B), f"{name}: actor came out as {found['actor_id']}"
+    assert found["subject_id"] == int(A), f"{name}: subject came out as {found['subject_id']}"
+# The listeners build the other half themselves, as " by {mention}".
+built = event_log.subjects(
+    lang.LOG_ROLE_UPDATE.format(mention=f"<@{A}>", id=A, actor=f" by <@{B}>", now=1))
+assert (built["subject_id"], built["actor_id"]) == (int(A), int(B)), built
+# And a deletion names the deleter in its own wording.
+deleted = event_log.subjects(lang.LOG_MESSAGE_DELETE.format(
+    mention=f"<@{A}>", id=A, channel="<#444444444444444444>",
+    deleter=lang.LOG_DELETED_BY.format(mention=f"<@{B}>"), now=1))
+assert (deleted["subject_id"], deleted["actor_id"]) == (int(A), int(B)), deleted
+# Nobody did it: an event with no actor must not borrow the subject as one.
+joined = event_log.subjects(lang.LOG_MEMBER_JOIN.format(mention=f"<@{A}>", id=A, now=1))
+assert joined["actor_id"] is None and joined["subject_id"] == int(A), joined
+# And an event with no subject must not borrow the actor as one.
+made = event_log.subjects(lang.LOG_CHANNEL_CREATE.format(
+    entity="Channel", display="<#444444444444444444>", actor=f" by <@{B}>", now=1))
+assert made["subject_id"] is None and made["actor_id"] == int(B), made
+print(f"every one of {len(TEMPLATES) + 4} real templates splits the two roles correctly")
 
 col = Col()
 store = event_log.EventLogStore(col)
@@ -185,8 +244,8 @@ DOCS = [
 data = {"rows": DOCS, "total": 2, "page": 1, "pages": 3}
 options = {"types": {"MESSAGE_DELETE": 5, "THREAD_CREATE": 1},
            "people": [111111111111111111, 999999999999999999], "channels": [444444444444444444]}
-chosen = {"type": "MESSAGE_DELETE", "group": "", "user": [111111111111111111],
-          "channel": [], "from": "2026-08-01", "to": ""}
+chosen = {"type": "MESSAGE_DELETE", "group": "", "subject": [111111111111111111],
+          "actor": [], "channel": [], "from": "2026-08-01", "to": ""}
 page = routes._server_log_html(None, guild, data, options, chosen)
 
 assert "Server log" in page and "2 event(s)" in page
@@ -200,7 +259,8 @@ assert 'class="ms-chip" data-id="111111111111111111"' in page, "the choice comes
 assert ">Mido<" in page, "and reads as a name rather than as a snowflake"
 assert '<input type="date" name="from"\n      value="2026-08-01">' in page, page[:0] or "date kept"
 # Every filter has to travel with the pager or page two silently drops the search.
-assert "type=MESSAGE_DELETE" in page and "user=111111111111111111" in page and "from=2026-08-01" in page
+assert "type=MESSAGE_DELETE" in page
+assert "subject=111111111111111111" in page and "from=2026-08-01" in page
 # The field name and its value both render.
 assert "Content" in page and "hello" in page
 print("page renders with filters preserved")
@@ -223,21 +283,33 @@ print("channels offered:", [c["label"] for c in chans])
 
 # Nothing chosen is still a working control, and the placeholder is the "any"
 # state rather than a value.
-none_picked = dict(chosen, user=[], channel=[])
+none_picked = dict(chosen, subject=[], actor=[], channel=[])
 blank = routes._server_log_html(None, guild, data, options, none_picked)
-assert 'placeholder="Anyone"' in blank and 'placeholder="Anywhere"' in blank
+assert 'placeholder="Done to anyone"' in blank and 'placeholder="By anyone"' in blank
+assert 'placeholder="Anywhere"' in blank
 # The closing quote matters: the empty container is class="ms-chips", which a
 # looser check matches happily.
 assert 'class="ms-chip"' not in blank, "no chips when nothing is picked"
-assert 'name="user"' in blank and 'name="channel"' in blank
+assert 'name="subject"' in blank and 'name="actor"' in blank
+assert 'name="channel"' in blank
 print("empty pickers keep their placeholders")
 
+# Every filter needs its own name in the query string. "Done to" and the date
+# "to" were briefly both called `to`, which one form silently resolves by
+# throwing one of them away.
+names = re.findall(r'<(?:input|select)[^>]*\sname="([^"]+)"', blank)
+assert sorted(names) == ["actor", "channel", "from", "subject", "to", "type"], names
+assert len(names) == len(set(names)), f"two filters share a name: {names}"
+# And "to" is still the date, not a person.
+assert re.search(r'type="date" name="to"', blank), "the date kept its name"
+print("filter field names:", names)
+
 # Two people at once: two chips, and both ids in the value the form submits.
-two = dict(chosen, user=[MIDO.id, FOX.id])
+two = dict(chosen, subject=[MIDO.id, FOX.id])
 page2 = routes._server_log_html(None, guild, data, options, two)
 assert page2.count('class="ms-chip"') == 2, "one chip each"
 assert f'value="{MIDO.id},{FOX.id}"' in page2, "and one field carrying both"
-assert f"user={MIDO.id},{FOX.id}" in page2, "which the pager carries too"
+assert f"subject={MIDO.id},{FOX.id}" in page2, "which the pager carries too"
 print("two people picked at once")
 
 

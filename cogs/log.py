@@ -190,6 +190,11 @@ class Log(commands.Cog, name="log"):
             "timestamp": discord.utils.utcnow().isoformat(),
             "user_ids": named["user_ids"],
             "channel_ids": named["channel_ids"],
+            # Who it happened to, and who did it. Kept apart because they are
+            # different questions: filtering on a moderator should not return
+            # every role change they ever made to somebody else.
+            "subject_id": named["subject_id"],
+            "actor_id": named["actor_id"],
         }
         self.bot.loop.run_in_executor(None, self._insert_db, db_data)
 
