@@ -986,6 +986,15 @@ TRIAL_CARD_TOP = "Top of the ladder. Nothing left to prove. 🏆"
 TRIAL_CARD_PROGRESS = "**{needed}** more to reach {next}"
 TRIAL_CARD_POINTS = "{points} points"
 TRIAL_CARD_STEPS_TITLE = "Next steps:"
+# Where they sit on the server's board, and who is immediately ahead. {place}
+# {total} {name} {score} {gap} are filled in by the cog.
+TRIAL_CARD_BOARD_TITLE = "Where you stand: #{place} of {total}"
+TRIAL_CARD_BOARD_LINE = "**#{place}** {name} · {score} (+{gap})"
+TRIAL_CARD_BOARD_YOU = "**#{place} {name} · {score}** ← you"
+TRIAL_CARD_BOARD_TOP = "Nobody is ahead of you. 🥇"
+# A Discord footer is plain text: no links, no markdown. So the board link goes
+# on the last line of the body instead, which is where it reads as one anyway.
+TRIAL_CARD_BOARD_LINK = "[See the full rankings]({url})"
 TRIAL_CARD_STEPS_EMPTY = (
     "Nothing on the board is priced for you yet. Ask an officer what's worth points."
 )

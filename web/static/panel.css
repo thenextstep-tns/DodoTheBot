@@ -604,6 +604,11 @@ nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
 /* The everyone-at-once row. Set apart from the one-person box above it and
    marked in the warning colour: it is the only control on this page that
    overrides an answer somebody already gave. */
+/* A URL is long and the box sits in a row of controls, so it takes the slack. */
+.urlbox { flex: 1 1 320px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 12px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+
 .pilotall { padding-top: 10px; border-top: 1px dashed var(--color-hairline); }
 .pilotall button { border-color: var(--color-warning); }
 .pilotall .small { flex: 1 1 320px; }

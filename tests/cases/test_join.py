@@ -28,11 +28,18 @@ decorators = [ast.unparse(d) for d in node.decorator_list]
 assert any("Cog.listener" in d for d in decorators), decorators
 print("on_member_join  registered as a listener")
 
-# There is exactly one of each listener: a duplicate definition silently wins
-# and the earlier one becomes dead code nobody notices editing.
-for name in ("on_member_join", "on_member_update", "refresh", "recalculate"):
-    assert src.count(f"    async def {name}(") == 1, f"{name} is defined more than once"
-print("no duplicated method definitions")
+# Exactly one of every method, not just of the four listeners this once named.
+# A duplicate definition silently wins and the earlier copy becomes dead code:
+# editing it changes nothing, and nothing anywhere says so. A block of nine
+# methods sat pasted twice in this file for weeks precisely because the check
+# below was a hand-written list that did not mention them.
+_cls = next(n for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == "TrialRanks")
+_defined = [n.name for n in _cls.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+_twice = sorted({n for n in _defined if _defined.count(n) > 1})
+assert not _twice, f"defined more than once, the later copy wins: {_twice}"
+print(f"no duplicated method definitions ({len(_defined)} methods)")
 
 
 class Col:

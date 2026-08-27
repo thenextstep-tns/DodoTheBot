@@ -670,6 +670,57 @@ def breakdown_for(guild, role_ids: Iterable[int], points: dict, trials: list[dic
     return rows
 
 
+def leaderboard(guild, config: dict, user_ids: Iterable[int],
+                records: dict = None) -> list[dict]:
+    """Everyone on the automated system, best first.
+
+    The same arithmetic the public board does, kept in one place so the card and
+    the board can never disagree about who is ahead of whom. Ties break on name,
+    exactly as they do on the board, which is what lets both call the same
+    person the same number.
+    """
+    points = config.get("points") or {}
+    trials = config.get("trials") or []
+    wanted = {int(uid) for uid in user_ids or ()}
+    rows = []
+    for member in getattr(guild, "members", None) or ():
+        if getattr(member, "bot", False) or int(member.id) not in wanted:
+            continue
+        held = {role.id for role in member.roles}
+        score = (score_for(held, points, trials=trials)
+                 + wr_points((records or {}).get(member.id)))
+        rows.append({"user_id": int(member.id), "name": member.display_name,
+                     "score": score})
+    rows.sort(key=lambda row: (-row["score"], row["name"].lower()))
+    return rows
+
+
+def placing(rows: list[dict], user_id: int, *, ahead: int = 2) -> Optional[dict]:
+    """Where somebody sits on that list, and the few people directly above.
+
+    Returns ``None`` when they are not on it at all, which is not an error: a
+    card can be asked for before the standings have caught up.
+
+    Positions are the position in the list, ties included, because the board
+    numbers its rows the same way. Competition ranking would read better here
+    and would then disagree with the page the card links to.
+    """
+    index = next((i for i, row in enumerate(rows) if row["user_id"] == int(user_id)), None)
+    if index is None:
+        return None
+    mine = rows[index]
+    above = rows[max(0, index - int(ahead)):index]
+    return {
+        "place": index + 1,
+        "total": len(rows),
+        "score": mine["score"],
+        # Top-down, so the slice reads like the board it is a slice of.
+        "above": [{"place": index - len(above) + offset + 1, "name": row["name"],
+                   "score": row["score"], "gap": row["score"] - mine["score"]}
+                  for offset, row in enumerate(above)],
+    }
+
+
 def find_members(guild, names: Iterable[str], *, limit: int = 10) -> list[dict]:
     """Resolve typed names to members: id, mention, exact, prefix, then substring.
 
@@ -916,6 +967,10 @@ class TrialRankManager:
                 "announce_channel_id": int(doc.get("announce_channel_id") or 0),
                 "announce_message_id": int(doc.get("announce_message_id") or 0),
                 "log_channel_id": int(doc.get("log_channel_id") or 0),
+                # The public board's address, so the card can link to it. It
+                # has to be stored rather than derived: the token behind the
+                # link is only ever kept hashed, so nothing can rebuild it.
+                "board_url": doc.get("board_url") or "",
             }
         return self._cache[guild_id]
 
@@ -923,7 +978,7 @@ class TrialRankManager:
         fields = {key: data[key] for key in
                   ("points", "ranks", "trials", "enabled", "exclusive",
                    "announce_channel_id", "announce_message_id",
-                   "log_channel_id") if key in data}
+                   "log_channel_id", "board_url") if key in data}
         if not fields:
             return
         fields["updated_at"] = datetime.datetime.now(datetime.timezone.utc)

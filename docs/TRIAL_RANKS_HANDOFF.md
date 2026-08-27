@@ -57,7 +57,8 @@ hadn't. `run_for_guild` still exists for the panel's **Recalculate now**.
 
 ```
 TrialRanks         {_id: guild_id, points, ranks, trials, exclusive,
-                    announce_channel_id, announce_message_id, log_channel_id}
+                    announce_channel_id, announce_message_id, log_channel_id,
+                    board_url}
 TrialStandings     {guild_id, user_id, score, rank}
 TrialEnrollment    {guild_id, user_id, state, name, source, *_at}
 TrialRankImages    {guild_id, role_id, data, content_type}
@@ -108,6 +109,25 @@ needed for the next rung, the next steps with their marginal gains, then the
 clears the total came from. Adding a field to the card means adding it in both
 places or it will drift.
 
+**The card shows where they stand, worked out live.** `standing_of` scores
+every enrolled member on the spot rather than reading `TrialStandings`: the
+stored row is only as fresh as that person's last recalculation, and "you are 4
+behind Fox" has to be right about Fox too. Ties break on name, the same way the
+board numbers its rows, so both call the same person the same number.
+
+**The board link is stored, not derived.** Only the token's hash is kept, so
+nothing can rebuild the URL. `board_url` on the guild config holds it, filled in
+automatically the moment a link is issued and cleared when one is revoked; the
+panel also takes a paste, which is the only way to attach a link issued before
+this existed. The consequence worth knowing: that row holds a working
+capability link in plaintext, which the `ShareTokens` collection deliberately
+does not. Validation refuses anything not containing `/r/<guild id>/`, because
+the bot posts this link to members.
+
+**A Discord embed footer is plain text.** No markdown, no links. The board link
+therefore sits on the last line of the body, directly above the footer, which
+is where it reads as one anyway. `set_footer` is unchanged.
+
 **Strings resolve through a chain.** `bot.lang.get(key, guild=, locale=)` walks
 guild+locale → guild+default → global+locale → global+default → `lang.py`.
 `lang.KEY` still works and means the global/default layer. Per-guild and
@@ -154,6 +174,10 @@ issued.
   collection was more forgiving than Mongo, or a fake `Guild` lacked `.me`.
 - **Check the database before theorising.** Two wrong diagnoses in a row were
   settled in one query.
+- **Nine methods were pasted twice in `cogs/trial_ranks.py`** and sat that way
+  for weeks. The later copy wins, so editing the earlier one changed nothing.
+  Removed; `test_join` now checks every method in the class rather than a
+  hand-written list of four, which is why it went unnoticed.
 - Nik's style: no em dashes in user-facing copy, no filler, plain sentences.
 
 ## Testing

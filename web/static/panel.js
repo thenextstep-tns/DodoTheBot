@@ -2359,8 +2359,25 @@ function bindMemberPicker(pick, members) {
     out.append(head, box);
     out.hidden = false;
     box.focus();
+    // The card's link is filled in server-side at the same moment; reflect it
+    // here so the field isn't showing the dead previous link.
+    const field = document.getElementById("boardurl");
+    if (field) field.value = res.url;
     flash("link created, copy it now", true);
   });
+
+  // Saved on change: it sits nowhere near the Save button, so waiting for one
+  // would quietly lose the paste.
+  const boardUrl = document.getElementById("boardurl");
+  if (boardUrl) {
+    boardUrl.addEventListener("change", async () => {
+      const res = await post(`/api/guild/${guildId}/trials`,
+                             { action: "board_url", url: boardUrl.value.trim() });
+      flash(res.ok ? (res.url ? "the /rank card links to the board ✓"
+                              : "link taken off the /rank card")
+                   : (res.error || "Failed"), res.ok);
+    });
+  }
 
   const kill = document.getElementById("sharekill");
   if (kill) {

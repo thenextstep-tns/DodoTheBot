@@ -603,6 +603,20 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             bonus=trial_ranks.wr_points(
                 self.bot.trial_ranks.wr_for(member.guild.id, member.id)))
 
+    def standing_of(self, member) -> dict | None:
+        """Where this member sits on the server board, and who is just ahead.
+
+        Worked out live from the enrolled members rather than read from
+        ``TrialStandings``: the stored row is only as fresh as that person's
+        last recalculation, and a card that says "you are 4 behind Fox" has to
+        be right about Fox too, not only about the person reading it.
+        """
+        config = self.bot.trial_ranks.get(member.guild.id)
+        rows = trial_ranks.leaderboard(
+            member.guild, config, self.bot.trial_ranks.enrolled_ids(member.guild.id),
+            self.bot.trial_ranks.wr_all(member.guild.id))
+        return trial_ranks.placing(rows, member.id)
+
     async def rank_embed(self, member) -> tuple[discord.Embed, list, discord.ui.View | None]:
         """The pretty card: where they are, how far along, and what's next.
 
@@ -674,7 +688,30 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 value = lang.TRIAL_CARD_STEPS_EMPTY
             embed.add_field(name=lang.TRIAL_CARD_STEPS_TITLE, value=value, inline=False)
 
-        embed.add_field(name="​", value=lang.TRIAL_CARD_OUTRO, inline=False)
+        # Where they sit against everyone else on the system, and who is close
+        # enough ahead to be worth chasing. The rank says how good they are;
+        # this says how they are doing, which is the other half of the question
+        # and the half a ladder on its own never answers.
+        board = self.standing_of(member)
+        if board is not None:
+            lines = [lang.TRIAL_CARD_BOARD_LINE.format(**row) for row in board["above"]]
+            lines.append(lang.TRIAL_CARD_BOARD_YOU.format(
+                place=board["place"], name=member.display_name, score=board["score"]))
+            if not board["above"]:
+                lines.append(lang.TRIAL_CARD_BOARD_TOP)
+            embed.add_field(
+                name=lang.TRIAL_CARD_BOARD_TITLE.format(place=board["place"],
+                                                        total=board["total"]),
+                value="\n".join(lines)[:1024], inline=False)
+
+        # The board link rides on the last line of the body, not in the footer:
+        # a Discord footer is plain text, so a link put there arrives as a piece
+        # of unclickable URL. This is the closest place to it that is a link.
+        outro = [lang.TRIAL_CARD_OUTRO]
+        board_url = (config.get("board_url") or "").strip()
+        if board_url:
+            outro.append(lang.TRIAL_CARD_BOARD_LINK.format(url=board_url))
+        embed.add_field(name="​", value="\n\n".join(outro), inline=False)
 
         files = []
         if current:
@@ -1095,287 +1132,6 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
             await self.recalculate(member)
         except Exception as error:  # noqa: BLE001 - showing the card matters more
             self.bot.logger.error(f"Trial rank refresh failed for {member.id}: {error}")
-
-    # ------------------------------------------------------------------ #
-    #  The rank card
-    # ------------------------------------------------------------------ #
-    def rank_view(self, member) -> dict:
-        """Everything /rank needs, computed off the roles the member holds."""
-        config = self.bot.trial_ranks.get(member.guild.id)
-        held = {role.id for role in member.roles}
-        return trial_ranks.missing_for_next(
-            member.guild, held, config.get("points") or {}, config.get("ranks") or [],
-            trials=config.get("trials") or [],
-            bonus=trial_ranks.wr_points(
-                self.bot.trial_ranks.wr_for(member.guild.id, member.id)))
-
-    async def rank_embed(self, member) -> tuple[discord.Embed, list, discord.ui.View | None]:
-        """The pretty card: where they are, how far along, and what's next.
-
-        Returns the view too — the interest button only exists when there are
-        recommendations for it to refer to.
-        """
-        state = self.rank_view(member)
-        current, upcoming = state["current"], state["next"]
-        current_name = trial_ranks.rank_name(current, member.guild) if current else None
-
-        config = self.bot.trial_ranks.get(member.guild.id)
-        if not config.get("ranks"):
-            # No rungs configured: "you're at the top of the ladder" would be a
-            # lie about a ladder that doesn't exist yet.
-            embed = discord.Embed(
-                title=lang.TRIAL_NO_LADDER_TITLE,
-                description=lang.TRIAL_NO_LADDER_BODY,
-                colour=discord.Colour.blurple())
-            embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-            embed.add_field(name=lang.TRIAL_CARD_POINTS.format(points=state["score"]),
-                            value=lang.TRIAL_NO_LADDER_POINTS, inline=False)
-            return embed, [], None
-
-        # The rank line lives in the description, not the title: a title renders
-        # a role mention as literal text, while a description renders it in the
-        # role's own colour — and mentions inside an embed never notify anyone.
-        # The stars go on their own line so a phone can't wrap them into the name.
-        stars = rank_stars(state["position"], state["total"])
-        role = member.guild.get_role(int(current["role_id"])) if current else None
-        name = role.mention if role is not None else f"**{current_name or lang.TRIAL_CARD_NO_RANK}**"
-        blocks = [lang.TRIAL_CARD_HEADING.format(rank=name, stars=stars).strip()]
-        if current and current.get("description"):
-            blocks.append(current["description"])
-
-        embed = discord.Embed(
-            description="\n\n".join(blocks),
-            colour=role.colour if role is not None and role.colour.value
-            else (member.colour if member.colour.value else discord.Colour.blurple()),
-        )
-        # Records are the person's, so they sit with their name rather than
-        # with the rank they helped earn.
-        medals = trial_ranks.wr_medals(
-            self.bot.trial_ranks.wr_for(member.guild.id, member.id))
-        embed.set_author(name=f"{member.display_name} {medals}".strip(),
-                         icon_url=member.display_avatar.url)
-
-        points_label = lang.TRIAL_CARD_POINTS.format(points=state["score"])
-        if upcoming is None:
-            embed.add_field(name=points_label,
-                            value=f"{progress_bar(1.0)}\n{lang.TRIAL_CARD_TOP}",
-                            inline=False)
-        else:
-            next_role = member.guild.get_role(int(upcoming["role_id"]))
-            next_name = (next_role.mention if next_role is not None
-                         else f"**{trial_ranks.rank_name(upcoming, member.guild)}**")
-            # Points, not a percentage: "1%" right after a rank-up told nobody
-            # anything, while "252 → 375" is the actual question being asked.
-            embed.add_field(
-                name=points_label,
-                value=(f"{progress_bar(state['fraction'])}  "
-                       f"{state['score']} → {upcoming['min_points']}\n"
-                       + lang.TRIAL_CARD_PROGRESS.format(needed=state["needed"],
-                                                         next=next_name)),
-                inline=False)
-            if state["steps"]:
-                lines = [f"• **+{step['gain']}** · {step['name']}" for step in state["steps"]]
-                value = "\n".join(lines)[:1024]
-            else:
-                value = lang.TRIAL_CARD_STEPS_EMPTY
-            embed.add_field(name=lang.TRIAL_CARD_STEPS_TITLE, value=value, inline=False)
-
-        embed.add_field(name="​", value=lang.TRIAL_CARD_OUTRO, inline=False)
-
-        files = []
-        if current:
-            picture = self.bot.trial_ranks.image(member.guild.id, current["role_id"])
-            if picture and picture.get("data"):
-                # Attached rather than linked: the panel sits behind a login, so
-                # there is no public URL for Discord to fetch. The extension has
-                # to match what was uploaded for the embed to render it.
-                extension = _EXTENSIONS.get(picture.get("content_type"), "png")
-                name = f"rank.{extension}"
-                files.append(discord.File(io.BytesIO(bytes(picture["data"])), filename=name))
-                embed.set_thumbnail(url=f"attachment://{name}")
-        embed.set_footer(text=lang.TRIAL_CARD_FOOTER)
-        # The button refers to "one of those", so it only makes sense when the
-        # card actually listed something.
-        # Only trial roles can be progged for, so the button offers only those,
-        # and doesn't appear at all when the advice is achievements alone.
-        proggable = [step["role_id"] for step in state["steps"] if step["trial"] is not None]
-        view = InterestView(self, member, proggable) if proggable else None
-        return embed, files, view
-
-    # ------------------------------------------------------------------ #
-    #  The consent flow
-    # ------------------------------------------------------------------ #
-    async def handle_check(self, interaction: discord.Interaction) -> None:
-        """The announcement button: show the rank, or ask to switch them over."""
-        member = interaction.user
-        guild = interaction.guild
-        if guild is None or not isinstance(member, discord.Member):
-            await interaction.response.send_message(
-                lang.TRIAL_ERROR_GUILD_ONLY, ephemeral=True)
-            return
-        if self.bot.trial_ranks.is_enrolled(guild.id, member.id):
-            # thinking=True makes a fresh ephemeral message the "original
-            # response", so editing it can't touch the pinned announcement.
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await self.refresh(member)
-            embed, files, view = await self.rank_embed(member)
-            await interaction.edit_original_response(embed=embed, attachments=files,
-                                                     view=view)
-            await self.log_event(guild, f"{member.mention} checked their rank.")
-            return
-
-        self.bot.trial_ranks.set_state(guild.id, member.id, trial_ranks.STATE_PROMPTED,
-                                       name=member.display_name, source="button")
-        view = ConsentView(self, member)
-        await interaction.response.send_message(
-            content=lang.TRIAL_CONSENT_ASK.format(mention=member.mention),
-            view=view, ephemeral=True)
-        view.interaction = interaction
-        await self.log_event(guild, f"{member.mention} was asked to switch to automatic ranking.")
-
-    async def accept_consent(self, interaction: discord.Interaction, member) -> None:
-        # Deferred *without* thinking, so the original response stays the
-        # question — answering it turns that same message into the rank card.
-        await interaction.response.defer()
-        await self.enrol(member, source="button")
-        embed, files, view = await self.rank_embed(member)
-        await interaction.edit_original_response(
-            content=lang.TRIAL_CONSENT_DONE,
-            embed=embed, attachments=files, view=view)
-
-    async def explain_system(self, interaction: discord.Interaction, member) -> None:
-        """Send the brief description plus the chart, privately.
-
-        A separate ephemeral message: the question keeps its buttons, so reading
-        the explanation and then saying yes is one flow rather than two.
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        self.bot.trial_ranks.set_state(member.guild.id, member.id, trial_ranks.STATE_READ,
-                                       name=member.display_name, source="button")
-        config = self.bot.trial_ranks.get(member.guild.id)
-        files = []
-        try:
-            png = await self.bot.loop.run_in_executor(
-                None, trial_image.build, member.guild, config)
-            files.append(discord.File(io.BytesIO(png), filename="trial-ranks.png"))
-        except Exception as error:  # noqa: BLE001 - the words matter more than the picture
-            self.bot.logger.error(f"Trial rank chart failed for {member.guild.id}: {error}")
-        await interaction.edit_original_response(content=lang.TRIAL_HOW_IT_WORKS, attachments=files)
-        await self.log_event(
-            member.guild, f"{member.mention} read how automatic ranking works.")
-
-    # ------------------------------------------------------------------ #
-    #  Prog interest
-    # ------------------------------------------------------------------ #
-    async def record_interest(self, interaction: discord.Interaction, member,
-                              role_ids: list[int]) -> None:
-        """Bank the "I'd prog for one of those" press and thank them for it."""
-        config = self.bot.trial_ranks.get(member.guild.id)
-        mapped = set(trial_ranks.slot_of(config.get("trials") or []))
-        role_ids = [r for r in role_ids if int(r) in mapped]
-        await self.bot.loop.run_in_executor(
-            None, self.bot.trial_ranks.record_interest, member.guild.id, member.id,
-            member.display_name, role_ids)
-        # edit_message keeps the card on screen and takes the button away, so
-        # the whole interaction is one press and one thank-you.
-        await interaction.response.edit_message(content=lang.TRIAL_INTEREST_THANKS, view=None)
-
-        wanted = []
-        for role_id in role_ids:
-            role = member.guild.get_role(int(role_id))
-            label = trial_ranks.trial_of_role(role_id, config.get("trials") or [])
-            wanted.append(label or (role.name if role else str(role_id)))
-        await self.log_event(
-            member.guild,
-            f"{member.mention} would join a prog for: "
-            # dict.fromkeys keeps first-seen order while dropping the repeats a
-            # hardmode and its trifecta produce for the same raid.
-            + ", ".join(list(dict.fromkeys(wanted))[:20]),
-            title="Trial ranks: prog interest")
-
-    # ------------------------------------------------------------------ #
-    #  Commands
-    # ------------------------------------------------------------------ #
-    @commands.hybrid_command(
-        name="rank",
-        description="Show your trial rank, your points and what you need for the next one.")
-    @commands.guild_only()
-    async def rank(self, context: commands.Context) -> None:
-        member = context.author
-        if not self.bot.trial_ranks.is_enrolled(context.guild.id, member.id):
-            self.bot.trial_ranks.set_state(
-                context.guild.id, member.id, trial_ranks.STATE_PROMPTED,
-                name=member.display_name, source="command")
-            view = ConsentView(self, member)
-            message = await context.send(
-                lang.TRIAL_CONSENT_ASK.format(mention=member.mention),
-                view=view, ephemeral=True)
-            # A prefix invocation has no interaction, so the message it sent is
-            # what gets the closing word when the ask times out.
-            view.interaction = context.interaction
-            view.message = message
-            await self.log_event(context.guild,
-                                 f"{member.mention} was asked to switch to automatic ranking.")
-            return
-        # Acknowledge before doing anything slow. From here the command reads
-        # Mongo and can edit roles, which does not fit inside Discord's three
-        # second budget, and blowing it shows "the application did not respond"
-        # even though the work went through. Deferred only on this branch: the
-        # consent reply below is one cached read, and deferring it would change
-        # which message the timeout has to edit.
-        await context.defer(ephemeral=True)
-        await self.refresh(member)
-        embed, files, view = await self.rank_embed(member)
-        await context.send(embed=embed, files=files, view=view or discord.utils.MISSING,
-                           ephemeral=True)
-        await self.log_event(context.guild, f"{member.mention} checked their rank.")
-
-    async def trial_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Offer the raids people have actually shown interest in, busiest first."""
-        guild = interaction.guild
-        if guild is None:
-            return []
-        config = self.bot.trial_ranks.get(guild.id)
-        rows = await self.bot.loop.run_in_executor(
-            None, self.bot.trial_ranks.interest_rows, guild.id)
-        buckets = trial_ranks.interest_buckets(guild, config, rows)
-        query = (current or "").lower()
-        return [
-            discord.app_commands.Choice(
-                name=f"{bucket['name']} · {bucket['count']}/{trial_ranks.GROUP_SIZE}",
-                value=bucket["name"])
-            for bucket in buckets if query in bucket["name"].lower()
-        ][:25]
-
-    @commands.hybrid_command(
-        name="interest",
-        description="Who would join a prog, and which clears they still need.")
-    @commands.guild_only()
-    @discord.app_commands.describe(trial="Which trial, e.g. vRG. Leave empty for all of them")
-    @discord.app_commands.autocomplete(trial=trial_autocomplete)
-    async def interest(self, context: commands.Context, *, trial: str = "") -> None:
-        config = self.bot.trial_ranks.get(context.guild.id)
-        rows = await self.bot.loop.run_in_executor(
-            None, self.bot.trial_ranks.interest_rows, context.guild.id)
-        buckets = trial_ranks.interest_buckets(context.guild, config, rows)
-        if not buckets:
-            await context.send(lang.TRIAL_INTEREST_EMPTY, ephemeral=True)
-            return
-
-        wanted = (trial or "").strip().lower()
-        if not wanted:
-            await context.send(embed=self._interest_overview(buckets), ephemeral=True)
-            return
-
-        bucket = next((b for b in buckets if b["name"].lower() == wanted), None)
-        if bucket is None:
-            # A near miss is far more likely than a typo nobody meant, so try a
-            # contains-match before giving up.
-            bucket = next((b for b in buckets if wanted in b["name"].lower()), None)
-        if bucket is None:
-            await context.send(lang.TRIAL_INTEREST_UNKNOWN.format(trial=trial), ephemeral=True)
-            return
-        await context.send(embed=self._interest_detail(context.guild, bucket), ephemeral=True)
 
 
 async def setup(bot):

@@ -2192,6 +2192,14 @@ def _trials_html(bot, guild, scope: str, viewer_id: int = 0) -> str:
           {'<button id="sharekill" class="ghost">Revoke</button>' if share_live else ''}
         </div>
         <div id="sharelink" class="sharelink" hidden></div>
+        <div class="announcebar">
+          <div><b>Link on the /rank card</b>
+            <div class="muted small">The address the "See the full rankings" line points at.
+            Filled in for you when you create a link above. Paste one here if you already
+            have a link, since only its hash is kept and it can't be read back out.</div></div>
+          <input id="boardurl" class="urlbox" placeholder="https://…/r/{guild.id}/…"
+            value="{html.escape(config.get("board_url") or "")}" autocomplete="off">
+        </div>
         <div class="sandbox">
           <div class="explain"><p>Simulates ranks for the server with the selected ruleset,
           including edits you haven't saved.</p></div>
@@ -3108,18 +3116,43 @@ async def api_guild_trials(request: web.Request):
         return web.json_response({"ok": True, "message_id": str(message.id),
                                   "channel": channel.name})
 
+    if action == "board_url":
+        url = str(data.get("url") or "").strip()
+        # Any host, because the panel can be fronted by a custom domain, but it
+        # has to be this guild's board. The bot posts this link to members, so
+        # an arbitrary address here would be a way to have the bot hand out
+        # somebody else's.
+        if url and not (url.startswith("https://") or url.startswith("http://")):
+            return _bad("A board link has to start with https://")
+        if url and f"/r/{guild.id}/" not in url:
+            return _bad("That isn't this server's board link. It should contain "
+                        f"/r/{guild.id}/")
+        was = bot.trial_ranks.get(guild.id).get("board_url") or ""
+        bot.trial_ranks.save(guild.id, {"board_url": url})
+        await _record_change(
+            request, audit_log.KIND_TRIAL, "board link on /rank",
+            "set" if was else None, "set" if url else None,
+            "The /rank card now links to the public board" if url
+            else "The /rank card no longer links to the public board")
+        return web.json_response({"ok": True, "url": url})
+
     if action in ("share_make", "share_kill"):
         if action == "share_kill":
             bot.share_tokens.revoke_all(guild.id, kind=share_tokens.KIND_PUBLIC)
+            # The card must not keep pointing at a link that now 404s.
+            bot.trial_ranks.save(guild.id, {"board_url": ""})
             await _record_change(request, audit_log.KIND_TRIAL, "public link",
                                  "active", None, "Public leaderboard link revoked")
             return web.json_response({"ok": True})
         token = bot.share_tokens.issue(guild.id, kind=share_tokens.KIND_PUBLIC)
+        url = f"{WEB_PUBLIC_URL.rstrip('/')}/r/{guild.id}/{token}"
+        # Issuing is the one moment the plaintext exists, so this is the only
+        # moment the card's link can be filled in without anybody pasting it.
+        bot.trial_ranks.save(guild.id, {"board_url": url})
         await _record_change(request, audit_log.KIND_TRIAL, "public link", None, "issued",
                              "Public leaderboard link issued (previous one revoked)")
         # The one and only time this value exists outside the reader's browser.
-        return web.json_response({"ok": True,
-                                  "url": f"{WEB_PUBLIC_URL.rstrip('/')}/r/{guild.id}/{token}"})
+        return web.json_response({"ok": True, "url": url})
 
     if action == "wr_set":
         tag = str(data.get("tag") or "").strip()

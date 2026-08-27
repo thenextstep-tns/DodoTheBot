@@ -4,6 +4,7 @@ import pathlib as _pathlib, sys as _sys
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2]))
 import discord
 from cogs.trial_ranks import TrialRanks
+import lang
 from helpers import trial_ranks as tr
 
 
@@ -19,7 +20,7 @@ class Role:
 
 class Guild:
     id, name = 42, "ESO for Dodos"
-    def __init__(self, roles): self.roles = roles
+    def __init__(self, roles): self.roles, self.members = roles, []
     def get_role(self, rid): return next((r for r in self.roles if r.id == rid), None)
 
 
@@ -64,10 +65,17 @@ CONFIG = {
 }
 
 
+WR = {99: {"current": 1, "former": 2}}
+
+
 class Mgr:
     def get(self, gid): return CONFIG
     def image(self, gid, role_id): return None
-    def wr_for(self, gid, uid): return {"current": 1, "former": 2} if uid == 99 else None
+    def wr_for(self, gid, uid): return WR.get(uid)
+    # The stub has to answer what the card now asks it, or the card silently
+    # loses a field and the test that was meant to catch that passes anyway.
+    def wr_all(self, gid): return dict(WR)
+    def enrolled_ids(self, gid): return {m.id for m in guild.members}
 
 
 class Bot: trial_ranks = Mgr()
@@ -151,4 +159,47 @@ assert field.name == "30 points", field.name
 plain = next(f for f in e.fields if f.name.endswith("points"))
 assert plain.name == "5 points" and tr.WR_MEDAL not in e.author.name, plain.name
 print("records add to the total and show with the name")
+
+# With nobody on the roster there is no board to place anyone on, so the field
+# is left off rather than asserting a position of one out of one.
+assert not any(f.name.startswith("Where you stand") for f in e.fields),     "no standings field when the server has no enrolled members"
+
+# --- where they stand, and the two people directly ahead -------------------- #
+guild.members = [
+    Member(guild, [ROLES["Godslayer (vAA trifecta)"], ROLES["vKA HM"]], uid=1),  # 45
+    Member(guild, [ROLES["vKA HM"]], uid=2),                                     # 15
+    Member(guild, [ROLES["vAA HM"], ROLES["vKA"]], uid=3),                       # 6
+    Member(guild, [ROLES["vAA"], ROLES["vKA"]], uid=7),                          # 5, ours
+]
+for who, label in zip(guild.members, ("Ace", "Fox", "Rosa", "Mido")):
+    who.display_name = label
+CONFIG["board_url"] = "https://dodobot.example/r/42/tok"
+card = show("standings", guild.members[-1])
+
+board = next(f for f in card.fields if f.name.startswith("Where you stand"))
+assert board.name == "Where you stand: #4 of 4", board.name
+rows = board.value.splitlines()
+# Top-down, so the slice reads like the board it is a slice of: the two people
+# directly ahead, then them.
+assert rows == ["**#2** Fox · 15 (+10)",
+                "**#3** Rosa · 6 (+1)",
+                "**#4 Mido · 5** ← you"], rows
+print("standings:", rows)
+
+# The link is the last line of the body. A Discord footer is plain text, so a
+# link put there would arrive as an unclickable URL.
+last = card.fields[-1].value.splitlines()[-1]
+assert last == "[See the full rankings](https://dodobot.example/r/42/tok)", last
+assert card.footer.text == lang.TRIAL_CARD_FOOTER, "the footer itself is unchanged"
+
+# Leader: nobody above, and it says so instead of printing an empty list.
+top = show("the leader", guild.members[0])
+lead = next(f for f in top.fields if f.name.startswith("Where you stand"))
+assert lead.name == "Where you stand: #1 of 4", lead.name
+assert lead.value.splitlines()[-1] == lang.TRIAL_CARD_BOARD_TOP, lead.value
+
+# No link configured means no link line, not an empty one.
+CONFIG["board_url"] = ""
+bare = show("no board link", guild.members[-1])
+assert "full rankings" not in bare.fields[-1].value, bare.fields[-1].value
 print("PASS")
