@@ -2253,6 +2253,142 @@ function bindMemberPicker(pick, members) {
   }
 }
 
+
+// --- Type-to-find picker that keeps several choices --------------------------
+// The single-choice `.mpick` above answers "which member"; this answers "which
+// of these", which is a different control and not a flag on the first one.
+// Sources its options from a JSON blob in the page, so the same widget serves
+// people and channels without knowing what either is.
+//
+// The hidden field is the only thing that carries a value. A half-typed name is
+// never a choice, and the chips are what you read back.
+(function multiPickers() {
+  document.querySelectorAll(".mspick").forEach((pick) => {
+    const raw = document.getElementById(pick.dataset.source);
+    if (!raw) return;
+    let options = [];
+    try { options = JSON.parse(raw.textContent || "[]"); } catch (e) { return; }
+
+    const chips = pick.querySelector(".ms-chips");
+    const text = pick.querySelector(".ms-text");
+    const value = pick.querySelector(".ms-value");
+    const list = pick.querySelector(".ms-list");
+    const byId = new Map(options.map((o) => [String(o.id), o]));
+    let chosen = (value.value || "").split(",").filter(Boolean);
+    let active = -1;
+
+    const close = () => { list.hidden = true; active = -1; };
+
+    const sync = () => {
+      value.value = chosen.join(",");
+      // The placeholder is the "any" state, so it only makes sense while
+      // nothing is picked; with chips beside it, it reads as a second filter.
+      text.placeholder = chosen.length ? "" : pick.dataset.placeholder || "";
+    };
+
+    const drawChips = () => {
+      chips.innerHTML = "";
+      chosen.forEach((id) => {
+        const option = byId.get(id);
+        const chip = document.createElement("span");
+        chip.className = "ms-chip";
+        chip.dataset.id = id;
+        chip.textContent = option ? option.label : id;
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "ms-x";
+        x.setAttribute("aria-label", "Remove");
+        x.textContent = "×";
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+      sync();
+    };
+
+    const add = (id) => {
+      if (chosen.indexOf(id) < 0) chosen.push(id);
+      text.value = "";
+      drawChips();
+      close();
+      text.focus();
+    };
+
+    const render = () => {
+      const q = text.value.trim().toLowerCase();
+      list.innerHTML = "";
+      // An empty box offers the first few rather than nothing, so the control
+      // shows what it is before anything is typed.
+      const hits = options
+        .filter((o) => chosen.indexOf(String(o.id)) < 0)
+        .filter((o) => !q || (o.label || "").toLowerCase().includes(q)
+                          || (o.sub || "").toLowerCase().includes(q))
+        .slice(0, 40);
+      if (!hits.length) {
+        const empty = document.createElement("div");
+        empty.className = "ms-empty";
+        empty.textContent = q ? "nothing matches" : "nothing left to add";
+        list.appendChild(empty);
+      }
+      hits.forEach((o, index) => {
+        const item = document.createElement("div");
+        item.className = "ms-item" + (index === active ? " active" : "");
+        const label = document.createElement("span");
+        label.textContent = o.label;
+        const sub = document.createElement("span");
+        sub.className = "ms-sub";
+        sub.textContent = o.sub || "";
+        item.append(label, sub);
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          add(String(o.id));
+        });
+        list.appendChild(item);
+      });
+      list.hidden = false;
+    };
+
+    chips.addEventListener("click", (e) => {
+      if (!e.target.classList.contains("ms-x")) return;
+      const chip = e.target.closest(".ms-chip");
+      chosen = chosen.filter((id) => id !== chip.dataset.id);
+      drawChips();
+    });
+
+    text.addEventListener("focus", render);
+    text.addEventListener("input", render);
+    text.addEventListener("blur", () => setTimeout(close, 120));
+    text.addEventListener("keydown", (e) => {
+      const items = Array.from(list.querySelectorAll(".ms-item"));
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (list.hidden) render();
+        active += e.key === "ArrowDown" ? 1 : -1;
+        active = Math.max(0, Math.min(active, items.length - 1));
+        items.forEach((el, i) => el.classList.toggle("active", i === active));
+        if (items[active]) items[active].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter") {
+        // Only swallow Enter when it is choosing something. Otherwise it has to
+        // reach the form, because Enter in a filter box means "search".
+        if (!list.hidden && items[active]) {
+          e.preventDefault();
+          items[active].dispatchEvent(new MouseEvent("mousedown"));
+        }
+      } else if (e.key === "Backspace" && !text.value && chosen.length) {
+        // Backspace on an empty box takes the last chip, the way every other
+        // token field behaves.
+        chosen.pop();
+        drawChips();
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+
+    pick.dataset.placeholder = text.placeholder;
+    drawChips();
+  });
+})();
+
+
 (function bindTrialMemberPickers() {
   const raw = document.getElementById("all-members");
   if (!raw) return;

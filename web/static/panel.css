@@ -488,6 +488,36 @@ main:has(.logpage) { max-width: 1180px; }
 .logfilters button { margin: 0; }
 .logpage table.stats td { vertical-align: top; }
 
+/* --- multi-choice type-to-find picker ---------------------------------- */
+/* One control, two shapes: chips for what is chosen, a box for finding more.
+   The whole thing is styled as a single field so it sits in a filter row next
+   to plain selects without looking like a different species. */
+.mspick { position: relative; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px; flex: 1 1 220px; min-width: 0; padding: 3px 6px;
+  background: var(--color-canvas); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); }
+.mspick:focus-within { border-color: var(--color-primary); }
+.ms-chips { display: contents; }
+.ms-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 4px 2px 8px; font-size: 12px; border-radius: var(--radius-full);
+  background: var(--color-surface-soft); border: 1px solid var(--color-hairline);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-x { margin: 0; padding: 0 3px; line-height: 1; font-size: 14px;
+  background: transparent; border: 0; color: var(--color-muted); cursor: pointer; }
+.ms-x:hover { background: transparent; color: var(--color-primary); }
+.ms-text { flex: 1 1 80px; min-width: 60px; padding: 4px 2px; font: inherit;
+  font-size: 13px; background: transparent; color: var(--color-ink); border: 0; }
+.ms-text:focus { outline: none; }
+.ms-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 30;
+  max-height: 280px; overflow-y: auto; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.ms-item { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px;
+  font-size: 13px; cursor: pointer; }
+.ms-item:hover, .ms-item.active { background: var(--color-surface-soft); }
+.ms-sub { color: var(--color-muted); font-size: 12px; }
+.ms-empty { padding: 8px 10px; font-size: 13px; color: var(--color-muted); }
+
 /* --- server log: what Discord did ------------------------------------- */
 .logfilters .datefield { display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--color-muted); }

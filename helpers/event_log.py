@@ -186,8 +186,25 @@ class EventLogStore:
         except Exception:  # noqa: BLE001 - housekeeping never blocks a page load
             pass
 
+    @staticmethod
+    def _id_clause(field: str, ids: list, pattern) -> dict:
+        """Match any of ``ids`` on the indexed field, or in the text it came from.
+
+        Several ids mean "any of these", not "all of them": nobody picks two
+        people to see the events involving both at once.
+
+        The fallback is guarded on the field being absent so that a row is only
+        ever matched one way. Without the guard, a row written today matches
+        twice and one written last year not at all.
+        """
+        return {"$or": [
+            {field: {"$in": ids}},
+            {field: {"$exists": False},
+             "description": {"$regex": pattern(ids)}},
+        ]}
+
     def _query(self, guild_id: int, *, event_type: str = "", group: str = "",
-               user_id: Optional[int] = None, channel_id: Optional[int] = None,
+               user_ids: list = None, channel_ids: list = None,
                since: str = "", until: str = "") -> dict:
         query: dict = {"guild_id": int(guild_id)}
         if event_type:
@@ -196,20 +213,19 @@ class EventLogStore:
             names = dict(EVENT_GROUPS).get(group)
             if names:
                 query["event_type"] = {"$in": list(names)}
-        if user_id:
-            # The indexed field first, then the text it was extracted from, so
-            # rows written before extraction existed are still answerable.
-            query["$and"] = query.get("$and", []) + [{"$or": [
-                {"user_ids": int(user_id)},
-                {"user_ids": {"$exists": False},
-                 "description": {"$regex": f"[<`]@?!?{int(user_id)}[>`]"}},
-            ]}]
-        if channel_id:
-            query["$and"] = query.get("$and", []) + [{"$or": [
-                {"channel_ids": int(channel_id)},
-                {"channel_ids": {"$exists": False},
-                 "description": {"$regex": f"<#{int(channel_id)}>"}},
-            ]}]
+        clauses = []
+        users = [int(value) for value in (user_ids or ()) if value]
+        if users:
+            clauses.append(self._id_clause(
+                "user_ids", users,
+                lambda ids: "[<`]@?!?(?:" + "|".join(str(i) for i in ids) + ")[>`]"))
+        channels = [int(value) for value in (channel_ids or ()) if value]
+        if channels:
+            clauses.append(self._id_clause(
+                "channel_ids", channels,
+                lambda ids: "<#(?:" + "|".join(str(i) for i in ids) + ")>"))
+        if clauses:
+            query["$and"] = clauses
         bounds = day_bounds(since, until)
         if bounds:
             query["timestamp"] = bounds

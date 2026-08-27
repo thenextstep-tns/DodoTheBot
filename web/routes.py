@@ -2358,6 +2358,80 @@ def _discord_markup(guild, text: str) -> str:
     return out.replace("\n", "<br>").strip()
 
 
+def _log_people(guild, seen: list) -> list[dict]:
+    """Everyone pickable in the person filter: the server, plus who has left.
+
+    The list is the guild's own roster first. Building it from the log instead
+    was wrong in a way that looked like working code: the ids are extracted at
+    write time, so a dropdown built from them offers only the people who have
+    happened to trigger an event since that extraction started, and reads as a
+    server with two members in it.
+
+    Ids found in the log and not in the guild are appended, because "who deleted
+    all this before they left" is exactly the question this page is for.
+    """
+    people = [{"id": str(member.id), "label": member.display_name,
+               "sub": f"@{member.name}"}
+              for member in sorted(getattr(guild, "members", None) or (),
+                                   key=lambda m: m.display_name.lower())
+              if not member.bot]
+    known = {int(row["id"]) for row in people}
+    for user_id in seen:
+        if int(user_id) not in known:
+            people.append({"id": str(user_id), "label": str(user_id),
+                           "sub": "left the server"})
+    return people
+
+
+def _log_channels(guild, seen: list) -> list[dict]:
+    """Every channel and live thread, plus ids only the log remembers.
+
+    Threads matter here more than anywhere else on the panel: a thread is where
+    the messages that get deleted actually live. Archived ones are gone from
+    ``guild.threads`` but still named in old rows, so those arrive via ``seen``.
+    """
+    out, known = [], set()
+    for channel in sorted(getattr(guild, "channels", None) or (),
+                          key=lambda c: (c.category.name if c.category else "", c.position)):
+        prefix = "🔊" if isinstance(channel, discord.VoiceChannel) else (
+            "🗂" if isinstance(channel, discord.ForumChannel) else "#")
+        out.append({"id": str(channel.id), "label": f"{prefix}{channel.name}",
+                    "sub": channel.category.name if channel.category else ""})
+        known.add(channel.id)
+    for thread in getattr(guild, "threads", None) or ():
+        out.append({"id": str(thread.id), "label": f"🧵{thread.name}", "sub": "thread"})
+        known.add(thread.id)
+    for channel_id in seen:
+        if int(channel_id) not in known:
+            out.append({"id": str(channel_id), "label": str(channel_id),
+                        "sub": "deleted or archived"})
+    return out
+
+
+def _multipick(name: str, source: str, placeholder: str, chosen: list,
+               options: list[dict]) -> str:
+    """A type-to-find box that keeps several choices as chips.
+
+    The visible box never carries the value; the hidden field does, as a comma
+    separated list. That is what stops a half-typed name being submitted as
+    though it were a choice.
+    """
+    labels = {row["id"]: row["label"] for row in options}
+    chips = "".join(
+        f'<span class="ms-chip" data-id="{html.escape(str(value))}">'
+        f'{html.escape(labels.get(str(value), str(value)))}'
+        f'<button type="button" class="ms-x" aria-label="Remove">&times;</button></span>'
+        for value in chosen)
+    return f"""<div class="mspick" data-source="{source}">
+      <div class="ms-chips">{chips}</div>
+      <input class="ms-text" type="text" autocomplete="off" spellcheck="false"
+        placeholder="{html.escape(placeholder)}">
+      <input type="hidden" name="{name}" class="ms-value"
+        value="{html.escape(','.join(str(v) for v in chosen))}">
+      <div class="ms-list" hidden></div>
+    </div>"""
+
+
 def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str:
     """The event log: what Discord did here, and the filters to find it again."""
     # Nothing is recorded while the feature is off, and nothing is recorded
@@ -2416,21 +2490,11 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
                 f'&nbsp;&nbsp;{html.escape(event_log.EVENT_LABELS.get(name, name))}'
                 f' ({options["types"][name]})</option>')
 
-    user_options = '<option value="">Anyone</option>'
-    for uid in options["people"]:
-        member = guild.get_member(uid)
-        name = member.display_name if member is not None else f"{uid} (left)"
-        user_options += (f'<option value="{uid}"'
-                         f'{" selected" if chosen["user"] == uid else ""}>'
-                         f"{html.escape(name)}</option>")
-
-    channel_options = '<option value="">Anywhere</option>'
-    for cid in options["channels"]:
-        found = guild.get_channel_or_thread(cid)
-        name = f"#{found.name}" if found is not None else f"{cid} (deleted)"
-        channel_options += (f'<option value="{cid}"'
-                            f'{" selected" if chosen["channel"] == cid else ""}>'
-                            f"{html.escape(name)}</option>")
+    people = _log_people(guild, options["people"])
+    channels = _log_channels(guild, options["channels"])
+    user_picker = _multipick("user", "log-people", "Anyone", chosen["user"], people)
+    channel_picker = _multipick("channel", "log-channels", "Anywhere",
+                                chosen["channel"], channels)
 
     # Every filter travels with the page links, or paging past page one quietly
     # drops the search that produced the list.
@@ -2438,12 +2502,15 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
         f"{key}={html.escape(str(value))}" for key, value in (
             ("type", chosen["type"]),
             ("type", f'g:{chosen["group"]}' if chosen["group"] else ""),
-            ("user", chosen["user"] or ""), ("channel", chosen["channel"] or ""),
+            ("user", ",".join(str(v) for v in chosen["user"])),
+            ("channel", ",".join(str(v) for v in chosen["channel"])),
             ("from", chosen["from"]), ("to", chosen["to"])) if value)
     base = f"/guild/{guild.id}/serverlog?{carried}"
 
     return f"""
 <div class="logpage" data-guild="{guild.id}">
+  <script type="application/json" id="log-people">{_json_dumps(people)}</script>
+  <script type="application/json" id="log-channels">{_json_dumps(channels)}</script>
   <div class="statshead">
     <div><h1>Server log <span class="muted">&middot; {data["total"]:,} event(s)</span></h1></div>
   </div>
@@ -2453,8 +2520,8 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
   {warning}
   <form class="logfilters" method="get" action="/guild/{guild.id}/serverlog">
     <select name="type">{type_options}</select>
-    <select name="user">{user_options}</select>
-    <select name="channel">{channel_options}</select>
+    {user_picker}
+    {channel_picker}
     <label class="datefield">from <input type="date" name="from"
       value="{html.escape(chosen["from"])}"></label>
     <label class="datefield">to <input type="date" name="to"
@@ -3590,9 +3657,18 @@ async def guild_server_log_page(request: web.Request):
     """
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
 
-    def _int(name: str) -> int:
-        value = request.query.get(name, "")
-        return int(value) if value.isdigit() else 0
+    def _ids(name: str) -> list[int]:
+        """A comma separated list of snowflakes, junk dropped rather than guessed.
+
+        Repeated parameters are read too, so the field works whether the picker
+        submits one value or the browser submits several.
+        """
+        out = []
+        for chunk in ",".join(request.query.getall(name, [])).split(","):
+            chunk = chunk.strip()
+            if chunk.isdigit() and int(chunk) not in out:
+                out.append(int(chunk))
+        return out
 
     try:
         page = max(1, int(request.query.get("p", 1)))
@@ -3608,7 +3684,7 @@ async def guild_server_log_page(request: web.Request):
         picked if picked in event_log.EVENT_LABELS else "")
     chosen = {
         "type": kind, "group": group,
-        "user": _int("user"), "channel": _int("channel"),
+        "user": _ids("user"), "channel": _ids("channel"),
         "from": event_log.valid_day(request.query.get("from", "")),
         "to": event_log.valid_day(request.query.get("to", "")),
     }
@@ -3616,7 +3692,7 @@ async def guild_server_log_page(request: web.Request):
     def read():
         data = bot.event_log.page(
             guild.id, page=page, event_type=chosen["type"], group=chosen["group"],
-            user_id=chosen["user"], channel_id=chosen["channel"],
+            user_ids=chosen["user"], channel_ids=chosen["channel"],
             since=chosen["from"], until=chosen["to"])
         return data, {
             "types": {row["value"]: row["count"] for row in bot.event_log.types(guild.id)},

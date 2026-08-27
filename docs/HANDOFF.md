@@ -311,6 +311,18 @@ Things worth knowing before touching the server log:
   server passes through `_discord_markup`. It escapes first and then matches
   `&lt;@123&gt;`, so there is no path from something typed in Discord to markup
   on an admin's page. There is a test that tries.
+- **The person and channel filters are built from the guild, not from the log.**
+  They were built by aggregating the extracted ids once, which was wrong in a
+  way that looked like working code: a server of hundreds offered the two people
+  who had happened to trigger an event since the extraction shipped. Ids found
+  in the log and no longer in the guild are appended as "left the server" or
+  "deleted or archived", because that is half of what the page is for.
+- **Both are multi-choice.** `.mspick` in `panel.js` is the widget, sourced from
+  a JSON blob in the page so the same control serves people and channels. The
+  hidden field carries a comma separated list and is the only thing that
+  submits; a half-typed name is never a choice. Several ids mean *any* of them.
+  `tests/render_serverlog.py` exists to click it, since nothing in the suite
+  runs a page's JavaScript.
 - **Nothing is recorded with the feature off or no log channel set.** Both
   produce an empty page, so the page says which one is true rather than leaving
   somebody to find it in the source.
