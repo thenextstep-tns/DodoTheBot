@@ -988,8 +988,12 @@ TRIAL_CARD_POINTS = "{points} points"
 TRIAL_CARD_STEPS_TITLE = "Next steps:"
 # Where they sit on the server's board, and who is immediately ahead. {place}
 # {total} {name} {score} {gap} are filled in by the cog.
-TRIAL_CARD_BOARD_TITLE = "Where you stand: #{place} of {total}"
+TRIAL_CARD_BOARD_TITLE = "Where you stand"
+# The place itself rides on the rank line at the top of the card, so it is the
+# first thing read rather than something found four fields down.
+TRIAL_CARD_BOARD_PLACE = "#{place} of {total}"
 TRIAL_CARD_BOARD_LINE = "**#{place}** {name} · {score} (+{gap})"
+TRIAL_CARD_BOARD_BEHIND = "**#{place}** {name} · {score} (-{gap})"
 TRIAL_CARD_BOARD_YOU = "**#{place} {name} · {score}** ← you"
 TRIAL_CARD_BOARD_TOP = "Nobody is ahead of you. 🥇"
 # A Discord footer is plain text: no links, no markdown. So the board link goes
@@ -1005,7 +1009,7 @@ TRIAL_CARD_OUTRO = (
 # The rank line at the top of the card. {rank} is a role mention, so it renders
 # in the role's own colour; {stars} is the earned/unearned row. The "##" makes it
 # a heading — drop to "###" for smaller, or "**{rank}**" for plain bold.
-TRIAL_CARD_HEADING = "## {rank}\n{stars}"
+TRIAL_CARD_HEADING = "## {rank} {place}\n{stars}"
 TRIAL_CARD_FOOTER = "Only your best clear per trial counts towards the total."
 
 # "I'd join a prog for one of those" — the one-click interest button.

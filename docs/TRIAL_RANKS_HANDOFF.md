@@ -115,6 +115,13 @@ stored row is only as fresh as that person's last recalculation, and "you are 4
 behind Fox" has to be right about Fox too. Ties break on name, the same way the
 board numbers its rows, so both call the same person the same number.
 
+**The place goes on the rank line, the neighbours go in a field.** `#4 of 42`
+sits next to the role mention at the top, because it is the first thing anyone
+looks for. The two people ahead and the two behind live further down under
+"Where you stand". Both gaps are magnitudes, never signed: which side of the
+"you" row they are on already carries the direction, and a signed gap in a
+minus template is how you get `(+-2)`.
+
 **The board link is stored, not derived.** Only the token's hash is kept, so
 nothing can rebuild the URL. `board_url` on the guild config holds it, filled in
 automatically the moment a link is issued and cleared when one is revoked; the

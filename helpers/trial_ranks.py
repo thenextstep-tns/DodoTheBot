@@ -695,8 +695,9 @@ def leaderboard(guild, config: dict, user_ids: Iterable[int],
     return rows
 
 
-def placing(rows: list[dict], user_id: int, *, ahead: int = 2) -> Optional[dict]:
-    """Where somebody sits on that list, and the few people directly above.
+def placing(rows: list[dict], user_id: int, *, ahead: int = 2,
+            behind: int = 2) -> Optional[dict]:
+    """Where somebody sits on that list, and the few people either side.
 
     Returns ``None`` when they are not on it at all, which is not an error: a
     card can be asked for before the standings have caught up.
@@ -704,12 +705,16 @@ def placing(rows: list[dict], user_id: int, *, ahead: int = 2) -> Optional[dict]
     Positions are the position in the list, ties included, because the board
     numbers its rows the same way. Competition ranking would read better here
     and would then disagree with the page the card links to.
+
+    Both gaps are magnitudes, never signed. The direction is already carried by
+    which list the row is in, and a "+-2" is what comes out of forgetting that.
     """
     index = next((i for i, row in enumerate(rows) if row["user_id"] == int(user_id)), None)
     if index is None:
         return None
     mine = rows[index]
     above = rows[max(0, index - int(ahead)):index]
+    below = rows[index + 1:index + 1 + int(behind)]
     return {
         "place": index + 1,
         "total": len(rows),
@@ -718,6 +723,9 @@ def placing(rows: list[dict], user_id: int, *, ahead: int = 2) -> Optional[dict]
         "above": [{"place": index - len(above) + offset + 1, "name": row["name"],
                    "score": row["score"], "gap": row["score"] - mine["score"]}
                   for offset, row in enumerate(above)],
+        "below": [{"place": index + offset + 2, "name": row["name"],
+                   "score": row["score"], "gap": mine["score"] - row["score"]}
+                  for offset, row in enumerate(below)],
     }
 
 

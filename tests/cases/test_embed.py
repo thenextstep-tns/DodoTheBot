@@ -107,6 +107,7 @@ e = show("mid-ladder, holds vAA + vKA", Member(guild, [ROLES["vAA"], ROLES["vKA"
 assert e.title is None, "the rank line moved out of the title so mentions render"
 first, second = e.description.splitlines()[:2]
 assert first == f"## <@&{rid('Trialgoer')}>", first   # heading, so it isn't lost
+# No board yet, so no place on the line and no stray trailing space.
 assert set(second) <= {"⭐", "⚪"} and second, second
 # Trialgoer has no colour and neither does the member, so the card falls back.
 assert e.colour == discord.Colour.blurple(), e.colour
@@ -170,20 +171,27 @@ guild.members = [
     Member(guild, [ROLES["vKA HM"]], uid=2),                                     # 15
     Member(guild, [ROLES["vAA HM"], ROLES["vKA"]], uid=3),                       # 6
     Member(guild, [ROLES["vAA"], ROLES["vKA"]], uid=7),                          # 5, ours
+    Member(guild, [ROLES["vKA"]], uid=4),                                        # 4
+    Member(guild, [ROLES["Master Angler"]], uid=5),                              # 3
 ]
-for who, label in zip(guild.members, ("Ace", "Fox", "Rosa", "Mido")):
+for who, label in zip(guild.members, ("Ace", "Fox", "Rosa", "Mido", "Tea", "Bram")):
     who.display_name = label
+mido = next(m for m in guild.members if m.id == 7)
 CONFIG["board_url"] = "https://dodobot.example/r/42/tok"
-card = show("standings", guild.members[-1])
+card = show("standings", mido)
 
-board = next(f for f in card.fields if f.name.startswith("Where you stand"))
-assert board.name == "Where you stand: #4 of 4", board.name
+# The place rides on the rank line, next to the role, where it is read first.
+assert card.description.splitlines()[0] == f"## <@&{rid('Trialgoer')}> #4 of 6",     card.description.splitlines()[0]
+
+board = next(f for f in card.fields if f.name == "Where you stand")
 rows = board.value.splitlines()
-# Top-down, so the slice reads like the board it is a slice of: the two people
-# directly ahead, then them.
+# Two ahead and two behind, top-down, so the slice reads like the board it is a
+# slice of. Both gaps are magnitudes: the direction is the side they are on.
 assert rows == ["**#2** Fox · 15 (+10)",
                 "**#3** Rosa · 6 (+1)",
-                "**#4 Mido · 5** ← you"], rows
+                "**#4 Mido · 5** ← you",
+                "**#5** Tea · 4 (-1)",
+                "**#6** Bram · 3 (-2)"], rows
 print("standings:", rows)
 
 # The link is the last line of the body. A Discord footer is plain text, so a
@@ -194,12 +202,16 @@ assert card.footer.text == lang.TRIAL_CARD_FOOTER, "the footer itself is unchang
 
 # Leader: nobody above, and it says so instead of printing an empty list.
 top = show("the leader", guild.members[0])
-lead = next(f for f in top.fields if f.name.startswith("Where you stand"))
-assert lead.name == "Where you stand: #1 of 4", lead.name
-assert lead.value.splitlines()[-1] == lang.TRIAL_CARD_BOARD_TOP, lead.value
+assert top.description.splitlines()[0].endswith("#1 of 6"), top.description
+lead = next(f for f in top.fields if f.name == "Where you stand")
+rows = lead.value.splitlines()
+# It goes first. Appended, it would sit between the leader and the people
+# behind them, which is where it used to go and read as a break in the list.
+assert rows[0] == lang.TRIAL_CARD_BOARD_TOP, rows
+assert rows[1].endswith("← you") and rows[2].startswith("**#2**"), rows
 
 # No link configured means no link line, not an empty one.
 CONFIG["board_url"] = ""
-bare = show("no board link", guild.members[-1])
+bare = show("no board link", mido)
 assert "full rankings" not in bare.fields[-1].value, bare.fields[-1].value
 print("PASS")

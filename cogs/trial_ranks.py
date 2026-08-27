@@ -647,7 +647,19 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
         stars = rank_stars(state["position"], state["total"])
         role = member.guild.get_role(int(current["role_id"])) if current else None
         name = role.mention if role is not None else f"**{current_name or lang.TRIAL_CARD_NO_RANK}**"
-        blocks = [lang.TRIAL_CARD_HEADING.format(rank=name, stars=stars).strip()]
+        # Their place on the server board sits on the rank line itself. It is
+        # the first thing anyone looks for, and four fields down is not where
+        # the first thing goes. The stars beside it count rungs of the ladder,
+        # which is a different question and reads as one.
+        board = self.standing_of(member)
+        place = ("" if board is None else
+                 lang.TRIAL_CARD_BOARD_PLACE.format(place=board["place"],
+                                                    total=board["total"]))
+        heading = lang.TRIAL_CARD_HEADING.format(rank=name, stars=stars, place=place)
+        # Line-wise, because an empty place or an empty star row otherwise
+        # leaves trailing whitespace in the middle of the block where a plain
+        # strip() cannot reach it.
+        blocks = ["\n".join(line.rstrip() for line in heading.splitlines()).strip()]
         if current and current.get("description"):
             blocks.append(current["description"])
 
@@ -688,21 +700,21 @@ class TrialRanks(commands.Cog, name="trial_ranks"):
                 value = lang.TRIAL_CARD_STEPS_EMPTY
             embed.add_field(name=lang.TRIAL_CARD_STEPS_TITLE, value=value, inline=False)
 
-        # Where they sit against everyone else on the system, and who is close
-        # enough ahead to be worth chasing. The rank says how good they are;
-        # this says how they are doing, which is the other half of the question
-        # and the half a ladder on its own never answers.
-        board = self.standing_of(member)
+        # Who is close on either side. Ahead is who to chase; behind is who is
+        # chasing, and leaving it out made the board look like a wall rather
+        # than a place you are standing in.
         if board is not None:
-            lines = [lang.TRIAL_CARD_BOARD_LINE.format(**row) for row in board["above"]]
-            lines.append(lang.TRIAL_CARD_BOARD_YOU.format(
-                place=board["place"], name=member.display_name, score=board["score"]))
+            lines = []
+            # "Nobody is ahead of you" goes above the rows, not after them:
+            # appended, it would sit between the leader and the people behind.
             if not board["above"]:
                 lines.append(lang.TRIAL_CARD_BOARD_TOP)
-            embed.add_field(
-                name=lang.TRIAL_CARD_BOARD_TITLE.format(place=board["place"],
-                                                        total=board["total"]),
-                value="\n".join(lines)[:1024], inline=False)
+            lines += [lang.TRIAL_CARD_BOARD_LINE.format(**row) for row in board["above"]]
+            lines.append(lang.TRIAL_CARD_BOARD_YOU.format(
+                place=board["place"], name=member.display_name, score=board["score"]))
+            lines += [lang.TRIAL_CARD_BOARD_BEHIND.format(**row) for row in board["below"]]
+            embed.add_field(name=lang.TRIAL_CARD_BOARD_TITLE,
+                            value="\n".join(lines)[:1024], inline=False)
 
         # The board link rides on the last line of the body, not in the footer:
         # a Discord footer is plain text, so a link put there arrives as a piece
