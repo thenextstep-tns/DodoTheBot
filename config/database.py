@@ -137,3 +137,6 @@ dodoland_activity = db["DodoLandActivity"]   # {guild_id, user_id, day, acts, sc
 # relation graph the map places neighbours from.
 dodoland_pairs = db["DodoLandPairs"]         # {guild_id, day, a, b, acts, n}
 dodoland_params = db["DodoLandParams"]       # {guild_id, key, value} — DodoLand's own tunables
+# The per-guild DodoLand configuration: buildings, their channels and tiers, and
+# later the uploaded map. One row per guild, read through helpers/dodoland/buildings.py.
+dodoland_config = db["DodoLandConfig"]       # {_id: guild_id, buildings, map, plots}

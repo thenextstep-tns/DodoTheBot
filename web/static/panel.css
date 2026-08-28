@@ -1550,3 +1550,20 @@ body.board { background: var(--color-surface-soft); }
   border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .rxeditorfoot { display: flex; gap: var(--space-sm); align-items: center; }
 .rxeditorfoot button { margin: 0; }
+
+/* --- DodoLand ---------------------------------------------------------- */
+/* The town map's own page. Everything else on it reuses the shared panel,
+   rule-card and multiselect styling; these are the few shapes it adds. */
+.dlmetric, .dlbuilding { margin-bottom: 14px; }
+.dlfields { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 4px; }
+.dlfield { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
+.dlfield input { width: 100%; }
+.dltiers { margin-top: 10px; }
+.dljson { width: 100%; font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.5; padding: 10px; border-radius: 8px;
+  border: 1px solid var(--color-border); background: var(--color-surface-soft);
+  color: var(--color-text); }
+/* The uploaded base map. Capped in height so a tall image cannot push the
+   controls under it off the page. */
+.dlmap { display: block; max-width: 100%; max-height: 420px; margin: 10px 0;
+  border-radius: 10px; border: 1px solid var(--color-border); }

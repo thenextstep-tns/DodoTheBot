@@ -185,6 +185,13 @@ class ActivityStore:
             query["day"] = {"$gte": since}
         return list(self._activity.find(query))
 
+    def pair_rows(self, guild_id: int, *, since: Optional[str] = None) -> list[dict]:
+        """Every pair row for a guild. The relation graph, whole."""
+        query: dict = {"guild_id": _require_guild(guild_id)}
+        if since:
+            query["day"] = {"$gte": since}
+        return list(self._pairs.find(query))
+
     def totals(self, guild_id: int, user_id: int, *, since: Optional[str] = None) -> dict[str, int]:
         """Scored acts per metric for one person over a window."""
         out: dict[str, int] = {}

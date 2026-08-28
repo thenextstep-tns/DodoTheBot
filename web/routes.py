@@ -286,6 +286,9 @@ def _guild_nav(guild, scope: str, current: str) -> str:
              ("events", "⚡ Events", panel_access.SCOPE_CONFIG),
              ("trials", "🏆 Trial ranks", panel_access.SCOPE_CONFIG),
              ("reactions", "🐈 Reactions", panel_access.SCOPE_CONFIG),
+             # DodoLand shows every member's standing, so it stays admin-scoped
+             # until any of it is meant to be seen by the people it ranks.
+             ("dodoland", "🏘 DodoLand", panel_access.SCOPE_CONFIG),
              # Tabletop is stats-scoped because players (not just admins) need it;
              # which campaigns they actually see is decided per campaign.
              ("tabletop", "🎲 Tabletop", panel_access.SCOPE_STATS),
@@ -4611,4 +4614,9 @@ def create_app(bot) -> web.Application:
     from web.dnd import dnd_routes
 
     app.add_routes(dnd_routes())
+    # DodoLand likewise. Independent of tabletop: it shares this chrome and
+    # nothing else, and imports nothing from web/dnd or helpers/dnd.
+    from web.dodoland import dodoland_routes
+
+    app.add_routes(dodoland_routes())
     return app

@@ -171,27 +171,67 @@ second place to forget to add them. The corollary is enforced by the same
 mechanism: nothing is listed in `METRICS` until something counts it, since a
 knob that changes nothing is worse than a missing one.
 
-## 4. Next: P1, the panel
+## 4. P1, the panel (built)
 
-Everything below is designed and unbuilt. The shape asked for:
+`/guild/{gid}/dodoland`, admin-scoped, in `web/dodoland/` (its own package, so
+`web/routes.py` does not grow). Five sections behind the shared side menu:
 
-1. **Building → channels → weight per channel.** A building is per-guild data,
-   not a constant: name, icon, the channels that feed it and how much each is
-   worth, its metric multipliers, and its tiers. Free-form the way trial ranks
-   are free-form.
-2. **Building → tiers**, each a title and a point threshold. Six or so, not
-   thirty. Thresholds should be **derived from the server's own distribution**
-   (tier N = a percentile band of the active population) rather than authored,
-   so a tier means the same thing on day one and in three years, on a 60-person
-   server and a 600-person one. The percentile band is the knob.
-3. **Live preview, panel-only.** Computed for everybody, from real backfilled
-   data, tweakable against the live system, and shown to nobody outside the
-   panel until the numbers are right.
-4. **Town power**: the total ranking. Buildings score from channels; town power
-   adds the people-reached term, which is channel-agnostic by nature.
+| Section | What it is |
+|---|---|
+| **Preview** | Everybody's town power, place, per-building tier and flourish, live from real data. Visible **only** here |
+| **Buildings** | Each building, the channels that feed it and their weights, its own metric emphasis, and its tiers with what each currently costs |
+| **What counts** | All 16 metrics, each with its four knobs, editable |
+| **The map** | Upload the base image, see who has settled |
+| **Settings** | Intake and window tunables |
 
-Then P2 the map (admin uploads the base image, players pick a plot), P3 the
-Discord surface (`/town`, one grouped command), P4 neighbours and visiting.
+`helpers/dodoland/buildings.py` holds the per-guild building definitions and
+their validation; `helpers/dodoland/standing.py` does the scoring. Neither
+writes anything a player sees.
+
+### Thresholds are derived
+
+A tier carries a **percentile** of the server's own live distribution plus a
+small absolute **floor**, and the effective threshold is whichever is higher.
+"Top 5%" means the same thing on day one and in three years, at 60 members and
+at 600, so nothing needs re-tuning and no tier is ever dead. The floor stops a
+top tier being cheap while only four people have scored at all. Thresholds are
+forced non-decreasing, or a floor could make an early rung harder than a later
+one. The panel shows the percentile, the floor, the live value and which of them
+decided, because a threshold you cannot watch resolve is the black box this
+whole design exists to avoid.
+
+### Flourish, and the two axes
+
+`helpers/dodoland/flourish.py`. Seven levels, spread across whatever rungs the
+trial ladder actually has, so renaming or adding a rank redistributes them and
+never breaks a lookup. Nothing is hardcoded to a rank name.
+
+**`standing.py` contains no reference to flourish, and there is a test that
+fails if it ever does.** Rank buys visual effect and never a tier. That is what
+keeps every building reachable by anyone through ordinary sociable activity
+while the scarce thing stays unfarmable and free to grant.
+
+### Isolation, enforced by test
+
+`tests/cases/test_dodoland_page.py` fails if any file under `helpers/dodoland/`,
+`web/dodoland/` or `cogs/dodoland.py` imports the tabletop engine, and if any of
+them writes to trial ranks. **Trial ranks is the only thing DodoLand reads from
+outside itself, and it is read-only.** The dependency is one-directional so the
+ladder never acquires a consumer that can change its data.
+
+Flourish reads the trial system's *stored* standings, so a person's glow is as
+fresh as their last recalculation. That is deliberate: computing live would mean
+reaching into the trial cog's scoring path.
+
+## 4a. P2, the map (partly built)
+
+Done: upload, replace and remove a base image (PNG/JPEG/WebP/SVG, under 4MB,
+stored on the guild's config row), and plot storage. Plots are **percentages of
+the image**, not pixels, so redrawing the map at another size never moves
+anybody's town.
+
+Not done: the player-facing settle flow, rendering towns onto the map, and the
+public link. Settling is `BuildingStore.settle()` and has no surface yet.
 
 ## 5. Constraints this has to live inside
 
