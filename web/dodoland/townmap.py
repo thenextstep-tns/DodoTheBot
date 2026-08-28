@@ -72,75 +72,85 @@ h1 { margin: 0 0 10px; font-size: clamp(30px, 5vw, 42px); font-weight: 600; }
   color: var(--ink-soft); font-size: 15px; }
 .dlnote p { margin: 0 0 6px; }
 
-/* The map is the page, so it gets the width of the screen rather than the
-   width of a column of prose. Full-bleed out of the paper, with a frame. */
-.dlstage { position: relative; margin: 14px calc(50% - 50vw) 0; width: 100vw;
-  max-width: 100vw; }
-.dlframe { position: relative; height: min(78vh, 900px); overflow: hidden;
-  background: var(--paper-deep);
-  border-top: 3px solid var(--edge); border-bottom: 3px solid var(--edge);
-  box-shadow: inset 0 0 120px rgba(60, 40, 20, .45);
+/* The map gets a framed block of its own. Not full-bleed: it sits inside a
+   page with text around it, and a band running off both edges of the screen
+   fights everything else on the page rather than framing anything. */
+.dlstage { position: relative; margin: 14px 0 0; width: 100%; }
+.dlframe { position: relative; height: min(72vh, 820px); overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--edge); background: var(--paper-deep);
+  box-shadow: inset 0 0 100px rgba(60, 40, 20, .4);
   touch-action: none; cursor: grab; }
 .dlframe.dragging { cursor: grabbing; }
 .dlframe.pickable { cursor: crosshair; }
-/* Everything inside moves and scales as one, so towns stay pinned to the
-   coastline they were placed on however far you zoom. */
+/* The image scales; the things standing on it do not. */
 .dlworld { position: absolute; top: 0; left: 0; transform-origin: 0 0;
   will-change: transform; }
 .dlworld img { display: block; width: 100%; height: auto;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 
-.dlzoom { position: absolute; right: 14px; top: 14px; display: flex;
-  flex-direction: column; gap: 6px; z-index: 4; }
-.dlzoom button { width: 38px; height: 38px; font-size: 18px; line-height: 1;
+.dlzoom { position: absolute; right: 12px; top: 12px; display: flex;
+  flex-direction: column; gap: 6px; z-index: 5; }
+.dlzoom button { width: 36px; height: 36px; font-size: 16px; line-height: 1;
   border-radius: 9px; border: 1px solid var(--edge); background: var(--paper);
   color: var(--ink); cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
 .dlzoom button:hover { background: var(--paper-deep); }
-.dlhint { position: absolute; left: 14px; bottom: 14px; z-index: 4;
-  padding: 5px 10px; border-radius: 8px; font-size: 12px;
-  background: rgba(0, 0, 0, .45); color: #fff6e6; }
+.dlzoom button.on { background: var(--lantern); color: #fff; border-color: var(--lantern); }
+.dlhint { position: absolute; left: 12px; bottom: 12px; z-index: 5;
+  padding: 4px 10px; border-radius: 8px; font-size: 12px;
+  background: rgba(0, 0, 0, .5); color: #fff6e6; }
 
-/* A town is a marker, not a control: it must never eat a click meant for the
-   map underneath it. */
-.dltown { position: absolute; transform: translate(-50%, -50%); pointer-events: none;
-  display: flex; flex-direction: column; align-items: center; gap: 3px; }
+/* A town sits in map space but is drawn at screen size. The counter-scale is
+   what stops a dot becoming a saucer at 4x: the world is scaled by k, so every
+   marker in it is scaled by 1/k and comes out the size it started. Without this
+   the map is a field of coloured blobs the moment anybody zooms. */
+.dltown { position: absolute; transform-origin: 50% 50%;
+  transform: translate(-50%, -50%) scale(var(--dl-inv, 1));
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  pointer-events: none; }
 .dltowndot { display: block;
   width: calc(var(--dl-base, 10px) * var(--dl-size, 1));
-  height: calc(var(--dl-base, 10px) * var(--dl-size, 1));
-  border-radius: 50%;
+  height: calc(var(--dl-base, 10px) * var(--dl-size, 1)); border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff6e2, var(--lantern) 70%);
-  border: 2px solid rgba(255, 245, 225, .9); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
-/* Three hundred names at once is a grey mat, not a map. Names appear as you
-   zoom in, which is also how every real map behaves. */
-.dltownname { font-size: 11px; letter-spacing: .02em; color: #fff8ea;
-  white-space: nowrap; opacity: 0; transition: opacity .12s ease;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .95), 0 0 10px rgba(0, 0, 0, .7); }
-.dlworld.named .dltownname { opacity: 1; }
-.dltown.big .dltownname, .dltown.mine .dltownname { opacity: 1; }
-/* Dormancy is a view, never a subtraction: quiet is dim, not smaller. */
-.dltown.dim { opacity: .45; }
-.dltown.mine .dltowndot { border-color: #fffaf0;
-  box-shadow: 0 0 0 4px var(--lantern), 0 0 22px 8px rgba(217, 141, 58, .55); }
-.dltown.mine .dltownname { font-size: 12.5px; font-weight: 600; }
+  border: 2px solid rgba(255, 245, 225, .9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+  /* The dot is the only part that takes a pointer, so hovering one town cannot
+     be blocked by a neighbour's invisible label box. */
+  pointer-events: auto; }
+.dltowndot:hover { border-color: #fff; }
 
-/* Flourish, earned from trial rank alone. Warm at the bottom, otherworldly at
-   the top, and readable against a busy map at every level. */
-.dltown.fl1 .dltowndot { box-shadow: 0 0 8px 2px rgba(255, 214, 130, .9); }
-.dltown.fl2 .dltowndot { box-shadow: 0 0 11px 3px rgba(255, 184, 77, .9); }
-.dltown.fl3 .dltowndot { box-shadow: 0 0 15px 4px rgba(255, 196, 61, .95);
+/* Names are off by default and that is the whole point: three hundred labels
+   drawn at once is a grey mat, which is exactly what shipped. Hover one to read
+   it, or turn the whole set on from the button when the map is zoomed in far
+   enough for them to fit. */
+.dltownname { position: absolute; top: 100%; left: 50%; margin-top: 3px;
+  transform: translateX(-50%); font-size: 11px; white-space: nowrap;
+  color: #fff8ea; opacity: 0; pointer-events: none; z-index: 3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95), 0 0 8px rgba(0, 0, 0, .85); }
+.dltown:hover { z-index: 6; }
+.dltown:hover .dltownname { opacity: 1; }
+.dlworld.named .dltownname { opacity: 1; }
+/* Dormancy is a view, never a subtraction: quiet is dim, not smaller. */
+.dltown.dim { opacity: .4; }
+.dltown.mine { z-index: 4; }
+.dltown.mine .dltowndot { border-color: #fffaf0;
+  box-shadow: 0 0 0 3px var(--lantern), 0 0 18px 6px rgba(217, 141, 58, .5); }
+.dltown.mine .dltownname { opacity: 1; font-weight: 600; }
+
+/* Flourish, earned from trial rank alone. */
+.dltown.fl1 .dltowndot { box-shadow: 0 0 6px 2px rgba(255, 214, 130, .9); }
+.dltown.fl2 .dltowndot { box-shadow: 0 0 8px 3px rgba(255, 184, 77, .9); }
+.dltown.fl3 .dltowndot { box-shadow: 0 0 10px 3px rgba(255, 196, 61, .95);
   border-color: #ffe9a8; }
-.dltown.fl4 .dltowndot { box-shadow: 0 0 19px 6px rgba(120, 190, 255, .9);
+.dltown.fl4 .dltowndot { box-shadow: 0 0 12px 4px rgba(120, 190, 255, .9);
   border-color: #dcefff; }
-.dltown.fl5 .dltowndot { box-shadow: 0 0 24px 8px rgba(150, 130, 255, .9);
+.dltown.fl5 .dltowndot { box-shadow: 0 0 15px 5px rgba(150, 130, 255, .9);
   border-color: #ece6ff; animation: dlbreathe 3.4s ease-in-out infinite; }
-.dltown.fl6 .dltowndot { box-shadow: 0 0 30px 11px rgba(255, 140, 210, .9);
+.dltown.fl6 .dltowndot { box-shadow: 0 0 18px 6px rgba(255, 140, 210, .9);
   border-color: #fff; animation: dlbreathe 2.2s ease-in-out infinite; }
 @keyframes dlbreathe {
-  0%, 100% { transform: scale(1); filter: brightness(1); }
-  50% { transform: scale(1.16); filter: brightness(1.3); }
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
 }
-/* A crowded map of animated towns is a phone's whole frame budget, and some
-   people have asked for less motion for reasons that are not about batteries. */
 @media (prefers-reduced-motion: reduce) {
   .dltown.fl5 .dltowndot, .dltown.fl6 .dltowndot { animation: none; }
 }
@@ -297,8 +307,9 @@ def canvas(bot, guild, towns, *, mine: int = 0, pickable: bool = False,
       <button type="button" id="dlzoomin" title="Zoom in">+</button>
       <button type="button" id="dlzoomout" title="Zoom out">&minus;</button>
       <button type="button" id="dlzoomfit" title="Fit the whole map">&#9633;</button>
+      <button type="button" id="dlnames" title="Show every name">A</button>
     </div>
-    <div class="dlhint" id="dlhint">Drag to move, scroll to zoom</div>
+    <div class="dlhint" id="dlhint">Drag to move, scroll to zoom, hover a town for its name</div>
   </div>
 </div>"""
 
@@ -322,7 +333,7 @@ def toolkit(assets: list[dict], unlocked: set, *, guild_id: int) -> str:
             f'<div class="dlkititem{"" if free else " locked"}" '
             f'title="{e(row["name"] + ((" · needs " + need) if need else ""))}">'
             f'<img alt="{e(row["name"])}" loading="lazy" '
-            f'src="/dl/{int(guild_id)}/asset/{e(row["asset_id"])}">'
+            f'src="/guild/{int(guild_id)}/dodoland/asset/{e(row["asset_id"])}">'
             f'<div>{e(row["name"])}</div>'
             f'{f"<div>{e(need)}</div>" if need else ""}</div>'
         )
@@ -341,14 +352,17 @@ VIEWPORT_SCRIPT = """
 
   var minZoom = parseFloat(frame.dataset.min) || 0.5;
   var maxZoom = parseFloat(frame.dataset.max) || 8;
-  var nameZoom = parseFloat(frame.dataset.namezoom) || 1.8;
+  var hint = document.getElementById('dlhint');
   var view = {x: 0, y: 0, k: 1};
   var natural = {w: 0, h: 0};
 
   function apply() {
     world.style.transform =
       'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')';
-    world.classList.toggle('named', view.k >= nameZoom);
+    // Towns live in map space but must be drawn at screen size, so each one is
+    // scaled back by 1/k. Without this a dot becomes a saucer at 4x and the map
+    // turns into a field of blobs.
+    world.style.setProperty('--dl-inv', (1 / view.k).toFixed(4));
   }
   function clamp() {
     // Never let the world be dragged entirely off the frame: there is no way
@@ -421,6 +435,16 @@ VIEWPORT_SCRIPT = """
     zoomAt(1 / 1.4, frame.clientWidth / 2, frame.clientHeight / 2);
   });
   document.getElementById('dlzoomfit').addEventListener('click', fit);
+
+  // Names are off until asked for. Hovering a town always shows its own.
+  var namesBtn = document.getElementById('dlnames');
+  if (namesBtn) namesBtn.addEventListener('click', function () {
+    var on = world.classList.toggle('named');
+    namesBtn.classList.toggle('on', on);
+    hint.textContent = on
+      ? 'Every name shown. Zoom in if they overlap.'
+      : 'Drag to move, scroll to zoom, hover a town for its name';
+  });
 
   // Exposed so the settle page can turn a click into map coordinates without
   // duplicating any of this.

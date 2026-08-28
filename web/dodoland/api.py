@@ -66,40 +66,6 @@ async def api_dodoland_buildings(request: web.Request):
     return web.json_response({"ok": True, "buildings": saved})
 
 
-async def api_dodoland_link(request: web.Request):
-    """Issue or revoke the public map link.
-
-    Shown in the clear exactly once, because only its hash is stored: nothing
-    here can rebuild a link it has already handed out. Issuing again retires the
-    previous one, so this is a rotation rather than a growing pile of live links
-    nobody is tracking. Same arrangement as the trial board's link.
-    """
-    from helpers import share_tokens
-    from web.routes import _record_change
-
-    bot, guild = request.app["bot"], request["guild"]
-    body = await request.json()
-
-    if body.get("revoke"):
-        bot.share_tokens.revoke_all(guild.id, kind=share_tokens.KIND_PUBLIC)
-        bot.dodoland_buildings.save_map_url(guild.id, "")
-        await _record_change(request, "dodoland_link", "public map", "issued",
-                             "revoked", "DodoLand map link revoked")
-        return web.json_response({"ok": True, "revoked": True})
-
-    token = bot.share_tokens.issue(guild.id, kind=share_tokens.KIND_PUBLIC)
-    if not token:
-        return _bad("Links are not available right now.")
-    base = (bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").rstrip("/")
-    url = f"{base}/m/{guild.id}/{token}"
-    # Stored so the panel and /town can show it again. The token itself is only
-    # ever kept hashed, so this row is the one place the working link exists.
-    bot.dodoland_buildings.save_map_url(guild.id, url if base else "")
-    await _record_change(request, "dodoland_link", "public map", "", "issued",
-                         "DodoLand map link issued")
-    return web.json_response({"ok": True, "url": url, "has_base": bool(base)})
-
-
 async def api_dodoland_suggest(request: web.Request):
     """Attach each building to the channels whose names look like it.
 

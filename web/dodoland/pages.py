@@ -288,22 +288,6 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 # --------------------------------------------------------------------------- #
 #  The map
 # --------------------------------------------------------------------------- #
-def _link_state(bot, guild) -> str:
-    """What the server can currently see, and whether a link would even work."""
-    base = (bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").strip()
-    stored = bot.dodoland_buildings.map_url(guild.id)
-    if not base:
-        return ('<div class="tuneblocked"><b>Public address is not set.</b> Set it '
-                'under Settings first, or an issued link will be relative and will '
-                'not open from Discord.</div>')
-    if stored:
-        return (f'<div class="muted small">A link is live: '
-                f'<a href="{_e(stored)}" target="_blank" rel="noreferrer">'
-                f'{_e(stored)}</a></div>')
-    return ('<div class="muted small">No link has been issued, so nobody outside '
-            'this panel can see the map.</div>')
-
-
 def _map_html(bot, guild, towns: list[dict]) -> str:
     """Upload, share, and look at the map — on the same viewport players get.
 
@@ -341,18 +325,11 @@ def _map_html(bot, guild, towns: list[dict]) -> str:
   in: three hundred labels at once is a grey mat rather than a map. The biggest
   towns keep theirs at every level so there is something to orient on.</p>
 
-  <h3 class="panelhead">Who can see it</h3>
-  <p class="muted small">The map is invisible until you issue a link. One link,
-  for the whole server, that anybody holding it may look at: towns, standings and
-  flourish, all read-only. Issuing a new one retires the old, and only the hash
-  is stored, so a link is shown in the clear exactly once.</p>
-  {_link_state(bot, guild)}
-  <div class="rulebtns">
-    <button id="dlissuelink">Issue a new public link</button>
-    <button id="dlrevokelink">Revoke it</button>
-    <span id="dllinkmsg" class="muted small"></span>
-  </div>
-  <p class="muted small" id="dllinkout"></p>
+  <div class="tuneblocked">Nothing here is visible to the server. The public
+  map, the per-player settle page and the <code>/town</code> command were built
+  and removed again: none of this is ready to be seen, and a half-finished thing
+  behind a link somebody can paste is worse than no thing at all. It comes back
+  with a proper front end and a Discord login.</div>
 
   <h3 class="panelhead">Every town, and where it sits</h3>
   <div class="dlscroll">{_coords_table(guild, towns)}</div>
@@ -394,7 +371,7 @@ def _assets_html(bot, guild) -> str:
         cards += f"""
   <div class="dlasset" data-asset="{_e(row['asset_id'])}">
     <img alt="{_e(row['name'])}" loading="lazy"
-         src="/dl/{guild.id}/asset/{_e(row['asset_id'])}">
+         src="/guild/{guild.id}/dodoland/asset/{_e(row['asset_id'])}">
     <div class="dlassetmeta">
       <b>{_e(row['name'])}</b>
       <div class="muted small">{_e(need)}</div>
@@ -861,34 +838,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (res.ok) card.remove();
         else say(assetMsg, 'Refused: ' + res.error, false);
       });
-    });
-  });
-
-  var linkMsg = document.getElementById('dllinkmsg');
-  var linkOut = document.getElementById('dllinkout');
-  var issue = document.getElementById('dlissuelink');
-  if (issue) issue.addEventListener('click', function () {
-    if (!window.confirm('Issue a new public map link? Any link already handed '
-        + 'out stops working.')) return;
-    say(linkMsg, 'Issuing...', true);
-    post('link', {}).then(function (res) {
-      if (!res.ok) { say(linkMsg, 'Refused: ' + res.error, false); return; }
-      say(linkMsg, res.has_base ? 'Issued. Copy it now, it is shown once.'
-                                : 'Issued, but the public address is not set.', true);
-      linkOut.innerHTML = '';
-      var a = document.createElement('a');
-      a.href = res.url; a.textContent = res.url;
-      a.target = '_blank'; a.rel = 'noreferrer';
-      linkOut.appendChild(a);
-    });
-  });
-  var revoke = document.getElementById('dlrevokelink');
-  if (revoke) revoke.addEventListener('click', function () {
-    if (!window.confirm('Revoke the public map link? Anybody holding it loses '
-        + 'access immediately.')) return;
-    post('link', {revoke: true}).then(function (res) {
-      say(linkMsg, res.ok ? 'Revoked.' : ('Refused: ' + res.error), res.ok);
-      if (res.ok) linkOut.textContent = '';
     });
   });
 

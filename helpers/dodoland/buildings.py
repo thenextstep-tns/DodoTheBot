@@ -437,20 +437,6 @@ class BuildingStore:
             self._col.update_one({"_id": guild_id}, {"$set": {"map": image}}, upsert=True)
         self.invalidate(guild_id)
 
-    def map_url(self, guild_id: int) -> str:
-        """The public map link, or empty. Stored rather than derived.
-
-        Only the token's hash is kept, so nothing can rebuild a link once it has
-        been handed out. This row is therefore the only place a working link
-        survives, exactly as the trial board's ``board_url`` is.
-        """
-        return str(self.config(guild_id).get("map_url") or "")
-
-    def save_map_url(self, guild_id: int, url: str) -> None:
-        self._col.update_one({"_id": int(guild_id)},
-                             {"$set": {"map_url": str(url or "")}}, upsert=True)
-        self.invalidate(guild_id)
-
     def plots(self, guild_id: int) -> dict[int, dict]:
         """``{user_id: {x, y}}`` — where people have settled, in map percentages.
 
