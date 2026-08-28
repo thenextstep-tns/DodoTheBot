@@ -223,15 +223,91 @@ Flourish reads the trial system's *stored* standings, so a person's glow is as
 fresh as their last recalculation. That is deliberate: computing live would mean
 reaching into the trial cog's scoring path.
 
-## 4a. P2, the map (partly built)
+## 4a. P2, the map (built)
 
-Done: upload, replace and remove a base image (PNG/JPEG/WebP/SVG, under 4MB,
-stored on the guild's config row), and plot storage. Plots are **percentages of
-the image**, not pixels, so redrawing the map at another size never moves
-anybody's town.
+The world is an **image an admin uploads**, not one the bot generates. That
+decision removed the vector editor, the procedural coastlines and the elevation
+polygons from the build entirely, and it is why there is a handcrafted world at
+all rather than one permanently scheduled.
 
-Not done: the player-facing settle flow, rendering towns onto the map, and the
-public link. Settling is `BuildingStore.settle()` and has no surface yet.
+Positions are **percentages of the image**, never pixels, so replacing the map
+with a redrawn one of another size does not move a single town.
+
+### Placement is graph-driven, and that is the whole point
+
+Letting people click an empty coordinate is still what settling does. But on a
+server this size an empty continent stays empty: towns land far apart, nobody is
+anybody's neighbour, and every mechanic that depends on adjacency never fires.
+The document this replaces made it worse by growing the canvas with the
+population, pinning density at "too sparse" permanently.
+
+So an unsettled town is **suggested beside the people its owner actually talks
+to**, from the pair rows the listener already writes. Clusters on the map are
+friend groups, and whoever sits between two clusters is visibly the person who
+bridges them. A suggestion is never binding: anybody who settles keeps that spot
+and the suggestion only fills in for people who have not chosen.
+
+`helpers/dodoland/mapview.py` is pure (coordinates in, coordinates out, no
+Discord and no Mongo), so placement is tested against a known graph rather than
+eyeballed on a live server.
+
+### Drawing
+
+- **Size is on a square-root scale.** Linear makes the busiest town swallow the
+  map; the root keeps a newcomer visible beside somebody with a year's head
+  start, which matters for a map meant to invite people in.
+- **Flourish is a CSS class per level**, so effects live in the stylesheet and a
+  town with no rank costs nothing to render. Levels 5 and 6 animate, and the
+  animation is dropped under `prefers-reduced-motion`: forty animated towns is a
+  phone's whole frame budget.
+- **A quiet town is dim and loses nothing.** There is a test that a dim town
+  still has all its points, so no decay can be introduced by accident later.
+- Towns draw weakest first, so the biggest are not buried under the smallest.
+
+### Rebuilding history from the archive
+
+`helpers/dodoland/backfill.py`, driven from the panel with a preview that writes
+nothing. Three properties, each of which would fail silently, each asserted:
+
+1. **A rebuilt day is worth what a live day is worth.** Both go through
+   `intake.acts_from_message` and cap through `store.allowance`, which exists
+   for exactly this reason. The test replays the same messages down both paths
+   and demands the totals, channel splits and relation graph all match.
+2. **It is repeatable.** In-memory aggregation written with `$set`, so twice is
+   not double. One act at a time with `$inc` would have been 600,000 round trips
+   and a landmine.
+3. **It never touches a live day.** It stops strictly before the listener's
+   earliest row; a rebuilt day overwriting a real one would be unrecoverable.
+
+Two archive quirks, inherited from `helpers/stats.py`: there is no timestamp
+field, so the day comes from the ObjectId's generation time; and older rows
+carry no guild, so a guild's history is activity in that guild's channels.
+
+### The order to switch this on
+
+Placement reads the relation graph, which the backfill creates, so:
+
+1. **Attach channels to buildings.** Nothing scores until this is done; the
+   defaults ship unattached because a building that silently counts every room
+   is one nobody configured.
+2. **Preview, then run the backfill.**
+3. **Upload the map.** Uploading earlier is fine for checking the image renders,
+   but do not settle anybody before step 2 or you are placing towns against a
+   layout that is about to change under them.
+
+## 4b. Not built
+
+- **The player-facing surface.** No `/town` command, no public link. Everything
+  is still admin-only, which is deliberate: nothing is shown to the people it
+  ranks until the numbers are right.
+- **The buildings editor is a validated JSON textarea.** It refuses bad input
+  rather than half-applying, but it is not the widget the rest of the panel has.
+  Worth upgrading once the building shapes settle, since building it twice is
+  the waste.
+- **Reactions**, and the rank-granted *social functions* (hosting beacons, decor
+  slots, naming rights). Candidates only. The constraint they must respect: rank
+  grants social capability, never economic advantage, or the two axes collapse
+  into one.
 
 ## 5. Constraints this has to live inside
 
@@ -252,6 +328,30 @@ py tests/run_tests.py dodoland      # this subsystem
 py tests/run_tests.py               # the whole bot suite
 ```
 
+Five cases, each protecting something that would fail invisibly:
+
+| Case | What it holds down |
+|---|---|
+| `test_dodoland` | Guild scoping, both caps, acts-vs-scored, voice overlap, invite attribution |
+| `test_dodoland_standing` | Validation, derived thresholds, the floor, per-channel scoring |
+| `test_dodoland_page` | The page actually renders; **no tabletop import; no write to trial ranks** |
+| `test_dodoland_backfill` | A rebuilt day equals a live day; repeatable; never crosses the boundary |
+| `test_dodoland_map` | Clusters come out as clusters; nothing off the edge, stacked, or drifting |
+
+Run the tabletop suites too after touching `web/routes.py`, which DodoLand does:
+
+```bash
+py tests/test_dnd_panel.py
+```
+
 `tests/fake_mongo.py` gained `$or` and `find_one_and_update(upsert=…)` for this,
 because the stub was more forgiving than Mongo and the handoff is explicit that
 this is how bugs survive.
+
+**Two traps this subsystem hit, both now guarded:**
+
+- The page script is full of literal `%` (positions are percentages), so it is
+  substituted with `.replace()` and never `%`-formatted. `%`-format tried to
+  read every percent sign as a conversion.
+- A test case must `print("PASS")` or the runner counts it as a failure however
+  many assertions passed.
