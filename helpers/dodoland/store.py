@@ -311,6 +311,29 @@ class ActivityStore:
     # ------------------------------------------------------------------ #
     #  Bulk writing (the archive backfill)
     # ------------------------------------------------------------------ #
+    def clear_backfill(self, guild_id: int) -> int:
+        """Remove every rebuilt row for a guild. Live rows are untouched.
+
+        The rebuild upserts what its plan contains and therefore cannot, on its
+        own, remove a row the plan **stopped** producing. That is fine while the
+        rules are stable and wrong the moment they change: excluding bots and
+        splitting forum posts out of their forum both shrank the plan, and the
+        rows those rules used to produce simply stayed, so the bot kept its town
+        and the old collapsed rooms kept their points.
+
+        Rebuilt rows are entirely derived, so clearing them and writing the plan
+        afresh is the only way to make a rebuild mean "this is the history",
+        rather than "this, plus whatever an older set of rules once wrote".
+        Rows the listener wrote carry no ``source`` and are never matched here.
+        """
+        guild_id = _require_guild(guild_id)
+        removed = self._activity.delete_many(
+            {"guild_id": guild_id, "source": BASIS_BACKFILL})
+        removed_pairs = self._pairs.delete_many(
+            {"guild_id": guild_id, "source": BASIS_BACKFILL})
+        return (int(getattr(removed, "deleted_count", 0) or 0)
+                + int(getattr(removed_pairs, "deleted_count", 0) or 0))
+
     def replace_days(self, guild_id: int, activity: list[dict], pairs: list[dict]) -> int:
         """Overwrite whole days outright. Returns how many rows were written.
 

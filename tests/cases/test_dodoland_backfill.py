@@ -159,4 +159,37 @@ produced = {metric for values in plan.activity.values() for metric in values["ac
 assert produced <= set(backfill.REBUILDABLE), produced
 print("honesty         the rebuild invents nothing the archive never stored")
 
+
+
+# --------------------------------------------------------------------------- #
+#  A rebuild replaces its own history rather than adding to it
+# --------------------------------------------------------------------------- #
+# Upserting cannot remove a row the plan stopped producing. When the rules
+# changed (bots excluded, forum posts split out) the old rows stayed, so the bot
+# kept its town and rooms that no longer existed kept their points.
+store, params = fresh()
+store.record(GUILD, NIK, "message", channel_id=LIB, day="2026-08-28")  # live
+store.replace_days(GUILD, [
+    {"user_id": 909, "day": "2025-01-01", "acts": {"message": 5},
+     "scored": {"message": 5}, "channels": {str(LIB): {"message": 5}}},
+    {"user_id": NIK, "day": "2025-01-01", "acts": {"message": 2},
+     "scored": {"message": 2}, "channels": {str(LIB): {"message": 2}}},
+], [{"day": "2025-01-01", "a": NIK, "b": 909, "acts": {"mention_given": 1}, "n": 1}])
+assert len(store.rows(GUILD)) == 3
+
+removed = store.clear_backfill(GUILD)
+assert removed == 3, removed
+remaining = store.rows(GUILD)
+assert len(remaining) == 1 and remaining[0]["day"] == "2026-08-28", remaining
+assert store.pair_rows(GUILD) == []
+print("rebuild         clearing removes every rebuilt row and no live one")
+
+# So a rebuild under new rules leaves no trace of the old ones.
+store.replace_days(GUILD, [
+    {"user_id": NIK, "day": "2025-01-01", "acts": {"message": 2},
+     "scored": {"message": 2}, "channels": {str(LIB): {"message": 2}}},
+], [])
+assert {int(r["user_id"]) for r in store.rows(GUILD)} == {NIK}, "a stale town survived"
+print("rebuild         a person the new rules exclude does not keep their town")
+
 print("PASS")

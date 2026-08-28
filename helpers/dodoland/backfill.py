@@ -231,8 +231,12 @@ def run(bot, guild, *, archive, dry_run: bool = False) -> dict:
                       bot_ids=known_bots)
 
     result = {**plan.summary(), "boundary": boundary, "dry_run": bool(dry_run),
-              "bots_excluded": len(known_bots), "written": 0}
+              "bots_excluded": len(known_bots), "cleared": 0, "written": 0}
     if not dry_run:
+        # Clear first. Upserting alone cannot remove a row the plan stopped
+        # producing, so a rules change (bots excluded, forum posts split out)
+        # would otherwise leave the old rows in place beside the new ones.
+        result["cleared"] = store.clear_backfill(guild.id)
         result["written"] = store.replace_days(
             guild.id, plan.activity_rows(), plan.pair_rows()
         )
