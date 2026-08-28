@@ -160,7 +160,17 @@ issued.
 3. **Per-embed capability tokens** for a "see the full rankings" button.
    `share_tokens.issue(guild, kind=KIND_USER, user_id=…, ttl_days=…)` already
    does the work; nothing in the module needs changing.
-4. **Public leaderboard is enrolled-only by design.** Widening it to everyone
+4. **The board's fixed columns are for desktop only.** `table-layout: fixed` is
+there so expanding a row cannot re-measure the table and shift every column
+under the reader's cursor. The three number columns add up to 314px, which on a
+375px phone left about twenty pixels for the player's name and rendered the
+whole board as "M...". Under 620px the row becomes a grid instead: the number
+and the name on the left, points and rank stacked on the right where they need
+no width of their own, and the longest names wrap rather than ellipsis. The
+filter bar is sticky at every width. `tests/render_board.py` renders the page
+with long names so this is looked at rather than assumed.
+
+**Public leaderboard is enrolled-only by design.** Widening it to everyone
    publishes standings for people who never opted in — treat as a decision, not
    a tweak.
 5. **`/interest` is visible to everyone.** It lists member names; the panel can
