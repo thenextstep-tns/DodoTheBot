@@ -363,8 +363,15 @@ print("map             unplaced towns stay off the map until put there")
 # the further you zoomed out until the map was all roofs.
 assert "levelOfDetail" in map_body, "towns never collapse to dots"
 assert "dot_below" in map_body, "no threshold for collapsing a town to a dot"
-assert "D.sizes.town + 'px'" in map_body, "a town is not sized in map units"
+assert "D.sizes.town_pct + '%'" in map_body,     "a town is sized absolutely again, so it depends on the map's resolution"
 print("map             towns scale with the map and become dots when far away")
+
+# The controls that decide how the world is drawn belong beside the map, not
+# buried in a settings list: a town width means nothing except in relation to
+# the map it is drawn on.
+assert "dodoland_town_width_pct" in body, "town width cannot be set on the map page"
+assert "How the world is drawn" in body
+print("map             the world's scale is set per server, beside the map")
 
 # Naming is authored and must never reach the scorer.
 scorer = pathlib.Path("helpers/dodoland/standing.py").read_text(encoding="utf-8")

@@ -146,9 +146,10 @@ async def map_page(request: web.Request):
     placed = [p for p in data["people"] if p["plot"]]
     unplaced = [p for p in data["people"] if not p["plot"]]
     sizes = {
-        # In the base image's own pixels, so a town is a size on the *map* and
-        # scales with it rather than floating above it at a fixed screen size.
-        "town": int(bot.dodoland_params.get(guild.id, "dodoland_town_size")),
+        # A proportion of the map's width, not a pixel count. Positions are
+        # percentages for the same reason: re-uploading the map at another
+        # resolution must change neither where a town sits nor how big it looks.
+        "town_pct": float(bot.dodoland_params.get(guild.id, "dodoland_town_width_pct")),
         "dot_below": int(bot.dodoland_params.get(guild.id, "dodoland_town_dot_below")),
         "detail_above": int(bot.dodoland_params.get(guild.id, "dodoland_detail_above")),
         "ratio": townart.HEIGHT / townart.WIDTH,
@@ -478,9 +479,11 @@ _SCRIPT = r"""
     el.dataset.id = person.id;
     el.style.left = person.plot.x + '%';
     el.style.top = person.plot.y + '%';
-    // Sized in the map's own pixels and inside the element the zoom scales, so
-    // a town shrinks and grows with the coastline.
-    el.style.width = D.sizes.town + 'px';
+    // A percentage of the world, which is the base image's own width, so a town
+    // is a fixed fraction of the map whatever resolution that image happens to
+    // be. It sits inside the element the zoom scales, so it shrinks and grows
+    // with the coastline.
+    el.style.width = D.sizes.town_pct + '%';
     el.innerHTML = '<span class="dldot"></span>' +
       '<div class="dlart"></div>' +
       '<div class="dlname">' + escapeHtml(person.name) + '</div>';
@@ -521,13 +524,13 @@ _SCRIPT = r"""
 
   function levelOfDetail() {
     if (!nat.w) return;
-    var shown = D.sizes.town * view.k;
+    var shown = nat.w * (D.sizes.town_pct / 100) * view.k;
     var tiny = shown < D.sizes.dot_below;
     world.classList.toggle('close', shown > D.sizes.detail_above);
 
     // The visible rectangle, in map percentages, with a margin so a town does
     // not pop in at the very edge of the frame.
-    var pad = D.sizes.town * 2;
+    var pad = nat.w * (D.sizes.town_pct / 100) * view.k * 2;
     var x0 = ((-view.x - pad) / (nat.w * view.k)) * 100;
     var x1 = ((-view.x + frame.clientWidth + pad) / (nat.w * view.k)) * 100;
     var y0 = ((-view.y - pad) / (nat.h * view.k)) * 100;

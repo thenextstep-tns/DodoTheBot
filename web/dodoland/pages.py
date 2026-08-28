@@ -288,6 +288,30 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 # --------------------------------------------------------------------------- #
 #  The map
 # --------------------------------------------------------------------------- #
+def _map_scale_rows(bot, guild) -> str:
+    """The handful of numbers that decide how the world is drawn.
+
+    Kept beside the upload rather than in the general settings list: a town
+    width means nothing except in relation to the map it is drawn on, so it
+    belongs on the page where that map is.
+    """
+    from web.routes import _param_input
+
+    rows = ""
+    for key in ("dodoland_town_width_pct", "dodoland_town_dot_below",
+                "dodoland_detail_above", "dodoland_map_min_zoom",
+                "dodoland_map_max_zoom"):
+        spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)
+        entry = {**spec, "value": bot.dodoland_params.get(guild.id, key)}
+        rows += f"""
+  <div class="paramrow">
+    <div><b>{_e(spec['label'])}</b>
+      <div class="muted small">{_e(spec['description'])}</div></div>
+    {_param_input(entry, guild)}
+  </div>"""
+    return f'<div class="params">{rows}</div>'
+
+
 def _map_html(bot, guild, towns: list[dict]) -> str:
     """Uploading the world, and the way through to the map itself.
 
@@ -314,6 +338,11 @@ def _map_html(bot, guild, towns: list[dict]) -> str:
     <button id="dlmapclear">Remove map</button>
     <span id="dlmapmsg" class="muted small"></span>
   </div>
+
+  <h3 class="panelhead">How the world is drawn</h3>
+  <p class="muted small">Set once per server, here rather than buried in the
+  settings, because these only mean anything next to the map they apply to.</p>
+  {_map_scale_rows(bot, guild)}
 
   <div class="paramrow wide">
     <div><b>Open the map</b>
