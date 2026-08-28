@@ -140,3 +140,7 @@ dodoland_params = db["DodoLandParams"]       # {guild_id, key, value} — DodoLa
 # The per-guild DodoLand configuration: buildings, their channels and tiers, and
 # later the uploaded map. One row per guild, read through helpers/dodoland/buildings.py.
 dodoland_config = db["DodoLandConfig"]       # {_id: guild_id, buildings, map, plots}
+# Decor and landmark images an admin uploads for people to place on their plots.
+# Kept out of DodoLandConfig: images are large and that row is read on every
+# page load, so binaries do not belong in it.
+dodoland_assets = db["DodoLandAssets"]       # {guild_id, asset_id, name, data, min_tier}

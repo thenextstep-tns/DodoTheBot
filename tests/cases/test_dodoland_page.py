@@ -20,6 +20,7 @@ import discord  # noqa: E402
 from fake_mongo import FakeCollection  # noqa: E402
 
 from helpers.dodoland import flourish, parameters as dodo_params  # noqa: E402
+from helpers.dodoland.assets import AssetStore  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
 from helpers.parameters import ParamManager  # noqa: E402
@@ -90,6 +91,7 @@ class Bot:
         self.dodoland_params = ParamManager(FakeCollection(), dodo_params.DODOLAND_PARAMETERS)
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
+        self.dodoland_assets = AssetStore(FakeCollection())
         self.visibility = Visibility()
         self.trial_ranks = TrialRanks()
         self._guild = None
@@ -161,7 +163,10 @@ print(f"page            all {len(sections)} panels are reachable from the menu")
 # Wide content scrolls inside its own box. Fifteen buildings as fifteen columns
 # pushed the entire panel sideways.
 assert "dlscroll" in body, "the wide table has no scroll container"
-assert body.count("<th>") < 12, "the preview is back to a column per building"
+# Scoped to the preview: other sections legitimately have their own tables, and
+# what this guards is that the preview never goes back to a column per building.
+_preview = body[body.index('data-panel="dl-preview"'):body.index('data-panel="dl-scratch"')]
+assert _preview.count("<th>") < 8, "the preview is back to a column per building"
 print("page            wide tables scroll inside themselves, not the page")
 
 # Saving with no feedback is indistinguishable from not saving at all. panel.js's

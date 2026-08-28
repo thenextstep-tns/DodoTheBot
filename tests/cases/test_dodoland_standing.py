@@ -83,10 +83,10 @@ picked = B.suggest_channels(_Guild(), defaults)
 attached = [cid for b in picked for cid in b["channels"]]
 assert len(attached) == len(set(attached)), "one room was given to two buildings"
 assert attached, "the suggester matched nothing at all"
-held = [dict(b, channels={99: 1.0}) if b["key"] == "library" else b for b in defaults]
+held = [dict(b, channels={"99": 1.0}) if b["key"] == "library" else b for b in defaults]
 again = B.suggest_channels(_Guild(), held)
 kept = next(b for b in again if b["key"] == "library")
-assert kept["channels"] == {99: 1.0}, "suggesting overwrote a hand-tuned building"
+assert kept["channels"] == {"99": 1.0}, "suggesting overwrote a hand-tuned building"
 print("defaults        suggestion fills empty buildings and never undoes a choice")
 
 
@@ -237,7 +237,7 @@ assert _resp.status == 200, _resp.text
 assert '"ok": true' in _resp.text, _resp.text
 saved = _bot.dodoland_buildings.buildings(GUILD)
 attached = {cid for b in saved for cid in b["channels"]}
-assert attached == {901, 902, 903}, attached
+assert attached == {'901', '902', '903'}, attached
 assert _bot.dodoland_buildings.is_configured(GUILD), "suggesting did not persist"
 print("suggest         one click attaches this server's real rooms, and it sticks")
 
@@ -296,7 +296,7 @@ print("channels        labelled by category, so searching one finds its rooms")
 # A hint may match a whole category, which is how servers are really organised.
 picked = B.suggest_channels(_Server(), B.validate_buildings(B.default_buildings()))
 tavern = next(b for b in picked if b["key"] == "tavern")
-assert set(tavern["channels"]) == {30, 31}, tavern["channels"]
+assert set(tavern["channels"]) == {"30", "31"}, tavern["channels"]
 print("channels        a hint can claim a whole category, not one room at a time")
 
 

@@ -66,6 +66,40 @@ async def api_dodoland_buildings(request: web.Request):
     return web.json_response({"ok": True, "buildings": saved})
 
 
+async def api_dodoland_link(request: web.Request):
+    """Issue or revoke the public map link.
+
+    Shown in the clear exactly once, because only its hash is stored: nothing
+    here can rebuild a link it has already handed out. Issuing again retires the
+    previous one, so this is a rotation rather than a growing pile of live links
+    nobody is tracking. Same arrangement as the trial board's link.
+    """
+    from helpers import share_tokens
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+
+    if body.get("revoke"):
+        bot.share_tokens.revoke_all(guild.id, kind=share_tokens.KIND_PUBLIC)
+        bot.dodoland_buildings.save_map_url(guild.id, "")
+        await _record_change(request, "dodoland_link", "public map", "issued",
+                             "revoked", "DodoLand map link revoked")
+        return web.json_response({"ok": True, "revoked": True})
+
+    token = bot.share_tokens.issue(guild.id, kind=share_tokens.KIND_PUBLIC)
+    if not token:
+        return _bad("Links are not available right now.")
+    base = (bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").rstrip("/")
+    url = f"{base}/m/{guild.id}/{token}"
+    # Stored so the panel and /town can show it again. The token itself is only
+    # ever kept hashed, so this row is the one place the working link exists.
+    bot.dodoland_buildings.save_map_url(guild.id, url if base else "")
+    await _record_change(request, "dodoland_link", "public map", "", "issued",
+                         "DodoLand map link issued")
+    return web.json_response({"ok": True, "url": url, "has_base": bool(base)})
+
+
 async def api_dodoland_suggest(request: web.Request):
     """Attach each building to the channels whose names look like it.
 
@@ -88,6 +122,55 @@ async def api_dodoland_suggest(request: web.Request):
                          f"{attached} rooms attached", "DodoLand rooms suggested")
     return web.json_response({"ok": True, "attached": attached,
                               "buildings": len(saved)})
+
+
+async def api_dodoland_asset(request: web.Request):
+    """Add, edit or remove one asset in the library.
+
+    Assets are what people put on their own patch of the world once they have
+    earned the right to. A lock is a **tier of a building**, never a point
+    total: thresholds are derived from the server's live distribution and move
+    as the server does, so a number written here would quietly mean something
+    different every week.
+    """
+    from helpers.dodoland import assets as asset_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    action = str(body.get("action") or "add")
+
+    try:
+        if action == "remove":
+            gone = bot.dodoland_assets.remove(guild.id, body.get("asset_id"))
+            if gone:
+                await _record_change(request, "dodoland_asset", "remove", "", "",
+                                     "DodoLand asset removed")
+            return web.json_response({"ok": True, "removed": bool(gone)})
+
+        if action == "update":
+            changed = bot.dodoland_assets.update(
+                guild.id, body.get("asset_id"),
+                name=body.get("name"), min_tier=body.get("min_tier"),
+                building=body.get("building"),
+            )
+            return web.json_response({"ok": True, "changed": bool(changed)})
+
+        content_type = str(body.get("content_type") or "").lower()
+        try:
+            blob = base64.b64decode(str(body.get("data") or "").split(",")[-1],
+                                    validate=True)
+        except Exception:
+            return _bad("That upload could not be read.")
+        row = bot.dodoland_assets.add(
+            guild.id, name=body.get("name"), data=blob, content_type=content_type,
+            min_tier=body.get("min_tier") or 0, building=body.get("building") or "",
+        )
+        await _record_change(request, "dodoland_asset", str(row["name"]), "", "added",
+                             "DodoLand asset added")
+        return web.json_response({"ok": True, "asset": row})
+    except asset_rules.AssetError as error:
+        return _bad(error)
 
 
 async def api_dodoland_settle(request: web.Request):

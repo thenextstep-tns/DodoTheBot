@@ -33,6 +33,7 @@ from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.dodoland import parameters as dodoland_parameters
+from helpers.dodoland.assets import AssetStore
 from helpers.dodoland.buildings import BuildingStore
 from helpers.dodoland.store import ActivityStore
 from helpers.events import EventRuleManager
@@ -128,6 +129,8 @@ class DodoBot(commands.Bot):
         # The towns themselves: which buildings a server has, what feeds them,
         # and what a tier costs. Per-guild data, edited on the DodoLand page.
         self.dodoland_buildings = BuildingStore(config_py.dodoland_config)
+        # Decor an admin uploads for people to place once they have earned it.
+        self.dodoland_assets = AssetStore(config_py.dodoland_assets)
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)

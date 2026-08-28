@@ -1651,3 +1651,64 @@ body.board { background: var(--color-surface-soft); }
 .dlnav .sidenavitem .navemoji { justify-self: center; width: 22px; }
 .dlnav .sidenavitem .navlabel,
 .dlnav .sidenavitem .navhint { justify-self: start; text-align: left; }
+
+/* --- DodoLand map viewport (panel copy) --------------------------------- */
+/* The player pages carry their own copy of these rules in their inline cosy
+   stylesheet. The markup is generated once in townmap.py so both surfaces show
+   the same map; only the palette differs, so only the palette is repeated. */
+.dlstage { position: relative; margin: 14px 0 0; width: 100%; }
+.dlframe { position: relative; height: min(70vh, 760px); overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--color-border);
+  background: var(--color-surface-soft);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, .18);
+  touch-action: none; cursor: grab; }
+.dlframe.dragging { cursor: grabbing; }
+.dlworld { position: absolute; top: 0; left: 0; transform-origin: 0 0;
+  will-change: transform; }
+.dlworld img { display: block; width: 100%; height: auto;
+  -webkit-user-drag: none; user-select: none; pointer-events: none; }
+.dlzoom { position: absolute; right: 12px; top: 12px; display: flex;
+  flex-direction: column; gap: 6px; z-index: 4; }
+.dlzoom button { width: 36px; height: 36px; font-size: 17px; line-height: 1;
+  border-radius: 9px; cursor: pointer; }
+.dlhint { position: absolute; left: 12px; bottom: 12px; z-index: 4;
+  padding: 4px 9px; border-radius: 8px; font-size: 12px;
+  background: rgba(0, 0, 0, .5); color: #fff; }
+.dltown { position: absolute; transform: translate(-50%, -50%);
+  pointer-events: none; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; }
+.dltowndot { display: block;
+  width: calc(var(--dl-base, 10px) * var(--dl-size, 1));
+  height: calc(var(--dl-base, 10px) * var(--dl-size, 1)); border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff6e2, #d98d3a 70%);
+  border: 2px solid rgba(255, 245, 225, .9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+/* Three hundred names at once is a grey mat, not a map. */
+.dltownname { font-size: 10px; color: #fff8ea; white-space: nowrap; opacity: 0;
+  transition: opacity .12s ease; text-shadow: 0 1px 3px rgba(0, 0, 0, .95); }
+.dlworld.named .dltownname { opacity: 1; }
+.dltown.big .dltownname { opacity: 1; }
+.dltown.dim { opacity: .45; }
+.dltown.fl1 .dltowndot { box-shadow: 0 0 8px 2px rgba(255, 214, 130, .9); }
+.dltown.fl2 .dltowndot { box-shadow: 0 0 11px 3px rgba(255, 184, 77, .9); }
+.dltown.fl3 .dltowndot { box-shadow: 0 0 15px 4px rgba(255, 196, 61, .95); }
+.dltown.fl4 .dltowndot { box-shadow: 0 0 19px 6px rgba(120, 190, 255, .9); }
+.dltown.fl5 .dltowndot { box-shadow: 0 0 24px 8px rgba(150, 130, 255, .9);
+  animation: dlbreathe 3.4s ease-in-out infinite; }
+.dltown.fl6 .dltowndot { box-shadow: 0 0 30px 11px rgba(255, 140, 210, .9);
+  animation: dlbreathe 2.2s ease-in-out infinite; }
+@keyframes dlbreathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.16); filter: brightness(1.3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dltown.fl5 .dltowndot, .dltown.fl6 .dltowndot { animation: none; }
+}
+
+/* The asset library */
+.dlassets { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.dlasset { display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+  border: 1px solid var(--color-border); border-radius: 10px; }
+.dlasset img { width: 48px; height: 48px; object-fit: contain; flex: none;
+  border-radius: 8px; background: var(--color-surface-soft); padding: 4px; }
+.dlassetmeta { flex: 1 1 auto; min-width: 0; }

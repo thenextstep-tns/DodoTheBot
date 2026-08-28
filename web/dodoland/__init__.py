@@ -22,10 +22,14 @@ def dodoland_routes() -> list:
     from helpers import panel_access
     from web.dodoland.api import (
         api_dodoland_backfill, api_dodoland_buildings, api_dodoland_map,
-        api_dodoland_param, api_dodoland_settle, api_dodoland_suggest,
+        api_dodoland_asset, api_dodoland_link, api_dodoland_param,
+        api_dodoland_settle,
+        api_dodoland_suggest,
     )
     from web.dodoland.pages import dodoland_page
-    from web.dodoland.settle import api_settle_own, settle_page
+    from web.dodoland.settle import (
+        api_settle_own, asset_image, public_map, settle_page,
+    )
     from web.routes import require_scope
 
     # Reading the page means reading everybody's standing, so it takes the same
@@ -42,9 +46,19 @@ def dodoland_routes() -> list:
         # Moving somebody's town is configuration, not a game action yet.
         web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),
         web.post("/api/guild/{gid}/dodoland/suggest", full(api_dodoland_suggest)),
+        web.post("/api/guild/{gid}/dodoland/link", full(api_dodoland_link)),
+        web.post("/api/guild/{gid}/dodoland/asset", full(api_dodoland_asset)),
         # The player's own link. No scope decorator on purpose: there is no
         # session here, the token in the path IS the credential, and it names
         # exactly one person whose only power is to move their own town.
+        # The shared map anybody with the link may look at, and one
+        # person's own plot. No scope decorator on either: there is no
+        # session here, the token in the path IS the credential.
+        web.get("/m/{gid}/{token}", public_map),
+        # Decor images. Unauthenticated: the id is a random token and
+        # threading a capability through every <img> would spread it far
+        # wider than it is worth.
+        web.get("/dl/{gid}/asset/{aid}", asset_image),
         web.get("/t/{gid}/{token}", settle_page),
         web.post("/t/{gid}/{token}/settle", api_settle_own),
     ]

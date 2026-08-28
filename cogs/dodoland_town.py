@@ -120,6 +120,30 @@ class Town(commands.Cog, name="dodoland_town"):
         embed.set_footer(text="Buildings come from taking part. Flourish comes from your rank.")
         await interaction.followup.send(embed=embed)
 
+    @town.command(name="map", description="Open the map of this server.")
+    async def map_command(self, interaction: discord.Interaction) -> None:
+        """The shared map, if an admin has issued a link for it."""
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "DodoLand only exists on a server.", ephemeral=True)
+            return
+        url = self.bot.dodoland_buildings.map_url(guild.id)
+        if not url:
+            await interaction.response.send_message(
+                "Nobody has opened the map to the server yet. An admin can issue "
+                "a link from the DodoLand panel.", ephemeral=True)
+            return
+        embed = discord.Embed(
+            title=f"🗺 The map of {guild.name}",
+            description=(f"[Open the map]({url})\n\nEvery town on it was built by "
+                         "somebody turning up and talking to people. Towns sit "
+                         "beside the people their owner talks to most, so the "
+                         "clusters are friendships."),
+            colour=discord.Colour.from_str("#8b5a2b"),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @town.command(name="settle", description="Choose where on the map your town sits.")
     async def settle(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild

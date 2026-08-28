@@ -288,80 +288,158 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 # --------------------------------------------------------------------------- #
 #  The map
 # --------------------------------------------------------------------------- #
-def _town_markers(towns: list[dict]) -> str:
-    """The towns, as absolutely-positioned markers over the base image.
-
-    Flourish is a class rather than inline style so the effects live in the
-    stylesheet where they can be looked at and changed, and so a town with no
-    rank carries no extra rendering cost at all.
-    """
-    out = ""
-    for town in towns:
-        classes = f"dltown fl{town['flourish']}" + ("" if town["lit"] else " dim")
-        title = f"{town['name']} · {town['power']:,} power"
-        if town["rank_name"]:
-            title += f" · {town['rank_name']}"
-        if not town["settled"]:
-            title += " · suggested, not yet settled"
-        built = ", ".join(f"{k}: {v}" for k, v in town["tiers"].items())
-        if built:
-            title += f" · {built}"
-        out += (
-            f'<button class="{classes}" style="left:{town["x"]}%;top:{town["y"]}%;'
-            f'--dl-size:{town["size"]:g}" data-user="{town["user_id"]}" '
-            f'title="{_e(title)}">'
-            f'<span class="dltowndot"></span>'
-            f'<span class="dltownname">{_e(town["name"])}</span></button>'
-        )
-    return out
+def _link_state(bot, guild) -> str:
+    """What the server can currently see, and whether a link would even work."""
+    base = (bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").strip()
+    stored = bot.dodoland_buildings.map_url(guild.id)
+    if not base:
+        return ('<div class="tuneblocked"><b>Public address is not set.</b> Set it '
+                'under Settings first, or an issued link will be relative and will '
+                'not open from Discord.</div>')
+    if stored:
+        return (f'<div class="muted small">A link is live: '
+                f'<a href="{_e(stored)}" target="_blank" rel="noreferrer">'
+                f'{_e(stored)}</a></div>')
+    return ('<div class="muted small">No link has been issued, so nobody outside '
+            'this panel can see the map.</div>')
 
 
 def _map_html(bot, guild, towns: list[dict]) -> str:
-    image = bot.dodoland_buildings.map_image(guild.id)
-    settled_count = sum(1 for town in towns if town["settled"])
+    """Upload, share, and look at the map — on the same viewport players get.
 
-    if image:
-        raw = image.get("data")
-        blob = bytes(raw) if raw is not None else b""
-        encoded = base64.b64encode(blob).decode("ascii")
-        canvas = f"""
-  <div class="dlcanvas" id="dlcanvas">
-    <img class="dlmap" alt="The server map"
-         src="data:{_e(image.get('content_type'))};base64,{encoded}">
-    {_town_markers(towns)}
-  </div>"""
-        state = f"A map is set ({len(blob):,} bytes). Uploading another replaces it."
-    else:
-        canvas = ('<div class="muted">No map uploaded yet. Towns are placed and '
-                  'drawn as soon as there is an image to place them on.</div>')
-        state = "Upload the image this server's continent is drawn on."
+    The markers, the panning and the zooming all come from ``townmap`` rather
+    than being written again here. The first version drew its own, which is how
+    the panel ended up showing three hundred permanently-labelled towns on a
+    postage stamp while the player pages showed something else entirely.
+    """
+    from web.dodoland import townmap
+
+    image = bot.dodoland_buildings.map_image(guild.id)
+    sizes = townmap.sizes_for(bot, guild)
+    state = (f"A map is set ({len(bytes(image.get('data') or b'')):,} bytes). "
+             "Uploading another replaces it." if image else
+             "Upload the image this server's continent is drawn on.")
+    settled = sum(1 for town in towns if town["settled"])
 
     return f"""
 <section class="sidepanel" data-panel="dl-map" hidden>
-  <h2 class="panelhead">🗺 The map</h2>
+  <h2 class="panelhead">\U0001F5FA The map</h2>
   <p class="muted">The world is an image you upload, not one the bot generates.
-  That removes the vector editor, the procedural coastlines and the elevation
-  polygons from the build entirely, and it means the map is handcrafted and
-  yours on day one.</p>
-  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB. Positions
-  are percentages of the image, so redrawing the map at a different size never
-  moves anybody's town.</p>
+  Positions are percentages of it, so redrawing the map at a different size
+  never moves anybody's town.</p>
+  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB.
+  <b>{settled}</b> of <b>{len(towns)}</b> towns have been placed deliberately;
+  the rest sit beside the people their owner talks to most.</p>
   <div class="rulebtns">
     <input type="file" id="dlmapfile" accept="image/png,image/jpeg,image/webp,image/svg+xml">
     <button id="dlmapclear">Remove map</button>
     <span id="dlmapmsg" class="muted small"></span>
   </div>
-  {canvas}
-  <p class="muted small"><b>{settled_count}</b> of <b>{len(towns)}</b> towns have
-  been settled deliberately. The rest are <i>suggested</i>: placed beside the
-  people their owner actually talks to, using the relation graph the listener
-  builds. Clusters on this map are friend groups, and whoever sits between two
-  clusters is the person who bridges them. A suggestion is never binding, and
-  anybody who settles keeps their spot forever.</p>
-  <p class="muted small">Click a town to place it where you click next, or use
-  this once the player-facing flow exists. Dim towns have had no activity inside
-  the lit window; that is the only thing dormancy ever costs, and coming back
-  lights them again. Nothing is ever taken away.</p>
+
+  {townmap.canvas(bot, guild, towns, sizes=sizes)}
+  <p class="muted small">Drag to move, scroll to zoom. Names appear as you zoom
+  in: three hundred labels at once is a grey mat rather than a map. The biggest
+  towns keep theirs at every level so there is something to orient on.</p>
+
+  <h3 class="panelhead">Who can see it</h3>
+  <p class="muted small">The map is invisible until you issue a link. One link,
+  for the whole server, that anybody holding it may look at: towns, standings and
+  flourish, all read-only. Issuing a new one retires the old, and only the hash
+  is stored, so a link is shown in the clear exactly once.</p>
+  {_link_state(bot, guild)}
+  <div class="rulebtns">
+    <button id="dlissuelink">Issue a new public link</button>
+    <button id="dlrevokelink">Revoke it</button>
+    <span id="dllinkmsg" class="muted small"></span>
+  </div>
+  <p class="muted small" id="dllinkout"></p>
+
+  <h3 class="panelhead">Every town, and where it sits</h3>
+  <div class="dlscroll">{_coords_table(guild, towns)}</div>
+</section>"""
+
+
+def _coords_table(guild, towns: list[dict]) -> str:
+    """Positions as numbers, because a map cannot be read off precisely."""
+    rows = ""
+    for index, town in enumerate(
+            sorted(towns, key=lambda t: (-t["power"], t["name"])), start=1):
+        rows += (f'<tr><td class="rankindex">{index}</td>'
+                 f'<td><b>{_e(town["name"])}</b></td>'
+                 f'<td class="nowrap">{town["power"]:,}</td>'
+                 f'<td class="nowrap">{town["x"]:.2f}, {town["y"]:.2f}</td>'
+                 f'<td class="muted small">'
+                 f'{"chosen" if town["settled"] else "suggested"}</td>'
+                 f'<td class="muted small">{"lit" if town["lit"] else "dim"}</td></tr>')
+    if not rows:
+        rows = '<tr><td colspan="6" class="muted">No towns yet.</td></tr>'
+    return ('<table class="previewtable"><thead><tr><th></th><th>Town</th>'
+            '<th>Standing</th><th>Position (x, y)</th><th>Placed</th>'
+            f'<th>State</th></tr></thead><tbody>{rows}</tbody></table>')
+
+
+def _assets_html(bot, guild) -> str:
+    """The library of things people can put on their plots."""
+    from helpers.dodoland import assets as asset_rules
+
+    rows = bot.dodoland_assets.list(guild.id)
+    buildings = bot.dodoland_buildings.buildings(guild.id)
+    options = '<option value="">Everybody (starter decor)</option>' + "".join(
+        f'<option value="{_e(b["key"])}">{_e(b["name"])}</option>' for b in buildings)
+
+    cards = ""
+    for row in rows:
+        need = (f'tier {int(row.get("min_tier", 0))} of {row["building"]}'
+                if row.get("building") else "available to everybody")
+        cards += f"""
+  <div class="dlasset" data-asset="{_e(row['asset_id'])}">
+    <img alt="{_e(row['name'])}" loading="lazy"
+         src="/dl/{guild.id}/asset/{_e(row['asset_id'])}">
+    <div class="dlassetmeta">
+      <b>{_e(row['name'])}</b>
+      <div class="muted small">{_e(need)}</div>
+    </div>
+    <button class="dlassetdel">Remove</button>
+  </div>"""
+    if not cards:
+        cards = ('<div class="muted small">Nothing in the library yet. Anything '
+                 'you upload here is what people can put on their plots.</div>')
+
+    return f"""
+<section class="sidepanel" data-panel="dl-assets" hidden>
+  <h2 class="panelhead">\U0001F9F0 Asset library</h2>
+  <p class="muted">The things people can place on their own patch of the world.
+  Upload an icon, say what unlocks it, and it appears in everybody's toolkit
+  under the map — dimmed until they have earned it, because a reward nobody can
+  see rewards nobody.</p>
+  <p class="muted small">A lock is a <b>tier of a building</b>, never a point
+  total. Thresholds are derived from the server's live distribution and move as
+  the server does, so a number here would quietly mean something different every
+  week. PNG, WebP, GIF or SVG, under {asset_rules.MAX_BYTES // 1024}KB.</p>
+
+  <div class="paramrow wide">
+    <div><b>Add something</b>
+      <div class="muted small">Small, square and transparent works best: these
+      are drawn a few dozen pixels across on a busy map.</div></div>
+    <div class="dlfields">
+      <label class="dlfield"><span class="muted small">Name</span>
+        <input type="text" id="dlassetname" maxlength="48" placeholder="Campfire"></label>
+      <label class="dlfield"><span class="muted small">Unlocked by</span>
+        <select id="dlassetbuilding">{options}</select></label>
+      <label class="dlfield"><span class="muted small">At tier</span>
+        <input type="number" id="dlassettier" min="0" max="12" value="1"></label>
+      <label class="dlfield"><span class="muted small">Image</span>
+        <input type="file" id="dlassetfile"
+               accept="image/png,image/webp,image/gif,image/svg+xml"></label>
+    </div>
+  </div>
+  <div class="rulebtns">
+    <button id="dlassetadd">Add to the library</button>
+    <span id="dlassetmsg" class="muted small"></span>
+  </div>
+
+  <h3 class="panelhead">In the library ({len(rows)})</h3>
+  <div class="dlassets">{cards}</div>
 </section>"""
 
 
@@ -750,6 +828,70 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  var assetMsg = document.getElementById('dlassetmsg');
+  var addAsset = document.getElementById('dlassetadd');
+  if (addAsset) addAsset.addEventListener('click', function () {
+    var file = document.getElementById('dlassetfile');
+    var chosen = file && file.files && file.files[0];
+    var name = (document.getElementById('dlassetname') || {}).value || '';
+    if (!chosen) { say(assetMsg, 'Pick an image first.', false); return; }
+    if (!name.trim()) { say(assetMsg, 'Give it a name.', false); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      say(assetMsg, 'Uploading...', true);
+      post('asset', {
+        action: 'add', name: name,
+        building: (document.getElementById('dlassetbuilding') || {}).value || '',
+        min_tier: parseInt((document.getElementById('dlassettier') || {}).value || '0', 10),
+        data: String(reader.result).split(',').pop(),
+        content_type: chosen.type
+      }).then(function (res) {
+        if (res.ok) { say(assetMsg, 'Added. Reloading...', true);
+          setTimeout(function () { location.reload(); }, 500); }
+        else { say(assetMsg, 'Refused: ' + res.error, false); }
+      });
+    };
+    reader.readAsDataURL(chosen);
+  });
+  document.querySelectorAll('.dlassetdel').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var card = btn.closest('.dlasset');
+      if (!card || !window.confirm('Remove this asset from the library?')) return;
+      post('asset', {action: 'remove', asset_id: card.dataset.asset}).then(function (res) {
+        if (res.ok) card.remove();
+        else say(assetMsg, 'Refused: ' + res.error, false);
+      });
+    });
+  });
+
+  var linkMsg = document.getElementById('dllinkmsg');
+  var linkOut = document.getElementById('dllinkout');
+  var issue = document.getElementById('dlissuelink');
+  if (issue) issue.addEventListener('click', function () {
+    if (!window.confirm('Issue a new public map link? Any link already handed '
+        + 'out stops working.')) return;
+    say(linkMsg, 'Issuing...', true);
+    post('link', {}).then(function (res) {
+      if (!res.ok) { say(linkMsg, 'Refused: ' + res.error, false); return; }
+      say(linkMsg, res.has_base ? 'Issued. Copy it now, it is shown once.'
+                                : 'Issued, but the public address is not set.', true);
+      linkOut.innerHTML = '';
+      var a = document.createElement('a');
+      a.href = res.url; a.textContent = res.url;
+      a.target = '_blank'; a.rel = 'noreferrer';
+      linkOut.appendChild(a);
+    });
+  });
+  var revoke = document.getElementById('dlrevokelink');
+  if (revoke) revoke.addEventListener('click', function () {
+    if (!window.confirm('Revoke the public map link? Anybody holding it loses '
+        + 'access immediately.')) return;
+    post('link', {revoke: true}).then(function (res) {
+      say(linkMsg, res.ok ? 'Revoked.' : ('Refused: ' + res.error), res.ok);
+      if (res.ok) linkOut.textContent = '';
+    });
+  });
+
   function backfill(preview) {
     var out = document.getElementById('dlbackfillout');
     var msg = document.getElementById('dlbackfillmsg');
@@ -840,7 +982,9 @@ async def dodoland_page(request: web.Request):
          f"{len(scratch['people'])} scoring"),
         ("dl-buildings", "\U0001F3D8", "Buildings", f"{len(buildings)}"),
         ("dl-metrics", "\U0001F4CF", "What counts", f"{len(metric_registry.METRICS)} metrics"),
-        ("dl-map", "\U0001F5FA", "The map", "upload"),
+        ("dl-map", "\U0001F5FA", "The map", f"{len(towns)} towns"),
+        ("dl-assets", "\U0001F9F0", "Asset library",
+         f"{len(bot.dodoland_assets.list(guild.id))} things"),
         ("dl-backfill", "\U000023EA", "Rebuild history", "from the archive"),
         ("dl-settings", "\U00002699", "Settings", "intake"),
     ):
@@ -865,11 +1009,12 @@ Nothing here is visible to anybody but this panel.</p>
     {_buildings_html(bot, guild, result)}
     {_metrics_html(bot, guild)}
     {_map_html(bot, guild, towns)}
+    {_assets_html(bot, guild)}
     {_backfill_html(bot, guild)}
     {_settings_html(bot, guild)}
   </div>
 </div>
-{buildings_ui.channel_options_template(guild)}
+{buildings_ui.channel_options_template(guild)}\n{__import__('web.dodoland.townmap', fromlist=['x']).VIEWPORT_SCRIPT}
 <p id="status" class="status"></p>
 {_script(guild.id)}"""
     return _page(f"DodoLand · {guild.name}", body, scope=scope, guild=guild,
