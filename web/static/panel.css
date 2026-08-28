@@ -1641,3 +1641,13 @@ body.board { background: var(--color-surface-soft); }
 .dlscroll { overflow-x: auto; max-width: 100%; }
 .dlscroll .previewtable { min-width: 720px; }
 .dlscroll .chips { flex-wrap: wrap; gap: 4px; }
+
+/* DodoLand's side menu. The shared .sidenavitem grid assumes its anchor fills
+   the column; here the items were shrink-to-fit and centring themselves, which
+   drew the menu as a staircase. Pinned explicitly rather than left to inherit. */
+.dlnav { align-items: stretch; }
+.dlnav .sidenavitem { width: 100%; box-sizing: border-box; text-align: left;
+  justify-items: start; }
+.dlnav .sidenavitem .navemoji { justify-self: center; width: 22px; }
+.dlnav .sidenavitem .navlabel,
+.dlnav .sidenavitem .navhint { justify-self: start; text-align: left; }

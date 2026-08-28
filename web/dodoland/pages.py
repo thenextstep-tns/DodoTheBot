@@ -441,9 +441,30 @@ def _script(guild_id: int) -> str:
 document.addEventListener('DOMContentLoaded', function () {
   var GID = "__DL_GID__";
 
+  // panel.js's flash() writes into #status and silently gives up when there is
+  // none, which is how every "saved" message on this page went nowhere. The
+  // element is rendered server-side now; this creates one anyway if it is ever
+  // missing again, because a save with no feedback is indistinguishable from a
+  // save that failed.
+  function toast() {
+    var el = document.getElementById('status');
+    if (!el) {
+      el = document.createElement('p');
+      el.id = 'status';
+      el.className = 'status';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  var _toastTimer = null;
   function say(el, text, ok) {
     if (el) { el.textContent = text; el.style.color = ok ? '' : '#c0392b'; }
-    if (typeof window.flash === 'function' && text) window.flash(text, !!ok);
+    if (!text) return;
+    var bar = toast();
+    bar.textContent = text;
+    bar.className = 'status show ' + (ok ? 'ok' : 'err');
+    if (_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(function () { bar.className = 'status'; }, 2500);
   }
   function post(path, body) {
     return fetch("/api/guild/" + GID + "/dodoland/" + path, {
@@ -779,7 +800,7 @@ async def dodoland_page(request: web.Request):
 looking back {window} days, with <b>{counted}</b> people scoring.
 Nothing here is visible to anybody but this panel.</p>
 <div class="sidepanels">
-  <nav class="sidenav">{nav}</nav>
+  <nav class="sidenav dlnav">{nav}</nav>
   <div class="content">
     {_preview_html(bot, guild, result, buildings, flourish,
                    basis=store_module.BASIS_ALL, panel='dl-preview', shown=True)}
@@ -792,6 +813,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_settings_html(bot, guild)}
   </div>
 </div>
+<p id="status" class="status"></p>
 {_script(guild.id)}"""
     return _page(f"DodoLand · {guild.name}", body, scope=scope, guild=guild,
                  current="dodoland")

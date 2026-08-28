@@ -161,6 +161,18 @@ assert "dlscroll" in body, "the wide table has no scroll container"
 assert body.count("<th>") < 12, "the preview is back to a column per building"
 print("page            wide tables scroll inside themselves, not the page")
 
+# Saving with no feedback is indistinguishable from not saving at all. panel.js's
+# flash() writes into #status and silently gives up when there is none, which is
+# exactly what happened here: every "saved" message went nowhere.
+assert 'id="status"' in body, "the page has nowhere to show a save confirmation"
+assert "function toast()" in body, "no fallback if the status element goes missing"
+print("page            saves have somewhere to report to")
+
+# The shared menu grid assumes its anchor fills the column; left to inherit, the
+# items shrank to fit and centred themselves, drawing the menu as a staircase.
+assert "sidenav dlnav" in body, "the menu is relying on inherited layout again"
+print("page            the side menu is pinned to its own layout")
+
 # Every control the page renders must be a real parameter, or it saves nothing.
 keys = set(re.findall(r'data-key="(dodoland_[a-z_]+)"', body))
 known = {spec["key"] for spec in dodo_params.DODOLAND_PARAMETERS}
