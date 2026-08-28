@@ -65,6 +65,13 @@ def _name_of(guild, bot, user_id: int) -> str:
     return user.name if user is not None else f"User {user_id}"
 
 
+def _grown(power: int, biggest: int) -> float:
+    """How far up the size curve a town sits, 0 to 1."""
+    if power <= 0 or biggest <= 0:
+        return 0.0
+    return min(1.0, (power / biggest) ** 0.5)
+
+
 def _collect(bot, guild) -> dict:
     """Everything the page needs, in one pass. Blocking; call in an executor."""
     buildings = bot.dodoland_buildings.buildings(guild.id)
@@ -84,6 +91,9 @@ def _collect(bot, guild) -> dict:
            if str(row.get("day") or "") >= lit_since}
 
     details = bot.dodoland_towns.all(guild.id)
+    base_pct = float(bot.dodoland_params.get(guild.id, "dodoland_town_width_pct"))
+    growth = max(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_town_growth")))
+    biggest = max((p["power"] for p in result["order"]), default=0)
     people = []
     for person in result["order"]:
         uid = person["user_id"]
@@ -121,6 +131,11 @@ def _collect(bot, guild) -> dict:
             "rank": shine.get("rank_name") or "",
             "lit": uid in lit,
             "plot": plots.get(uid),
+            # A town grows from the base width by its standing, on a square-root
+            # curve. Linear growth would let one prolific person's settlement
+            # swallow the map while everybody else stayed a speck, which is the
+            # same reason the old marker sizing used a root.
+            "w": round(base_pct * (1 + (growth - 1) * _grown(person["power"], biggest)), 4),
         })
     return {"people": people, "buildings": buildings, "total": len(result["people"])}
 
@@ -283,14 +298,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    until the map says we are close enough, because three hundred smoking
    chimneys at map scale is noise rather than detail. */
 .fx { display: none; }
-.dlworld.close .fx { display: inline; }
-.dlworld.close .glow { filter: blur(1.6px); animation: dlflicker 4s ease-in-out infinite; }
-.dlworld.close .halo { filter: blur(2.4px); opacity: .75;
+.dltown.close .fx { display: inline; }
+.dltown.close .glow { filter: blur(1.6px); animation: dlflicker 4s ease-in-out infinite; }
+.dltown.close .halo { filter: blur(2.4px); opacity: .75;
   animation: dlflicker 3s ease-in-out infinite; }
-.dlworld.close .pf1 { animation: dlrise 5s linear infinite; }
-.dlworld.close .pf2 { animation: dlrise 5s linear infinite 1.6s; }
-.dlworld.close .pf3 { animation: dlrise 5s linear infinite 3.2s; }
-.dlworld.close .banner { animation: dlwave 2.6s ease-in-out infinite;
+.dltown.close .pf1 { animation: dlrise 5s linear infinite; }
+.dltown.close .pf2 { animation: dlrise 5s linear infinite 1.6s; }
+.dltown.close .pf3 { animation: dlrise 5s linear infinite 3.2s; }
+.dltown.close .banner { animation: dlwave 2.6s ease-in-out infinite;
   transform-box: fill-box; transform-origin: left center; }
 @keyframes dlflicker { 0%,100% { opacity: .85; } 50% { opacity: .45; } }
 @keyframes dlrise {
@@ -300,8 +315,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 }
 @keyframes dlwave { 0%,100% { transform: skewY(0deg); } 50% { transform: skewY(-6deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .dlworld.close .glow, .dlworld.close .halo, .dlworld.close .pf1,
-  .dlworld.close .pf2, .dlworld.close .pf3, .dlworld.close .banner
+  .dltown.close .glow, .dltown.close .halo, .dltown.close .pf1,
+  .dltown.close .pf2, .dltown.close .pf3, .dltown.close .banner
     { animation: none; }
 }
 
@@ -483,7 +498,7 @@ _SCRIPT = r"""
     // is a fixed fraction of the map whatever resolution that image happens to
     // be. It sits inside the element the zoom scales, so it shrinks and grows
     // with the coastline.
-    el.style.width = D.sizes.town_pct + '%';
+    el.style.width = (person.w || D.sizes.town_pct) + '%';
     el.innerHTML = '<span class="dldot"></span>' +
       '<div class="dlart"></div>' +
       '<div class="dlname">' + escapeHtml(person.name) + '</div>';
@@ -524,13 +539,14 @@ _SCRIPT = r"""
 
   function levelOfDetail() {
     if (!nat.w) return;
-    var shown = nat.w * (D.sizes.town_pct / 100) * view.k;
-    var tiny = shown < D.sizes.dot_below;
-    world.classList.toggle('close', shown > D.sizes.detail_above);
+    // Sizes differ per town now, so the thresholds are asked per town rather
+    // than once for the map. A large settlement keeps its buildings and its
+    // smoke further out than a hamlet does, which is what you would expect.
+    var mapPx = nat.w * view.k / 100;
 
     // The visible rectangle, in map percentages, with a margin so a town does
     // not pop in at the very edge of the frame.
-    var pad = nat.w * (D.sizes.town_pct / 100) * view.k * 2;
+    var pad = nat.w * (D.sizes.town_pct / 100) * view.k * 3;
     var x0 = ((-view.x - pad) / (nat.w * view.k)) * 100;
     var x1 = ((-view.x + frame.clientWidth + pad) / (nat.w * view.k)) * 100;
     var y0 = ((-view.y - pad) / (nat.h * view.k)) * 100;
@@ -545,7 +561,10 @@ _SCRIPT = r"""
         return;
       }
       if (!el) el = draw(p);
+      var shown = (p.w || D.sizes.town_pct) * mapPx;
+      var tiny = shown < D.sizes.dot_below;
       el.classList.toggle('tiny', tiny);
+      el.classList.toggle('close', shown > D.sizes.detail_above);
       // A dot needs no artwork, which is most of the saving on a wide view.
       if (!tiny) needArt(p, el);
     });

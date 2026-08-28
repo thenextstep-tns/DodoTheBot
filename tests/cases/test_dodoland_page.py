@@ -363,13 +363,16 @@ print("map             unplaced towns stay off the map until put there")
 # the further you zoomed out until the map was all roofs.
 assert "levelOfDetail" in map_body, "towns never collapse to dots"
 assert "dot_below" in map_body, "no threshold for collapsing a town to a dot"
-assert "D.sizes.town_pct + '%'" in map_body,     "a town is sized absolutely again, so it depends on the map's resolution"
+assert "(person.w || D.sizes.town_pct) + '%'" in map_body,     "a town is sized absolutely again, so it depends on the map's resolution"
+assert '"w":' in map_body, "towns no longer carry their own grown width"
+print("map             a town's width grows from the base with its standing")
 print("map             towns scale with the map and become dots when far away")
 
 # The controls that decide how the world is drawn belong beside the map, not
 # buried in a settings list: a town width means nothing except in relation to
 # the map it is drawn on.
 assert "dodoland_town_width_pct" in body, "town width cannot be set on the map page"
+assert "dodoland_town_growth" in body, "how much a town grows cannot be set"
 assert "How the world is drawn" in body
 print("map             the world's scale is set per server, beside the map")
 

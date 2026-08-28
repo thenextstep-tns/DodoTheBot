@@ -298,7 +298,8 @@ def _map_scale_rows(bot, guild) -> str:
     from web.routes import _param_input
 
     rows = ""
-    for key in ("dodoland_town_width_pct", "dodoland_town_dot_below",
+    for key in ("dodoland_town_width_pct", "dodoland_town_growth",
+                "dodoland_town_dot_below",
                 "dodoland_detail_above", "dodoland_map_min_zoom",
                 "dodoland_map_max_zoom"):
         spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)

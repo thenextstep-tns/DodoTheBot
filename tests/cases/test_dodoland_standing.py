@@ -347,4 +347,28 @@ src = pathlib.Path("cogs/dodoland.py").read_text(encoding="utf-8")
 assert "isinstance(parent, discord.ForumChannel)" in src,     "forum posts are being collapsed into their forum again"
 print("forums          a post is its own room; a thread in a channel is not")
 
+
+
+# --------------------------------------------------------------------------- #
+#  A town has depth, not a queue of houses
+# --------------------------------------------------------------------------- #
+import re as _re  # noqa: E402
+
+from helpers.dodoland import townart  # noqa: E402
+
+art = townart.town_svg([{"key": f"b{i}", "tier": 6 - i} for i in range(5)])
+spots = _re.findall(r"translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)", art)
+assert len(spots) == 5, spots
+xs = {round(float(x)) for x, _y, _s in spots}
+ys = {round(float(y)) for _x, y, _s in spots}
+assert len(xs) > 1, "every building stands at the same x: that is a row, not a town"
+assert len(ys) > 1, "every building stands on one line: the town has no depth"
+print("art             buildings are spread across the plate, not lined up")
+
+# Further back is smaller, and drawn first so the near ones cover it.
+pairs = sorted((float(y), float(s)) for _x, y, s in spots)
+assert pairs[0][1] < pairs[-1][1], "depth does not change how large a building is"
+assert art.index(f"translate({spots[0][0]}") < art.index(f"translate({spots[-1][0]}"),     "buildings are not painted back to front"
+print("art             the far ones are smaller and drawn under the near ones")
+
 print("PASS")

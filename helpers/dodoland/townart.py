@@ -412,54 +412,91 @@ SHAPE_LABELS = {
 DEFAULT_SHAPE = "inn"
 
 
+# Where the buildings stand on the plate, as (depth, sideways) pairs.
+#
+# Depth runs 0 at the back to 1 at the front. A building further back is drawn
+# higher up, smaller, and earlier, so the ones in front overlap it: that is the
+# whole trick, and it is what turns a row of houses into a village with a
+# middle. Sideways is a fraction of the plate's half-width at that depth, so
+# nothing stands off the edge of its own ground.
+#
+# The order is deliberate rather than random: the grandest building lands
+# centre and slightly back, where a keep or a cathedral belongs, and the rest
+# fan out around it. Fixed rather than seeded so a town does not rearrange
+# itself between two page loads.
+_PLOTS = (
+    (0.34,  0.00),   # the centrepiece
+    (0.78, -0.52),   # front left
+    (0.16,  0.46),   # back right
+    (0.92,  0.20),   # front, nearest
+    (0.50, -0.82),   # far left, mid
+    (0.06, -0.28),   # back left
+    (0.68,  0.80),   # right, forward
+)
+
+
+def _stand(depth: float) -> tuple[float, float, float]:
+    """Ground line, half-width and scale at a depth on the plate.
+
+    Everything about perspective here is linear and shallow on purpose. This is
+    a map pictogram, not a render: enough depth to read as a place, not enough
+    to look like it is falling over.
+    """
+    y = GROUND_Y - 5.0 + depth * 11.0
+    half = WIDTH * 0.40 * (0.55 + 0.45 * depth)
+    scale = 0.70 + 0.30 * depth
+    return y, half, scale
+
+
 def town_svg(buildings: Iterable[dict], *, lit: bool = True,
              flourish: int = 0, shapes: Optional[dict] = None,
              colours: Optional[dict] = None) -> str:
     """A whole settlement as an SVG fragment.
 
-    ``buildings`` are ``{"key", "tier"}`` in any order. The grandest is placed in
-    the middle and the rest alternate outward, which is what gives a town a
-    silhouette instead of a queue, and they are drawn back to front so the
-    tallest overlaps its neighbours.
-
-    A town with nothing built is a single tent, not an empty patch: somebody who
-    has just arrived should still be somewhere.
+    ``buildings`` are ``{"key", "tier"}`` in any order. The grandest stands
+    centre and slightly back and the rest are spread across the plate, drawn
+    back to front so the near ones overlap the far ones. A town with nothing
+    built is a single tent, not an empty patch: somebody who has just arrived
+    should still be somewhere.
     """
     rows = sorted(buildings, key=lambda b: -int(b.get("tier", 1)))[:MAX_BUILDINGS]
     shapes = shapes or {}
     colours = colours or {}
 
     parts = [
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" rx="{WIDTH * 0.46:.1f}" '
-        f'ry="9" fill="#cdb894" stroke="#a68f6a" stroke-width="1.4"/>',
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 4:.1f}" rx="{WIDTH * 0.42:.1f}" '
-        f'ry="7" fill="#ddcaa6"/>',
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" rx="{WIDTH * 0.47:.1f}" '
+        f'ry="10" fill="#cdb894" stroke="#a68f6a" stroke-width="1.4"/>',
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 5:.1f}" rx="{WIDTH * 0.43:.1f}" '
+        f'ry="8" fill="#ddcaa6"/>',
     ]
 
     if not rows:
         cx = WIDTH / 2
-        parts.append(_tri(cx - 9, GROUND_Y, cx, GROUND_Y - 15, cx + 9, GROUND_Y, "#b98b4e"))
+        parts.append(_tri(cx - 9, GROUND_Y + 2, cx, GROUND_Y - 13, cx + 9,
+                          GROUND_Y + 2, "#b98b4e"))
     else:
-        order: list[dict] = []
+        standing = []
         for index, row in enumerate(rows):
-            (order.append if index % 2 else order.insert)(*(
-                (row,) if index % 2 else (0, row)))
-        span = WIDTH * 0.74
-        step = span / max(1, len(order) - 1) if len(order) > 1 else 0
-        start = (WIDTH - span) / 2 if len(order) > 1 else WIDTH / 2
-        placed = [(start + i * step, row) for i, row in enumerate(order)]
-        placed.sort(key=lambda pair: int(pair[1].get("tier", 1)))
-        for x, row in placed:
+            depth, sideways = _PLOTS[index % len(_PLOTS)]
+            y, half, scale = _stand(depth)
+            standing.append((y, WIDTH / 2 + sideways * half, scale, row))
+        # Painter's algorithm: the far ones first, so the near ones cover them.
+        standing.sort(key=lambda item: item[0])
+        for y, x, scale, row in standing:
             key = str(row.get("key") or "")
             draw = SHAPES.get(shapes.get(key) or DEFAULT_SHAPE, _inn)
-            parts.append(draw(x, GROUND_Y, int(row.get("tier", 1)),
-                              colours.get(key) or colour_for(key)))
+            art = draw(0.0, 0.0, int(row.get("tier", 1)),
+                       colours.get(key) or colour_for(key))
+            # Drawn at the origin and moved into place, so one transform carries
+            # both where it stands and how near it is.
+            parts.append(f'<g transform="translate({x:.1f},{y:.1f}) '
+                         f'scale({scale:.2f})">{art}</g>')
 
     body = "".join(parts)
     if flourish:
         glow = min(6, int(flourish))
         body = (f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" '
-                f'rx="{WIDTH * 0.5:.1f}" ry="11" fill="none" '
+                f'rx="{WIDTH * 0.51:.1f}" ry="12" fill="none" '
                 f'stroke="var(--fl{glow}, #ffd27f)" stroke-width="{1 + glow * 0.5:.1f}" '
                 f'opacity=".85"/>') + body
     if not lit:
