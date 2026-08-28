@@ -56,6 +56,23 @@ def days_back(count: int, now: Optional[datetime.datetime] = None) -> str:
     return (moment - datetime.timedelta(days=max(0, count))).strftime("%Y-%m-%d")
 
 
+def allowance(done_before: int, amount: int, cap: int) -> int:
+    """How much of ``amount`` scores, given what already happened and the cap.
+
+    Extracted so the live listener and the archive backfill cannot drift: one
+    writes against Mongo's current count and the other against an in-memory
+    tally, but the decision itself is made in exactly one place. A backfilled
+    day and a live day have to be worth the same, or the history is a second
+    economy wearing the same name.
+
+    Clips rather than falls off: a bulk amount that crosses the cap still scores
+    the part that was under it.
+    """
+    if cap <= 0:
+        return max(0, amount)
+    return max(0, min(amount, cap - done_before))
+
+
 class ActivityStore:
     """Reads and writes DodoLand's two activity collections.
 
@@ -141,8 +158,7 @@ class ActivityStore:
 
         if not within_partner_cap:
             return 0
-        cap = self.daily_cap(guild_id, metric_key)
-        allowed = amount if cap <= 0 else max(0, min(amount, cap - (done - amount)))
+        allowed = allowance(done - amount, amount, self.daily_cap(guild_id, metric_key))
         if allowed <= 0:
             return 0
 
@@ -239,6 +255,51 @@ class ActivityStore:
             other = row["b"] if int(row["a"]) == int(user_id) else row["a"]
             out[int(other)] = out.get(int(other), 0) + int(row.get("n", 0))
         return out
+
+    def first_day(self, guild_id: int) -> Optional[str]:
+        """The earliest day this guild has a row for, or ``None``.
+
+        The backfill needs it: everything it writes must stop strictly before
+        the first day the live listener recorded, so a rebuilt day can never
+        overwrite a real one.
+        """
+        rows = self.rows(_require_guild(guild_id))
+        days = sorted(row.get("day") for row in rows if row.get("day"))
+        return days[0] if days else None
+
+    # ------------------------------------------------------------------ #
+    #  Bulk writing (the archive backfill)
+    # ------------------------------------------------------------------ #
+    def replace_days(self, guild_id: int, activity: list[dict], pairs: list[dict]) -> int:
+        """Overwrite whole days outright. Returns how many rows were written.
+
+        ``$set`` rather than ``$inc``, which is what makes the backfill safely
+        **repeatable**: running it twice writes the same numbers rather than
+        doubling them. That is only sound because the caller restricts itself to
+        days before the listener started, where there is nothing live to lose.
+        """
+        guild_id = _require_guild(guild_id)
+        written = 0
+        for row in activity or ():
+            self._activity.update_one(
+                {"guild_id": guild_id, "user_id": int(row["user_id"]), "day": row["day"]},
+                {"$set": {"acts": row.get("acts") or {},
+                          "scored": row.get("scored") or {},
+                          "channels": row.get("channels") or {},
+                          "source": "backfill"}},
+                upsert=True,
+            )
+            written += 1
+        for row in pairs or ():
+            self._pairs.update_one(
+                {"guild_id": guild_id, "day": row["day"],
+                 "a": int(row["a"]), "b": int(row["b"])},
+                {"$set": {"acts": row.get("acts") or {}, "n": int(row.get("n", 0)),
+                          "source": "backfill"}},
+                upsert=True,
+            )
+            written += 1
+        return written
 
     # ------------------------------------------------------------------ #
     #  Retention

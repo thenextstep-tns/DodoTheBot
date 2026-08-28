@@ -66,6 +66,43 @@ async def api_dodoland_buildings(request: web.Request):
     return web.json_response({"ok": True, "buildings": saved})
 
 
+async def api_dodoland_backfill(request: web.Request):
+    """Rebuild the archivable history from the message archive.
+
+    Reads the whole archive for this guild's channels, so it runs in an executor:
+    the panel is served from inside the bot process and doing this on the event
+    loop would stop the bot answering Discord for the duration.
+
+    ``preview`` aggregates and reports without writing anything, which is how to
+    look at it before letting it near real rows.
+    """
+    import asyncio
+
+    import config_py
+    from helpers.dodoland import backfill as backfill_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    dry_run = bool(body.get("preview"))
+
+    def work():
+        return backfill_rules.run(bot, guild, archive=config_py.messages, dry_run=dry_run)
+
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(None, work)
+    except Exception as error:
+        return _bad(f"The backfill failed: {error}")
+
+    if not dry_run:
+        await _record_change(
+            request, "dodoland_backfill", "archive", "",
+            f"{result['written']} rows from {result['messages']} messages",
+            "DodoLand history rebuilt from the message archive",
+        )
+    return web.json_response({"ok": True, **result})
+
+
 async def api_dodoland_map(request: web.Request):
     """Store (or clear) the uploaded base map for this server's continent.
 

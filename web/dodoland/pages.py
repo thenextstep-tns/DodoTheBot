@@ -305,6 +305,41 @@ def _map_html(bot, guild) -> str:
 # --------------------------------------------------------------------------- #
 #  Settings and the page
 # --------------------------------------------------------------------------- #
+def _backfill_html(bot, guild) -> str:
+    """The archive rebuild, and an honest account of what it can and cannot do."""
+    live_from = bot.dodoland.first_day(guild.id)
+    started = (f"The listener's own rows begin on <b>{_e(live_from)}</b>, and the "
+               "rebuild stops strictly before that, so it can never overwrite a "
+               "real day." if live_from else
+               "The listener has recorded nothing yet, so the rebuild covers "
+               "everything up to today.")
+    rebuildable = ", ".join(
+        metric_registry.get(key).label for key in ("message", "mention_given", "mention_received")
+    )
+    return f"""
+<section class="sidepanel" data-panel="dl-backfill" hidden>
+  <h2 class="panelhead">\U000023EA Rebuild history</h2>
+  <p class="muted">The message archive holds every message this bot has ever
+  seen, so three metrics can be reconstructed across the whole life of the
+  server: <b>{_e(rebuildable)}</b>. That is what lets the map open with towns
+  that already have history and a relation graph that already knows who talks to
+  whom.</p>
+  <p class="muted small">Everything else (pictures, replies, threads, voice,
+  events, invites) was never stored anywhere and can only be counted forward
+  from the day tracking started. No rebuild will ever produce them.</p>
+  <p class="muted small">{started} Rebuilt days are valued by exactly the rules a
+  live day is: the same intake function, the same caps, the same per-metric
+  channel lists. Running it twice writes the same numbers rather than doubling
+  them, so it is safe to repeat after changing a weight.</p>
+  <div class="rulebtns">
+    <button id="dlpreviewbackfill">Preview without writing</button>
+    <button id="dlrunbackfill">Rebuild history</button>
+  </div>
+  <pre id="dlbackfillout" class="dljson" hidden></pre>
+  <span id="dlbackfillmsg" class="muted small"></span>
+</section>"""
+
+
 def _settings_html(bot, guild) -> str:
     from web.routes import _param_input
 
@@ -412,6 +447,27 @@ def _script(guild_id: int) -> str:
     };
     reader.readAsDataURL(chosen);
   });
+  function backfill(preview) {
+    var out = document.getElementById('dlbackfillout');
+    var msg = document.getElementById('dlbackfillmsg');
+    if (!preview && !window.confirm(
+        'Rebuild history from the message archive? This rewrites historical rows. '
+        + 'It cannot touch days the listener already recorded, and running it '
+        + 'again writes the same numbers rather than doubling them.')) return;
+    msg.textContent = preview ? 'Reading the archive...' : 'Rebuilding...';
+    post('backfill', {preview: !!preview}, function (res) {
+      out.hidden = false;
+      out.textContent = JSON.stringify(res, null, 2);
+      msg.textContent = res.ok
+        ? (preview ? 'Preview only, nothing was written.'
+                   : 'Done. Reload to see the rebuilt towns.')
+        : ('Refused: ' + res.error);
+    });
+  }
+  var pv = document.getElementById('dlpreviewbackfill');
+  if (pv) pv.addEventListener('click', function () { backfill(true); });
+  var rn = document.getElementById('dlrunbackfill');
+  if (rn) rn.addEventListener('click', function () { backfill(false); });
   var clear = document.getElementById('dlmapclear');
   if (clear) clear.addEventListener('click', function () {
     post('map', {data: null}, function (res) {
@@ -473,6 +529,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_buildings_html(bot, guild, result)}
     {_metrics_html(bot, guild)}
     {_map_html(bot, guild)}
+    {_backfill_html(bot, guild)}
     {_settings_html(bot, guild)}
   </div>
 </div>
