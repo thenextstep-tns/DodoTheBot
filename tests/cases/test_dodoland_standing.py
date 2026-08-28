@@ -247,4 +247,56 @@ again = {cid for b in _bot.dodoland_buildings.buildings(GUILD) for cid in b["cha
 assert again == attached, "a second suggest moved rooms around"
 print("suggest         pressing it twice changes nothing")
 
+
+
+# --------------------------------------------------------------------------- #
+#  Channels are offered in the order Discord draws them
+# --------------------------------------------------------------------------- #
+import discord  # noqa: E402
+
+from web.dodoland import buildings_ui  # noqa: E402
+
+
+class _Cat:
+    def __init__(self, cid, name, position):
+        self.id, self.name, self.position = cid, name, position
+
+
+class _Room(discord.TextChannel):
+    def __init__(self, cid, name, category, position):
+        self.id, self.name, self.position = cid, name, position
+        self._cat = category
+
+    @property
+    def category(self):
+        return self._cat
+
+
+_info, _admin, _social = _Cat(1, "Information", 0), _Cat(2, "Admin", 1), _Cat(3, "Social", 2)
+
+
+class _Server:
+    id = GUILD
+    channels = [_Room(30, "general", _social, 1), _Room(10, "announcements", _info, 0),
+                _Room(21, "moderators", _admin, 1), _Room(20, "raid-leading", _admin, 0),
+                _Room(31, "big-walk", _social, 0), _Room(11, "wayshrine", _info, 1)]
+
+    def get_channel(self, cid):
+        return next((c for c in self.channels if c.id == cid), None)
+
+
+# With sixty-odd channels the only ordering anybody knows is their own sidebar.
+order = [c.id for c in buildings_ui.ordered_channels(_Server())]
+assert order == [10, 11, 20, 21, 31, 30], order
+print("channels        offered in Discord's own category and channel order")
+
+assert buildings_ui.channel_label(_Server().channels[0]) == "Social / general"
+print("channels        labelled by category, so searching one finds its rooms")
+
+# A hint may match a whole category, which is how servers are really organised.
+picked = B.suggest_channels(_Server(), B.validate_buildings(B.default_buildings()))
+tavern = next(b for b in picked if b["key"] == "tavern")
+assert set(tavern["channels"]) == {30, 31}, tavern["channels"]
+print("channels        a hint can claim a whole category, not one room at a time")
+
 print("PASS")

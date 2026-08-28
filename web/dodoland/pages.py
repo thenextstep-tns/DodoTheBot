@@ -95,11 +95,14 @@ def _metric_block(guild, setup: dict) -> str:
       {_param_input({"key": param_key, "type": ptype, "value": setup[value_key]}, guild)}
     </label>"""
 
-    channels = _param_input(
-        {"key": dodo_params.channels_key(setup["key"]), "type": "list_channel",
-         "value": setup["channels"]}, guild)
+    # The shared list_channel widget lists channels in whatever order the API
+    # returned them, which with sixty-odd rooms is no order at all. This one is
+    # grouped and ordered the way the server's own sidebar is.
+    channels = buildings_ui.channel_multiselect(
+        guild, key=dodo_params.channels_key(setup["key"]), selected=setup["channels"])
     where = ("everywhere DodoLand tracks" if not setup["channels"]
              else ", ".join(_channel_name(guild, c) for c in setup["channels"][:6]))
+    
 
     return f"""
 <div class="rulecard dlmetric">
@@ -502,6 +505,25 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  // Fill every picker from the one shared template before binding it. The
+  // options are identical apart from which are ticked, so they are sent once
+  // rather than repeated in each of the thirty-odd pickers on this page.
+  var optionTemplate = document.getElementById('dlchanoptions');
+  function fill(ms) {
+    var host = ms.querySelector('.ms-options');
+    if (!optionTemplate || !host || host.children.length) return;
+    var chosen = {};
+    (ms.dataset.chosen || '').split(',').forEach(function (id) {
+      if (id) chosen[id] = 1;
+    });
+    var copy = optionTemplate.content.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll('.ms-opt'), function (o) {
+      o.dataset.selected = chosen[o.dataset.id] ? '1' : '0';
+    });
+    host.appendChild(copy);
+  }
+  document.querySelectorAll('.multiselect[data-chosen]').forEach(fill);
+
   function bind(ms, save) {
     if (typeof window.bindMultiSelect === 'function') return window.bindMultiSelect(ms, save);
     var opts = Array.prototype.slice.call(ms.querySelectorAll('.ms-opt'));
@@ -733,33 +755,39 @@ async def dodoland_page(request: web.Request):
 
     # Every read here is blocking pymongo, and this handler runs on the bot's own
     # event loop. Doing it inline stops the bot responding while Mongo works.
-    def compute_for(basis):
-        return standing.guild_standings(bot.dodoland, bot.dodoland_params,
-                                        guild.id, buildings, since=since,
-                                        basis=basis)
-
     loop = asyncio.get_running_loop()
-    # Both previews, computed server-side so switching between them is instant
-    # and neither can be a stale view of the other.
-    result = await loop.run_in_executor(None, compute_for, store_module.BASIS_ALL)
-    scratch = await loop.run_in_executor(None, compute_for, store_module.BASIS_LIVE)
-    # Read-only, and the only thing DodoLand reads from outside itself.
-    flourish = await loop.run_in_executor(
-        None, flourish_rules.flourish_map, bot, guild.id)
-
-    # Where the towns go. Settled spots are kept; everybody else is suggested
-    # beside the people they actually talk to, from the relation graph.
     lit_days = int(bot.dodoland_params.get(guild.id, "dodoland_lit_days"))
     lit_since = store_module.days_back(lit_days)
 
+    # One read of each collection for the whole page. Previously every view
+    # fetched its own copy: two previews, each also counting days, plus the map,
+    # came to eight scans of a 32,000-row collection per page load. The rows are
+    # split by basis in memory instead, which is the same answer far cheaper.
+    def fetch():
+        return (bot.dodoland.rows(guild.id, since=since),
+                bot.dodoland.pair_rows(guild.id, since=since))
+
+    all_rows, all_pairs = await loop.run_in_executor(None, fetch)
+
+    def compute_for(basis):
+        return standing.guild_standings(
+            bot.dodoland, bot.dodoland_params, guild.id, buildings,
+            since=since, basis=basis, rows=all_rows, pair_rows=all_pairs,
+        )
+
+    result = await loop.run_in_executor(None, compute_for, store_module.BASIS_ALL)
+    scratch = await loop.run_in_executor(None, compute_for, store_module.BASIS_LIVE)
+    flourish = await loop.run_in_executor(
+        None, flourish_rules.flourish_map, bot, guild.id)
+
     def townwork():
-        partners = {}
-        for row in bot.dodoland.pair_rows(guild.id, since=since):
+        partners: dict = {}
+        for row in all_pairs:
             a, b, n = int(row.get("a", 0)), int(row.get("b", 0)), int(row.get("n", 0))
             partners.setdefault(a, {})[b] = partners.setdefault(a, {}).get(b, 0) + n
             partners.setdefault(b, {})[a] = partners.setdefault(b, {}).get(a, 0) + n
-        lit = {int(r.get("user_id", 0))
-               for r in bot.dodoland.rows(guild.id, since=lit_since)}
+        lit = {int(row.get("user_id", 0)) for row in all_rows
+               if str(row.get("day") or "") >= lit_since}
         return mapview.towns(
             result["order"], partners=partners,
             settled=bot.dodoland_buildings.plots(guild.id), flourish=flourish,
@@ -813,6 +841,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_settings_html(bot, guild)}
   </div>
 </div>
+{buildings_ui.channel_options_template(guild)}
 <p id="status" class="status"></p>
 {_script(guild.id)}"""
     return _page(f"DodoLand · {guild.name}", body, scope=scope, guild=guild,

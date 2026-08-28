@@ -39,27 +39,79 @@ def _channel_name(guild, channel_id: int) -> str:
     return f"#{channel.name}" if channel else f"channel {channel_id}"
 
 
-def _channel_picker(guild, building: dict) -> str:
-    """The panel's searchable chip multi-select, listing this guild's channels."""
+def ordered_channels(guild) -> list:
+    """This guild's channels in the order Discord itself draws them.
+
+    Categories in their own order, then channels within each category in theirs.
+    With sixty-odd channels an alphabetical or arbitrary list is unusable: the
+    only ordering anybody knows is the one in their sidebar, so that is the one
+    to show.
+
+    Threads are deliberately absent. A thread is a room inside a channel and is
+    charged to its parent, so offering one here would promise an attachment the
+    scorer would never honour.
+    """
     import discord
 
-    selected = {int(cid) for cid in (building.get("channels") or {})}
-    options = ""
-    for channel in getattr(guild, "channels", []):
-        if not isinstance(channel, (discord.TextChannel, discord.ForumChannel,
-                                    discord.VoiceChannel)):
-            continue
-        options += (
-            f'<div class="ms-opt" data-id="{channel.id}" '
-            f'data-name="{_e(channel.name)}" '
-            f'data-selected="{1 if channel.id in selected else 0}">{_e(channel.name)}</div>'
-        )
-    return (
-        f'<div class="multiselect dlchannels" data-key="{_e(building["key"])}">'
-        f'<div class="ms-chips"></div>'
-        f'<input class="ms-search" placeholder="Search channels…" autocomplete="off">'
-        f'<div class="ms-options">{options}</div></div>'
+    kinds = (discord.TextChannel, discord.ForumChannel, discord.VoiceChannel)
+    rooms = [c for c in getattr(guild, "channels", []) if isinstance(c, kinds)]
+
+    def sort_key(channel):
+        category = getattr(channel, "category", None)
+        # Channels above every category sort first, the way Discord shows them.
+        return (getattr(category, "position", -1) if category is not None else -1,
+                getattr(category, "id", 0) or 0,
+                getattr(channel, "position", 0),
+                getattr(channel, "id", 0))
+
+    return sorted(rooms, key=sort_key)
+
+
+def channel_label(channel) -> str:
+    """``Category / name`` — so searching a category finds all of its rooms."""
+    category = getattr(channel, "category", None)
+    name = getattr(channel, "name", "?")
+    return f"{category.name} / {name}" if category is not None else name
+
+
+def channel_options_template(guild) -> str:
+    """Every channel, once, as a template the pickers are filled from.
+
+    There are around thirty pickers on this page (one per metric, one per
+    building) and sixty-odd channels, so writing the options into each of them
+    put roughly two thousand elements in the HTML. They are identical apart from
+    which are ticked, so they are sent once and cloned in the browser.
+    """
+    options = "".join(
+        f'<div class="ms-opt" data-id="{channel.id}" '
+        f'data-name="{_e(channel_label(channel))}" '
+        f'data-selected="0">{_e(channel_label(channel))}</div>'
+        for channel in ordered_channels(guild)
     )
+    return f'<template id="dlchanoptions">{options}</template>'
+
+
+def channel_multiselect(guild, *, key: str, selected, extra_class: str = "") -> str:
+    """The panel's chip multi-select, ordered and labelled the way Discord is.
+
+    Emits no options of its own: ``data-chosen`` says which channels are ticked
+    and the script fills the rest from the shared template before binding.
+    """
+    chosen = ",".join(str(int(c)) for c in sorted(int(x) for x in (selected or [])))
+    classes = ("multiselect " + extra_class).strip()
+    return (
+        f'<div class="{classes}" data-key="{_e(key)}" data-chosen="{chosen}">'
+        f'<div class="ms-chips"></div>'
+        f'<input class="ms-search" placeholder="Search channels or categories…" '
+        f'autocomplete="off">'
+        f'<div class="ms-options"></div></div>'
+    )
+
+
+def _channel_picker(guild, building: dict) -> str:
+    return channel_multiselect(guild, key=building["key"],
+                               selected=(building.get("channels") or {}),
+                               extra_class="dlchannels")
 
 
 def _weight_rows(guild, building: dict) -> str:

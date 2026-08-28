@@ -343,7 +343,15 @@ def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
             name = str(getattr(channel, "name", "") or "").lower()
             if not channel_id or channel_id in claimed or not name:
                 continue
-            if any(hint in name for hint in hints):
+            # The category counts as part of the name, so a hint can match a
+            # whole section of the server rather than one room at a time. That
+            # is how servers are actually organised, and it is far more reliable
+            # than guessing at individual channel names.
+            category = getattr(channel, "category", None)
+            haystack = name
+            if category is not None and getattr(category, "name", None):
+                haystack = f"{str(category.name).lower()}/{name}"
+            if any(hint in haystack for hint in hints):
                 found[channel_id] = 1.0
                 claimed.add(channel_id)
         building["channels"] = found

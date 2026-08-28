@@ -144,15 +144,37 @@ def tier_reached(points: int, resolved: list[dict]) -> Optional[int]:
 # --------------------------------------------------------------------------- #
 #  A whole guild
 # --------------------------------------------------------------------------- #
+def matches_basis(row: dict, basis: str) -> bool:
+    """Whether a row belongs to the history ``basis`` names.
+
+    The same rule :func:`helpers.dodoland.store._basis_filter` expresses as a
+    query, applied in memory. It exists so a caller can fetch every row once and
+    then split it, rather than asking the database the same question twice.
+    """
+    source = row.get("source")
+    if basis == "live":
+        return source != "backfill"
+    if basis == "backfill":
+        return source == "backfill"
+    return True
+
+
 def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
                     user_ids: Optional[Iterable[int]] = None,
-                    since: Optional[str] = None, basis: str = "all") -> dict:
+                    since: Optional[str] = None, basis: str = "all",
+                    rows: Optional[list[dict]] = None,
+                    pair_rows: Optional[list[dict]] = None) -> dict:
     """Every scoring person's buildings, town power and place, in one pass.
 
-    Reads the guild's day rows once and aggregates in memory rather than
-    querying per person: a ranking only exists relative to everybody else, so
-    it has to be computed as a set. This is the same reasoning that shapes the
-    tribe sweep.
+    Aggregates in memory rather than querying per person: a ranking only exists
+    relative to everybody else, so it has to be computed as a set. This is the
+    same reasoning that shapes the tribe sweep.
+
+    ``rows`` and ``pair_rows`` let a caller hand in day rows it has already
+    fetched. The panel shows two bases of the same data and also draws a map
+    from it; fetching per view meant eight scans of a 32,000-row collection on
+    every page load, which is what made the page take seconds to open. Passing
+    them in makes it one scan, split in memory.
     """
     weights = metric_weights_for(params, guild_id)
     partner_weight = int(params.get(guild_id, "dodoland_partner_weight"))
@@ -161,7 +183,10 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
     # {user: {channel: {metric: count}}}, built from one scan of the day rows.
     per_user: dict[int, dict[int, dict[str, int]]] = {}
     wanted = {int(u) for u in user_ids} if user_ids is not None else None
-    for row in store.rows(guild_id, since=since, basis=basis):
+    day_rows = (rows if rows is not None
+                else store.rows(guild_id, since=since, basis=basis))
+    day_rows = [row for row in day_rows if matches_basis(row, basis)]
+    for row in day_rows:
         user_id = int(row.get("user_id", 0))
         if not user_id or (wanted is not None and user_id not in wanted):
             continue
@@ -173,14 +198,18 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
 
     # People reached, counted per day and capped the same way an act is.
     reach: dict[int, int] = {}
-    for row in store.pair_rows(guild_id, since=since, basis=basis):
+    pairs = (pair_rows if pair_rows is not None
+             else store.pair_rows(guild_id, since=since, basis=basis))
+    pairs = [row for row in pairs if matches_basis(row, basis)]
+    for row in pairs:
         for user_id in (int(row.get("a", 0)), int(row.get("b", 0))):
             if user_id and (wanted is None or user_id in wanted):
                 reach[user_id] = reach.get(user_id, 0) + 1
     if partner_cap > 0:
         # The cap is per day; the store cannot apply it because it does not know
         # the day's shape until the whole window is read.
-        reach = {user: min(count, partner_cap * _days_seen(store, guild_id, since, basis))
+        span = max(1, len({row.get("day") for row in day_rows}))
+        reach = {user: min(count, partner_cap * span)
                  for user, count in reach.items()}
 
     people: dict[int, dict] = {}
@@ -237,9 +266,3 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
         "weights": weights,
         "partner_weight": partner_weight,
     }
-
-
-def _days_seen(store, guild_id: int, since: Optional[str], basis: str = "all") -> int:
-    """How many distinct days the window covers, for capping people reached."""
-    days = {row.get("day") for row in store.rows(guild_id, since=since, basis=basis)}
-    return max(1, len(days))
