@@ -1634,3 +1634,10 @@ body.board { background: var(--color-surface-soft); }
 .dltier .dlfield { min-width: 96px; }
 .dlbtnbar { position: sticky; top: 64px; z-index: 3; padding: 8px 0;
   background: var(--color-canvas); }
+
+/* Wide content scrolls inside its own box; the page body never scrolls
+   sideways. Fifteen buildings as fifteen columns pushed the whole panel
+   off-screen, which is what this exists to prevent. */
+.dlscroll { overflow-x: auto; max-width: 100%; }
+.dlscroll .previewtable { min-width: 720px; }
+.dlscroll .chips { flex-wrap: wrap; gap: 4px; }

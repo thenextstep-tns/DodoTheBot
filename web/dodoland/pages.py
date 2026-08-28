@@ -195,48 +195,73 @@ def _buildings_html(bot, guild, result: dict) -> str:
 
 def _preview_html(bot, guild, result: dict, buildings: list[dict],
                   flourish: dict, *, basis: str, panel: str, shown: bool) -> str:
-    heads = "".join(f"<th>{_e(b.get('icon') or '')} {_e(b['name'])}</th>" for b in buildings)
+    """One row per person, and deliberately **not** one column per building.
+
+    Fifteen buildings became fifteen columns, which pushed the whole page
+    sideways and made the numbers unreadable. A town is described by what
+    actually stands in it, so the buildings somebody has started are listed in a
+    single cell and the ones at zero are simply not mentioned. That keeps the
+    row width bounded however many buildings a server invents.
+    """
     rows = ""
     for person in result["order"][:200]:
-        cells = ""
-        for building in buildings:
-            score = person["buildings"].get(building["key"], {})
-            tier = score.get("tier")
-            label = (f"<b>{_e(score.get('tier_title'))}</b>" if tier is not None
-                     else '<span class="muted">not started</span>')
-            cells += (f'<td>{label}<div class="muted small">'
-                      f'{score.get("points", 0):,} pts</div></td>')
-            glow = flourish.get(person["user_id"]) or flourish_rules.BLANK
-        badge = (f'<div class="muted small">{_e(glow["label"])}'
-                 + (f' · {_e(glow["rank_name"])}' if glow["rank_name"] else "")
-                 + "</div>") if glow["level"] else ""
+        glow = flourish.get(person["user_id"]) or flourish_rules.BLANK
+        badge = ""
+        if glow["level"]:
+            badge = (f'<div class="muted small">{_e(glow["label"])}'
+                     + (f' · {_e(glow["rank_name"])}' if glow["rank_name"] else "")
+                     + "</div>")
+
+        started = [score for score in person["buildings"].values()
+                   if score.get("tier") is not None]
+        started.sort(key=lambda score: -score.get("points", 0))
+        if started:
+            built = " ".join(
+                f'<span class="chip">{_e(score.get("icon") or "")} '
+                f'{_e(score["name"])}: <b>{_e(score["tier_title"])}</b> '
+                f'({score["points"]:,})</span>'
+                for score in started
+            )
+        else:
+            built = '<span class="muted small">nothing built yet</span>'
+
         rows += f"""
   <tr><td class="rankindex">{person['place']}</td>
       <td><b>{_e(_name_of(guild, person['user_id']))}</b>{badge}</td>
       <td class="nowrap"><b>{person['power']:,}</b></td>
       <td class="muted small nowrap">{person['reached']:,} people
           ({person['reach_points']:,} pts)</td>
-      {cells}</tr>"""
+      <td><div class="chips">{built}</div></td></tr>"""
+
     if not rows:
-        rows = ('<tr><td colspan="4" class="muted">Nothing recorded yet. The '
-                'listener started with this build; give it a day.</td></tr>')
+        rows = ('<tr><td colspan="5" class="muted">Nothing recorded on this '
+                'basis yet.</td></tr>')
+
+    unattached = sum(1 for b in buildings if not (b.get("channels") or {}))
+    note = ""
+    if unattached:
+        note = (f'<div class="tuneblocked">{unattached} of {len(buildings)} '
+                "buildings have no rooms attached, so they cannot score for "
+                "anybody. Attach channels under <b>Buildings</b>, or press "
+                "<b>Suggest from channel names</b> there.</div>")
 
     return f"""
-<section class="sidepanel" data-panel="dl-preview">
-  <h2 class="panelhead">\U0001F441 Preview</h2>
-  <p class="muted">Where everybody stands right now, worked out live from real
-  activity. <b>Nobody outside this panel can see any of this.</b> It is here so
-  the economy can be tuned against the actual server before a single player is
-  shown a town.</p>
+<section class="sidepanel" data-panel="{panel}"{'' if shown else ' hidden'}>
+  <h2 class="panelhead">\U0001F441 Preview: {_e(store_module.BASIS_LABELS[basis])}</h2>
+  <p class="muted">{_e(_BASIS_BLURB[basis])}
+  <b>Nobody outside this panel can see any of this.</b></p>
   <p class="muted small">The name column also carries <b>flourish</b>: the
   visual effect a person's trial rank earns. Flourish is cosmetic and never
   changes a building tier, so every building stays reachable by anybody, and the
   scarce thing is the one that costs nothing to grant and cannot be farmed.</p>
-  <table class="previewtable">
-    <thead><tr><th></th><th>Person</th><th>Town power</th><th>People reached</th>
-    {heads}</tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
+  {note}
+  <div class="dlscroll">
+    <table class="previewtable">
+      <thead><tr><th></th><th>Person</th><th>Town power</th>
+      <th>People reached</th><th>What stands there</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
 </section>"""
 
 
@@ -729,12 +754,18 @@ async def dodoland_page(request: web.Request):
               "switched off, so nothing is being recorded")
 
     nav = ""
+    # Every panel in the body needs an entry here. A section with no menu item
+    # renders hidden with nothing able to reveal it, which is exactly how the
+    # rebuild button went missing: on the page, and unreachable.
     for key, emoji, label, hint in (
-        ("dl-preview", "\U0001F441", "Preview", f"{counted} scoring"),
+        ("dl-preview", "\U0001F441", "Preview: with history", f"{counted} scoring"),
+        ("dl-scratch", "\U0001F195", "Preview: from scratch",
+         f"{len(scratch['people'])} scoring"),
         ("dl-buildings", "\U0001F3D8", "Buildings", f"{len(buildings)}"),
         ("dl-metrics", "\U0001F4CF", "What counts", f"{len(metric_registry.METRICS)} metrics"),
         ("dl-map", "\U0001F5FA", "The map", "upload"),
-        ("dl-settings", "⚙️", "Settings", "intake"),
+        ("dl-backfill", "\U000023EA", "Rebuild history", "from the archive"),
+        ("dl-settings", "\U00002699", "Settings", "intake"),
     ):
         active = " active" if key == "dl-preview" else ""
         nav += (f'<a class="sidenavitem{active}" href="#{key}" data-panel="{key}">'

@@ -145,6 +145,22 @@ for needle, why in (
     assert needle in body, f"the page is missing {why} ({needle!r})"
 print("page            buildings, tiers, metrics, caps, preview and map all present")
 
+# Every section must have a menu entry. A panel with none renders hidden with
+# nothing able to reveal it, which is how the rebuild button went missing: it
+# was on the page the whole time and unreachable.
+sections = set(re.findall(r'<section class="sidepanel" data-panel="(dl-[a-z]+)"', body))
+menu = set(re.findall(r'class="sidenavitem[^"]*" href="#(dl-[a-z]+)"', body))
+assert sections, "the page rendered no panels at all"
+assert not (sections - menu), f"unreachable panels: {sorted(sections - menu)}"
+assert not (menu - sections), f"menu entries pointing at nothing: {sorted(menu - sections)}"
+print(f"page            all {len(sections)} panels are reachable from the menu")
+
+# Wide content scrolls inside its own box. Fifteen buildings as fifteen columns
+# pushed the entire panel sideways.
+assert "dlscroll" in body, "the wide table has no scroll container"
+assert body.count("<th>") < 12, "the preview is back to a column per building"
+print("page            wide tables scroll inside themselves, not the page")
+
 # Every control the page renders must be a real parameter, or it saves nothing.
 keys = set(re.findall(r'data-key="(dodoland_[a-z_]+)"', body))
 known = {spec["key"] for spec in dodo_params.DODOLAND_PARAMETERS}
