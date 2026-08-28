@@ -27,6 +27,11 @@ class DuplicateKeyError(Exception):
 def _matches(doc: dict, query: dict) -> bool:
     """Query matching for the operators the repositories use."""
     for key, condition in query.items():
+        if key == "$or":
+            # A top-level disjunction, not a condition on a field named "$or".
+            if not any(_matches(doc, sub) for sub in condition):
+                return False
+            continue
         value = _resolve(doc, key)
         if isinstance(condition, re.Pattern):
             if not (isinstance(value, str) and condition.match(value)):
@@ -142,11 +147,22 @@ class FakeCollection:
             return type("Result", (), {"modified_count": 1})()
         return type("Result", (), {"modified_count": 0})()
 
-    def find_one_and_update(self, query: dict, update: dict, return_document=True):
+    def find_one_and_update(self, query: dict, update: dict, return_document=True,
+                            upsert: bool = False):
         for doc in self.docs:
             if _matches(doc, query or {}):
                 self._apply(doc, update)
                 return dict(doc)
+        if upsert:
+            # Mirrors pymongo: the equality terms of the query seed the new
+            # document, the update is applied to it, and ReturnDocument.AFTER
+            # gets the created row back. Without this a caller that upserts
+            # would read None on the first act of every day and mis-count it.
+            base = {k: v for k, v in (query or {}).items()
+                    if not isinstance(v, (dict, re.Pattern)) and not k.startswith("$")}
+            self._apply(base, update)
+            self.insert_one(base)
+            return dict(base)
         return None
 
     def delete_one(self, query: dict):

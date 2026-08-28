@@ -125,3 +125,15 @@ dnd_relations = db["DndRelations"]            # directed pair state (P2)
 dnd_clocks = db["DndClocks"]                  # faction agendas / fronts (P3)
 dnd_canon_queue = db["DndCanonQueue"]         # LLM inventions awaiting GM promotion (P4)
 dnd_snapshots = db["DndSnapshots"]            # event-log compaction checkpoints
+
+# --------------------------------------------------------------------------- #
+#  DodoLand — the socialite tribe's town map (see docs/DODOLAND.md)
+# --------------------------------------------------------------------------- #
+# Both carry guild_id and are keyed by day. helpers/dodoland/store.py is the only
+# module that touches them, and it refuses an unscoped query: DodoLand is
+# multiserver from its first write and no code path reads across guilds.
+dodoland_activity = db["DodoLandActivity"]   # {guild_id, user_id, day, acts, scored, channels}
+# One row per pair per day, a < b. Enforces the per-partner caps, and is also the
+# relation graph the map places neighbours from.
+dodoland_pairs = db["DodoLandPairs"]         # {guild_id, day, a, b, acts, n}
+dodoland_params = db["DodoLandParams"]       # {guild_id, key, value} — DodoLand's own tunables

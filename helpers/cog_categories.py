@@ -126,6 +126,8 @@ FEATURES: list[dict] = [
      "link": ("events", "Chat triggers")},
     {"key": "chat_unprompted", "cog": "chat", "label": "Unprompted chat",
      "description": "Very rarely join a live conversation nobody addressed, using the last few messages as context."},
+    {"key": "dodoland_tracking", "cog": "dodoland", "label": "DodoLand activity tracking",
+     "description": "Count who talked and who they named, per channel, to build the town map. Silent: it gathers and shows nobody anything."},
 ]
 
 _FEATURES_BY_COG: dict[str, list[dict]] = {}

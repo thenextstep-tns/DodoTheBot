@@ -32,6 +32,8 @@ from helpers.visibility import VisibilityManager
 from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
+from helpers.dodoland import parameters as dodoland_parameters
+from helpers.dodoland.store import ActivityStore
 from helpers.events import EventRuleManager
 from helpers.chat.triggers import ChatTriggerManager
 from helpers.chat.activity import ChatActivity
@@ -115,6 +117,13 @@ class DodoBot(commands.Bot):
         # Per-server command parameters (thresholds, limits, role lists, …).
         # Cogs read via self.params.get(guild_id, "key"); edited from the panel.
         self.params = ParamManager(config_py.command_params)
+        # DodoLand's own tunables and activity store, deliberately separate from
+        # the general registry above so a server's town economy never appears
+        # among the ordinary cog settings (the same split tabletop uses).
+        self.dodoland_params = dodoland_parameters.manager()
+        self.dodoland = ActivityStore(
+            config_py.dodoland_activity, config_py.dodoland_pairs, self.dodoland_params
+        )
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)
