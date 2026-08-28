@@ -314,27 +314,63 @@ class ActivityStore:
         **repeatable**: running it twice writes the same numbers rather than
         doubling them. That is only sound because the caller restricts itself to
         days before the listener started, where there is nothing live to lose.
+
+        Sent as bulk batches. A rebuild of this server is roughly 32,000 rows,
+        and one round trip each took long enough that the first real run was
+        killed part-way through, leaving the activity rows written and the
+        relation graph almost entirely missing. Batching is the difference
+        between a job that finishes and a job that gets interrupted.
         """
         guild_id = _require_guild(guild_id)
-        written = 0
-        for row in activity or ():
-            self._activity.update_one(
+        activity_ops = [
+            (
                 {"guild_id": guild_id, "user_id": int(row["user_id"]), "day": row["day"]},
                 {"$set": {"acts": row.get("acts") or {},
                           "scored": row.get("scored") or {},
                           "channels": row.get("channels") or {},
                           "source": "backfill"}},
-                upsert=True,
             )
-            written += 1
-        for row in pairs or ():
-            self._pairs.update_one(
+            for row in activity or ()
+        ]
+        pair_ops = [
+            (
                 {"guild_id": guild_id, "day": row["day"],
                  "a": int(row["a"]), "b": int(row["b"])},
                 {"$set": {"acts": row.get("acts") or {}, "n": int(row.get("n", 0)),
                           "source": "backfill"}},
-                upsert=True,
             )
+            for row in pairs or ()
+        ]
+        return (self._bulk(self._activity, activity_ops)
+                + self._bulk(self._pairs, pair_ops))
+
+    @staticmethod
+    def _bulk(collection, operations, batch: int = 1000) -> int:
+        """Upsert many rows, in batches, falling back to one at a time.
+
+        The fallback is for the test stub, which models a collection rather than
+        a driver and has no ``bulk_write``. It must stay: a stub that quietly
+        did nothing here would let a broken rebuild pass its tests.
+        """
+        if not operations:
+            return 0
+        try:
+            from pymongo import UpdateOne
+        except Exception:  # pragma: no cover - no driver, as in the tests
+            UpdateOne = None
+
+        written = 0
+        if UpdateOne is not None and hasattr(collection, "bulk_write"):
+            for start in range(0, len(operations), batch):
+                chunk = operations[start:start + batch]
+                collection.bulk_write(
+                    [UpdateOne(query, update, upsert=True) for query, update in chunk],
+                    ordered=False,
+                )
+                written += len(chunk)
+            return written
+        for query, update in operations:
+            collection.update_one(query, update, upsert=True)
             written += 1
         return written
 
