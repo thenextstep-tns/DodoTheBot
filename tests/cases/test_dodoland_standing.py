@@ -177,4 +177,74 @@ assert res2["people"][NIK]["reached"] == 1 and res2["people"][FOX]["reached"] ==
 assert res2["people"][FOX]["power"] > 0, "a person with only ties still has a town"
 print("scoring         reach sits on the town, and ties alone still make one")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The suggest endpoint: the one click that makes any of this score
+# --------------------------------------------------------------------------- #
+import asyncio  # noqa: E402
+
+from helpers.dodoland.buildings import BuildingStore  # noqa: E402
+from web.dodoland import api as dodoland_api  # noqa: E402
+
+
+class _Ch:
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+
+
+class _G:
+    id, name = GUILD, "G"
+    channels = [_Ch(901, "eso-help"), _Ch(902, "trials-lfg"), _Ch(903, "pet-pics")]
+
+    def get_member(self, uid):
+        return None
+
+
+class _Audit:
+    def record(self, *a, **k):
+        pass
+
+
+class _Bot:
+    def __init__(self):
+        self.dodoland_buildings = BuildingStore(FakeCollection())
+        self.audit_log = self.audit_notify = _Audit()
+
+    def get_guild(self, gid):
+        return _G()
+
+
+class _Req(dict):
+    def __init__(self, app, body):
+        super().__init__()
+        self.app, self._b = app, body
+        self.match_info = {"gid": str(GUILD)}
+
+    async def json(self):
+        return self._b
+
+
+_bot = _Bot()
+_req = _Req({"bot": _bot}, {})
+_req["guild"], _req["scope"], _req["uid"] = _G(), "owner", 1
+
+# Nothing scores until rooms are attached, so this endpoint is the one click
+# that turns a configured server into a scoring one. It must actually persist.
+assert not any(b["channels"] for b in _bot.dodoland_buildings.buildings(GUILD))
+_resp = asyncio.run(dodoland_api.api_dodoland_suggest(_req))
+assert _resp.status == 200, _resp.text
+assert '"ok": true' in _resp.text, _resp.text
+saved = _bot.dodoland_buildings.buildings(GUILD)
+attached = {cid for b in saved for cid in b["channels"]}
+assert attached == {901, 902, 903}, attached
+assert _bot.dodoland_buildings.is_configured(GUILD), "suggesting did not persist"
+print("suggest         one click attaches this server's real rooms, and it sticks")
+
+# Running it again must not disturb what it already did.
+asyncio.run(dodoland_api.api_dodoland_suggest(_req))
+again = {cid for b in _bot.dodoland_buildings.buildings(GUILD) for cid in b["channels"]}
+assert again == attached, "a second suggest moved rooms around"
+print("suggest         pressing it twice changes nothing")
+
 print("PASS")
