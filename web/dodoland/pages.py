@@ -82,7 +82,10 @@ def _name_of(guild, user_id: int, bot=None) -> str:
 
 
 def _channel_name(guild, channel_id: int) -> str:
+    """A room's name, which may be a forum post rather than a channel."""
     channel = guild.get_channel(int(channel_id))
+    if channel is None and hasattr(guild, "get_thread"):
+        channel = guild.get_thread(int(channel_id))
     return f"#{channel.name}" if channel else f"channel {channel_id}"
 
 
@@ -549,7 +552,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (chosen[o.dataset.id]) { delete chosen[o.dataset.id]; o.dataset.selected = '0'; }
         else { chosen[o.dataset.id] = 1; o.dataset.selected = '1'; }
         o.style.fontWeight = o.dataset.selected === '1' ? '700' : '';
-        save(Object.keys(chosen));
+        save(Object.keys(chosen));  // same contract as bindMultiSelect
       });
     });
     return null;
@@ -563,7 +566,15 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     });
   });
-  document.querySelectorAll('.dlchannels').forEach(function (ms) { bind(ms, function () {}); });
+  // A building's rooms are part of the buildings form, so they are collected on
+  // save rather than written one at a time. bindMultiSelect keeps its selection
+  // in a closure and never writes data-selected back to the elements, so the
+  // callback is the ONLY place the current choice exists: it is recorded on the
+  // element here, and that is what the collector reads. Reading the option
+  // attributes instead is how attaching channels silently did nothing.
+  document.querySelectorAll('.dlchannels').forEach(function (ms) {
+    bind(ms, function (ids) { ms.dataset.chosen = ids.join(','); });
+  });
 
   var bmsg = document.getElementById('dlbuildingsmsg');
 
@@ -571,8 +582,10 @@ document.addEventListener('DOMContentLoaded', function () {
     var channels = {};
     var picker = card.querySelector('.dlchannels');
     if (picker) {
-      picker.querySelectorAll('.ms-opt').forEach(function (o) {
-        if (o.dataset.selected === '1') channels[o.dataset.id] = 1;
+      // data-chosen is kept current by the picker's save callback above. It is
+      // the only place the live selection exists.
+      (picker.dataset.chosen || '').split(',').forEach(function (id) {
+        if (id) channels[id] = 1;
       });
     }
     card.querySelectorAll('.dlchw').forEach(function (input) {

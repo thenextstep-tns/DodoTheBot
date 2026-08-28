@@ -57,13 +57,25 @@ class DodoLand(commands.Cog, name="dodoland"):
         return self.bot.dodoland_params.get(guild_id, key)
 
     def _channel_id(self, channel) -> int:
-        """The channel an act belongs to, with a thread charged to its parent.
+        """The room an act belongs to.
 
-        A thread is a room inside a channel, not a channel of its own. Charging
-        threads to their parent keeps a building definable as "these channels"
-        without every new thread silently escaping the definition.
+        Two different things wear the same Discord type, and they are not the
+        same kind of place:
+
+        * A **thread in an ordinary channel** is a conversation inside that
+          channel and is charged to it. Otherwise every new thread would escape
+          whatever building its channel feeds, and building definitions would go
+          stale as fast as people start conversations.
+        * A **post in a forum** is charged to itself. A forum is a container of
+          separate rooms, not a room: collapsing them made the food feed, the
+          safe space and the selfies thread into a single indistinguishable
+          channel, which is exactly the distinction the map is meant to show.
         """
         parent = getattr(channel, "parent", None)
+        if parent is None:
+            return int(getattr(channel, "id", 0) or 0)
+        if isinstance(parent, discord.ForumChannel):
+            return int(getattr(channel, "id", 0) or 0)
         return int(getattr(parent, "id", 0) or getattr(channel, "id", 0) or 0)
 
     def _tracked(self, guild_id: int, channel_id: int) -> bool:

@@ -299,4 +299,52 @@ tavern = next(b for b in picked if b["key"] == "tavern")
 assert set(tavern["channels"]) == {30, 31}, tavern["channels"]
 print("channels        a hint can claim a whole category, not one room at a time")
 
+
+
+# --------------------------------------------------------------------------- #
+#  A forum's posts are separate rooms; ordinary threads are not
+# --------------------------------------------------------------------------- #
+class _Forum(discord.ForumChannel):
+    def __init__(self, cid, name, category, position):
+        self.id, self.name, self.position = cid, name, position
+        self._cat = category
+
+    @property
+    def category(self):
+        return self._cat
+
+
+class _Post:
+    """A forum post. Only the attributes the picker and labeller read."""
+
+    def __init__(self, tid, name, parent):
+        self.id, self.name, self.parent = tid, name, parent
+
+
+_feed = _Forum(40, "personal-feed", _social, 2)
+_food = _Post(401, "Salvalicious food pics", _feed)
+_safe = _Post(402, "Safe Space", _feed)
+
+
+class _WithForum(_Server):
+    channels = _Server.channels + [_feed]
+    threads = [_safe, _food]
+
+
+ids = [c.id for c in buildings_ui.ordered_channels(_WithForum())]
+assert 40 in ids, "the forum itself is missing"
+assert ids.index(401) > ids.index(40) and ids.index(402) > ids.index(40), ids
+print("forums          each forum's posts are listed as rooms, under their forum")
+
+label = buildings_ui.channel_label(_food)
+assert label == "Social / personal-feed / Salvalicious food pics", label
+print("forums          a post is labelled by its category and its forum")
+
+# The listener charges a forum post to itself and an ordinary thread to its
+# parent. Collapsing forum posts made the food feed, the safe space and the
+# selfies thread one indistinguishable channel.
+src = pathlib.Path("cogs/dodoland.py").read_text(encoding="utf-8")
+assert "isinstance(parent, discord.ForumChannel)" in src,     "forum posts are being collapsed into their forum again"
+print("forums          a post is its own room; a thread in a channel is not")
+
 print("PASS")

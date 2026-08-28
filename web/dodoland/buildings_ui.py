@@ -35,28 +35,36 @@ def _e(value) -> str:
 
 
 def _channel_name(guild, channel_id: int) -> str:
+    """A room's name, which may be a forum post rather than a channel."""
     channel = guild.get_channel(int(channel_id))
+    if channel is None and hasattr(guild, "get_thread"):
+        channel = guild.get_thread(int(channel_id))
     return f"#{channel.name}" if channel else f"channel {channel_id}"
 
 
 def ordered_channels(guild) -> list:
-    """This guild's channels in the order Discord itself draws them.
+    """Every room a building can point at, in the order Discord draws them.
 
-    Categories in their own order, then channels within each category in theirs.
-    With sixty-odd channels an alphabetical or arbitrary list is unusable: the
-    only ordering anybody knows is the one in their sidebar, so that is the one
-    to show.
+    Categories in their own order, then channels within each, and **each forum's
+    posts listed under it**. With sixty-odd channels an arbitrary flat list is
+    unusable: the only ordering anybody knows is their own sidebar.
 
-    Threads are deliberately absent. A thread is a room inside a channel and is
-    charged to its parent, so offering one here would promise an attachment the
-    scorer would never honour.
+    Forum posts are included because a forum is a container of separate rooms
+    rather than a room. Threads in ordinary text channels are not: those are
+    conversations inside a channel, charged to it, so offering one here would
+    promise an attachment the scorer will never honour.
+
+    Only **active** posts can be listed. Discord does not hand archived threads
+    over without a request per forum, and a picker that waited on that would
+    take seconds to draw. A building already pointing at a post that has since
+    been archived keeps its attachment; it simply cannot be picked afresh here.
     """
     import discord
 
     kinds = (discord.TextChannel, discord.ForumChannel, discord.VoiceChannel)
     rooms = [c for c in getattr(guild, "channels", []) if isinstance(c, kinds)]
 
-    def sort_key(channel):
+    def channel_key(channel):
         category = getattr(channel, "category", None)
         # Channels above every category sort first, the way Discord shows them.
         return (getattr(category, "position", -1) if category is not None else -1,
@@ -64,13 +72,34 @@ def ordered_channels(guild) -> list:
                 getattr(channel, "position", 0),
                 getattr(channel, "id", 0))
 
-    return sorted(rooms, key=sort_key)
+    posts: dict[int, list] = {}
+    for thread in getattr(guild, "threads", []) or []:
+        parent = getattr(thread, "parent", None)
+        if isinstance(parent, discord.ForumChannel):
+            posts.setdefault(int(parent.id), []).append(thread)
+
+    out = []
+    for channel in sorted(rooms, key=channel_key):
+        out.append(channel)
+        for post in sorted(posts.get(int(channel.id), []),
+                           key=lambda t: (str(getattr(t, "name", "")).lower(), t.id)):
+            out.append(post)
+    return out
 
 
 def channel_label(channel) -> str:
-    """``Category / name`` — so searching a category finds all of its rooms."""
-    category = getattr(channel, "category", None)
+    """``Category / name``, or ``Category / forum / post`` for a forum post.
+
+    The category is part of the label so searching one finds all of its rooms,
+    which is the only workable way to find anything among sixty-odd channels.
+    """
     name = getattr(channel, "name", "?")
+    parent = getattr(channel, "parent", None)
+    if parent is not None:  # a forum post
+        category = getattr(parent, "category", None)
+        head = f"{category.name} / " if category is not None else ""
+        return f"{head}{getattr(parent, 'name', '?')} / {name}"
+    category = getattr(channel, "category", None)
     return f"{category.name} / {name}" if category is not None else name
 
 

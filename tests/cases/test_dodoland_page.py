@@ -283,4 +283,20 @@ print("bots            never score, and mentioning one earns the mentioner nothi
 assert "(@" in body, "names carry no account handle"
 print("names           nickname and handle, so duplicates are tellable apart")
 
+
+
+# --------------------------------------------------------------------------- #
+#  Attaching rooms to a building must actually save
+# --------------------------------------------------------------------------- #
+# panel.js's bindMultiSelect keeps its selection in a closure and never writes
+# data-selected back to the option elements. The collector used to read those
+# attributes, so it always saw the server-rendered state and every newly
+# attached channel was silently dropped on save. The callback is the only place
+# the live selection exists, so it records it on the element and the collector
+# reads that.
+assert "ms.dataset.chosen = ids.join(',')" in body,     "the channel picker no longer records what was chosen"
+assert "picker.dataset.chosen" in body,     "the buildings collector is not reading the live selection"
+assert "if (o.dataset.selected === '1') channels[o.dataset.id] = 1;" not in body,     "the collector is back to reading attributes that never change"
+print("buildings       attaching rooms records the live selection, and saves it")
+
 print("PASS")
