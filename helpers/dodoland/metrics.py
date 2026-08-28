@@ -183,7 +183,10 @@ METRICS: tuple[Metric, ...] = (
             "A minute in a voice channel with at least one other person in it. "
             "Sitting alone in a channel earns nothing, however long you do it. "
             "The daily cap is the real control here: four hours is a full "
-            "evening, and past it the hours stop being evidence of anything."
+            "evening, and past it the hours stop being evidence of anything. "
+            "Counts toward town power but builds nothing yet: voice minutes "
+            "arrive in far larger numbers than messages and would dominate "
+            "whichever building they landed in."
         ),
         kind=SOLO, weight=1, daily_cap=240,
     ),

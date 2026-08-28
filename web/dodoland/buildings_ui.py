@@ -129,8 +129,8 @@ def building_card(guild, building: dict, resolved: list[dict], population: int) 
   <div class="paramrow wide">
     <div><b>Rooms that build it</b>
       <div class="muted small">Everything earned in these channels builds this
-      one. A room feeding two buildings makes both mean less, so keep them
-      apart.</div></div>
+      one. A room may feed more than one building, at different weights: a busy
+      general channel really is both the tavern and somewhere else.</div></div>
     {_channel_picker(guild, building)}
   </div>
 

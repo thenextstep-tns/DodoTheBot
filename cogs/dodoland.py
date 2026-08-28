@@ -215,13 +215,22 @@ class DodoLand(commands.Cog, name="dodoland"):
         self._count_command(interaction.guild, interaction.user, interaction.channel)
 
     def _count_command(self, guild, user, channel) -> None:
+        """Bot use counts wherever it happens.
+
+        Deliberately **not** subject to the tracked/ignored channel lists. The
+        bot channel is the first thing anybody ignores, precisely so command
+        spam does not build towns, and that would have left the Dodo Statue
+        permanently unbuildable. Commands are a thing you did, not a room you
+        were in, so they are counted anywhere and the statue is fed by total
+        bot use rather than by location.
+
+        The daily cap is what keeps this sane; a metric's own channel list still
+        applies in ``_write``, so it can be narrowed by hand if that is wanted.
+        """
         if not self._on(guild.id) or not self._humans(guild.id, user):
             return
-        channel_id = self._channel_id(channel)
-        if not self._tracked(guild.id, channel_id):
-            return
         self._write(guild.id, [intake.Act(metric="command_used", user_id=user.id,
-                                          channel_id=channel_id)])
+                                          channel_id=self._channel_id(channel))])
 
     # --------------------------------------------------------------------- #
     #  Threads: starting a conversation
@@ -264,7 +273,15 @@ class DodoLand(commands.Cog, name="dodoland"):
             self.voice.join(guild.id, member.id, after.channel.id)
 
     def _credit_voice(self, guild_id: int, credit) -> None:
-        """Turn a finished voice session into acts."""
+        """Turn a finished voice session into acts.
+
+        Recorded with **no channel**, deliberately: voice counts toward town
+        power but builds nothing. Attaching voice channels to buildings is a
+        one-line change (pass ``credit.channel_id`` below) and is held back
+        until the text side is tuned, because voice minutes arrive in much
+        larger numbers than messages and would dominate whichever building they
+        landed in.
+        """
         minimum = int(self._param(guild_id, "dodoland_voice_min_minutes"))
         partners = {other: shared for other, shared in credit.partners.items()
                     if shared >= minimum}
@@ -274,17 +291,14 @@ class DodoLand(commands.Cog, name="dodoland"):
             self._ensure_indexes()
             # Minutes are credited in one write rather than one per minute.
             self.bot.dodoland.record(
-                guild_id, credit.user_id, "voice_minute",
-                channel_id=credit.channel_id, amount=credit.minutes,
+                guild_id, credit.user_id, "voice_minute", amount=credit.minutes,
             )
             for other in partners:
                 self.bot.dodoland.record(
-                    guild_id, credit.user_id, "voice_together",
-                    channel_id=credit.channel_id, partner_id=other,
+                    guild_id, credit.user_id, "voice_together", partner_id=other,
                 )
                 self.bot.dodoland.record(
-                    guild_id, other, "voice_together",
-                    channel_id=credit.channel_id, partner_id=credit.user_id,
+                    guild_id, other, "voice_together", partner_id=credit.user_id,
                 )
         except Exception as error:
             self.bot.logger.error(f"DodoLand failed to record a voice session: {error}")

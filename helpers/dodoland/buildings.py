@@ -279,9 +279,11 @@ _DEFAULT_SET: tuple[tuple, ...] = (
       "basement", "dungeon", "unhinged"),
      {}, ("Cellar Door", "Back Room", "The Speakeasy", "The Undercroft",
           "The Deep Cellars", "The Unlit Halls")),
+    # The statue is fed by bot commands, which are counted wherever they happen
+    # rather than by room. Its hints still match a bot channel so that ordinary
+    # chatter in there builds something, but the statue grows either way.
     ("statue", "The Dodo Statue", "🗿",
-     ("bot", "command", "dodo", "casino", "gamble", "spam", "playground",
-      "commands", "minigame"),
+     ("bot", "command", "dodo", "casino", "gamble", "playground", "minigame"),
      {"command_used": 2.0},
      ("Odd Boulder", "Carved Stone", "The Little Dodo", "The Dodo Statue",
       "The Gilded Dodo", "The Colossus of Dodo")),
@@ -313,9 +315,13 @@ def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
     """Attach each building to the channels whose names look like it.
 
     Only ever fills in buildings that have **no** channels yet, so pressing it
-    again after hand-tuning cannot undo the tuning. A channel is offered to at
-    most one building — the first whose hint it matches — because a room feeding
-    two buildings makes both of them mean less.
+    again after hand-tuning cannot undo the tuning.
+
+    A room *may* feed more than one building — that is a deliberate allowance,
+    because a busy general channel really is both the tavern and somewhere else.
+    The suggester still hands each room to a single building, because a guess
+    that quietly double-counted would be a bad guess; sharing a room is a choice
+    somebody makes on purpose, in the editor.
 
     Matching is on the channel name alone. It is a starting guess and is meant
     to be corrected, which is the same bargain "Suggest from role names" makes
