@@ -70,8 +70,8 @@ cogs/dodoland.py                the listeners
 tests/cases/test_dodoland.py    scoping, caps, acts-vs-scored, voice overlap, invites
 ```
 
-**16 metrics, 71 parameters.** Three are backfillable (`message`,
-`mention_given`, `mention_received`); the other thirteen count forward only.
+**17 metrics, 75 parameters, 15 buildings.** Three metrics are backfillable
+(`message`, `mention_given`, `mention_received`); the rest count forward only.
 
 ### Collections
 
@@ -146,8 +146,12 @@ scorer and any future surface cannot disagree about a metric's configuration.
   exists to prevent.
 - **Role pings reach nobody.** `<@&id>` and `@everyone` are excluded. If they
   scored, one ping of @Members would outweigh a year of conversation.
-- **A thread is charged to its parent channel.** A thread is a room inside a
-  channel; otherwise every new thread silently escapes a building's definition.
+- **A thread is charged to its parent channel, but a forum post is charged to
+  itself.** A thread in an ordinary channel is a conversation inside it, and
+  charging it elsewhere would make building definitions go stale as fast as
+  people start conversations. A forum is a container of separate rooms rather
+  than a room, so collapsing its posts destroyed the distinction the map exists
+  to show. See §4c.
 - **Length is measured on raw text**, so a message that is only a ping is not a
   free point.
 - **Failures in the listener are logged, never raised.** It runs inside
@@ -308,6 +312,73 @@ Placement reads the relation graph, which the backfill creates, so:
   slots, naming rights). Candidates only. The constraint they must respect: rank
   grants social capability, never economic advantage, or the two axes collapse
   into one.
+
+## 4c. What went wrong in the first days, and what now guards it
+
+Every one of these was found by the owner on the live panel, not by a test. They
+are listed because each is a class of mistake this subsystem is prone to.
+
+**Controls that render but are not wired.** `panel.js` binds parameters and
+multiselects only inside a `.cogcard`, and this page has none, so every channel
+picker on it was a list of dead divs. Bind on `DOMContentLoaded` (that file
+loads *after* an inline script) and bind this page's controls explicitly.
+
+**`bindMultiSelect` never writes its selection back to the DOM.** It keeps the
+chosen ids in a closure and hands them to its `save` callback, and nothing else.
+Reading `data-selected` off the options gives the server-rendered state forever,
+which is why attaching channels to a building silently did nothing. The callback
+is the only place the live selection exists; it records it on the element and
+the collector reads that. Tested in both directions.
+
+**A save with no feedback is indistinguishable from no save.** `flash()` writes
+into `#status` and silently gives up when there is none. The page renders one
+and the script creates one if it ever goes missing.
+
+**A panel with no menu entry is unreachable.** The rebuild button sat on the
+page, hidden, with nothing able to reveal it. The render test now fails on any
+panel without an entry and any entry pointing at nothing.
+
+**A column per building does not scale.** Fifteen buildings became fifteen
+columns and pushed the whole page sideways. The preview lists what a town has
+actually built, in one cell. Wide content lives in `.dlscroll`.
+
+**The page read the same collection eight times.** Two previews, each separately
+counting distinct days, plus the map fetching rows and pairs again: about
+100,000 documents per page load once the archive rebuild made the collection
+real. Now one read, split by basis in memory. Measured on the live server: 5.6s
+of database time became 0.70s, and the Python scoring is 0.06s of it. The
+Python was never the cost.
+
+**Excluding bot *authors* is not excluding bots.** People mention the bot
+constantly, and each of those was a mention received by it and a mention given
+by them, so Dodo sat second on the board with 10,560 town power. Bots are
+dropped on both sides of every act, and the rebuild learns which accounts are
+bots from the archive so departed ones are caught too.
+
+**A rebuild that only upserts cannot shrink.** When the rules changed the plan
+got smaller and the old rows stayed, so the bot kept its town and the preview
+counted 1,261 people where the rules produce 671. The rebuild clears every row
+it previously wrote before writing the new ones. Live rows carry no `source` and
+are never touched.
+
+**A forum is not a room.** It is a container of rooms. Collapsing its posts into
+it made the food feed, the safe space and the selfies thread one
+indistinguishable channel. A forum post is charged to itself; a thread in an
+ordinary text channel is still charged to its parent, or building definitions
+would go stale as fast as people start conversations. Only *active* posts can be
+listed in the picker: Discord will not hand over archived threads without a
+request per forum.
+
+## 4d. Settled decisions
+
+| Question | Answer |
+|---|---|
+| Bot commands vs ignored bot channels | Commands count **wherever** they happen, ignoring channel rules. Otherwise the Dodo Statue is unbuildable, since bot channels are the first thing anybody ignores |
+| Can a room feed two buildings? | **Yes**, at different weights. A busy general channel really is both the tavern and somewhere else. The suggester still gives each room to one building, because a guess that quietly double-counted would be a bad guess |
+| Who gets a town? | **Only people with activity.** No empty plots for lurkers |
+| Does voice build anything? | **No, not yet.** It counts toward town power only. Voice minutes arrive in far larger numbers than messages and would dominate whichever building they landed in. Attaching them is a one-line change |
+| Forum posts | **Their own rooms.** Ordinary threads still collapse into their channel |
+| Thresholds | **Derived** from the server's live distribution, with a floor |
 
 ## 5. Constraints this has to live inside
 
