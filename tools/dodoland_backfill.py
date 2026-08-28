@@ -21,7 +21,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
+
+# Run from anywhere: this lives one directory down from the repo root, and the
+# bot's modules are all rooted there.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import config_py
 from helpers.dodoland import backfill as backfill_rules
