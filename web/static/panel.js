@@ -2254,6 +2254,21 @@ function bindMemberPicker(pick, members) {
 }
 
 
+// --- Spoilers in the server log ---------------------------------------------
+// Delegated from the document: the rows are rendered server-side, so there is
+// nothing to bind per row, and a row opened later gets this for free.
+document.addEventListener("click", (e) => {
+  const covered = e.target.closest && e.target.closest(".spoiler");
+  if (covered) covered.classList.add("open");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const covered = e.target.closest && e.target.closest(".spoiler");
+  if (!covered) return;
+  e.preventDefault();
+  covered.classList.add("open");
+});
+
 // --- Type-to-find picker that keeps several choices --------------------------
 // The single-choice `.mpick` above answers "which member"; this answers "which
 // of these", which is a different control and not a flag on the first one.

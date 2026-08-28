@@ -577,6 +577,9 @@ main:has(.logpage) { max-width: 1180px; }
 .logfieldname { flex: 0 0 96px; font-size: 10px; letter-spacing: .05em;
   text-transform: uppercase; color: var(--color-muted); line-height: 1.7;
   white-space: nowrap; }
+/* One flex item for the whole value. Without it every span inside became an
+   item of its own and the sentence came out in vertical strips. */
+.logfieldvalue { flex: 1 1 auto; min-width: 0; }
 
 /* Mentions read as mentions rather than as raw snowflakes, and a deleted one
    says so instead of showing an id nobody can look up. */
@@ -590,11 +593,16 @@ main:has(.logpage) { max-width: 1180px; }
 /* A custom emoji has no image here, so it reads as the name people call it. */
 .cemoji { padding: 0 3px; border-radius: var(--radius-sm); font-size: 12px;
   background: var(--color-surface-soft); color: var(--color-muted); }
-/* Marked, not hidden. Hiding it painted a grey slab over however many lines the
-   spoiler spanned, and covered the one thing the row exists to show. The dotted
-   underline says it was posted behind a spoiler; the text stays readable. */
-.spoiler { text-decoration: underline dotted var(--color-muted-soft);
-  text-underline-offset: 2px; }
+/* A spoilered word is a word with a cover on it, nothing more: it sits in the
+   line it was typed in and takes a click to read. box-decoration-break: clone is
+   what keeps a spoiler that wraps from painting one slab over both lines, and
+   the descendant rule covers mentions and emoji inside it, which set their own
+   colours and would otherwise show straight through. */
+.spoiler { border-radius: 3px; cursor: pointer;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.spoiler:not(.open) { background: var(--color-muted-soft); color: transparent; }
+.spoiler:not(.open) * { color: transparent; background: transparent;
+  border-color: transparent; }
 
 /* Below this the three columns stop being columns. A log row is a timestamp, a
    label and a paragraph; on a phone that is a card, not a table. */

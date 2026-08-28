@@ -352,12 +352,17 @@ Things worth knowing before touching the server log:
   per line. Note that `.logtable td { display: block }` outranks a bare
   `.logwhen`, so the mobile overrides are qualified with `.logtable` - without
   that they silently lose and the header line stacks.
-- **`||spoilers||` are marked, not hidden.** They were hidden at first, which
-  painted a grey slab over however many lines the spoiler spanned and covered
-  the one thing the row exists to show. A dotted underline says it was posted
-  behind a spoiler and the text stays readable. `<:emoji:id>` renders as
-  `:emoji:`; the images live on Discord's CDN, which this page has no business
-  fetching from.
+- **A field's value must be one element.** `.logfield` is a flex container, and
+  a flex container makes every inline child its own item: the text runs, each
+  mention, each spoiler and each emoji were laid out as separate columns, so a
+  sentence came out in vertical strips. It is wrapped in `.logfieldvalue`. This
+  looked like a spoiler-styling problem for two rounds and was not one.
+- **`||spoilers||` are hidden and open on click.** Inline, in the line they were
+  typed in. `box-decoration-break: clone` stops one that wraps from painting a
+  single slab across both lines, and the descendant rule covers mentions and
+  emoji inside a spoiler, which set their own colours and otherwise show
+  straight through the cover. `<:emoji:id>` renders as `:emoji:`; the images
+  live on Discord's CDN, which this page has no business fetching from.
 - **Stripping the timestamp leaves its separator behind.** Every template ends
   `" - <t:…:f>"`, so removing the token alone left a dash dangling off the end
   of every row. `_MD_TRAILING_SEP` takes it.

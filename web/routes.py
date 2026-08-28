@@ -2366,11 +2366,11 @@ def _discord_markup(guild, text: str) -> str:
     out = _MD_EMOJI.sub(lambda m: f'<span class="cemoji">:{m.group(1)}:</span>', out)
     out = _MD_BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", out)
     out = _MD_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
-    # Spoilers are marked, not hidden. Hiding them turned every one into a grey
-    # slab the height of however many lines it spanned, which is what a page for
-    # reading deleted messages cannot afford: the content is the whole point of
-    # the row. A dotted underline says it was posted behind a spoiler.
-    out = _MD_SPOILER.sub(lambda m: f'<span class="spoiler">{m.group(1)}</span>', out)
+    # Hidden, and nothing more than that: it stays in the line it was typed in
+    # and takes a click to read.
+    out = _MD_SPOILER.sub(
+        lambda m: f'<span class="spoiler" role="button" tabindex="0" '
+                  f'title="Click to reveal">{m.group(1)}</span>', out)
     return out.replace("\n", "<br>").strip()
 
 
@@ -2476,9 +2476,15 @@ def _server_log_html(bot, guild, data: dict, options: dict, chosen: dict) -> str
         group = event_log.GROUP_OF.get(kind, "Server")
         body = _discord_markup(guild, entry.get("description"))
         for name, value in (entry.get("fields") or {}).items():
+            # The value has to be one element. .logfield is a flex container, and
+            # a flex container makes every inline child its own item: the text
+            # runs, each mention, each spoiler and each emoji were being laid out
+            # as separate columns, which shredded a sentence into vertical
+            # strips. Wrapped, it is one item and the text simply flows.
             body += (f'<div class="logfield"><span class="logfieldname">'
-                     f"{html.escape(str(name))}</span> "
-                     f"{_discord_markup(guild, value)}</div>")
+                     f"{html.escape(str(name))}</span>"
+                     f'<div class="logfieldvalue">{_discord_markup(guild, value)}</div>'
+                     f"</div>")
         # Date over time rather than one long string: it halves the width of the
         # column, and on a narrow screen the two sit back on one line.
         day, _, clock = stamp.partition(" ")
