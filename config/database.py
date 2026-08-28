@@ -144,3 +144,6 @@ dodoland_config = db["DodoLandConfig"]       # {_id: guild_id, buildings, map, p
 # Kept out of DodoLandConfig: images are large and that row is read on every
 # page load, so binaries do not belong in it.
 dodoland_assets = db["DodoLandAssets"]       # {guild_id, asset_id, name, data, min_tier}
+# What a person calls their town, what they say about it, and its picture.
+# Authored, never scored: nothing in here changes a single number.
+dodoland_towns = db["DodoLandTowns"]    # {guild_id, user_id, name, blurb, image, building_names}

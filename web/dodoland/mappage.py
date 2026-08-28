@@ -14,17 +14,28 @@ deliberately. The graph-driven suggestion still exists in
 three hundred towns for you is a map you cannot curate, and curating it is the
 point of building one by hand.
 
-**A town is drawn from what stands in it.** Not a dot: a small cluster of the
-buildings that person has actually reached a tier in, each one a Font Awesome
-glyph, sized by how far it has come. A settlement with a library, a bakery and a
-forge looks like a different place from one with barracks and a war room, which
-is the whole reason buildings were worth having.
+**A town is drawn from what stands in it.** Not a dot: the buildings that person
+has actually reached a tier in, each drawn as its own kind — an inn, a hall, a
+keep, a chapel — and each grown by its tier. A settlement with a library, a
+bakery and a forge looks like a different place from one with barracks and a war
+room, which is the whole reason buildings were worth having.
 
 **Clicking a town opens it.** Standing, place, flourish, every building and its
 tier, and the coordinates. A map you cannot interrogate is wallpaper.
 
-Font Awesome is loaded from its CDN. It is the one external dependency on this
-page and it degrades to nothing worse than missing glyphs.
+**Detail arrives with the zoom.** Only towns inside the visible rectangle get a
+DOM node at all, and their artwork is fetched the first time they are close
+enough to be worth drawing. Shipping three hundred pre-rendered settlements and
+hiding most of them with CSS costs the whole payload and the whole parse for the
+handful anybody can actually see. Because of that this can afford as much
+detail per building as it likes: what is on screen at high zoom is a few towns,
+not the server.
+
+Nothing is loaded from anywhere else. The towns are shapes this repository draws
+and the few controls are ordinary characters, so the page renders identically on
+a machine with no network at all. An icon font was tried first and dropped: it
+could not express a tier, and pulling in a CDN for four buttons was not a trade
+worth making.
 """
 
 from __future__ import annotations
@@ -38,11 +49,9 @@ from aiohttp import web
 
 from helpers.dodoland import flourish as flourish_rules
 from helpers.dodoland import standing
+from helpers.dodoland import townart
+from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
-
-FONT_AWESOME = ("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/"
-                "css/all.min.css")
-
 
 def _e(value) -> str:
     return html.escape(str(value))
@@ -74,27 +83,35 @@ def _collect(bot, guild) -> dict:
     lit = {int(row.get("user_id", 0)) for row in rows
            if str(row.get("day") or "") >= lit_since}
 
-    by_key = {b["key"]: b for b in buildings}
+    details = bot.dodoland_towns.all(guild.id)
     people = []
     for person in result["order"]:
         uid = person["user_id"]
+        mine = details.get(uid, {})
         built = []
         for key, score in person["buildings"].items():
             if score.get("tier") is None:
                 continue
             built.append({
                 "key": key,
-                "name": score["name"],
-                "fa": by_key.get(key, {}).get("fa") or "fa-house",
+                # What its owner calls it, falling back to what the server calls
+                # it. Naming is free and changes nothing; the tier behind it is
+                # neither.
+                "name": town_rules.building_label(mine, key, score["name"]),
+                "given": score["name"],
                 "tier": int(score["tier"]) + 1,
                 "title": score["tier_title"],
                 "points": score["points"],
             })
         built.sort(key=lambda b: -b["tier"])
         shine = glow.get(uid) or flourish_rules.BLANK
+        owner = _name_of(guild, bot, uid)
         people.append({
             "id": str(uid),
-            "name": _name_of(guild, bot, uid),
+            "owner": owner,
+            "name": town_rules.display_name(mine, owner),
+            "blurb": str(mine.get("blurb") or ""),
+            "has_image": bool(mine.get("image")),
             "power": person["power"],
             "place": person["place"],
             "reached": person["reached"],
@@ -129,7 +146,12 @@ async def map_page(request: web.Request):
     placed = [p for p in data["people"] if p["plot"]]
     unplaced = [p for p in data["people"] if not p["plot"]]
     sizes = {
+        # In the base image's own pixels, so a town is a size on the *map* and
+        # scales with it rather than floating above it at a fixed screen size.
         "town": int(bot.dodoland_params.get(guild.id, "dodoland_town_size")),
+        "dot_below": int(bot.dodoland_params.get(guild.id, "dodoland_town_dot_below")),
+        "detail_above": int(bot.dodoland_params.get(guild.id, "dodoland_detail_above")),
+        "ratio": townart.HEIGHT / townart.WIDTH,
         "min_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_min_zoom")),
         "max_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_max_zoom")),
     }
@@ -138,7 +160,6 @@ async def map_page(request: web.Request):
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Map · {_e(guild.name)}</title>
-<link rel="stylesheet" href="{FONT_AWESOME}" crossorigin="anonymous" referrerpolicy="no-referrer">
 <style>{_CSS}</style>
 </head><body>
 <div class="dlbar">
@@ -154,10 +175,10 @@ async def map_page(request: web.Request):
 <div class="dlframe" id="dlframe">
   <div class="dlworld" id="dlworld">{world}</div>
   <div class="dlzoom">
-    <button type="button" id="dlin" title="Zoom in"><i class="fa-solid fa-plus"></i></button>
-    <button type="button" id="dlout" title="Zoom out"><i class="fa-solid fa-minus"></i></button>
-    <button type="button" id="dlfit" title="Fit"><i class="fa-solid fa-expand"></i></button>
-    <button type="button" id="dlnames" title="Show names"><i class="fa-solid fa-font"></i></button>
+    <button type="button" id="dlin" title="Zoom in">+</button>
+    <button type="button" id="dlout" title="Zoom out">&minus;</button>
+    <button type="button" id="dlfit" title="Fit the whole map">&#9634;</button>
+    <button type="button" id="dlnames" title="Show every name">A</button>
   </div>
   <div class="dlhint" id="dlhint">Drag to move, scroll to zoom</div>
 </div>
@@ -165,7 +186,7 @@ async def map_page(request: web.Request):
 <aside class="dldrawer" id="dldrawer">
   <div class="dldhead">
     <b>Towns</b>
-    <button class="dlghost" id="dlclose"><i class="fa-solid fa-xmark"></i></button>
+    <button class="dlghost" id="dlclose">&times;</button>
   </div>
   <input class="dlsearch" id="dlsearch" placeholder="Search a name...">
   <div class="dllist" id="dllist"></div>
@@ -227,48 +248,68 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   padding: 6px 12px; border-radius: 9px; font-size: 13px;
   background: rgba(0,0,0,.55); color: #fff3e0; }
 
-/* A town: a cluster of the buildings that actually stand in it. Counter-scaled
-   so it keeps its size on screen however far the map is zoomed. */
-.dltown { position: absolute; transform-origin: 50% 50%;
-  transform: translate(-50%, -50%) scale(var(--inv, 1));
-  display: flex; flex-direction: column; align-items: center;
+/* A town is placed and sized in the map's own units and sits inside the element
+   the zoom scales, so it shrinks and grows with the coastline exactly as a
+   village on a paper map does. It is deliberately NOT counter-scaled: an
+   earlier version pinned towns to a fixed screen size, which made them loom
+   larger the further you zoomed out until the map was all roofs. */
+.dltown { position: absolute; transform: translate(-50%, -100%);
   cursor: pointer; z-index: 5; }
-/* A settlement, not a fence. Buildings overlap slightly, sit on a common
-   baseline, and the tallest are drawn behind the shorter ones, so the cluster
-   has a silhouette instead of being a row of evenly-spaced identical icons. */
-.dlbuildings { display: flex; align-items: flex-end; justify-content: center;
-  filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
-.dlbuildings i { color: #f7e7c8; margin: 0 -2px; }
-.dlbuildings i:nth-child(2n) { color: #e8cfa4; }
-.dlbuildings i:nth-child(3n) { color: #fff3dd; }
-/* Taller tiers read as bigger buildings, so a grown town looks grown. */
-.dlb1 { font-size: 12px; } .dlb2 { font-size: 15px; } .dlb3 { font-size: 19px; }
-.dlb4 { font-size: 23px; } .dlb5 { font-size: 28px; } .dlb6 { font-size: 34px; }
-.dlground { width: 70%; min-width: 30px; height: 6px; border-radius: 50%;
-  margin-top: -3px; background: rgba(20,10,0,.5); filter: blur(1.5px); }
-/* Legible on any coastline: a pill rather than text floating on white. */
-.dlname { margin-top: 5px; padding: 2px 8px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; letter-spacing: .01em;
+.dlart { width: 100%; }
+.dltown svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* Below a few dozen pixels a settlement is an illegible smudge, so it becomes a
+   dot, which is what every map does as you pull away from it. */
+.dltown.tiny .dlart, .dltown.tiny .dlname { display: none; }
+.dltown.tiny .dldot { display: block; }
+.dldot { display: none; width: 9px; height: 9px; border-radius: 50%;
+  background: #f0c98a; border: 2px solid #4a3524;
+  box-shadow: 0 1px 3px rgba(0,0,0,.5);
+  position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); }
+.dltown.dim { opacity: .5; }
+.dltown.on svg { filter: drop-shadow(0 0 6px var(--lantern)); }
+.dltown.on .dldot { box-shadow: 0 0 0 3px var(--lantern); }
+/* The name is drawn at a constant screen size, because a label that shrinks
+   with the map stops being a label. It is the one thing here that is
+   counter-scaled, and only ever the text. */
+.dlname { position: absolute; left: 50%; top: 100%; margin-top: 4px;
+  transform: translateX(-50%) scale(var(--inv, 1)); transform-origin: top center;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
   color: #fff6e4; background: rgba(20,14,8,.82); white-space: nowrap;
-  opacity: 0; transition: opacity .12s ease; }
+  opacity: 0; transition: opacity .12s ease; pointer-events: none; }
 .dltown:hover { z-index: 9; }
 .dltown:hover .dlname, .dlworld.named .dlname, .dltown.on .dlname { opacity: 1; }
-.dltown.dim { opacity: .45; }
-.dltown.on .dlbuildings { filter: drop-shadow(0 0 6px var(--lantern))
-  drop-shadow(0 2px 3px rgba(0,0,0,.55)); }
-/* Flourish: earned from trial rank, decoration only, never a tier. */
-.fl1 .dlbuildings i { text-shadow: 0 0 6px rgba(255,214,130,.95); }
-.fl2 .dlbuildings i { text-shadow: 0 0 8px rgba(255,184,77,.95); }
-.fl3 .dlbuildings i { text-shadow: 0 0 10px rgba(255,196,61,1); color: #fff2cf; }
-.fl4 .dlbuildings i { text-shadow: 0 0 12px rgba(120,190,255,1); color: #eaf5ff; }
-.fl5 .dlbuildings i { text-shadow: 0 0 14px rgba(150,130,255,1); color: #f1ecff;
-  animation: dlglow 3.4s ease-in-out infinite; }
-.fl6 .dlbuildings i { text-shadow: 0 0 18px rgba(255,140,210,1); color: #fff;
-  animation: dlglow 2.2s ease-in-out infinite; }
-@keyframes dlglow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
-@media (prefers-reduced-motion: reduce) {
-  .fl5 .dlbuildings i, .fl6 .dlbuildings i { animation: none; }
+/* Close-up flourishes: smoke, lit windows, waving banners, lantern halos. Off
+   until the map says we are close enough, because three hundred smoking
+   chimneys at map scale is noise rather than detail. */
+.fx { display: none; }
+.dlworld.close .fx { display: inline; }
+.dlworld.close .glow { filter: blur(1.6px); animation: dlflicker 4s ease-in-out infinite; }
+.dlworld.close .halo { filter: blur(2.4px); opacity: .75;
+  animation: dlflicker 3s ease-in-out infinite; }
+.dlworld.close .pf1 { animation: dlrise 5s linear infinite; }
+.dlworld.close .pf2 { animation: dlrise 5s linear infinite 1.6s; }
+.dlworld.close .pf3 { animation: dlrise 5s linear infinite 3.2s; }
+.dlworld.close .banner { animation: dlwave 2.6s ease-in-out infinite;
+  transform-box: fill-box; transform-origin: left center; }
+@keyframes dlflicker { 0%,100% { opacity: .85; } 50% { opacity: .45; } }
+@keyframes dlrise {
+  0% { opacity: 0; transform: translateY(0) scale(.7); }
+  25% { opacity: .5; }
+  100% { opacity: 0; transform: translateY(-14px) scale(1.4); }
 }
+@keyframes dlwave { 0%,100% { transform: skewY(0deg); } 50% { transform: skewY(-6deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .dlworld.close .glow, .dlworld.close .halo, .dlworld.close .pf1,
+  .dlworld.close .pf2, .dlworld.close .pf3, .dlworld.close .banner
+    { animation: none; }
+}
+
+/* Flourish colours the ring the town art draws on its own ground plate. */
+.fl1 { --fl1: #ffd682; } .fl2 { --fl2: #ffb84d; } .fl3 { --fl3: #ffc43d; }
+.fl4 { --fl4: #78beff; } .fl5 { --fl5: #9682ff; } .fl6 { --fl6: #ff8cd2; }
+.fl5 svg, .fl6 svg { animation: dlglow 3s ease-in-out infinite; }
+@keyframes dlglow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.3); } }
+@media (prefers-reduced-motion: reduce) { .fl5 svg, .fl6 svg { animation: none; } }
 
 /* Drawers float over the map rather than stealing its width. */
 .dldrawer { position: fixed; top: 52px; bottom: 0; right: 0; width: 340px;
@@ -303,7 +344,19 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlcard li { display: flex; align-items: center; gap: 8px; padding: 3px 0;
   font-size: 14px; }
 .dlcard li i { width: 20px; text-align: center; color: var(--lantern); }
-.dlcard .acts { display: flex; gap: 8px; margin-top: 14px; }
+.dlcard .acts { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.dlcard .blurb { margin: 8px 0 0; font-size: 14px; color: var(--soft);
+  white-space: pre-wrap; }
+.dlcard img.pic { width: 100%; border-radius: 8px; margin-top: 10px;
+  border: 1px solid var(--edge); }
+.dledit { margin-top: 12px; display: none; }
+.dledit.open { display: block; }
+.dledit label { display: block; font-size: 12px; color: var(--soft);
+  margin: 8px 0 3px; }
+.dledit input, .dledit textarea { width: 100%; padding: 7px 9px; font: inherit;
+  font-size: 14px; border: 1px solid var(--edge); border-radius: 8px;
+  background: var(--deep); color: var(--ink); }
+.dledit textarea { min-height: 70px; resize: vertical; }
 .dlcard button { flex: 1 1 auto; padding: 7px 10px; border-radius: 8px;
   border: 1px solid var(--edge); background: var(--deep); color: var(--ink);
   font: inherit; font-size: 13px; cursor: pointer; }
@@ -332,7 +385,10 @@ _SCRIPT = r"""
     world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')';
     // Towns live in map space but are drawn at screen size, so each is scaled
     // back by 1/k. Without this a town becomes a billboard at 4x.
+    // Only labels are counter-scaled: a name that shrinks with the map stops
+    // being a name. The towns themselves scale with the world on purpose.
     world.style.setProperty('--inv', (1 / view.k).toFixed(4));
+    levelOfDetail();
   }
   function clamp() {
     var w = nat.w * view.k, h = nat.h * view.k, s = 90;
@@ -410,29 +466,23 @@ _SCRIPT = r"""
   };
 
   // --- towns ------------------------------------------------------------ //
+  // --- level of detail -------------------------------------------------- //
+  // Three questions, asked on every pan and zoom: is this town on screen at
+  // all, is it big enough to be more than a dot, and is it close enough for its
+  // flourishes. Only the first decides whether it exists in the DOM.
+  var nodes = {}, art = {};
+
   function draw(person) {
     var el = document.createElement('div');
     el.className = 'dltown fl' + person.flourish + (person.lit ? '' : ' dim');
     el.dataset.id = person.id;
     el.style.left = person.plot.x + '%';
     el.style.top = person.plot.y + '%';
-    // A town is what stands in it. Six buildings is already a skyline; past
-    // that the cluster stops reading as a place.
-    // Tallest in the middle, shorter ones flanking: a silhouette rather than a
-    // row. Six is already a skyline; past that the cluster stops reading as a
-    // place at all.
-    var top = person.built.slice(0, 6);
-    var arranged = [];
-    top.forEach(function (b, i) {
-      if (i % 2) arranged.push(b); else arranged.unshift(b);
-    });
-    var shown = arranged.map(function (b) {
-      return '<i class="fa-solid ' + b.fa + ' dlb' + Math.min(6, b.tier) +
-        '" title="' + escapeHtml(b.name + ' — ' + b.title) + '"></i>';
-    }).join('');
-    if (!shown) shown = '<i class="fa-solid fa-campground dlb1"></i>';
-    el.innerHTML = '<div class="dlbuildings">' + shown + '</div>' +
-      '<div class="dlground"></div>' +
+    // Sized in the map's own pixels and inside the element the zoom scales, so
+    // a town shrinks and grows with the coastline.
+    el.style.width = D.sizes.town + 'px';
+    el.innerHTML = '<span class="dldot"></span>' +
+      '<div class="dlart"></div>' +
       '<div class="dlname">' + escapeHtml(person.name) + '</div>';
     el.addEventListener('click', function (ev) {
       ev.stopPropagation();
@@ -440,8 +490,64 @@ _SCRIPT = r"""
       open(person.id);
     });
     world.appendChild(el);
+    nodes[person.id] = el;
     return el;
   }
+
+  function needArt(person, el) {
+    // Fetched once per town, then kept. A town that is never approached is
+    // never drawn, which is what lets a building be as detailed as it likes.
+    if (art[person.id] === undefined) {
+      art[person.id] = null;  // in flight; do not ask twice
+      fetch('/guild/' + D.gid + '/dodoland/town/' + person.id + '/art')
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (svg) {
+          art[person.id] = svg;
+          var host = nodes[person.id];
+          if (host && svg) {
+            host.querySelector('.dlart').innerHTML =
+              '<svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">' +
+              svg + '</svg>';
+          }
+        }).catch(function () { art[person.id] = ''; });
+    } else if (art[person.id]) {
+      var host = el.querySelector('.dlart');
+      if (!host.firstChild) {
+        host.innerHTML = '<svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">' +
+          art[person.id] + '</svg>';
+      }
+    }
+  }
+
+  function levelOfDetail() {
+    if (!nat.w) return;
+    var shown = D.sizes.town * view.k;
+    var tiny = shown < D.sizes.dot_below;
+    world.classList.toggle('close', shown > D.sizes.detail_above);
+
+    // The visible rectangle, in map percentages, with a margin so a town does
+    // not pop in at the very edge of the frame.
+    var pad = D.sizes.town * 2;
+    var x0 = ((-view.x - pad) / (nat.w * view.k)) * 100;
+    var x1 = ((-view.x + frame.clientWidth + pad) / (nat.w * view.k)) * 100;
+    var y0 = ((-view.y - pad) / (nat.h * view.k)) * 100;
+    var y1 = ((-view.y + frame.clientHeight + pad) / (nat.h * view.k)) * 100;
+
+    D.people.forEach(function (p) {
+      if (!p.plot) return;
+      var on = p.plot.x >= x0 && p.plot.x <= x1 && p.plot.y >= y0 && p.plot.y <= y1;
+      var el = nodes[p.id];
+      if (!on) {
+        if (el) { el.remove(); delete nodes[p.id]; }
+        return;
+      }
+      if (!el) el = draw(p);
+      el.classList.toggle('tiny', tiny);
+      // A dot needs no artwork, which is most of the saving on a wide view.
+      if (!tiny) needArt(p, el);
+    });
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
@@ -449,7 +555,8 @@ _SCRIPT = r"""
   }
   function redraw() {
     world.querySelectorAll('.dltown').forEach(function (n) { n.remove(); });
-    D.people.forEach(function (p) { if (p.plot) draw(p); });
+    nodes = {};
+    levelOfDetail();
     var on = D.people.filter(function (p) { return p.plot; }).length;
     document.getElementById('dlplaced').textContent = on;
     document.getElementById('dlwaiting').textContent = D.people.length - on;
@@ -465,31 +572,95 @@ _SCRIPT = r"""
       n.classList.toggle('on', n.dataset.id === id);
     });
     var rows = p.built.map(function (b) {
-      return '<li><i class="fa-solid ' + b.fa + '"></i><span>' +
-        escapeHtml(b.name) + ' — <b>' + escapeHtml(b.title) + '</b></span>' +
+      return '<li><span>' + escapeHtml(b.name) + ' — <b>' +
+        escapeHtml(b.title) + '</b></span>' +
         '<span style="margin-left:auto;opacity:.7">' + b.points.toLocaleString() +
         '</span></li>';
     }).join('') || '<li style="opacity:.7">Nothing built yet.</li>';
+
+    // Every building can be renamed, which is why they are inputs rather than
+    // text once the editor is open. Naming is free and moves no number.
+    var nameFields = p.built.map(function (b) {
+      return '<label>' + escapeHtml(b.given) + '</label>' +
+        '<input class="bname" data-key="' + escapeHtml(b.key) + '" maxlength="48" value="' +
+        escapeHtml(b.name) + '">';
+    }).join('');
+
     card.innerHTML =
       '<h3>' + escapeHtml(p.name) + '</h3>' +
-      '<div class="sub">#' + p.place + ' · ' + p.power.toLocaleString() +
-        ' standing · ' + p.reached.toLocaleString() + ' people reached' +
+      '<div class="sub">' + escapeHtml(p.owner) + ' · #' + p.place + ' · ' +
+        p.power.toLocaleString() + ' standing · ' + p.reached.toLocaleString() +
+        ' people reached' +
         (p.rank ? ' · ' + escapeHtml(p.flourish_label) + ' (' + escapeHtml(p.rank) + ')' : '') +
         '</div>' +
+      (p.blurb ? '<p class="blurb">' + escapeHtml(p.blurb) + '</p>' : '') +
+      (p.has_image ? '<img class="pic" alt="" src="/guild/' + D.gid +
+        '/dodoland/town/' + p.id + '/picture">' : '') +
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
       '<div class="acts">' +
+        '<button data-act="edit">Edit</button>' +
         '<button data-act="move">Move</button>' +
         '<button data-act="remove">Remove</button>' +
-        '<button data-act="close">Close</button></div>';
+        '<button data-act="close">Close</button></div>' +
+      '<div class="dledit">' +
+        '<label>Town name</label>' +
+        '<input id="tname" maxlength="48" value="' + escapeHtml(p.name) + '">' +
+        '<label>Description</label>' +
+        '<textarea id="tblurb" maxlength="600">' + escapeHtml(p.blurb) + '</textarea>' +
+        '<label>Picture or GIF</label>' +
+        '<input id="tpic" type="file" accept="image/png,image/jpeg,image/gif,image/webp">' +
+        (nameFields ? '<label style="margin-top:12px"><b>Building names</b></label>' +
+          nameFields : '') +
+        '<div class="acts"><button data-act="save">Save</button>' +
+        '<button data-act="clearpic">Remove picture</button></div>' +
+      '</div>';
     card.hidden = false;
+    var editor = card.querySelector('.dledit');
     card.querySelectorAll('button').forEach(function (b) {
       b.onclick = function () {
-        if (b.dataset.act === 'close') { closeCard(); }
-        else if (b.dataset.act === 'move') { arm(id); closeCard(); }
-        else { place(id, null); closeCard(); }
+        var act = b.dataset.act;
+        if (act === 'close') { closeCard(); }
+        else if (act === 'move') { arm(id); closeCard(); }
+        else if (act === 'remove') { place(id, null); closeCard(); }
+        else if (act === 'edit') { editor.classList.toggle('open'); }
+        else if (act === 'clearpic') { saveTown(id, {clear_image: true}); }
+        else if (act === 'save') {
+          var names = {};
+          card.querySelectorAll('.bname').forEach(function (i) {
+            names[i.dataset.key] = i.value;
+          });
+          var pic = card.querySelector('#tpic');
+          var chosen = pic && pic.files && pic.files[0];
+          var payload = {
+            name: card.querySelector('#tname').value,
+            blurb: card.querySelector('#tblurb').value,
+            building_names: names
+          };
+          if (!chosen) { saveTown(id, payload); return; }
+          var reader = new FileReader();
+          reader.onload = function () {
+            payload.image = String(reader.result).split(',').pop();
+            payload.content_type = chosen.type;
+            saveTown(id, payload);
+          };
+          reader.readAsDataURL(chosen);
+        }
       };
+    });
+  }
+
+  function saveTown(id, payload) {
+    payload.user_id = id;
+    hint.textContent = 'Saving...';
+    fetch('/api/guild/' + D.gid + '/dodoland/town', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res.ok) { hint.textContent = res.error || 'That did not work.'; return; }
+      hint.textContent = 'Saved.';
+      window.location.reload();
     });
   }
   function closeCard() {

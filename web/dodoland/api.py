@@ -139,6 +139,52 @@ async def api_dodoland_asset(request: web.Request):
         return _bad(error)
 
 
+async def api_dodoland_town(request: web.Request):
+    """Name a town, describe it, picture it, and name its buildings.
+
+    None of this moves a number. Standing is earned and cannot be typed in;
+    everything here is authored and belongs to the town's owner rather than to
+    the scoring. Keeping the two apart is what lets naming be free, instant and
+    reversible without a rename ever becoming an exploit.
+    """
+    from helpers.dodoland import towns as town_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    try:
+        user_id = int(body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return _bad("Which town?")
+
+    try:
+        bot.dodoland_towns.save(
+            guild.id, user_id,
+            name=body.get("name"), blurb=body.get("blurb"),
+            building_names=body.get("building_names"),
+        )
+        if body.get("clear_image"):
+            bot.dodoland_towns.save_image(guild.id, user_id, None)
+        elif body.get("image"):
+            try:
+                blob = base64.b64decode(str(body["image"]).split(",")[-1],
+                                        validate=True)
+            except Exception:
+                return _bad("That picture could not be read.")
+            bot.dodoland_towns.save_image(
+                guild.id, user_id,
+                {"data": blob, "content_type": str(body.get("content_type") or "")},
+            )
+    except town_rules.TownError as error:
+        return _bad(error)
+
+    await _record_change(request, "dodoland_town", str(user_id), "", "edited",
+                         "DodoLand town details")
+    return web.json_response({"ok": True})
+
+
 async def api_dodoland_settle(request: web.Request):
     """Place, move or remove one town on the map.
 

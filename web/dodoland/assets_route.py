@@ -32,3 +32,76 @@ async def asset_image(request: web.Request):
         # library of fifty icons from being refetched on every page load.
         headers={"Cache-Control": "private, max-age=604800, immutable"},
     )
+
+
+async def town_picture(request: web.Request):
+    """A town's own picture or GIF, if its owner set one."""
+    bot, guild = request.app["bot"], request["guild"]
+    try:
+        user_id = int(request.match_info.get("uid") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    row = bot.dodoland_towns.get(guild.id, user_id) if user_id else {}
+    image = (row or {}).get("image")
+    if not image:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+    raw = image.get("data")
+    return web.Response(
+        body=bytes(raw) if raw is not None else b"",
+        content_type=str(image.get("content_type") or "image/png"),
+        # Short: unlike an asset, a town picture is replaced in place by its
+        # owner, so a long cache would show them yesterday's.
+        headers={"Cache-Control": "private, max-age=60"},
+    )
+
+
+async def town_art(request: web.Request):
+    """One town's artwork, drawn on demand.
+
+    The map asks for this the first time a town comes close enough to be worth
+    drawing, and never again. Shipping every settlement with the page and hiding
+    the far ones costs the whole payload for the few anybody can see, and it is
+    what put a megabyte of unused SVG in front of every page load.
+
+    Because art is fetched rather than shipped, a building can be as detailed as
+    it likes: what is on screen at high zoom is a handful of towns.
+    """
+    import asyncio
+
+    from helpers.dodoland import flourish as flourish_rules
+    from helpers.dodoland import standing, townart
+    from helpers.dodoland import store as store_module
+
+    bot, guild = request.app["bot"], request["guild"]
+    try:
+        user_id = int(request.match_info.get("uid") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+
+    def draw():
+        buildings = bot.dodoland_buildings.buildings(guild.id)
+        window = int(bot.dodoland_params.get(guild.id, "dodoland_window_days"))
+        since = store_module.days_back(window)
+        lit_since = store_module.days_back(
+            int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
+        rows = bot.dodoland.rows(guild.id, user_id=user_id, since=since)
+        result = standing.guild_standings(
+            bot.dodoland, bot.dodoland_params, guild.id, buildings,
+            since=since, user_ids=[user_id], rows=rows,
+            pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
+        )
+        person = result["people"].get(user_id) or {}
+        built = [{"key": key, "tier": int(score["tier"]) + 1}
+                 for key, score in (person.get("buildings") or {}).items()
+                 if score.get("tier") is not None]
+        glow = flourish_rules.flourish_map(bot, guild.id).get(user_id) or {}
+        lit = any(str(row.get("day") or "") >= lit_since for row in rows)
+        return townart.town_svg(
+            built, lit=lit, flourish=int(glow.get("level", 0)),
+            shapes={b["key"]: b.get("shape") for b in buildings})
+
+    art = await asyncio.get_running_loop().run_in_executor(None, draw)
+    return web.Response(text=art, content_type="image/svg+xml",
+                        headers={"Cache-Control": "private, max-age=120"})

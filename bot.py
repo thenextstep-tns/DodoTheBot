@@ -36,6 +36,7 @@ from helpers.dodoland import parameters as dodoland_parameters
 from helpers.dodoland.assets import AssetStore
 from helpers.dodoland.buildings import BuildingStore
 from helpers.dodoland.store import ActivityStore
+from helpers.dodoland.towns import TownStore
 from helpers.events import EventRuleManager
 from helpers.chat.triggers import ChatTriggerManager
 from helpers.chat.activity import ChatActivity
@@ -131,6 +132,9 @@ class DodoBot(commands.Bot):
         self.dodoland_buildings = BuildingStore(config_py.dodoland_config)
         # Decor an admin uploads for people to place once they have earned it.
         self.dodoland_assets = AssetStore(config_py.dodoland_assets)
+        # Names, descriptions and pictures. Authored by their owner,
+        # and deliberately unable to move a single number.
+        self.dodoland_towns = TownStore(config_py.dodoland_towns)
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)

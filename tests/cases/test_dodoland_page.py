@@ -22,6 +22,7 @@ from fake_mongo import FakeCollection  # noqa: E402
 from helpers.dodoland import flourish, parameters as dodo_params  # noqa: E402
 from helpers.dodoland.assets import AssetStore  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
+from helpers.dodoland.towns import TownStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
 from helpers.parameters import ParamManager  # noqa: E402
 from web.dodoland import pages  # noqa: E402
@@ -92,6 +93,7 @@ class Bot:
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
         self.dodoland_assets = AssetStore(FakeCollection())
+        self.dodoland_towns = TownStore(FakeCollection())
         self.visibility = Visibility()
         self.trial_ranks = TrialRanks()
         self._guild = None
@@ -318,14 +320,37 @@ map_request["guild"], map_request["scope"] = guild, "full"
 map_body = asyncio.run(mappage.map_page(map_request)).text
 print(f"map             renders, {len(map_body):,} bytes")
 
-assert "font-awesome" in map_body, "Font Awesome is not loaded"
 assert "dlframe" in map_body and "dlworld" in map_body
 print("map             the map has the window, not a panel section")
 
-# A town is drawn from what stands in it, so the buildings' icon classes have to
-# reach the page.
-assert "fa-book-open" in map_body or "fa-campground" in map_body,     "no building glyphs reached the map"
-print("map             a town is drawn from the buildings that stand in it")
+# Artwork is fetched when a town comes close, never shipped with the page.
+# Sending three hundred settlements and hiding most of them costs the whole
+# payload for the handful anybody can see.
+assert '"svg"' not in map_body, "the page is shipping pre-rendered town art again"
+assert "/art'" in map_body, "nothing fetches a town's artwork"
+assert "fa-solid" not in map_body, "the map is back to icon glyphs"
+print("map             town art is fetched on approach, not shipped with the page")
+
+# Only what is on screen exists in the DOM at all.
+assert "frame.clientWidth + pad" in map_body, "towns off screen are never culled"
+print("map             off-screen towns are not in the document")
+
+# Every building kind is drawn differently, and every kind grows with its tier.
+from helpers.dodoland import townart  # noqa: E402
+seen = {}
+for shape in townart.SHAPES:
+    small, large = townart.one_svg(shape, 1), townart.one_svg(shape, 6)
+    assert large != small, f"{shape} does not change with its tier"
+    assert len(large) > len(small), f"{shape} does not grow with its tier"
+    seen[shape] = small
+assert len(set(seen.values())) == len(seen), "two building kinds draw the same thing"
+print(f"art             {len(seen)} building kinds, each distinct, each growing by tier")
+
+# Close-up flourishes exist and are gated, not always on.
+assert 'class="fx"' in townart.one_svg("inn", 6), "no close-up detail at the top tier"
+assert ".fx { display: none; }" in map_body, "close-up detail is not gated by zoom"
+assert "detail_above" in map_body, "no threshold for showing close-up detail"
+print("art             high tiers gain flourishes, shown only when zoomed close")
 
 # Only what somebody placed appears. Nothing is scattered for you.
 assert '"plot": {' in map_body.replace(" ", "") or '"plot":{' in map_body.replace(" ", "")
@@ -333,8 +358,17 @@ unplaced = map_body.count('"plot": null') + map_body.count('"plot":null')
 assert unplaced >= 1, "every town was given a position without being placed"
 print("map             unplaced towns stay off the map until put there")
 
-# Markers must be counter-scaled or they become billboards at high zoom.
-assert "--inv" in map_body, "town markers will scale with the map again"
-print("map             markers keep their size however far the map is zoomed")
+# A town is sized in the map's own units and lives inside the scaled element, so
+# it shrinks with the coastline. Pinning it to the screen made towns loom larger
+# the further you zoomed out until the map was all roofs.
+assert "levelOfDetail" in map_body, "towns never collapse to dots"
+assert "dot_below" in map_body, "no threshold for collapsing a town to a dot"
+assert "D.sizes.town + 'px'" in map_body, "a town is not sized in map units"
+print("map             towns scale with the map and become dots when far away")
+
+# Naming is authored and must never reach the scorer.
+scorer = pathlib.Path("helpers/dodoland/standing.py").read_text(encoding="utf-8")
+assert "town_rules" not in scorer and "building_names" not in scorer,     "naming a building has become able to move a number"
+print("names           naming a town or a building moves no number at all")
 
 print("PASS")

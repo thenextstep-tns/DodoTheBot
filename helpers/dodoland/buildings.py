@@ -195,11 +195,19 @@ def validate_building(value: Any, *, guild=None) -> dict:
     fa = str(value.get("fa") or "").strip()[:40]
     if fa and not re.fullmatch(r"[a-z0-9 -]+", fa):
         raise DodoLandError("An icon class may only contain letters, digits, spaces and hyphens.")
+    # Which silhouette this building is drawn with on the map. A building's kind
+    # has to be legible in outline alone, so this is a choice from a known set
+    # rather than free text.
+    from helpers.dodoland import townart
+    shape = str(value.get("shape") or "").strip()
+    if shape and shape not in townart.SHAPES:
+        raise DodoLandError(f"There is no {shape!r} building shape.")
     return {
         "key": _slug(value.get("key") or name),
         "name": name,
         "icon": icon,
         "fa": fa or "fa-house",
+        "shape": shape or townart.DEFAULT_SHAPE,
         "channels": validate_channels(value.get("channels") or {}, guild=guild),
         "metric_weights": validate_metric_weights(value.get("metric_weights") or {}),
         # Kept through a save so "Suggest from channel names" still has its
@@ -251,53 +259,62 @@ def _tier_set(titles: Iterable[str]) -> list[dict]:
 _DEFAULT_SET: tuple[tuple, ...] = (
     ("tavern", "The Tavern", "🍺",
      "fa-beer-mug-empty",
+     "inn",
      ("general", "chat", "lounge", "chill", "hangout", "talk", "offtopic",
       "off-topic", "banter", "social", "main"),
      {}, ("Roadside Bench", "Ale Stall", "The Tap Room", "The Inn",
           "The Great Hall", "Heart of the Town")),
     ("library", "The Grand Library", "📚",
      "fa-book-open",
+     "hall",
      ("help", "guide", "question", "advice", "info", "resource", "lore", "wiki",
       "faq", "support", "build", "theorycraft", "newbie", "beginner"),
      {}, ("Scholar's Desk", "Reading Nook", "Modest Archive", "The Athenaeum",
           "Grand Library", "Citadel of Wisdom")),
     ("warroom", "The War Room", "🗺",
      "fa-map-location-dot",
+     "keep",
      ("lead", "officer", "organiser", "organizer", "sherpa", "planning",
       "schedule", "signup", "sign-up", "mentor"),
      {}, ("Chalk Table", "Map Table", "The Planning Room", "The Strategium",
           "The War Room", "Seat of Command")),
     ("barracks", "The Vanguard Barracks", "🛡",
      "fa-shield-halved",
+     "keep",
      ("trial", "raid", "lfg", "prog", "dps", "parse", "vet", "roster", "static",
       "score", "hardmode", "trifecta"),
      {}, ("Training Dummy", "Militia Camp", "The Armory", "Guardhouse",
           "Vanguard Keep", "Paragon's Redoubt")),
     ("playhouse", "The Playhouse", "🎮",
      "fa-gamepad",
+     "stage",
      ("game", "gaming", "other games", "minecraft", "steam", "console",
       "playing", "co-op", "coop", "lobby"),
      {}, ("Street Corner", "Card Table", "The Games Room", "The Playhouse",
           "The Grand Arcade", "The Pleasure Gardens")),
     ("moot", "The Moot Hall", "⚖",
      "fa-scale-balanced",
+     "hall",
      ("debate", "trivia", "quiz", "discussion", "argument", "philosoph",
       "politics", "serious", "topic"),
      {}, ("Soapbox", "Speaking Stone", "The Debating Room", "The Moot Hall",
           "The Forum", "The Great Assembly")),
     ("menagerie", "The Menagerie", "🦜",
      "fa-paw",
+     "pen",
      ("pet", "cat", "dog", "animal", "creature", "critter", "mount", "paw"),
      {"image": 2.0}, ("Mud Paddock", "Animal Pens", "The Stables",
                       "Exotic Menagerie", "The Aviary", "Gilded Sanctuary")),
     ("gallery", "The Gallery", "🖼",
      "fa-image",
+     "hall",
      ("photo", "picture", "screenshot", "art", "gallery", "media", "showcase",
       "landscape", "shot"),
      {"image": 2.5}, ("Chalk Wall", "Pinned Sketches", "The Long Corridor",
                       "The Salon", "The Exhibition", "Hall of Wonders")),
     ("portraits", "The Portrait Hall", "🪞",
      "fa-camera-retro",
+     "hall",
      ("selfie", "face", "irl", "us", "yourself", "mirror", "fit", "fashion",
       "outfit"),
      {"image": 2.5}, ("Small Mirror", "Sketch Corner", "The Sitting Room",
@@ -305,24 +322,28 @@ _DEFAULT_SET: tuple[tuple, ...] = (
                       "Hall of a Thousand Faces")),
     ("bakery", "The Bakery", "🍞",
      "fa-bread-slice",
+     "inn",
      ("food", "cook", "recipe", "bake", "kitchen", "meal", "eat", "coffee",
       "tea", "snack"),
      {"image": 2.0}, ("Cold Hearth", "Bread Oven", "The Bakehouse",
                       "The Kitchens", "The Banquet Hall", "The Endless Feast")),
     ("workshop", "The Clockwork Workshop", "⚙",
      "fa-gear",
+     "works",
      ("cod", "dev", "program", "tech", "software", "script", "addon", "bot",
       "engineer", "hardware", "linux"),
      {}, ("Workbench", "Tinker's Shed", "The Workshop", "The Manufactory",
           "The Clockwork Hall", "The Engine of Making")),
     ("sanctuary", "The Sanctuary", "🕯",
      "fa-dove",
+     "chapel",
      ("safe", "vent", "support", "mental", "health", "quiet", "comfort",
       "kind", "care"),
      {}, ("Wayside Stone", "Small Shrine", "The Chapel", "The Sanctuary",
           "The Temple", "The Still Heart")),
     ("undercroft", "The Undercroft", "🕶",
      "fa-wine-bottle",
+     "keep",
      ("degen", "lair", "unmoderated", "nsfw", "cursed", "gremlin", "chaos",
       "basement", "dungeon", "unhinged"),
      {}, ("Cellar Door", "Back Room", "The Speakeasy", "The Undercroft",
@@ -332,12 +353,14 @@ _DEFAULT_SET: tuple[tuple, ...] = (
     # chatter in there builds something, but the statue grows either way.
     ("statue", "The Dodo Statue", "🗿",
      "fa-monument",
+     "monument",
      ("bot", "command", "dodo", "casino", "gamble", "playground", "minigame"),
      {"command_used": 2.0},
      ("Odd Boulder", "Carved Stone", "The Little Dodo", "The Dodo Statue",
       "The Gilded Dodo", "The Colossus of Dodo")),
     ("wayshrine", "The Wayshrine", "🚪",
      "fa-door-open",
+     "gate",
      ("welcome", "introduction", "intro", "arrival", "rules", "gate", "hello",
       "newcomer", "start", "lobby"),
      {}, ("Boundary Post", "Traveller's Marker", "The Gatehouse",
@@ -354,10 +377,10 @@ def default_buildings() -> list[dict]:
     has never seen the server. Every name here is meant to be rewritten.
     """
     return [
-        {"key": key, "name": name, "icon": icon, "fa": fa, "channels": {},
-         "metric_weights": dict(weights), "hints": list(hints),
+        {"key": key, "name": name, "icon": icon, "fa": fa, "shape": shape,
+         "channels": {}, "metric_weights": dict(weights), "hints": list(hints),
          "tiers": _tier_set(titles)}
-        for key, name, icon, fa, hints, weights, titles in _DEFAULT_SET
+        for key, name, icon, fa, shape, hints, weights, titles in _DEFAULT_SET
     ]
 
 
@@ -377,7 +400,7 @@ def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
     to be corrected, which is the same bargain "Suggest from role names" makes
     on the trials page.
     """
-    hints_for = {key: hints for key, _n, _i, _f, hints, _w, _t in _DEFAULT_SET}
+    hints_for = {key: hints for key, _n, _i, _f, _s, hints, _w, _t in _DEFAULT_SET}
     claimed: set[int] = {int(cid) for building in buildings
                          for cid in (building.get("channels") or {})}
     out = []
@@ -451,6 +474,9 @@ class BuildingStore:
             base = fallback.get(building.get("key"), {})
             if not building.get("fa"):
                 building["fa"] = base.get("fa") or "fa-house"
+            if not building.get("shape"):
+                from helpers.dodoland import townart
+                building["shape"] = base.get("shape") or townart.DEFAULT_SHAPE
             if not building.get("hints"):
                 building["hints"] = list(base.get("hints") or [])
             out.append(building)

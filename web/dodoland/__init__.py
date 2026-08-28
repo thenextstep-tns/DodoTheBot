@@ -25,9 +25,11 @@ def dodoland_routes() -> list:
     from web.dodoland.api import (
         api_dodoland_asset, api_dodoland_backfill, api_dodoland_buildings,
         api_dodoland_map, api_dodoland_param, api_dodoland_settle,
-        api_dodoland_suggest,
+        api_dodoland_suggest, api_dodoland_town,
     )
-    from web.dodoland.assets_route import asset_image
+    from web.dodoland.assets_route import (
+        asset_image, town_art, town_picture,
+    )
     from web.dodoland.mappage import map_page
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
@@ -41,6 +43,9 @@ def dodoland_routes() -> list:
         # The map deserves the whole window, so it is its own page.
         web.get("/guild/{gid}/dodoland/map", configure(map_page)),
         web.get("/guild/{gid}/dodoland/asset/{aid}", configure(asset_image)),
+        web.get("/guild/{gid}/dodoland/town/{uid}/picture", configure(town_picture)),
+        # Drawn on demand, so the map ships no artwork it may never show.
+        web.get("/guild/{gid}/dodoland/town/{uid}/art", configure(town_art)),
         web.post("/api/guild/{gid}/dodoland/param", full(api_dodoland_param)),
         web.post("/api/guild/{gid}/dodoland/buildings", full(api_dodoland_buildings)),
         web.post("/api/guild/{gid}/dodoland/map", full(api_dodoland_map)),
@@ -49,6 +54,8 @@ def dodoland_routes() -> list:
         # Moving somebody's town is configuration while there is no player-facing
         # way for them to move it themselves.
         web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),
+        # Names, descriptions and pictures. Authored, never scored.
+        web.post("/api/guild/{gid}/dodoland/town", full(api_dodoland_town)),
         # Rewrites historical rows, so it takes the highest scope on the page.
         web.post("/api/guild/{gid}/dodoland/backfill", full(api_dodoland_backfill)),
     ]
