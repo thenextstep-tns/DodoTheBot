@@ -572,8 +572,11 @@ main:has(.logpage) { max-width: 1180px; }
    wherever its own name ended. */
 .logfield { display: flex; gap: 8px; margin-top: 3px; padding-left: 8px;
   border-left: 2px solid var(--color-hairline); }
-.logfieldname { flex: 0 0 74px; font-size: 10px; letter-spacing: .05em;
-  text-transform: uppercase; color: var(--color-muted); line-height: 1.7; }
+/* Wide enough for the longest label there is, and nowrap so it can never break
+   into "ATTACHMENT" over "S" again. */
+.logfieldname { flex: 0 0 96px; font-size: 10px; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--color-muted); line-height: 1.7;
+  white-space: nowrap; }
 
 /* Mentions read as mentions rather than as raw snowflakes, and a deleted one
    says so instead of showing an id nobody can look up. */
@@ -587,10 +590,11 @@ main:has(.logpage) { max-width: 1180px; }
 /* A custom emoji has no image here, so it reads as the name people call it. */
 .cemoji { padding: 0 3px; border-radius: var(--radius-sm); font-size: 12px;
   background: var(--color-surface-soft); color: var(--color-muted); }
-/* Hidden when it was posted, so hidden here. Click or tab-and-enter to reveal. */
-.spoiler { border-radius: var(--radius-sm); background: var(--color-muted-soft);
-  color: transparent; cursor: pointer; }
-.spoiler.open { background: var(--color-surface-soft); color: inherit; }
+/* Marked, not hidden. Hiding it painted a grey slab over however many lines the
+   spoiler spanned, and covered the one thing the row exists to show. The dotted
+   underline says it was posted behind a spoiler; the text stays readable. */
+.spoiler { text-decoration: underline dotted var(--color-muted-soft);
+  text-underline-offset: 2px; }
 
 /* Below this the three columns stop being columns. A log row is a timestamp, a
    label and a paragraph; on a phone that is a card, not a table. */

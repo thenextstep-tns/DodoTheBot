@@ -352,10 +352,15 @@ Things worth knowing before touching the server log:
   per line. Note that `.logtable td { display: block }` outranks a bare
   `.logwhen`, so the mobile overrides are qualified with `.logtable` - without
   that they silently lose and the header line stacks.
-- **`||spoilers||` stay hidden and `<:emoji:id>` renders as `:emoji:`.** A
-  spoiler was hidden when it was posted; the page is read by moderators but the
-  screen may not be theirs alone, so it takes a click. Custom emoji images live
-  on Discord's CDN, which this page has no business fetching from.
+- **`||spoilers||` are marked, not hidden.** They were hidden at first, which
+  painted a grey slab over however many lines the spoiler spanned and covered
+  the one thing the row exists to show. A dotted underline says it was posted
+  behind a spoiler and the text stays readable. `<:emoji:id>` renders as
+  `:emoji:`; the images live on Discord's CDN, which this page has no business
+  fetching from.
+- **Stripping the timestamp leaves its separator behind.** Every template ends
+  `" - <t:…:f>"`, so removing the token alone left a dash dangling off the end
+  of every row. `_MD_TRAILING_SEP` takes it.
 - **Nothing is recorded with the feature off or no log channel set.** Both
   produce an empty page, so the page says which one is true rather than leaving
   somebody to find it in the source.

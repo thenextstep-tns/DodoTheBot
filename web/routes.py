@@ -2322,6 +2322,9 @@ _MD_TIME = re.compile(r"&lt;t:\d+(?::[a-zA-Z])?&gt;")
 # as :name:, which is what the token means and what people call it anyway.
 _MD_EMOJI = re.compile(r"&lt;a?:([A-Za-z0-9_]{2,32}):\d{15,25}&gt;")
 _MD_SPOILER = re.compile(r"\|\|(.+?)\|\|", re.S)
+# What the removed timestamp leaves behind: a separator at the end of a line
+# with nothing after it.
+_MD_TRAILING_SEP = re.compile(r"[ \t]*[-–—·]+[ \t]*(?=\n|$)")
 
 
 def _discord_markup(guild, text: str) -> str:
@@ -2333,7 +2336,9 @@ def _discord_markup(guild, text: str) -> str:
     sent passes through here, so that ordering is the whole safety story.
     """
     out = html.escape(str(text or ""))
-    out = _MD_TIME.sub("", out)
+    # Every template ends " - <t:…:f>". Dropping the timestamp on its own left
+    # the dash behind, dangling at the end of every single row.
+    out = _MD_TRAILING_SEP.sub("", _MD_TIME.sub("", out))
 
     def user(match):
         member = guild.get_member(int(match.group(1)))
@@ -2361,12 +2366,11 @@ def _discord_markup(guild, text: str) -> str:
     out = _MD_EMOJI.sub(lambda m: f'<span class="cemoji">:{m.group(1)}:</span>', out)
     out = _MD_BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", out)
     out = _MD_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
-    # A spoiler was hidden when it was posted, so it stays hidden here. The page
-    # is read by moderators, not by the people who agreed to be surprised, but
-    # showing it by default puts an unmarked spoiler on a screen somebody else
-    # can be standing behind. Click to reveal.
-    out = _MD_SPOILER.sub(
-        lambda m: f'<span class="spoiler" role="button" tabindex="0">{m.group(1)}</span>', out)
+    # Spoilers are marked, not hidden. Hiding them turned every one into a grey
+    # slab the height of however many lines it spanned, which is what a page for
+    # reading deleted messages cannot afford: the content is the whole point of
+    # the row. A dotted underline says it was posted behind a spoiler.
+    out = _MD_SPOILER.sub(lambda m: f'<span class="spoiler">{m.group(1)}</span>', out)
     return out.replace("\n", "<br>").strip()
 
 
