@@ -61,9 +61,33 @@ print("validation      tiers are stored in ladder order regardless of entry orde
 # Defaults exist, are valid, and attach to no channels: a building that silently
 # counted every room would be a building nobody configured.
 defaults = B.validate_buildings(B.default_buildings())
-assert len(defaults) == 3 and all(not b["channels"] for b in defaults)
+assert len(defaults) >= 12, "a town needs more than a handful of buildings"
+assert all(not b["channels"] for b in defaults), "a default building claimed a room"
 assert all(len(b["tiers"]) == 6 for b in defaults)
-print("defaults        three buildings, six tiers each, no channels assumed")
+assert all(b["hints"] for b in defaults), "a building has no words to match channels by"
+print(f"defaults        {len(defaults)} buildings, six tiers each, no channels assumed")
+
+# Suggestion is a starting guess: it fills empty buildings, never overwrites a
+# choice, and never hands one room to two buildings.
+class _Chan:
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+
+
+class _Guild:
+    channels = [_Chan(1, "eso-help"), _Chan(2, "trials-lfg"), _Chan(3, "pet-pics"),
+                _Chan(4, "general-chat")]
+
+
+picked = B.suggest_channels(_Guild(), defaults)
+attached = [cid for b in picked for cid in b["channels"]]
+assert len(attached) == len(set(attached)), "one room was given to two buildings"
+assert attached, "the suggester matched nothing at all"
+held = [dict(b, channels={99: 1.0}) if b["key"] == "library" else b for b in defaults]
+again = B.suggest_channels(_Guild(), held)
+kept = next(b for b in again if b["key"] == "library")
+assert kept["channels"] == {99: 1.0}, "suggesting overwrote a hand-tuned building"
+print("defaults        suggestion fills empty buildings and never undoes a choice")
 
 
 # --------------------------------------------------------------------------- #

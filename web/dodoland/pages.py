@@ -32,12 +32,30 @@ import html
 from aiohttp import web
 
 from helpers.dodoland import buildings as building_rules
+from web.dodoland import buildings_ui
 from helpers.dodoland import flourish as flourish_rules
 from helpers.dodoland import mapview
 from helpers.dodoland import metrics as metric_registry
 from helpers.dodoland import parameters as dodo_params
 from helpers.dodoland import standing
 from helpers.dodoland import store as store_module
+
+
+# What each preview is actually answering. Two honest answers to two different
+# questions: being able to hold them side by side is the difference between
+# "these numbers look odd" and "these numbers look odd because of the rebuild".
+_BASIS_BLURB = {
+    store_module.BASIS_ALL: (
+        "Everything: the rebuilt history from the message archive plus everything "
+        "counted live since tracking started. This is what people would see if the "
+        "map opened today, and it is the one to tune against."),
+    store_module.BASIS_LIVE: (
+        "Only what has been counted since the listener started, ignoring the "
+        "rebuilt history entirely. This is what a brand new server looks like, and "
+        "it is the honest picture of how fast the thing actually accrues."),
+    store_module.BASIS_BACKFILL: (
+        "Only the history rebuilt from the message archive."),
+}
 
 
 def _e(value) -> str:
@@ -170,49 +188,13 @@ def _building_card(guild, building: dict, resolved: list[dict], population: int)
 
 
 def _buildings_html(bot, guild, result: dict) -> str:
-    buildings = bot.dodoland_buildings.buildings(guild.id)
-    configured = bot.dodoland_buildings.is_configured(guild.id)
-    cards = ""
-    for building in buildings:
-        key = building["key"]
-        population = sum(
-            1 for person in result["people"].values()
-            if person["buildings"].get(key, {}).get("points", 0) > 0
-        )
-        cards += _building_card(guild, building, result["tiers"].get(key, []), population)
-
-    warning = "" if configured else """
-  <div class="tuneblocked">These are the starting buildings, and no channels are
-  attached to any of them yet, so nothing is being built. Point each one at the
-  rooms it belongs to and save.</div>"""
-
-    import json
-    editor = _e(json.dumps(buildings, indent=2, ensure_ascii=False))
-    return f"""
-<section class="sidepanel" data-panel="dl-buildings" hidden>
-  <h2 class="panelhead">\U0001F3D8 Buildings</h2>
-  <p class="muted">A building is a place, so it scores from <b>channels</b>.
-  Every building is reachable by anyone through ordinary sociable activity;
-  trial rank adds flourish on top and never the tier itself.</p>
-  {warning}
-  {cards}
-  <h3 class="panelhead">Edit</h3>
-  <p class="muted small">Names, icons, channel weights, per-building emphasis and
-  tiers. Saving validates everything before it is stored, and refuses rather
-  than half-applying.</p>
-  <textarea id="dlbuildings" class="dljson" rows="18" spellcheck="false">{editor}</textarea>
-  <div class="rulebtns">
-    <button id="dlsavebuildings">Save buildings</button>
-    <span id="dlbuildingsmsg" class="muted small"></span>
-  </div>
-</section>"""
+    """The buildings editor. Lives in its own module: it is the densest
+    surface here and the one most likely to keep changing."""
+    return buildings_ui.buildings_section(bot, guild, result)
 
 
-# --------------------------------------------------------------------------- #
-#  Preview and ranking
-# --------------------------------------------------------------------------- #
 def _preview_html(bot, guild, result: dict, buildings: list[dict],
-                  flourish: dict) -> str:
+                  flourish: dict, *, basis: str, panel: str, shown: bool) -> str:
     heads = "".join(f"<th>{_e(b.get('icon') or '')} {_e(b['name'])}</th>" for b in buildings)
     rows = ""
     for person in result["order"][:200]:
@@ -409,25 +391,46 @@ def _settings_html(bot, guild) -> str:
 def _script(guild_id: int) -> str:
     """This page's own behaviour.
 
+    Three things this has to get right, all of which it got wrong the first time
+    and each of which produced a control that looked fine and did nothing:
+
+    * **Run after ``panel.js``.** That file defines ``bindMultiSelect``, which is
+      what makes a channel picker clickable, and it loads *after* this inline
+      script. Binding on ``DOMContentLoaded`` means both exist by then.
+      Rendering a multiselect without binding it produces a list of dead divs.
+    * **Bind our own controls.** ``panel.js`` only wires parameters and
+      multiselects inside a ``.cogcard``, and this page has none, so nothing on
+      it was ever bound.
+    * **Say what happened.** A save with no feedback is indistinguishable from a
+      save that failed. Every write here reports either way, with the server's
+      own error text rather than a shrug.
+
     The guild id is substituted rather than %-formatted: this script is full of
-    literal percent signs (positions on the map are percentages), and %-format
-    would try to read every one of them as a conversion. It is also quoted as a
-    **string** in the output, because a 64-bit snowflake parsed as a JavaScript
-    number loses its last digits and every request 404s. That has caused an
-    outage here before.
+    literal percent signs (map positions are percentages) and %-format reads
+    every one as a conversion. It is quoted as a **string**, because a 64-bit
+    snowflake parsed as a JavaScript number loses its last digits and every
+    request 404s. That has caused an outage here before.
     """
     return """
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
   var GID = "__DL_GID__";
-  function post(path, body, done) {
-    fetch("/api/guild/" + GID + "/dodoland/" + path, {
+
+  function say(el, text, ok) {
+    if (el) { el.textContent = text; el.style.color = ok ? '' : '#c0392b'; }
+    if (typeof window.flash === 'function' && text) window.flash(text, !!ok);
+  }
+  function post(path, body) {
+    return fetch("/api/guild/" + GID + "/dodoland/" + path, {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); }).then(done)
-      .catch(function (e) { done({ok: false, error: String(e)}); });
+    }).then(function (r) {
+      return r.json().catch(function () {
+        return {ok: false, error: "HTTP " + r.status};
+      });
+    }).catch(function (e) { return {ok: false, error: String(e)}; });
   }
-  // The side menu, same behaviour as the other multi-panel pages.
+
   document.querySelectorAll('.sidenavitem[data-panel]').forEach(function (item) {
     item.addEventListener('click', function (event) {
       event.preventDefault();
@@ -440,78 +443,162 @@ def _script(guild_id: int) -> str:
       });
     });
   });
-  // Scalar knobs save on change; multiselects announce themselves the same way
-  // the rest of the panel's do.
-  function valueOf(el) {
-    if (el.type === 'checkbox') return el.checked;
-    return el.value;
-  }
+
+  var settingsMsg = document.getElementById('dlsettingsmsg');
   document.querySelectorAll('.sidepanel .param').forEach(function (el) {
     el.addEventListener('change', function () {
-      post('param', {key: el.dataset.key, value: valueOf(el)}, function (res) {
-        el.classList.toggle('act-bad', !res.ok);
-        el.classList.toggle('act-ok', !!res.ok);
+      var value = (el.type === 'checkbox') ? el.checked : el.value;
+      post('param', {key: el.dataset.key, value: value}).then(function (res) {
+        say(settingsMsg, res.ok ? (el.dataset.key + ' saved')
+                                : ('Could not save ' + el.dataset.key + ': ' + res.error),
+            res.ok);
       });
     });
   });
-  document.querySelectorAll('.sidepanel .multiselect').forEach(function (box) {
-    box.addEventListener('mschange', function () {
-      var ids = Array.prototype.map.call(
-        box.querySelectorAll('.ms-opt[data-selected="1"]'),
-        function (o) { return o.dataset.id; });
-      post('param', {key: box.dataset.key, value: ids}, function () {});
+
+  function bind(ms, save) {
+    if (typeof window.bindMultiSelect === 'function') return window.bindMultiSelect(ms, save);
+    var opts = Array.prototype.slice.call(ms.querySelectorAll('.ms-opt'));
+    var chosen = {};
+    opts.forEach(function (o) { if (o.dataset.selected === '1') chosen[o.dataset.id] = 1; });
+    opts.forEach(function (o) {
+      o.style.fontWeight = o.dataset.selected === '1' ? '700' : '';
+      o.addEventListener('click', function () {
+        if (chosen[o.dataset.id]) { delete chosen[o.dataset.id]; o.dataset.selected = '0'; }
+        else { chosen[o.dataset.id] = 1; o.dataset.selected = '1'; }
+        o.style.fontWeight = o.dataset.selected === '1' ? '700' : '';
+        save(Object.keys(chosen));
+      });
+    });
+    return null;
+  }
+
+  document.querySelectorAll('.sidepanel .multiselect:not(.dlchannels)').forEach(function (ms) {
+    bind(ms, function (ids) {
+      post('param', {key: ms.dataset.key, value: ids}).then(function (res) {
+        say(settingsMsg, res.ok ? (ms.dataset.key + ' saved')
+                                : ('Could not save: ' + res.error), res.ok);
+      });
     });
   });
+  document.querySelectorAll('.dlchannels').forEach(function (ms) { bind(ms, function () {}); });
+
+  var bmsg = document.getElementById('dlbuildingsmsg');
+
+  function readBuilding(card) {
+    var channels = {};
+    var picker = card.querySelector('.dlchannels');
+    if (picker) {
+      picker.querySelectorAll('.ms-opt').forEach(function (o) {
+        if (o.dataset.selected === '1') channels[o.dataset.id] = 1;
+      });
+    }
+    card.querySelectorAll('.dlchw').forEach(function (input) {
+      if (channels.hasOwnProperty(input.dataset.channel)) {
+        channels[input.dataset.channel] = parseFloat(input.value || '1');
+      }
+    });
+    var emphasis = {};
+    card.querySelectorAll('.dlemph').forEach(function (input) {
+      var v = parseFloat(input.value);
+      if (!isNaN(v) && v !== 1) emphasis[input.dataset.metric] = v;
+    });
+    var tiers = [];
+    card.querySelectorAll('.dltier').forEach(function (row) {
+      var t = row.querySelector('.dltiertitle');
+      if (!t || !t.value.trim()) return;
+      var pct = row.querySelector('.dltierpct');
+      var flr = row.querySelector('.dltierfloor');
+      tiers.push({
+        title: t.value,
+        percentile: parseFloat(pct ? pct.value : '0') || 0,
+        floor: parseInt(flr ? flr.value : '0', 10) || 0
+      });
+    });
+    var name = card.querySelector('.dlbname');
+    var icon = card.querySelector('.dlbicon');
+    var hints = [];
+    try { hints = JSON.parse(card.dataset.hints || '[]'); } catch (e) { hints = []; }
+    return {
+      key: card.dataset.key,
+      name: name ? name.value : '',
+      icon: icon ? icon.value : '',
+      hints: hints,
+      channels: channels, metric_weights: emphasis, tiers: tiers
+    };
+  }
+  function collect() {
+    return Array.prototype.map.call(
+      document.querySelectorAll('#dlbuildinglist .dlbuilding'), readBuilding);
+  }
+
   var save = document.getElementById('dlsavebuildings');
   if (save) save.addEventListener('click', function () {
-    var msg = document.getElementById('dlbuildingsmsg');
-    var parsed;
-    try { parsed = JSON.parse(document.getElementById('dlbuildings').value); }
-    catch (e) { msg.textContent = 'That is not valid JSON: ' + e.message; return; }
-    msg.textContent = 'Saving...';
-    post('buildings', {buildings: parsed}, function (res) {
-      msg.textContent = res.ok ? 'Saved. Reload to see the new tiers.'
-                               : ('Refused: ' + res.error);
+    say(bmsg, 'Saving...', true);
+    post('buildings', {buildings: collect()}).then(function (res) {
+      if (res.ok) {
+        say(bmsg, 'Saved. Reloading...', true);
+        setTimeout(function () { location.reload(); }, 500);
+      } else { say(bmsg, 'Refused: ' + res.error, false); }
     });
   });
-  var file = document.getElementById('dlmapfile');
-  if (file) file.addEventListener('change', function () {
-    var chosen = file.files && file.files[0];
-    var msg = document.getElementById('dlmapmsg');
-    if (!chosen) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      msg.textContent = 'Uploading...';
-      post('map', {data: String(reader.result).split(',').pop(),
-                   content_type: chosen.type}, function (res) {
-        msg.textContent = res.ok ? 'Map saved. Reload to see it.'
-                                 : ('Refused: ' + res.error);
-      });
-    };
-    reader.readAsDataURL(chosen);
+
+  var suggest = document.getElementById('dlsuggest');
+  if (suggest) suggest.addEventListener('click', function () {
+    say(bmsg, 'Matching channel names...', true);
+    post('suggest', {}).then(function (res) {
+      if (res.ok) {
+        say(bmsg, 'Matched ' + res.attached + ' rooms. Reloading...', true);
+        setTimeout(function () { location.reload(); }, 700);
+      } else { say(bmsg, 'Refused: ' + res.error, false); }
+    });
   });
-  function backfill(preview) {
-    var out = document.getElementById('dlbackfillout');
-    var msg = document.getElementById('dlbackfillmsg');
-    if (!preview && !window.confirm(
-        'Rebuild history from the message archive? This rewrites historical rows. '
-        + 'It cannot touch days the listener already recorded, and running it '
-        + 'again writes the same numbers rather than doubling them.')) return;
-    msg.textContent = preview ? 'Reading the archive...' : 'Rebuilding...';
-    post('backfill', {preview: !!preview}, function (res) {
-      out.hidden = false;
-      out.textContent = JSON.stringify(res, null, 2);
-      msg.textContent = res.ok
-        ? (preview ? 'Preview only, nothing was written.'
-                   : 'Done. Reload to see the rebuilt towns.')
-        : ('Refused: ' + res.error);
+
+  document.querySelectorAll('.dlbdel').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var card = btn.closest('.dlbuilding');
+      if (card && window.confirm('Remove this building? Nothing is saved until you press Save buildings.')) {
+        card.remove();
+      }
+    });
+  });
+  function wireTierDelete(btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('.dltier');
+      if (row) row.remove();
     });
   }
-  var pv = document.getElementById('dlpreviewbackfill');
-  if (pv) pv.addEventListener('click', function () { backfill(true); });
-  var rn = document.getElementById('dlrunbackfill');
-  if (rn) rn.addEventListener('click', function () { backfill(false); });
-  // Click a town to arm it, then click the map to place it there.
+  document.querySelectorAll('.dltierdel').forEach(wireTierDelete);
+  document.querySelectorAll('.dltieradd').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = document.createElement('div');
+      row.className = 'dltier';
+      row.innerHTML = '<input type="text" class="dltiertitle" placeholder="Tier name" maxlength="60">'
+        + '<label class="dlfield"><span class="muted small">Percentile</span>'
+        + '<input type="number" step="1" min="0" max="100" class="dltierpct" value="50"></label>'
+        + '<label class="dlfield"><span class="muted small">Floor</span>'
+        + '<input type="number" step="1" min="0" class="dltierfloor" value="0"></label>'
+        + '<button class="dltierdel">&times;</button>';
+      wireTierDelete(row.querySelector('.dltierdel'));
+      btn.parentNode.insertBefore(row, btn);
+    });
+  });
+
+  var addB = document.getElementById('dlbadd');
+  if (addB) addB.addEventListener('click', function () {
+    var name = window.prompt('What is this building called?');
+    if (!name) return;
+    say(bmsg, 'Adding...', true);
+    post('buildings', {buildings: collect().concat([{
+      name: name, icon: '', channels: {}, metric_weights: {}, hints: [],
+      tiers: [{title: 'Foundations', percentile: 20, floor: 25}]
+    }])}).then(function (res) {
+      if (res.ok) { location.reload(); }
+      else { say(bmsg, 'Refused: ' + res.error, false); }
+    });
+  });
+
+  var mapMsg = document.getElementById('dlmapmsg');
   var armed = null;
   var canvas = document.getElementById('dlcanvas');
   if (canvas) {
@@ -520,38 +607,74 @@ def _script(guild_id: int) -> str:
         event.stopPropagation();
         if (armed) armed.classList.remove('armed');
         armed = (armed === town) ? null : town;
-        if (armed) armed.classList.add('armed');
-      });
-    });
-    canvas.addEventListener('click', function (event) {
-      if (!armed) return;
-      var box = canvas.getBoundingClientRect();
-      var x = ((event.clientX - box.left) / box.width) * 100;
-      var y = ((event.clientY - box.top) / box.height) * 100;
-      var moving = armed;
-      post('settle', {user_id: moving.dataset.user, x: x, y: y}, function (res) {
-        var msg = document.getElementById('dlmapmsg');
-        if (res.ok) {
-          moving.style.left = res.x + '%';
-          moving.style.top = res.y + '%';
-          moving.classList.remove('armed');
-          armed = null;
-          msg.textContent = 'Settled.';
-        } else {
-          msg.textContent = 'Refused: ' + res.error;
+        if (armed) {
+          armed.classList.add('armed');
+          say(mapMsg, 'Now click where this town should go.', true);
         }
       });
     });
+    canvas.addEventListener('click', function (event) {
+      if (!armed) { say(mapMsg, 'Click a town first, then click where it goes.', true); return; }
+      var box = canvas.getBoundingClientRect();
+      var moving = armed;
+      post('settle', {user_id: moving.dataset.user,
+                      x: ((event.clientX - box.left) / box.width) * 100,
+                      y: ((event.clientY - box.top) / box.height) * 100}).then(function (res) {
+        if (!res.ok) { say(mapMsg, 'Refused: ' + res.error, false); return; }
+        moving.style.left = res.x + '%';
+        moving.style.top = res.y + '%';
+        moving.classList.remove('armed');
+        armed = null;
+        say(mapMsg, 'Moved.', true);
+      });
+    });
   }
-  var clear = document.getElementById('dlmapclear');
-  if (clear) clear.addEventListener('click', function () {
-    post('map', {data: null}, function (res) {
-      document.getElementById('dlmapmsg').textContent =
-        res.ok ? 'Map removed. Reload.' : ('Refused: ' + res.error);
+  var file = document.getElementById('dlmapfile');
+  if (file) file.addEventListener('change', function () {
+    var chosen = file.files && file.files[0];
+    if (!chosen) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      say(mapMsg, 'Uploading...', true);
+      post('map', {data: String(reader.result).split(',').pop(),
+                   content_type: chosen.type}).then(function (res) {
+        if (res.ok) {
+          say(mapMsg, 'Map saved. Reloading...', true);
+          setTimeout(function () { location.reload(); }, 500);
+        } else { say(mapMsg, 'Refused: ' + res.error, false); }
+      });
+    };
+    reader.readAsDataURL(chosen);
+  });
+  var clearMap = document.getElementById('dlmapclear');
+  if (clearMap) clearMap.addEventListener('click', function () {
+    if (!window.confirm('Remove the map? Towns keep their positions.')) return;
+    post('map', {data: null}).then(function (res) {
+      if (res.ok) { location.reload(); }
+      else { say(mapMsg, 'Refused: ' + res.error, false); }
     });
   });
-})();
-</script>""".replace("__DL_GID__", str(guild_id))
+
+  function backfill(preview) {
+    var out = document.getElementById('dlbackfillout');
+    var msg = document.getElementById('dlbackfillmsg');
+    if (!preview && !window.confirm('Rebuild history from the message archive? It cannot touch days the listener already recorded, and running it again writes the same numbers rather than doubling them.')) return;
+    say(msg, preview ? 'Reading the archive...' : 'Rebuilding...', true);
+    post('backfill', {preview: !!preview}).then(function (res) {
+      out.hidden = false;
+      out.textContent = JSON.stringify(res, null, 2);
+      say(msg, res.ok ? (preview ? 'Preview only, nothing was written.'
+                                 : 'Done. Reload to see the rebuilt towns.')
+                      : ('Refused: ' + res.error), res.ok);
+    });
+  }
+  var pv = document.getElementById('dlpreviewbackfill');
+  if (pv) pv.addEventListener('click', function () { backfill(true); });
+  var rn = document.getElementById('dlrunbackfill');
+  if (rn) rn.addEventListener('click', function () { backfill(false); });
+});
+</script>
+""".replace("__DL_GID__", str(guild_id))
 
 
 async def dodoland_page(request: web.Request):
@@ -564,13 +687,18 @@ async def dodoland_page(request: web.Request):
 
     # Every read here is blocking pymongo, and this handler runs on the bot's own
     # event loop. Doing it inline stops the bot responding while Mongo works.
-    def compute():
+    def compute_for(basis):
         return standing.guild_standings(bot.dodoland, bot.dodoland_params,
-                                        guild.id, buildings, since=since)
+                                        guild.id, buildings, since=since,
+                                        basis=basis)
 
-    result = await asyncio.get_running_loop().run_in_executor(None, compute)
+    loop = asyncio.get_running_loop()
+    # Both previews, computed server-side so switching between them is instant
+    # and neither can be a stale view of the other.
+    result = await loop.run_in_executor(None, compute_for, store_module.BASIS_ALL)
+    scratch = await loop.run_in_executor(None, compute_for, store_module.BASIS_LIVE)
     # Read-only, and the only thing DodoLand reads from outside itself.
-    flourish = await asyncio.get_running_loop().run_in_executor(
+    flourish = await loop.run_in_executor(
         None, flourish_rules.flourish_map, bot, guild.id)
 
     # Where the towns go. Settled spots are kept; everybody else is suggested
@@ -593,7 +721,7 @@ async def dodoland_page(request: web.Request):
             lit=lit,
         )
 
-    towns = await asyncio.get_running_loop().run_in_executor(None, townwork)
+    towns = await loop.run_in_executor(None, townwork)
 
     tracking = bot.visibility.feature_active(guild.id, "dodoland_tracking", "dodoland")
     counted = len(result["people"])
@@ -622,7 +750,10 @@ Nothing here is visible to anybody but this panel.</p>
 <div class="sidepanels">
   <nav class="sidenav">{nav}</nav>
   <div class="content">
-    {_preview_html(bot, guild, result, buildings, flourish)}
+    {_preview_html(bot, guild, result, buildings, flourish,
+                   basis=store_module.BASIS_ALL, panel='dl-preview', shown=True)}
+    {_preview_html(bot, guild, scratch, buildings, flourish,
+                   basis=store_module.BASIS_LIVE, panel='dl-scratch', shown=False)}
     {_buildings_html(bot, guild, result)}
     {_metrics_html(bot, guild)}
     {_map_html(bot, guild, towns)}

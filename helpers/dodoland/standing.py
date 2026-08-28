@@ -146,7 +146,7 @@ def tier_reached(points: int, resolved: list[dict]) -> Optional[int]:
 # --------------------------------------------------------------------------- #
 def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
                     user_ids: Optional[Iterable[int]] = None,
-                    since: Optional[str] = None) -> dict:
+                    since: Optional[str] = None, basis: str = "all") -> dict:
     """Every scoring person's buildings, town power and place, in one pass.
 
     Reads the guild's day rows once and aggregates in memory rather than
@@ -161,7 +161,7 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
     # {user: {channel: {metric: count}}}, built from one scan of the day rows.
     per_user: dict[int, dict[int, dict[str, int]]] = {}
     wanted = {int(u) for u in user_ids} if user_ids is not None else None
-    for row in store.rows(guild_id, since=since):
+    for row in store.rows(guild_id, since=since, basis=basis):
         user_id = int(row.get("user_id", 0))
         if not user_id or (wanted is not None and user_id not in wanted):
             continue
@@ -173,14 +173,14 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
 
     # People reached, counted per day and capped the same way an act is.
     reach: dict[int, int] = {}
-    for row in store.pair_rows(guild_id, since=since):
+    for row in store.pair_rows(guild_id, since=since, basis=basis):
         for user_id in (int(row.get("a", 0)), int(row.get("b", 0))):
             if user_id and (wanted is None or user_id in wanted):
                 reach[user_id] = reach.get(user_id, 0) + 1
     if partner_cap > 0:
         # The cap is per day; the store cannot apply it because it does not know
         # the day's shape until the whole window is read.
-        reach = {user: min(count, partner_cap * _days_seen(store, guild_id, since))
+        reach = {user: min(count, partner_cap * _days_seen(store, guild_id, since, basis))
                  for user, count in reach.items()}
 
     people: dict[int, dict] = {}
@@ -230,6 +230,7 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
         person["place"] = place
 
     return {
+        "basis": basis,
         "people": people,
         "order": order,
         "tiers": resolved,
@@ -238,7 +239,7 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
     }
 
 
-def _days_seen(store, guild_id: int, since: Optional[str]) -> int:
+def _days_seen(store, guild_id: int, since: Optional[str], basis: str = "all") -> int:
     """How many distinct days the window covers, for capping people reached."""
-    days = {row.get("day") for row in store.rows(guild_id, since=since)}
+    days = {row.get("day") for row in store.rows(guild_id, since=since, basis=basis)}
     return max(1, len(days))

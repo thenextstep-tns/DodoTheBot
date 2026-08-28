@@ -66,6 +66,30 @@ async def api_dodoland_buildings(request: web.Request):
     return web.json_response({"ok": True, "buildings": saved})
 
 
+async def api_dodoland_suggest(request: web.Request):
+    """Attach each building to the channels whose names look like it.
+
+    Only fills in buildings that have no rooms yet, so pressing it after
+    hand-tuning cannot undo the tuning, and a channel is offered to at most one
+    building. It is a starting guess meant to be corrected, the same bargain
+    "Suggest from role names" makes on the trials page.
+    """
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    current = bot.dodoland_buildings.buildings(guild.id)
+    suggested = building_rules.suggest_channels(guild, current)
+    try:
+        saved = bot.dodoland_buildings.save_buildings(guild.id, suggested, guild=guild)
+    except building_rules.DodoLandError as error:
+        return _bad(error)
+    attached = sum(len(building.get("channels") or {}) for building in saved)
+    await _record_change(request, "dodoland_buildings", "suggest", "",
+                         f"{attached} rooms attached", "DodoLand rooms suggested")
+    return web.json_response({"ok": True, "attached": attached,
+                              "buildings": len(saved)})
+
+
 async def api_dodoland_settle(request: web.Request):
     """Place one town on the map, in percentages of the base image.
 

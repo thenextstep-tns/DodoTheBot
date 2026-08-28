@@ -236,6 +236,17 @@ METRICS: tuple[Metric, ...] = (
         kind=SOCIAL, weight=25, daily_cap=10, partner_cap=1,
     ),
     Metric(
+        key="command_used",
+        label="Used a bot command",
+        description=(
+            "Somebody ran one of Dodo's commands. Playing with the bot is taking "
+            "part too, and it is the one thing on this list a brand new member "
+            "can do on their first minute here. Note that if the bot channel is "
+            "in the ignored list, this scores nowhere."
+        ),
+        kind=SOLO, weight=2, daily_cap=20,
+    ),
+    Metric(
         key="member_recruited",
         label="Brought somebody in",
         description=(

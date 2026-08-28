@@ -56,6 +56,28 @@ def days_back(count: int, now: Optional[datetime.datetime] = None) -> str:
     return (moment - datetime.timedelta(days=max(0, count))).strftime("%Y-%m-%d")
 
 
+# Which history a read covers. Rebuilt rows are stamped ``source: "backfill"``;
+# rows the listener wrote carry no source at all, which is what "live" means.
+BASIS_ALL = "all"
+BASIS_LIVE = "live"
+BASIS_BACKFILL = "backfill"
+BASES = (BASIS_ALL, BASIS_LIVE, BASIS_BACKFILL)
+BASIS_LABELS = {
+    BASIS_ALL: "With history",
+    BASIS_LIVE: "From scratch",
+    BASIS_BACKFILL: "Rebuilt history only",
+}
+
+
+def _basis_filter(basis: str) -> dict:
+    """The query fragment selecting one history."""
+    if basis == BASIS_LIVE:
+        return {"source": {"$ne": BASIS_BACKFILL}}
+    if basis == BASIS_BACKFILL:
+        return {"source": BASIS_BACKFILL}
+    return {}
+
+
 def allowance(done_before: int, amount: int, cap: int) -> int:
     """How much of ``amount`` scores, given what already happened and the cap.
 
@@ -192,35 +214,48 @@ class ActivityStore:
     #  Reading
     # ------------------------------------------------------------------ #
     def rows(self, guild_id: int, *, user_id: Optional[int] = None,
-             since: Optional[str] = None) -> list[dict]:
-        """Daily rows for a guild, optionally one person's, from a day onward."""
+             since: Optional[str] = None, basis: str = BASIS_ALL) -> list[dict]:
+        """Daily rows for a guild, optionally one person's, from a day onward.
+
+        ``basis`` picks which history to read. It is what lets the panel show
+        two honest previews side by side: everything, and only what has been
+        counted since tracking started. Both are real answers to different
+        questions, and being able to see them together is the difference between
+        "these numbers look odd" and "these numbers look odd *because of the
+        rebuild*".
+        """
         query: dict = {"guild_id": _require_guild(guild_id)}
         if user_id is not None:
             query["user_id"] = int(user_id)
         if since:
             query["day"] = {"$gte": since}
+        query.update(_basis_filter(basis))
         return list(self._activity.find(query))
 
-    def pair_rows(self, guild_id: int, *, since: Optional[str] = None) -> list[dict]:
+    def pair_rows(self, guild_id: int, *, since: Optional[str] = None,
+                  basis: str = BASIS_ALL) -> list[dict]:
         """Every pair row for a guild. The relation graph, whole."""
         query: dict = {"guild_id": _require_guild(guild_id)}
         if since:
             query["day"] = {"$gte": since}
+        query.update(_basis_filter(basis))
         return list(self._pairs.find(query))
 
-    def totals(self, guild_id: int, user_id: int, *, since: Optional[str] = None) -> dict[str, int]:
+    def totals(self, guild_id: int, user_id: int, *, since: Optional[str] = None,
+               basis: str = BASIS_ALL) -> dict[str, int]:
         """Scored acts per metric for one person over a window."""
         out: dict[str, int] = {}
-        for row in self.rows(guild_id, user_id=user_id, since=since):
+        for row in self.rows(guild_id, user_id=user_id, since=since, basis=basis):
             for key, count in (row.get("scored") or {}).items():
                 out[key] = out.get(key, 0) + int(count)
         return out
 
     def channel_totals(self, guild_id: int, user_id: int, *,
-                       since: Optional[str] = None) -> dict[int, dict[str, int]]:
+                       since: Optional[str] = None,
+                       basis: str = BASIS_ALL) -> dict[int, dict[str, int]]:
         """Scored acts per metric, split by channel. What buildings score from."""
         out: dict[int, dict[str, int]] = {}
-        for row in self.rows(guild_id, user_id=user_id, since=since):
+        for row in self.rows(guild_id, user_id=user_id, since=since, basis=basis):
             for channel, counts in (row.get("channels") or {}).items():
                 bucket = out.setdefault(int(channel), {})
                 for key, count in (counts or {}).items():
@@ -256,14 +291,16 @@ class ActivityStore:
             out[int(other)] = out.get(int(other), 0) + int(row.get("n", 0))
         return out
 
-    def first_day(self, guild_id: int) -> Optional[str]:
+    def first_day(self, guild_id: int, *, basis: str = BASIS_LIVE) -> Optional[str]:
         """The earliest day this guild has a row for, or ``None``.
 
-        The backfill needs it: everything it writes must stop strictly before
-        the first day the live listener recorded, so a rebuilt day can never
-        overwrite a real one.
+        Defaults to the **live** history, because the caller that matters is the
+        backfill: everything it writes must stop strictly before the first day
+        the listener recorded, so a rebuilt day can never overwrite a real one.
+        Reading all rows here would make the boundary move every time the
+        rebuild ran, which would then refuse to rebuild anything at all.
         """
-        rows = self.rows(_require_guild(guild_id))
+        rows = self.rows(_require_guild(guild_id), basis=basis)
         days = sorted(row.get("day") for row in rows if row.get("day"))
         return days[0] if days else None
 

@@ -37,7 +37,7 @@ from typing import Any, Iterable, Optional
 
 from helpers.dodoland import metrics as metric_registry
 
-MAX_BUILDINGS = 12
+MAX_BUILDINGS = 24
 MAX_TIERS = 12
 MAX_NAME = 60
 MAX_TITLE = 60
@@ -160,12 +160,16 @@ def validate_building(value: Any, *, guild=None) -> dict:
         raise DodoLandError("A building must be an object.")
     name = _clean_text(value.get("name"), MAX_NAME, "A building name")
     icon = str(value.get("icon") or "").strip()[:MAX_ICON]
+    hints = value.get("hints")
     return {
         "key": _slug(value.get("key") or name),
         "name": name,
         "icon": icon,
         "channels": validate_channels(value.get("channels") or {}, guild=guild),
         "metric_weights": validate_metric_weights(value.get("metric_weights") or {}),
+        # Kept through a save so "Suggest from channel names" still has its
+        # matching words after the building has been edited once.
+        "hints": [str(h)[:40] for h in hints][:40] if isinstance(hints, list) else [],
         "tiers": validate_tiers(value.get("tiers") or []),
     }
 
@@ -204,28 +208,141 @@ def _tier_set(titles: Iterable[str]) -> list[dict]:
             for title, (_default, pct, floor) in zip(titles, _DEFAULT_TIERS)]
 
 
+# A town, as a town is normally imagined: somewhere to drink, somewhere to
+# learn, somewhere to trade, somewhere to train, somewhere to worship, somewhere
+# to make things. Each entry carries ``hints`` — keywords matched against real
+# channel names by :func:`suggest_channels`, so a server attaches its own rooms
+# rather than a guess made by somebody who has never seen it.
+_DEFAULT_SET: tuple[tuple, ...] = (
+    ("tavern", "The Tavern", "🍺",
+     ("general", "chat", "lounge", "chill", "hangout", "talk", "offtopic",
+      "off-topic", "banter", "social", "main"),
+     {}, ("Roadside Bench", "Ale Stall", "The Tap Room", "The Inn",
+          "The Great Hall", "Heart of the Town")),
+    ("library", "The Grand Library", "📚",
+     ("help", "guide", "question", "advice", "info", "resource", "lore", "wiki",
+      "faq", "support", "build", "theorycraft", "newbie", "beginner"),
+     {}, ("Scholar's Desk", "Reading Nook", "Modest Archive", "The Athenaeum",
+          "Grand Library", "Citadel of Wisdom")),
+    ("warroom", "The War Room", "🗺",
+     ("lead", "officer", "organiser", "organizer", "sherpa", "planning",
+      "schedule", "signup", "sign-up", "mentor"),
+     {}, ("Chalk Table", "Map Table", "The Planning Room", "The Strategium",
+          "The War Room", "Seat of Command")),
+    ("barracks", "The Vanguard Barracks", "🛡",
+     ("trial", "raid", "lfg", "prog", "dps", "parse", "vet", "roster", "static",
+      "score", "hardmode", "trifecta"),
+     {}, ("Training Dummy", "Militia Camp", "The Armory", "Guardhouse",
+          "Vanguard Keep", "Paragon's Redoubt")),
+    ("playhouse", "The Playhouse", "🎮",
+     ("game", "gaming", "other games", "minecraft", "steam", "console",
+      "playing", "co-op", "coop", "lobby"),
+     {}, ("Street Corner", "Card Table", "The Games Room", "The Playhouse",
+          "The Grand Arcade", "The Pleasure Gardens")),
+    ("moot", "The Moot Hall", "⚖",
+     ("debate", "trivia", "quiz", "discussion", "argument", "philosoph",
+      "politics", "serious", "topic"),
+     {}, ("Soapbox", "Speaking Stone", "The Debating Room", "The Moot Hall",
+          "The Forum", "The Great Assembly")),
+    ("menagerie", "The Menagerie", "🦜",
+     ("pet", "cat", "dog", "animal", "creature", "critter", "mount", "paw"),
+     {"image": 2.0}, ("Mud Paddock", "Animal Pens", "The Stables",
+                      "Exotic Menagerie", "The Aviary", "Gilded Sanctuary")),
+    ("gallery", "The Gallery", "🖼",
+     ("photo", "picture", "screenshot", "art", "gallery", "media", "showcase",
+      "landscape", "shot"),
+     {"image": 2.5}, ("Chalk Wall", "Pinned Sketches", "The Long Corridor",
+                      "The Salon", "The Exhibition", "Hall of Wonders")),
+    ("portraits", "The Portrait Hall", "🪞",
+     ("selfie", "face", "irl", "us", "yourself", "mirror", "fit", "fashion",
+      "outfit"),
+     {"image": 2.5}, ("Small Mirror", "Sketch Corner", "The Sitting Room",
+                      "The Portrait Hall", "The Gallery of Faces",
+                      "Hall of a Thousand Faces")),
+    ("bakery", "The Bakery", "🍞",
+     ("food", "cook", "recipe", "bake", "kitchen", "meal", "eat", "coffee",
+      "tea", "snack"),
+     {"image": 2.0}, ("Cold Hearth", "Bread Oven", "The Bakehouse",
+                      "The Kitchens", "The Banquet Hall", "The Endless Feast")),
+    ("workshop", "The Clockwork Workshop", "⚙",
+     ("cod", "dev", "program", "tech", "software", "script", "addon", "bot",
+      "engineer", "hardware", "linux"),
+     {}, ("Workbench", "Tinker's Shed", "The Workshop", "The Manufactory",
+          "The Clockwork Hall", "The Engine of Making")),
+    ("sanctuary", "The Sanctuary", "🕯",
+     ("safe", "vent", "support", "mental", "health", "quiet", "comfort",
+      "kind", "care"),
+     {}, ("Wayside Stone", "Small Shrine", "The Chapel", "The Sanctuary",
+          "The Temple", "The Still Heart")),
+    ("undercroft", "The Undercroft", "🕶",
+     ("degen", "lair", "unmoderated", "nsfw", "cursed", "gremlin", "chaos",
+      "basement", "dungeon", "unhinged"),
+     {}, ("Cellar Door", "Back Room", "The Speakeasy", "The Undercroft",
+          "The Deep Cellars", "The Unlit Halls")),
+    ("statue", "The Dodo Statue", "🗿",
+     ("bot", "command", "dodo", "casino", "gamble", "spam", "playground",
+      "commands", "minigame"),
+     {"command_used": 2.0},
+     ("Odd Boulder", "Carved Stone", "The Little Dodo", "The Dodo Statue",
+      "The Gilded Dodo", "The Colossus of Dodo")),
+    ("wayshrine", "The Wayshrine", "🚪",
+     ("welcome", "introduction", "intro", "arrival", "rules", "gate", "hello",
+      "newcomer", "start", "lobby"),
+     {}, ("Boundary Post", "Traveller's Marker", "The Gatehouse",
+          "The Wayshrine", "The Great Gate", "Threshold of the World")),
+)
+
+
 def default_buildings() -> list[dict]:
-    """A starting set with no channels attached.
+    """A town's worth of buildings, with no channels attached.
 
     Deliberately unattached: a building that silently counts every room is a
-    building nobody configured, and the first thing an admin should do is say
-    which rooms are which. The names are a suggestion and are meant to be
-    rewritten.
+    building nobody configured. "Suggest from channel names" fills them in from
+    the server's actual rooms, which is better than a guess made by somebody who
+    has never seen the server. Every name here is meant to be rewritten.
     """
     return [
-        {"key": "library", "name": "The Grand Library", "icon": "📚",
-         "channels": {}, "metric_weights": {},
-         "tiers": _tier_set(("Scholar's Desk", "Reading Nook", "Modest Archive",
-                             "The Athenaeum", "Grand Library", "Citadel of Wisdom"))},
-        {"key": "menagerie", "name": "The Menagerie", "icon": "🦜",
-         "channels": {}, "metric_weights": {"image": 2.0},
-         "tiers": _tier_set(("Mud Paddock", "Animal Pens", "The Stables",
-                             "Exotic Menagerie", "The Aviary", "Gilded Sanctuary"))},
-        {"key": "barracks", "name": "The Vanguard Barracks", "icon": "🛡️",
-         "channels": {}, "metric_weights": {},
-         "tiers": _tier_set(("Training Dummy", "Militia Camp", "The Armory",
-                             "Guardhouse", "Vanguard Keep", "Paragon's Redoubt"))},
+        {"key": key, "name": name, "icon": icon, "channels": {},
+         "metric_weights": dict(weights), "hints": list(hints),
+         "tiers": _tier_set(titles)}
+        for key, name, icon, hints, weights, titles in _DEFAULT_SET
     ]
+
+
+def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
+    """Attach each building to the channels whose names look like it.
+
+    Only ever fills in buildings that have **no** channels yet, so pressing it
+    again after hand-tuning cannot undo the tuning. A channel is offered to at
+    most one building — the first whose hint it matches — because a room feeding
+    two buildings makes both of them mean less.
+
+    Matching is on the channel name alone. It is a starting guess and is meant
+    to be corrected, which is the same bargain "Suggest from role names" makes
+    on the trials page.
+    """
+    hints_for = {key: hints for key, _n, _i, hints, _w, _t in _DEFAULT_SET}
+    claimed: set[int] = {int(cid) for building in buildings
+                         for cid in (building.get("channels") or {})}
+    out = []
+    for building in buildings:
+        building = dict(building)
+        if building.get("channels"):
+            out.append(building)
+            continue
+        hints = building.get("hints") or hints_for.get(building.get("key")) or []
+        found: dict[int, float] = {}
+        for channel in getattr(guild, "channels", []):
+            channel_id = int(getattr(channel, "id", 0) or 0)
+            name = str(getattr(channel, "name", "") or "").lower()
+            if not channel_id or channel_id in claimed or not name:
+                continue
+            if any(hint in name for hint in hints):
+                found[channel_id] = 1.0
+                claimed.add(channel_id)
+        building["channels"] = found
+        out.append(building)
+    return out
 
 
 # --------------------------------------------------------------------------- #

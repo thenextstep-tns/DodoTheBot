@@ -22,9 +22,10 @@ def dodoland_routes() -> list:
     from helpers import panel_access
     from web.dodoland.api import (
         api_dodoland_backfill, api_dodoland_buildings, api_dodoland_map,
-        api_dodoland_param, api_dodoland_settle,
+        api_dodoland_param, api_dodoland_settle, api_dodoland_suggest,
     )
     from web.dodoland.pages import dodoland_page
+    from web.dodoland.settle import api_settle_own, settle_page
     from web.routes import require_scope
 
     # Reading the page means reading everybody's standing, so it takes the same
@@ -40,4 +41,10 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/backfill", full(api_dodoland_backfill)),
         # Moving somebody's town is configuration, not a game action yet.
         web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),
+        web.post("/api/guild/{gid}/dodoland/suggest", full(api_dodoland_suggest)),
+        # The player's own link. No scope decorator on purpose: there is no
+        # session here, the token in the path IS the credential, and it names
+        # exactly one person whose only power is to move their own town.
+        web.get("/t/{gid}/{token}", settle_page),
+        web.post("/t/{gid}/{token}/settle", api_settle_own),
     ]

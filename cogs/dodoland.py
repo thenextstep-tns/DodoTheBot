@@ -197,6 +197,33 @@ class DodoLand(commands.Cog, name="dodoland"):
         self._write(guild_id, acts)
 
     # --------------------------------------------------------------------- #
+    #  Bot commands: what the statue is built from
+    # --------------------------------------------------------------------- #
+    # Counted live rather than from the ``Commands Usage`` archive, which records
+    # no channel at all. Without a channel a command could not feed a building,
+    # since a building is defined as a set of rooms.
+    @commands.Cog.listener()
+    async def on_command_completion(self, context) -> None:
+        if context.guild is None:
+            return
+        self._count_command(context.guild, context.author, context.channel)
+
+    @commands.Cog.listener()
+    async def on_app_command_completion(self, interaction, command) -> None:
+        if interaction.guild is None:
+            return
+        self._count_command(interaction.guild, interaction.user, interaction.channel)
+
+    def _count_command(self, guild, user, channel) -> None:
+        if not self._on(guild.id) or not self._humans(guild.id, user):
+            return
+        channel_id = self._channel_id(channel)
+        if not self._tracked(guild.id, channel_id):
+            return
+        self._write(guild.id, [intake.Act(metric="command_used", user_id=user.id,
+                                          channel_id=channel_id)])
+
+    # --------------------------------------------------------------------- #
     #  Threads: starting a conversation
     # --------------------------------------------------------------------- #
     @commands.Cog.listener()
