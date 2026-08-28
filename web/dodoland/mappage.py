@@ -144,8 +144,9 @@ async def map_page(request: web.Request):
 <div class="dlbar">
   <a class="dlback" href="/guild/{guild.id}/dodoland">&larr; DodoLand</a>
   <b>{_e(guild.name)}</b>
-  <span class="dlcount"><b id="dlplaced">{len(placed)}</b> placed ·
-    <b>{len(unplaced)}</b> waiting · {data['total']} with standing</span>
+  <span class="dlcount"><b id="dlplaced">{len(placed)}</b> on the map ·
+    <b id="dlwaiting">{len(unplaced)}</b> waiting ·
+    {len(data['people'])} with standing</span>
   <span class="dlspacer"></span>
   <button id="dltoggle" class="dlghost">Towns list</button>
 </div>
@@ -232,16 +233,24 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   transform: translate(-50%, -50%) scale(var(--inv, 1));
   display: flex; flex-direction: column; align-items: center;
   cursor: pointer; z-index: 5; }
+/* A settlement, not a fence. Buildings overlap slightly, sit on a common
+   baseline, and the tallest are drawn behind the shorter ones, so the cluster
+   has a silhouette instead of being a row of evenly-spaced identical icons. */
 .dlbuildings { display: flex; align-items: flex-end; justify-content: center;
-  gap: 2px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.55)); }
-.dlbuildings i { color: #f6e3c2; }
+  filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
+.dlbuildings i { color: #f7e7c8; margin: 0 -2px; }
+.dlbuildings i:nth-child(2n) { color: #e8cfa4; }
+.dlbuildings i:nth-child(3n) { color: #fff3dd; }
 /* Taller tiers read as bigger buildings, so a grown town looks grown. */
-.dlb1 { font-size: 11px; } .dlb2 { font-size: 14px; } .dlb3 { font-size: 17px; }
-.dlb4 { font-size: 20px; } .dlb5 { font-size: 24px; } .dlb6 { font-size: 28px; }
-.dlground { width: 26px; height: 5px; border-radius: 50%; margin-top: -2px;
-  background: rgba(0,0,0,.45); }
-.dlname { margin-top: 3px; font-size: 11px; color: #fff8ea; white-space: nowrap;
-  opacity: 0; text-shadow: 0 1px 3px rgba(0,0,0,.95); }
+.dlb1 { font-size: 12px; } .dlb2 { font-size: 15px; } .dlb3 { font-size: 19px; }
+.dlb4 { font-size: 23px; } .dlb5 { font-size: 28px; } .dlb6 { font-size: 34px; }
+.dlground { width: 70%; min-width: 30px; height: 6px; border-radius: 50%;
+  margin-top: -3px; background: rgba(20,10,0,.5); filter: blur(1.5px); }
+/* Legible on any coastline: a pill rather than text floating on white. */
+.dlname { margin-top: 5px; padding: 2px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; letter-spacing: .01em;
+  color: #fff6e4; background: rgba(20,14,8,.82); white-space: nowrap;
+  opacity: 0; transition: opacity .12s ease; }
 .dltown:hover { z-index: 9; }
 .dltown:hover .dlname, .dlworld.named .dlname, .dltown.on .dlname { opacity: 1; }
 .dltown.dim { opacity: .45; }
@@ -331,10 +340,17 @@ _SCRIPT = r"""
     view.y = Math.min(frame.clientHeight - s, Math.max(s - h, view.y));
   }
   function fit() {
-    if (!nat.w) return;
-    view.k = Math.min(frame.clientWidth / nat.w, frame.clientHeight / nat.h);
-    view.x = (frame.clientWidth - nat.w * view.k) / 2;
-    view.y = (frame.clientHeight - nat.h * view.k) / 2;
+    if (!nat.w || !nat.h) return;
+    // Measured after layout: called too early the frame has no height yet and
+    // the map ends up stranded in the middle of a black screen, which is what
+    // it did. A little air so the coastline is not flush against the edges.
+    var fw = frame.clientWidth, fh = frame.clientHeight;
+    if (!fw || !fh) { requestAnimationFrame(fit); return; }
+    var pad = 24;
+    view.k = Math.min((fw - pad * 2) / nat.w, (fh - pad * 2) / nat.h);
+    view.k = Math.min(D.sizes.max_zoom, Math.max(D.sizes.min_zoom, view.k));
+    view.x = (fw - nat.w * view.k) / 2;
+    view.y = (fh - nat.h * view.k) / 2;
     apply();
   }
   function zoom(f, cx, cy) {
@@ -346,10 +362,14 @@ _SCRIPT = r"""
   }
   function measure() {
     if (!base) return;
-    nat.w = base.naturalWidth || frame.clientWidth;
-    nat.h = base.naturalHeight || frame.clientHeight;
+    // An SVG with no intrinsic size reports 0, so fall back to what it actually
+    // laid out at rather than to a number that makes fit() meaningless.
+    var box = base.getBoundingClientRect();
+    nat.w = base.naturalWidth || Math.round(box.width) || frame.clientWidth;
+    nat.h = base.naturalHeight || Math.round(box.height) || frame.clientHeight;
     world.style.width = nat.w + 'px';
-    fit();
+    world.style.height = nat.h + 'px';
+    requestAnimationFrame(fit);
   }
   if (base) { if (base.complete && base.naturalWidth) measure();
               else base.addEventListener('load', measure); }
@@ -398,8 +418,17 @@ _SCRIPT = r"""
     el.style.top = person.plot.y + '%';
     // A town is what stands in it. Six buildings is already a skyline; past
     // that the cluster stops reading as a place.
-    var shown = person.built.slice(0, 6).map(function (b) {
-      return '<i class="fa-solid ' + b.fa + ' dlb' + Math.min(6, b.tier) + '"></i>';
+    // Tallest in the middle, shorter ones flanking: a silhouette rather than a
+    // row. Six is already a skyline; past that the cluster stops reading as a
+    // place at all.
+    var top = person.built.slice(0, 6);
+    var arranged = [];
+    top.forEach(function (b, i) {
+      if (i % 2) arranged.push(b); else arranged.unshift(b);
+    });
+    var shown = arranged.map(function (b) {
+      return '<i class="fa-solid ' + b.fa + ' dlb' + Math.min(6, b.tier) +
+        '" title="' + escapeHtml(b.name + ' — ' + b.title) + '"></i>';
     }).join('');
     if (!shown) shown = '<i class="fa-solid fa-campground dlb1"></i>';
     el.innerHTML = '<div class="dlbuildings">' + shown + '</div>' +
@@ -421,8 +450,9 @@ _SCRIPT = r"""
   function redraw() {
     world.querySelectorAll('.dltown').forEach(function (n) { n.remove(); });
     D.people.forEach(function (p) { if (p.plot) draw(p); });
-    document.getElementById('dlplaced').textContent =
-      D.people.filter(function (p) { return p.plot; }).length;
+    var on = D.people.filter(function (p) { return p.plot; }).length;
+    document.getElementById('dlplaced').textContent = on;
+    document.getElementById('dlwaiting').textContent = D.people.length - on;
   }
 
   // --- the town card ----------------------------------------------------- //

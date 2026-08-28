@@ -432,9 +432,29 @@ class BuildingStore:
         return self._cache[guild_id]
 
     def buildings(self, guild_id: int) -> list[dict]:
-        """This guild's buildings, or the unattached defaults if none are set."""
+        """This guild's buildings, or the unattached defaults if none are set.
+
+        Rows saved before a field existed are filled in from the defaults by
+        key, on read. Every building on this server was stored before there was
+        an icon class, so without this they all drew as the same generic house
+        and a town was a row of identical huts. Migrating on read rather than
+        with a script means a server that has not been opened since is fixed the
+        moment somebody looks at it.
+        """
         stored = self.config(guild_id).get("buildings")
-        return list(stored) if stored else default_buildings()
+        if not stored:
+            return default_buildings()
+        fallback = {b["key"]: b for b in default_buildings()}
+        out = []
+        for building in stored:
+            building = dict(building)
+            base = fallback.get(building.get("key"), {})
+            if not building.get("fa"):
+                building["fa"] = base.get("fa") or "fa-house"
+            if not building.get("hints"):
+                building["hints"] = list(base.get("hints") or [])
+            out.append(building)
+        return out
 
     def is_configured(self, guild_id: int) -> bool:
         """Whether anybody has saved buildings, as opposed to seeing defaults."""
