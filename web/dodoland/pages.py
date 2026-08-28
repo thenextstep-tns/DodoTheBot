@@ -33,6 +33,7 @@ from aiohttp import web
 
 from helpers.dodoland import buildings as building_rules
 from helpers.dodoland import flourish as flourish_rules
+from helpers.dodoland import mapview
 from helpers.dodoland import metrics as metric_registry
 from helpers.dodoland import parameters as dodo_params
 from helpers.dodoland import standing
@@ -260,45 +261,80 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 # --------------------------------------------------------------------------- #
 #  The map
 # --------------------------------------------------------------------------- #
-def _map_html(bot, guild) -> str:
+def _town_markers(towns: list[dict]) -> str:
+    """The towns, as absolutely-positioned markers over the base image.
+
+    Flourish is a class rather than inline style so the effects live in the
+    stylesheet where they can be looked at and changed, and so a town with no
+    rank carries no extra rendering cost at all.
+    """
+    out = ""
+    for town in towns:
+        classes = f"dltown fl{town['flourish']}" + ("" if town["lit"] else " dim")
+        title = f"{town['name']} · {town['power']:,} power"
+        if town["rank_name"]:
+            title += f" · {town['rank_name']}"
+        if not town["settled"]:
+            title += " · suggested, not yet settled"
+        built = ", ".join(f"{k}: {v}" for k, v in town["tiers"].items())
+        if built:
+            title += f" · {built}"
+        out += (
+            f'<button class="{classes}" style="left:{town["x"]}%;top:{town["y"]}%;'
+            f'--dl-size:{town["size"]:g}" data-user="{town["user_id"]}" '
+            f'title="{_e(title)}">'
+            f'<span class="dltowndot"></span>'
+            f'<span class="dltownname">{_e(town["name"])}</span></button>'
+        )
+    return out
+
+
+def _map_html(bot, guild, towns: list[dict]) -> str:
     image = bot.dodoland_buildings.map_image(guild.id)
-    plots = bot.dodoland_buildings.plots(guild.id)
+    settled_count = sum(1 for town in towns if town["settled"])
+
     if image:
         raw = image.get("data")
         blob = bytes(raw) if raw is not None else b""
         encoded = base64.b64encode(blob).decode("ascii")
-        preview = (f'<img class="dlmap" alt="The server map" '
-                   f'src="data:{_e(image.get("content_type"))};base64,{encoded}">')
+        canvas = f"""
+  <div class="dlcanvas" id="dlcanvas">
+    <img class="dlmap" alt="The server map"
+         src="data:{_e(image.get('content_type'))};base64,{encoded}">
+    {_town_markers(towns)}
+  </div>"""
         state = f"A map is set ({len(blob):,} bytes). Uploading another replaces it."
     else:
-        preview = '<div class="muted">No map uploaded yet.</div>'
+        canvas = ('<div class="muted">No map uploaded yet. Towns are placed and '
+                  'drawn as soon as there is an image to place them on.</div>')
         state = "Upload the image this server's continent is drawn on."
-
-    settled = "".join(
-        f'<span class="chip">{_e(_name_of(guild, uid))} '
-        f'({spot.get("x", 0):g}, {spot.get("y", 0):g})</span>'
-        for uid, spot in sorted(plots.items())
-    ) or '<span class="muted small">Nobody has settled yet.</span>'
 
     return f"""
 <section class="sidepanel" data-panel="dl-map" hidden>
-  <h2 class="panelhead">\U0001F5FA The map</h2>
+  <h2 class="panelhead">🗺 The map</h2>
   <p class="muted">The world is an image you upload, not one the bot generates.
   That removes the vector editor, the procedural coastlines and the elevation
   polygons from the build entirely, and it means the map is handcrafted and
-  yours on day one. Players pick their own plot on it.</p>
-  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB. Plots are
-  stored as percentages of the image, so redrawing the map at a different size
-  never moves anybody's town.</p>
-  {preview}
+  yours on day one.</p>
+  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB. Positions
+  are percentages of the image, so redrawing the map at a different size never
+  moves anybody's town.</p>
   <div class="rulebtns">
     <input type="file" id="dlmapfile" accept="image/png,image/jpeg,image/webp,image/svg+xml">
     <button id="dlmapclear">Remove map</button>
     <span id="dlmapmsg" class="muted small"></span>
   </div>
-  <div class="paramrow wide"><div><b>Settled towns</b>
-    <div class="muted small">Where people have chosen to build.</div></div>
-    <div class="chips">{settled}</div></div>
+  {canvas}
+  <p class="muted small"><b>{settled_count}</b> of <b>{len(towns)}</b> towns have
+  been settled deliberately. The rest are <i>suggested</i>: placed beside the
+  people their owner actually talks to, using the relation graph the listener
+  builds. Clusters on this map are friend groups, and whoever sits between two
+  clusters is the person who bridges them. A suggestion is never binding, and
+  anybody who settles keeps their spot forever.</p>
+  <p class="muted small">Click a town to place it where you click next, or use
+  this once the player-facing flow exists. Dim towns have had no activity inside
+  the lit window; that is the only thing dormancy ever costs, and coming back
+  lights them again. Nothing is ever taken away.</p>
 </section>"""
 
 
@@ -371,12 +407,19 @@ def _settings_html(bot, guild) -> str:
 
 
 def _script(guild_id: int) -> str:
-    """This page's own behaviour. Snowflakes are strings: a 64-bit id parsed as a
-    JavaScript number loses its last digits and every request 404s."""
+    """This page's own behaviour.
+
+    The guild id is substituted rather than %-formatted: this script is full of
+    literal percent signs (positions on the map are percentages), and %-format
+    would try to read every one of them as a conversion. It is also quoted as a
+    **string** in the output, because a 64-bit snowflake parsed as a JavaScript
+    number loses its last digits and every request 404s. That has caused an
+    outage here before.
+    """
     return """
 <script>
 (function () {
-  var GID = "%s";
+  var GID = "__DL_GID__";
   function post(path, body, done) {
     fetch("/api/guild/" + GID + "/dodoland/" + path, {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -468,6 +511,38 @@ def _script(guild_id: int) -> str:
   if (pv) pv.addEventListener('click', function () { backfill(true); });
   var rn = document.getElementById('dlrunbackfill');
   if (rn) rn.addEventListener('click', function () { backfill(false); });
+  // Click a town to arm it, then click the map to place it there.
+  var armed = null;
+  var canvas = document.getElementById('dlcanvas');
+  if (canvas) {
+    canvas.querySelectorAll('.dltown').forEach(function (town) {
+      town.addEventListener('click', function (event) {
+        event.stopPropagation();
+        if (armed) armed.classList.remove('armed');
+        armed = (armed === town) ? null : town;
+        if (armed) armed.classList.add('armed');
+      });
+    });
+    canvas.addEventListener('click', function (event) {
+      if (!armed) return;
+      var box = canvas.getBoundingClientRect();
+      var x = ((event.clientX - box.left) / box.width) * 100;
+      var y = ((event.clientY - box.top) / box.height) * 100;
+      var moving = armed;
+      post('settle', {user_id: moving.dataset.user, x: x, y: y}, function (res) {
+        var msg = document.getElementById('dlmapmsg');
+        if (res.ok) {
+          moving.style.left = res.x + '%';
+          moving.style.top = res.y + '%';
+          moving.classList.remove('armed');
+          armed = null;
+          msg.textContent = 'Settled.';
+        } else {
+          msg.textContent = 'Refused: ' + res.error;
+        }
+      });
+    });
+  }
   var clear = document.getElementById('dlmapclear');
   if (clear) clear.addEventListener('click', function () {
     post('map', {data: null}, function (res) {
@@ -476,7 +551,7 @@ def _script(guild_id: int) -> str:
     });
   });
 })();
-</script>""" % guild_id
+</script>""".replace("__DL_GID__", str(guild_id))
 
 
 async def dodoland_page(request: web.Request):
@@ -497,6 +572,28 @@ async def dodoland_page(request: web.Request):
     # Read-only, and the only thing DodoLand reads from outside itself.
     flourish = await asyncio.get_running_loop().run_in_executor(
         None, flourish_rules.flourish_map, bot, guild.id)
+
+    # Where the towns go. Settled spots are kept; everybody else is suggested
+    # beside the people they actually talk to, from the relation graph.
+    lit_days = int(bot.dodoland_params.get(guild.id, "dodoland_lit_days"))
+    lit_since = store_module.days_back(lit_days)
+
+    def townwork():
+        partners = {}
+        for row in bot.dodoland.pair_rows(guild.id, since=since):
+            a, b, n = int(row.get("a", 0)), int(row.get("b", 0)), int(row.get("n", 0))
+            partners.setdefault(a, {})[b] = partners.setdefault(a, {}).get(b, 0) + n
+            partners.setdefault(b, {})[a] = partners.setdefault(b, {}).get(a, 0) + n
+        lit = {int(r.get("user_id", 0))
+               for r in bot.dodoland.rows(guild.id, since=lit_since)}
+        return mapview.towns(
+            result["order"], partners=partners,
+            settled=bot.dodoland_buildings.plots(guild.id), flourish=flourish,
+            names={p["user_id"]: _name_of(guild, p["user_id"]) for p in result["order"]},
+            lit=lit,
+        )
+
+    towns = await asyncio.get_running_loop().run_in_executor(None, townwork)
 
     tracking = bot.visibility.feature_active(guild.id, "dodoland_tracking", "dodoland")
     counted = len(result["people"])
@@ -528,7 +625,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_preview_html(bot, guild, result, buildings, flourish)}
     {_buildings_html(bot, guild, result)}
     {_metrics_html(bot, guild)}
-    {_map_html(bot, guild)}
+    {_map_html(bot, guild, towns)}
     {_backfill_html(bot, guild)}
     {_settings_html(bot, guild)}
   </div>

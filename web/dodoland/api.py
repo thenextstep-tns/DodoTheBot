@@ -66,6 +66,25 @@ async def api_dodoland_buildings(request: web.Request):
     return web.json_response({"ok": True, "buildings": saved})
 
 
+async def api_dodoland_settle(request: web.Request):
+    """Place one town on the map, in percentages of the base image.
+
+    Re-settling moves a town rather than making a second one: a person has one
+    town per server, which is what makes the map readable at a glance.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    try:
+        user_id = int(body.get("user_id") or 0)
+        x, y = float(body.get("x")), float(body.get("y"))
+    except (TypeError, ValueError):
+        return _bad("A town needs a person and a position.")
+    if not user_id:
+        return _bad("A town needs a person.")
+    spot = bot.dodoland_buildings.settle(guild.id, user_id, x, y)
+    return web.json_response({"ok": True, **spot})
+
+
 async def api_dodoland_backfill(request: web.Request):
     """Rebuild the archivable history from the message archive.
 

@@ -22,7 +22,7 @@ def dodoland_routes() -> list:
     from helpers import panel_access
     from web.dodoland.api import (
         api_dodoland_backfill, api_dodoland_buildings, api_dodoland_map,
-        api_dodoland_param,
+        api_dodoland_param, api_dodoland_settle,
     )
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
@@ -38,4 +38,6 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/map", full(api_dodoland_map)),
         # Rewrites historical rows, so it takes the highest scope on the page.
         web.post("/api/guild/{gid}/dodoland/backfill", full(api_dodoland_backfill)),
+        # Moving somebody's town is configuration, not a game action yet.
+        web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),
     ]

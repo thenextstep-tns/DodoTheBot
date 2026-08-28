@@ -1567,3 +1567,43 @@ body.board { background: var(--color-surface-soft); }
    controls under it off the page. */
 .dlmap { display: block; max-width: 100%; max-height: 420px; margin: 10px 0;
   border-radius: 10px; border: 1px solid var(--color-border); }
+
+/* The map canvas: the uploaded image with towns positioned over it in
+   percentages, so a redrawn map of another size moves nothing. */
+.dlcanvas { position: relative; display: inline-block; max-width: 100%;
+  margin: 10px 0; line-height: 0; }
+.dlcanvas .dlmap { margin: 0; max-height: none; }
+.dltown { position: absolute; transform: translate(-50%, -50%); display: flex;
+  flex-direction: column; align-items: center; gap: 2px; padding: 0;
+  background: none; border: 0; cursor: pointer; line-height: 1; }
+.dltowndot { display: block; width: calc(9px * var(--dl-size, 1));
+  height: calc(9px * var(--dl-size, 1)); border-radius: 50%;
+  background: var(--color-primary); border: 2px solid rgba(255, 255, 255, .85); }
+.dltownname { font-size: 10px; font-weight: var(--weight-semibold);
+  color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .95); white-space: nowrap; }
+/* Dormancy is a view, never a subtraction: a quiet town is dim, not smaller. */
+.dltown.dim { opacity: .45; }
+.dltown.armed .dltowndot { outline: 2px dashed var(--color-primary);
+  outline-offset: 3px; }
+
+/* Flourish. Earned only from trial rank, purely visual, and never a tier.
+   Each level is deliberately distinguishable at a glance on a crowded map. */
+.dltown.fl1 .dltowndot { box-shadow: 0 0 6px 1px rgba(255, 214, 130, .95); }
+.dltown.fl2 .dltowndot { box-shadow: 0 0 9px 2px rgba(255, 184, 77, .95); }
+.dltown.fl3 .dltowndot { box-shadow: 0 0 12px 3px rgba(255, 196, 61, .95);
+  border-color: #ffd970; }
+.dltown.fl4 .dltowndot { box-shadow: 0 0 16px 5px rgba(120, 190, 255, .9);
+  border-color: #cfe8ff; }
+.dltown.fl5 .dltowndot { box-shadow: 0 0 20px 7px rgba(150, 130, 255, .9);
+  border-color: #e2dbff; animation: dlpulse 3.2s ease-in-out infinite; }
+.dltown.fl6 .dltowndot { box-shadow: 0 0 26px 9px rgba(255, 120, 200, .9);
+  border-color: #fff; animation: dlpulse 2s ease-in-out infinite; }
+@keyframes dlpulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.18); filter: brightness(1.35); }
+}
+/* Forty animated towns is a phone's whole frame budget, so the motion is the
+   first thing to go for anybody who has asked for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .dltown.fl5 .dltowndot, .dltown.fl6 .dltowndot { animation: none; }
+}
