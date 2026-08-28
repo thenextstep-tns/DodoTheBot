@@ -304,4 +304,37 @@ assert "picker.dataset.chosen" in body,     "the buildings collector is not read
 assert "if (o.dataset.selected === '1') channels[o.dataset.id] = 1;" not in body,     "the collector is back to reading attributes that never change"
 print("buildings       attaching rooms records the live selection, and saves it")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The map has a page of its own
+# --------------------------------------------------------------------------- #
+from web.dodoland import mappage  # noqa: E402
+
+bot.trial_ranks = TrialRanks()
+bot.dodoland_buildings.settle(GUILD_ID, 1, 30.0, 40.0)
+map_request = Request({"bot": bot})
+map_request["guild"], map_request["scope"] = guild, "full"
+map_body = asyncio.run(mappage.map_page(map_request)).text
+print(f"map             renders, {len(map_body):,} bytes")
+
+assert "font-awesome" in map_body, "Font Awesome is not loaded"
+assert "dlframe" in map_body and "dlworld" in map_body
+print("map             the map has the window, not a panel section")
+
+# A town is drawn from what stands in it, so the buildings' icon classes have to
+# reach the page.
+assert "fa-book-open" in map_body or "fa-campground" in map_body,     "no building glyphs reached the map"
+print("map             a town is drawn from the buildings that stand in it")
+
+# Only what somebody placed appears. Nothing is scattered for you.
+assert '"plot": {' in map_body.replace(" ", "") or '"plot":{' in map_body.replace(" ", "")
+unplaced = map_body.count('"plot": null') + map_body.count('"plot":null')
+assert unplaced >= 1, "every town was given a position without being placed"
+print("map             unplaced towns stay off the map until put there")
+
+# Markers must be counter-scaled or they become billboards at high zoom.
+assert "--inv" in map_body, "town markers will scale with the map again"
+print("map             markers keep their size however far the map is zoomed")
+
 print("PASS")

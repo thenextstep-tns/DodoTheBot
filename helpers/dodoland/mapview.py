@@ -133,7 +133,7 @@ def marker_size(power: int, biggest: int) -> float:
 def towns(people: Iterable[dict], *, partners: dict[int, dict[int, int]],
           settled: dict[int, dict], flourish: dict[int, dict],
           names: Optional[dict[int, str]] = None,
-          lit: Optional[set[int]] = None) -> list[dict]:
+          lit: Optional[set[int]] = None, suggest: bool = True) -> list[dict]:
     """Everything needed to draw the map, one entry per town.
 
     ``lit`` is whoever has been active inside the recent window. A town not in it
@@ -141,7 +141,13 @@ def towns(people: Iterable[dict], *, partners: dict[int, dict[int, int]],
     score is reduced, nothing is removed, and coming back lights it again.
     """
     rows = list(people)
-    positions = place(rows, partners, settled)
+    # ``suggest=False`` means only what somebody actually placed appears. The
+    # map view uses that: a world that scattered three hundred towns for you is
+    # a world you cannot curate, and curating it is the point of drawing one.
+    positions = (place(rows, partners, settled) if suggest
+                 else {int(uid): {"x": float(spot.get("x", 50)),
+                                  "y": float(spot.get("y", 50)), "settled": True}
+                       for uid, spot in (settled or {}).items()})
     biggest = max((int(p.get("power", 0)) for p in rows), default=0)
     lit = lit if lit is not None else set()
 

@@ -140,20 +140,31 @@ async def api_dodoland_asset(request: web.Request):
 
 
 async def api_dodoland_settle(request: web.Request):
-    """Place one town on the map, in percentages of the base image.
+    """Place, move or remove one town on the map.
 
     Re-settling moves a town rather than making a second one: a person has one
-    town per server, which is what makes the map readable at a glance.
+    town per server, which is what makes the map readable at a glance. Removing
+    takes it off the map and touches nothing they have earned — a town's
+    position and a town's standing have never had anything to do with each
+    other.
     """
     bot, guild = request.app["bot"], request["guild"]
     body = await request.json()
     try:
         user_id = int(body.get("user_id") or 0)
-        x, y = float(body.get("x")), float(body.get("y"))
     except (TypeError, ValueError):
-        return _bad("A town needs a person and a position.")
+        return _bad("A town needs a person.")
     if not user_id:
         return _bad("A town needs a person.")
+
+    if body.get("remove"):
+        bot.dodoland_buildings.unsettle(guild.id, user_id)
+        return web.json_response({"ok": True, "removed": True})
+
+    try:
+        x, y = float(body.get("x")), float(body.get("y"))
+    except (TypeError, ValueError):
+        return _bad("A town needs a position.")
     spot = bot.dodoland_buildings.settle(guild.id, user_id, x, y)
     return web.json_response({"ok": True, **spot})
 

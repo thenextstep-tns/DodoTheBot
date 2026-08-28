@@ -289,41 +289,40 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 #  The map
 # --------------------------------------------------------------------------- #
 def _map_html(bot, guild, towns: list[dict]) -> str:
-    """Upload, share, and look at the map — on the same viewport players get.
+    """Uploading the world, and the way through to the map itself.
 
-    The markers, the panning and the zooming all come from ``townmap`` rather
-    than being written again here. The first version drew its own, which is how
-    the panel ended up showing three hundred permanently-labelled towns on a
-    postage stamp while the player pages showed something else entirely.
+    The map is not drawn here any more. A map squeezed between a settings form
+    and a table is a thumbnail, so it has its own page and this section is the
+    door to it plus the one thing that genuinely belongs on a settings page:
+    the base image.
     """
-    from web.dodoland import townmap
-
     image = bot.dodoland_buildings.map_image(guild.id)
-    sizes = townmap.sizes_for(bot, guild)
+    placed = len(bot.dodoland_buildings.plots(guild.id))
     state = (f"A map is set ({len(bytes(image.get('data') or b'')):,} bytes). "
              "Uploading another replaces it." if image else
              "Upload the image this server's continent is drawn on.")
-    settled = sum(1 for town in towns if town["settled"])
 
     return f"""
 <section class="sidepanel" data-panel="dl-map" hidden>
-  <h2 class="panelhead">\U0001F5FA The map</h2>
+  <h2 class="panelhead">🗺 The map</h2>
   <p class="muted">The world is an image you upload, not one the bot generates.
   Positions are percentages of it, so redrawing the map at a different size
-  never moves anybody's town.</p>
-  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB.
-  <b>{settled}</b> of <b>{len(towns)}</b> towns have been placed deliberately;
-  the rest sit beside the people their owner talks to most.</p>
+  never moves a town that has been placed.</p>
+  <p class="muted small">{_e(state)} PNG, JPEG, WebP or SVG, under 4MB.</p>
   <div class="rulebtns">
     <input type="file" id="dlmapfile" accept="image/png,image/jpeg,image/webp,image/svg+xml">
     <button id="dlmapclear">Remove map</button>
     <span id="dlmapmsg" class="muted small"></span>
   </div>
 
-  {townmap.canvas(bot, guild, towns, sizes=sizes)}
-  <p class="muted small">Drag to move, scroll to zoom. Names appear as you zoom
-  in: three hundred labels at once is a grey mat rather than a map. The biggest
-  towns keep theirs at every level so there is something to orient on.</p>
+  <div class="paramrow wide">
+    <div><b>Open the map</b>
+      <div class="muted small"><b>{placed}</b> of <b>{len(towns)}</b> towns have
+      been placed. Nothing appears on the map until you put it there: towns are
+      placed by hand from the list beside it, so the world fills up
+      deliberately.</div></div>
+    <a class="dlopenmap" href="/guild/{guild.id}/dodoland/map">Open the map →</a>
+  </div>
 
   <div class="tuneblocked">Nothing here is visible to the server. The public
   map, the per-player settle page and the <code>/town</code> command were built
@@ -341,12 +340,14 @@ def _coords_table(guild, towns: list[dict]) -> str:
     rows = ""
     for index, town in enumerate(
             sorted(towns, key=lambda t: (-t["power"], t["name"])), start=1):
+        where = (f'{town["x"]:.2f}, {town["y"]:.2f}' if town["settled"]
+                 else '<span class="muted">—</span>')
         rows += (f'<tr><td class="rankindex">{index}</td>'
                  f'<td><b>{_e(town["name"])}</b></td>'
                  f'<td class="nowrap">{town["power"]:,}</td>'
-                 f'<td class="nowrap">{town["x"]:.2f}, {town["y"]:.2f}</td>'
+                 f'<td class="nowrap">{where}</td>'
                  f'<td class="muted small">'
-                 f'{"chosen" if town["settled"] else "suggested"}</td>'
+                 f'{"on the map" if town["settled"] else "not placed"}</td>'
                  f'<td class="muted small">{"lit" if town["lit"] else "dim"}</td></tr>')
     if not rows:
         rows = '<tr><td colspan="6" class="muted">No towns yet.</td></tr>'
@@ -909,6 +910,8 @@ async def dodoland_page(request: web.Request):
         return mapview.towns(
             result["order"], partners=partners,
             settled=bot.dodoland_buildings.plots(guild.id), flourish=flourish,
+            # Only what somebody actually placed. Nothing is scattered for you.
+            suggest=False,
             names={p["user_id"]: _name_of(guild, p["user_id"], bot)
                    for p in result["order"]},
             lit=lit,

@@ -28,6 +28,7 @@ def dodoland_routes() -> list:
         api_dodoland_suggest,
     )
     from web.dodoland.assets_route import asset_image
+    from web.dodoland.mappage import map_page
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
 
@@ -37,6 +38,8 @@ def dodoland_routes() -> list:
     full = require_scope(panel_access.SCOPE_FULL)
     return [
         web.get("/guild/{gid}/dodoland", configure(dodoland_page)),
+        # The map deserves the whole window, so it is its own page.
+        web.get("/guild/{gid}/dodoland/map", configure(map_page)),
         web.get("/guild/{gid}/dodoland/asset/{aid}", configure(asset_image)),
         web.post("/api/guild/{gid}/dodoland/param", full(api_dodoland_param)),
         web.post("/api/guild/{gid}/dodoland/buildings", full(api_dodoland_buildings)),

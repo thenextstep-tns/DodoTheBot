@@ -1712,3 +1712,9 @@ body.board { background: var(--color-surface-soft); }
 .dlasset img { width: 48px; height: 48px; object-fit: contain; flex: none;
   border-radius: 8px; background: var(--color-surface-soft); padding: 4px; }
 .dlassetmeta { flex: 1 1 auto; min-width: 0; }
+
+/* The way through to the map's own page. */
+.dlopenmap { display: inline-block; padding: 10px 18px; border-radius: 10px;
+  text-decoration: none; font-weight: var(--weight-semibold);
+  background: var(--color-primary); color: #fff; white-space: nowrap; }
+.dlopenmap:hover { filter: brightness(1.08); }
