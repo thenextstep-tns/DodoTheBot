@@ -114,8 +114,20 @@ def validate_tiers(value: Any) -> list[dict]:
     return out
 
 
-def validate_channels(value: Any, *, guild=None) -> dict[int, float]:
-    """``{channel_id: weight}`` — which rooms feed this building, and how much."""
+def validate_channels(value: Any, *, guild=None) -> dict[str, float]:
+    """``{channel id: weight}`` — which rooms feed this building, and how much.
+
+    **Keys come back as strings.** BSON documents may only have string keys, so
+    an int-keyed mapping is rejected by the driver and surfaces as a 500 on
+    save. Every reader coerces with ``int()`` already, so strings are the safe
+    representation and ints are the one that cannot be stored.
+
+    A room may be a channel **or a forum post**: a forum is a container of
+    separate rooms rather than a room, so its posts are attachable in their own
+    right and are not in ``guild.channels``. Both are accepted, and anything
+    belonging to another server is refused, because the panel is per-guild and
+    pointing one server at another's rooms would leak activity between them.
+    """
     if isinstance(value, list):
         # The panel posts a list of rows; both shapes are accepted so the API
         # does not dictate the widget.
@@ -123,16 +135,32 @@ def validate_channels(value: Any, *, guild=None) -> dict[int, float]:
                  if isinstance(row, dict)}
     if not isinstance(value, dict):
         raise DodoLandError("A building's channels must be a mapping.")
-    out: dict[int, float] = {}
-    known = {c.id for c in guild.channels} if guild is not None else None
+
+    known: Optional[set] = None
+    if guild is not None:
+        known = {int(c.id) for c in getattr(guild, "channels", [])}
+        # Active forum posts. An archived one already attached stays attached:
+        # it is checked below only when the guild can still see it.
+        known |= {int(t.id) for t in (getattr(guild, "threads", []) or [])}
+
+    out: dict[str, float] = {}
     for raw_id, weight in value.items():
         try:
             channel_id = int(raw_id)
         except (TypeError, ValueError):
             raise DodoLandError("A channel id must be a number.") from None
         if known is not None and channel_id not in known:
-            raise DodoLandError("A channel in this building is not in this server.")
-        out[channel_id] = _weight(weight)
+            # An archived forum post is not in the guild's active lists but is
+            # still a real room with real history behind it, so it is kept.
+            still_there = None
+            if hasattr(guild, "get_thread"):
+                still_there = guild.get_thread(channel_id)
+            if still_there is None and hasattr(guild, "get_channel"):
+                still_there = guild.get_channel(channel_id)
+            if still_there is None:
+                raise DodoLandError(
+                    "A room in this building is not in this server.")
+        out[str(channel_id)] = _weight(weight)
     return out
 
 
@@ -337,7 +365,7 @@ def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
             out.append(building)
             continue
         hints = building.get("hints") or hints_for.get(building.get("key")) or []
-        found: dict[int, float] = {}
+        found: dict[str, float] = {}
         for channel in getattr(guild, "channels", []):
             channel_id = int(getattr(channel, "id", 0) or 0)
             name = str(getattr(channel, "name", "") or "").lower()
@@ -352,7 +380,7 @@ def suggest_channels(guild, buildings: list[dict]) -> list[dict]:
             if category is not None and getattr(category, "name", None):
                 haystack = f"{str(category.name).lower()}/{name}"
             if any(hint in haystack for hint in hints):
-                found[channel_id] = 1.0
+                found[str(channel_id)] = 1.0
                 claimed.add(channel_id)
         building["channels"] = found
         out.append(building)

@@ -149,7 +149,9 @@ def _weight_rows(guild, building: dict) -> str:
         return ('<div class="muted small">No rooms attached yet, so nothing builds '
                 'this. Pick channels above and save.</div>')
     rows = ""
-    for channel_id, weight in sorted(channels.items()):
+    # Keys are strings (BSON allows nothing else), so sort them as numbers
+    # or the rooms list orders 1000 before 900.
+    for channel_id, weight in sorted(channels.items(), key=lambda kv: int(kv[0])):
         rows += f"""
     <label class="dlfield"><span class="muted small">{_e(_channel_name(guild, channel_id))}</span>
       <input type="number" step="0.1" min="0" max="10" class="dlchw"
