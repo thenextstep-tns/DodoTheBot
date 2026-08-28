@@ -114,8 +114,14 @@ class FakeCollection:
                 return dict(doc)
         return None
 
-    def find(self, query: dict | None = None):
-        return _FakeCursor([dict(d) for d in self.docs if _matches(d, query or {})])
+    def find(self, query: dict | None = None, projection: dict | None = None):
+        found = [dict(d) for d in self.docs if _matches(d, query or {})]
+        if projection:
+            keep = {k for k, v in projection.items() if v} | {"_id"}
+            if not projection.get("_id", 1):
+                keep.discard("_id")
+            found = [{k: v for k, v in doc.items() if k in keep} for doc in found]
+        return _FakeCursor(found)
 
     def count_documents(self, query: dict | None = None) -> int:
         return sum(1 for d in self.docs if _matches(d, query or {}))

@@ -127,11 +127,18 @@ def _day_of(document) -> Optional[str]:
 
 
 def build_plan(documents: Iterable[dict], *, params, guild_id: int,
-               channel_ids: Iterable[int], before: Optional[str] = None) -> Plan:
+               channel_ids: Iterable[int], before: Optional[str] = None,
+               bot_ids: Optional[set] = None) -> Plan:
     """Aggregate an archive cursor into a writable plan.
 
     ``before`` is the exclusive upper bound: nothing on or after it is rebuilt,
     because that is where the live listener's own rows begin.
+
+    ``bot_ids`` are excluded on **both** sides of every act. Skipping bot authors
+    was never enough: people say "@Dodo pumpkin" all day, and each of those was
+    a mention received by the bot and a mention given by the person. That put the
+    bot second on the board with ten thousand points and inflated everybody who
+    talks to it. A bot is not somebody you reached.
     """
     plan = Plan()
     known = {int(c) for c in channel_ids}
@@ -152,6 +159,7 @@ def build_plan(documents: Iterable[dict], *, params, guild_id: int,
                                (params.get(guild_id, dodo_params.channels_key(m.key)) or [])}
                        for m in metric_registry.METRICS}
 
+    bots = {int(b) for b in (bot_ids or ())}
     for document in documents:
         author = document.get("author")
         channel = document.get("channel")
@@ -162,7 +170,7 @@ def build_plan(documents: Iterable[dict], *, params, guild_id: int,
         if channel_id not in known:
             plan.skipped += 1
             continue  # not this guild's room
-        if document.get("bot") and not count_bots:
+        if not count_bots and (document.get("bot") or int(author) in bots):
             plan.skipped += 1
             continue
         if not intake.counts_channel(channel_id, tracked=tracked, ignored=ignored):
@@ -185,6 +193,10 @@ def build_plan(documents: Iterable[dict], *, params, guild_id: int,
         plan.first_day = day if plan.first_day is None else min(plan.first_day, day)
         plan.last_day = day if plan.last_day is None else max(plan.last_day, day)
         for act in acts:
+            if not count_bots and (int(act.user_id) in bots
+                                   or (act.partner_id is not None
+                                       and int(act.partner_id) in bots)):
+                continue  # a bot is not somebody you reached
             only = metric_channels.get(act.metric) or set()
             if only and int(act.channel_id or 0) not in only:
                 continue
@@ -206,15 +218,20 @@ def run(bot, guild, *, archive, dry_run: bool = False) -> dict:
     live_from = store.first_day(guild.id)
     boundary = live_from or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
+    # Every account the archive has ever seen posting as a bot. Used to drop
+    # them as mention targets too, which is the half that was missing.
+    known_bots = {int(a) for a in archive.distinct("author", {"bot": True}) if a}
+
     cursor = archive.find(
         {"channel": {"$in": channel_ids}},
         {"_id": 1, "author": 1, "channel": 1, "message": 1, "bot": 1},
     )
     plan = build_plan(cursor, params=params, guild_id=guild.id,
-                      channel_ids=channel_ids, before=boundary)
+                      channel_ids=channel_ids, before=boundary,
+                      bot_ids=known_bots)
 
     result = {**plan.summary(), "boundary": boundary, "dry_run": bool(dry_run),
-              "written": 0}
+              "bots_excluded": len(known_bots), "written": 0}
     if not dry_run:
         result["written"] = store.replace_days(
             guild.id, plan.activity_rows(), plan.pair_rows()

@@ -39,8 +39,10 @@ class Channel(discord.TextChannel):
 class Member:
     bot = False
 
-    def __init__(self, uid, name):
-        self.id, self.name, self.display_name = uid, name, name
+    def __init__(self, uid, name, handle=None):
+        self.id = uid
+        self.display_name = name
+        self.name = handle or name.lower()
 
 
 class Role:
@@ -52,7 +54,8 @@ class Guild:
     name, id = "ESO for Dodos", GUILD_ID
 
     def __init__(self):
-        self.members = [Member(1, "Nik"), Member(2, "Fox"), Member(3, "Rosa")]
+        self.members = [Member(1, "Nik", "nikladushkin"), Member(2, "Fox", "foxxo"),
+                        Member(3, "Rosa", "rosa_eso")]
         self.channels = [Channel(LIB, "help"), Channel(FASH, "fashion")]
         self.roles = [Role(70, "Godslayer"), Role(71, "Casual")]
 
@@ -239,5 +242,45 @@ for path in sorted(pathlib.Path("helpers/dodoland").glob("*.py")):
                 "trial_standings.insert", "save_standing", "trial_ranks.set"):
         assert bad not in text, f"{path} writes to trial ranks via {bad}"
 print("isolation       DodoLand only reads from trial ranks, never writes")
+
+
+
+# --------------------------------------------------------------------------- #
+#  Bots are never anybody's neighbour
+# --------------------------------------------------------------------------- #
+# Excluding bot authors was never enough. People mention the bot constantly, and
+# every one of those was a mention received by it and a mention given by them,
+# which put the bot second on the board with five figures of town power.
+from helpers.dodoland import backfill as backfill_rules  # noqa: E402
+from bson import ObjectId  # noqa: E402
+import datetime as _dt  # noqa: E402
+
+_when = _dt.datetime(2025, 5, 1, tzinfo=_dt.timezone.utc)
+DODO = 999
+
+
+def _row(author, text):
+    return {"_id": ObjectId.from_datetime(_when), "author": author, "channel": LIB,
+            "message": text, "bot": author == DODO}
+
+
+_plan = backfill_rules.build_plan(
+    iter([_row(1, "<@999> pumpkin"), _row(1, "<@999> pumpkin again"),
+          _row(DODO, "a bot message here"), _row(1, "hello <@2> there")]),
+    params=bot.dodoland_params, guild_id=GUILD_ID, channel_ids=[LIB],
+    before="2099-01-01", bot_ids={DODO},
+)
+scored_users = {uid for uid, _day in _plan.activity}
+assert DODO not in scored_users, "the bot scored a town"
+assert not any(DODO in (a, b) for _d, a, b in _plan.pairs), "the bot is in the graph"
+assert 1 in scored_users and 2 in scored_users, "real people stopped counting"
+_nik = _plan.activity[(1, "2025-05-01")]["scored"]
+assert _nik.get("mention_given") == 1, f"mentions of the bot still scored: {_nik}"
+print("bots            never score, and mentioning one earns the mentioner nothing")
+
+# The name column carries the handle, so two people called Dodo are tellable
+# apart and somebody who left is named as such rather than as a bare number.
+assert "(@" in body, "names carry no account handle"
+print("names           nickname and handle, so duplicates are tellable apart")
 
 print("PASS")

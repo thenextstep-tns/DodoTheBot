@@ -230,6 +230,10 @@ class ActivityStore:
         if since:
             query["day"] = {"$gte": since}
         query.update(_basis_filter(basis))
+        # Whole documents on purpose. Projecting ``acts`` away would shrink the
+        # payload, but ``acts`` is the uncapped record the panel needs to say
+        # "200 happened, 80 scored", and a read that quietly cannot answer that
+        # is worth more than the tenths of a second it saves.
         return list(self._activity.find(query))
 
     def pair_rows(self, guild_id: int, *, since: Optional[str] = None,

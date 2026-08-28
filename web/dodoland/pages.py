@@ -62,9 +62,23 @@ def _e(value) -> str:
     return html.escape(str(value))
 
 
-def _name_of(guild, user_id: int) -> str:
-    member = guild.get_member(int(user_id))
-    return member.display_name if member else f"User {user_id}"
+def _name_of(guild, user_id: int, bot=None) -> str:
+    """Server nickname and the account handle behind it.
+
+    Two names because on a server this size neither alone is enough: nicknames
+    are changed, duplicated and full of decoration, and the handle is the only
+    stable way to tell two "Dodo"s apart. Somebody who has left is named by id,
+    which is all that is left of them.
+    """
+    member = guild.get_member(int(user_id)) if guild else None
+    if member is not None:
+        handle = getattr(member, "name", "") or ""
+        shown = getattr(member, "display_name", None) or handle or str(user_id)
+        return f"{shown} (@{handle})" if handle and handle != shown else shown
+    user = bot.get_user(int(user_id)) if bot is not None else None
+    if user is not None:
+        return f"{getattr(user, 'display_name', None) or user.name} (@{user.name})"
+    return f"User {user_id} (left)"
 
 
 def _channel_name(guild, channel_id: int) -> str:
@@ -230,7 +244,7 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 
         rows += f"""
   <tr><td class="rankindex">{person['place']}</td>
-      <td><b>{_e(_name_of(guild, person['user_id']))}</b>{badge}</td>
+      <td><b>{_e(_name_of(guild, person['user_id'], bot))}</b>{badge}</td>
       <td class="nowrap"><b>{person['power']:,}</b></td>
       <td class="muted small nowrap">{person['reached']:,} people
           ({person['reach_points']:,} pts)</td>
@@ -791,7 +805,8 @@ async def dodoland_page(request: web.Request):
         return mapview.towns(
             result["order"], partners=partners,
             settled=bot.dodoland_buildings.plots(guild.id), flourish=flourish,
-            names={p["user_id"]: _name_of(guild, p["user_id"]) for p in result["order"]},
+            names={p["user_id"]: _name_of(guild, p["user_id"], bot)
+                   for p in result["order"]},
             lit=lit,
         )
 

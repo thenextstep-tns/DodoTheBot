@@ -102,8 +102,28 @@ class DodoLand(commands.Cog, name="dodoland"):
             return True
         return int(act.channel_id or 0) in {int(c) for c in only}
 
+    def _is_bot(self, guild, user_id) -> bool:
+        """Whether an id belongs to a bot, as best this guild can tell."""
+        if user_id is None:
+            return False
+        member = guild.get_member(int(user_id)) if guild else None
+        if member is not None:
+            return bool(getattr(member, "bot", False))
+        user = self.bot.get_user(int(user_id))
+        return bool(getattr(user, "bot", False)) if user is not None else False
+
     def _write(self, guild_id: int, acts) -> None:
-        """Record a batch, never letting a storage failure escape."""
+        """Record a batch, never letting a storage failure escape.
+
+        Acts touching a bot are dropped on **both** sides. Excluding bot authors
+        was never enough: people mention the bot constantly, and every one of
+        those was a mention received by it and a mention given by them.
+        """
+        guild = self.bot.get_guild(int(guild_id))
+        if not self._param(guild_id, "dodoland_count_bots"):
+            acts = [act for act in acts
+                    if not self._is_bot(guild, act.user_id)
+                    and not self._is_bot(guild, act.partner_id)]
         acts = [act for act in acts if self._metric_allowed_here(guild_id, act)]
         if not acts:
             return
