@@ -223,6 +223,14 @@ TOWN_ART_CSS = """
 .dltown.close .o2 { animation: dlspin 22s linear infinite reverse; }
 .dltown.close .o3 { animation: dlspin 28s linear infinite; }
 .dltown.close .o4 { animation: dlspin 19s linear infinite reverse; }
+/* A thing carried round a building stays the right way up. The orbit turns the
+   group; each icon inside turns back at the same rate, or it tumbles and spends
+   half of every circuit upside down. Durations must match their orbit exactly. */
+.upright { transform-box: fill-box; transform-origin: center; }
+.dltown.close .o1 .upright { animation: dlspin 16s linear infinite reverse; }
+.dltown.close .o2 .upright { animation: dlspin 22s linear infinite; }
+.dltown.close .o3 .upright { animation: dlspin 28s linear infinite reverse; }
+.dltown.close .o4 .upright { animation: dlspin 19s linear infinite; }
 .dltown.close .u1 { animation: dlfloat 7s ease-in-out infinite; }
 .dltown.close .u2 { animation: dlfloat 9s ease-in-out infinite -2s; }
 .dltown.close .u3 { animation: dlfloat 11s ease-in-out infinite -5s; }
@@ -236,11 +244,13 @@ TOWN_ART_CSS = """
 .dltown.close .f1 { animation: dlflit 10s ease-in-out infinite; }
 .dltown.close .f2 { animation: dlflit 13s ease-in-out infinite -4s; }
 .dltown.close .f3 { animation: dlflit 16s ease-in-out infinite -8s; }
+/* No mirroring. A creature turns to face the way it is walking; a music note
+   or a hammer does not, and a mirrored one just looks wrong. */
 @keyframes dlflit {
-  0%,100% { transform: translate(0,0) scaleX(1); }
-  25%     { transform: translate(9px,-5px) scaleX(1); }
-  50%     { transform: translate(13px,-2px) scaleX(-1); }
-  75%     { transform: translate(-6px,-7px) scaleX(-1); }
+  0%,100% { transform: translate(0,0); }
+  25%     { transform: translate(9px,-5px); }
+  50%     { transform: translate(13px,-2px); }
+  75%     { transform: translate(-6px,-7px); }
 }
 
 /* ---- flourish ----------------------------------------------------------- */
@@ -276,7 +286,7 @@ TOWN_ART_CSS = """
   .dltown .pf3, .dltown .banner, .dltown .spark, .dltown .drift,
   .dltown .wheel, .dltown .cog, .dltown .orbit,
   .dltown .flring2, .dltown .flring, .dltown .flunder,
-  .dltown .fxorbit, .dltown .fxrise, .dltown .fxflit,
+  .dltown .fxorbit, .dltown .fxrise, .dltown .fxflit, .dltown .upright,
   .dltown .lifted, .dltown .bbeam, .dltown .bring,
   .dltown .townflag .cloth, .cardflag img { animation: none; }
 }

@@ -361,7 +361,8 @@ def _tower(x, base, height, radius, colour, *, conical=True, tier=1) -> str:
     return "".join(out)
 
 
-def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
+def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0,
+             wall: str = WALL) -> str:
     """One ordinary house. The town's filler, and its sense of scale.
 
     A settlement is mostly ordinary houses; the buildings somebody has earned
@@ -382,7 +383,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
     if variant == 1:  # tall and narrow, two storeys, gable to the front
         w, h = size * 0.66, size * 1.15
         left, top = x - w / 2, base - h
-        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+        return (_rect(left, top, w, h, fill=wall, width=0.9, rx=0.3)
                 + _tri(left - 0.8, top, x, top - w * 0.6, left + w + 0.8, top, colour)
                 + _rect(x - w * 0.2, top + h * 0.22, w * 0.4, h * 0.22,
                         fill=GLASS, width=0.5, rx=0.2)
@@ -392,7 +393,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
     if variant == 2:  # long and low, roof running the length of it, a chimney
         w, h = size * 1.35, size * 0.56
         left, top = x - w / 2, base - h
-        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+        return (_rect(left, top, w, h, fill=wall, width=0.9, rx=0.3)
                 + _rect(left - 1, top - h * 0.5, w + 2, h * 0.55,
                         fill=colour, width=0.9, rx=0.4)
                 + _rect(left + w * 0.72, top - h * 1.25, w * 0.13, h * 0.8,
@@ -400,7 +401,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
                 + door)
 
     if variant == 3:  # a house with a lean-to shed against it
-        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+        return (_rect(left, top, w, h, fill=wall, width=0.9, rx=0.3)
                 + _tri(left - 1.1, top, x, top - h * 0.8, left + w + 1.1, top, colour)
                 + f'<path d="M{left + w:.1f},{base:.1f} L{left + w:.1f},'
                   f'{top + h * 0.3:.1f} L{left + w + size * 0.5:.1f},'
@@ -412,7 +413,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
         r = size * 0.42
         return (f'<path d="M{x - r:.1f},{base:.1f} L{x - r:.1f},{base - r * 0.9:.1f} '
                 f'A{r:.1f},{r * 0.5:.1f} 0 0 1 {x + r:.1f},{base - r * 0.9:.1f} '
-                f'L{x + r:.1f},{base:.1f} Z" fill="{WALL}" stroke="{LINE}" '
+                f'L{x + r:.1f},{base:.1f} Z" fill="{wall}" stroke="{LINE}" '
                 f'stroke-width=".9"/>'
                 + _tri(x - r * 1.35, base - r * 0.9, x, base - r * 2.5,
                        x + r * 1.35, base - r * 0.9, colour)
@@ -420,7 +421,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
                         fill=DOOR, stroke="none", width=0, rx=0.2))
 
     if variant == 5:  # a house behind a low walled yard
-        return (_rect(left + w * 0.12, top, w * 0.88, h, width=0.9, rx=0.3)
+        return (_rect(left + w * 0.12, top, w * 0.88, h, fill=wall, width=0.9, rx=0.3)
                 + _tri(left - 0.2, top, x + w * 0.06, top - h * 0.78,
                        left + w + 1.1, top, colour)
                 + _rect(left - size * 0.34, base - h * 0.34, w * 0.6, h * 0.34,
@@ -429,7 +430,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
                 + door)
 
     # 0: the plain gabled cottage everything else is a variation on.
-    return (_rect(left, top, w, h, width=0.9, rx=0.4)
+    return (_rect(left, top, w, h, fill=wall, width=0.9, rx=0.4)
             + _tri(left - 1.1, top, x, top - h * 0.75, left + w + 1.1, top, colour)
             + door)
 
@@ -1209,16 +1210,39 @@ def _plate(density: float, houses: int = 0) -> float:
     return min(MAX_PLATE, 0.30 + 0.09 * density + min(0.05, houses / 900.0))
 
 
-def _stand(depth: float, plate: float = 0.40) -> tuple[float, float, float]:
+PLATE_CY = GROUND_Y + 3.0
+
+
+def _plate_ry(density: float) -> float:
+    """Half the ground's depth, front to back."""
+    return 8.0 + density * 2.0
+
+
+def _stand(depth: float, plate: float = 0.40,
+           ry: float = 9.0) -> tuple[float, float, float]:
     """Ground line, half-width and scale at a depth on the plate.
 
-    Everything about perspective here is linear and shallow on purpose. This is
-    a map pictogram, not a render: enough depth to read as a place, not enough
-    to look like it is falling over.
+    **Both come from the plate's own ellipse.** They used to be straight lines:
+    the ground ran from six units above the plate's centre to six below it while
+    the plate itself ran ten either way, so the whole front of a town was bare
+    sand; and the width grew linearly with depth, which is a trapezoid, so the
+    built area and the ground it stood on were different shapes. Between them
+    that left a third of every plate unused, at the front and around the back
+    corners, which is exactly where it looked emptiest.
+
+    Depth 0 is the plate's far edge and 1 is its near edge.
+
+    Everything about the perspective is still shallow on purpose. This is a map
+    pictogram, not a render: enough depth to read as a place, not enough to look
+    like it is falling over.
     """
-    y = GROUND_Y - 6.0 + depth * 12.0
-    half = WIDTH * plate * (0.66 + 0.34 * depth)
-    scale = 0.66 + 0.34 * depth
+    across = depth * 2.0 - 1.0                       # -1 at the back, +1 in front
+    y = PLATE_CY + across * ry * 0.94
+    # The ellipse's own half-width at that line, so a building at the back
+    # stands on ground that is actually there.
+    frac = max(0.16, (1.0 - across * across) ** 0.5)
+    half = WIDTH * plate * 1.06 * frac
+    scale = 0.62 + 0.38 * depth
     return y, half, scale
 
 
@@ -1254,24 +1278,36 @@ def _house_spots(count: int) -> list[tuple[float, float]]:
     return spots
 
 
-def _houses(count: int, plate: float, uid: str = "t") -> list[tuple]:
+def _houses(count: int, plate: float, uid: str = "t",
+            ry: float = 9.0) -> list[tuple]:
     """``(y, x, scale, svg)`` for the ordinary houses between the landmarks."""
     seed = int(hashlib.sha1(f"h{uid}".encode("utf-8")).hexdigest()[:8], 16)
     out = []
     for index, (depth, sideways) in enumerate(_house_spots(count)):
-        y, half, scale = _stand(depth, plate)
+        y, half, scale = _stand(depth, plate, ry)
         spin = (seed >> (index * 5 % 20)) & 0x3FF
         # Houses are smaller than landmarks at the same depth, or the landmarks
         # stop being landmarks.
+        roof, wall = HOUSE_COLOURS[spin % len(HOUSE_COLOURS)]
         out.append((y, WIDTH / 2 + sideways * half, scale * HOUSE_SCALE,
-                    _cottage(0.0, 0.0, 6.4 + (spin % 5) * 0.7,
-                             HOUSE_COLOURS[spin % len(HOUSE_COLOURS)],
-                             variant=spin % 6)))
+                    _cottage(0.0, 0.0, 6.4 + (spin % 5) * 0.7, roof,
+                             variant=(spin // 7) % 6, wall=wall)))
     return out
 
 
-HOUSE_COLOURS = ("#b0724a", "#a8663f", "#9c6b4b", "#b87c52", "#8f5f42",
-                 "#a9714f", "#96613f")
+# Roofs and walls, paired. Only the roof was ever coloured and every wall was
+# the same cream, so sixty houses came out as sixty copies of one house in
+# seven shades of brown — which is what they looked like.
+HOUSE_COLOURS = (
+    ("#b0724a", "#f6efe2"),   # tile on cream
+    ("#8f5f42", "#e8dcc6"),   # dark tile on stone
+    ("#9c6b4b", "#f2e4cd"),
+    ("#7d5a6b", "#efe6e8"),   # slate on limewash
+    ("#5f7a6b", "#e9efe6"),   # mossy on pale green
+    ("#a8663f", "#fbf3e4"),
+    ("#6b6f86", "#e6e8f0"),   # blue slate on grey
+    ("#96613f", "#f0e0c4"),
+)
 
 
 def _defs(uid: str, colour: str) -> str:
@@ -1407,7 +1443,7 @@ HOUSE_SCALE = 0.62
 
 
 def _life(rows: list[dict], shapes: dict, *, richness: float = 0.0,
-          plate: float = 0.40, uid: str = "t") -> str:
+          plate: float = 0.40, uid: str = "t", ry: float = 9.0) -> str:
     """Creatures and people wandering the town, drawn from what stands there.
 
     A menagerie brings animals, an inn brings drinkers, a chapel brings birds.
@@ -1443,7 +1479,7 @@ def _life(rows: list[dict], shapes: dict, *, richness: float = 0.0,
         spin = (seed >> (index * 3 % 24)) & 0xFFF
         depth = 0.18 + ((spin % 79) / 79.0) * 0.80
         sideways = -1.0 + (((spin // 79) % 89) / 89.0) * 2.0
-        y, half, scale = _stand(depth, plate)
+        y, half, scale = _stand(depth, plate, ry)
         x = WIDTH / 2 + sideways * half * 0.92
         route = 1 + (spin % WALK_ROUTES)
         body = draw(WALKER_COLOURS[spin % len(WALKER_COLOURS)],
@@ -1514,10 +1550,20 @@ def _building_fx(family: str, tier: int, colour: str, symbol: str = "") -> str:
         if motion == "orbit":
             # Round the building, in its own group so the rotation has a centre.
             radius = 15 + tier * 1.6 + lane * 5
+            # Each icon sits in its own `upright` group, which the stylesheet
+            # turns backwards at exactly the speed the orbit turns forwards.
+            # Without it the icon tumbles with the orbit and spends half of
+            # every circuit upside down — which is what a music note over a
+            # playhouse was doing.
+            lead = icon(name, size, colour, cx=0, cy=0)
+            trail = icon(name, size * 0.8, colour, cx=0, cy=0)
             out.append(
                 f'<g class="fxorbit o{index % 4 + 1}">'
-                f'{icon(name, size, colour, cx=radius, cy=-(12 + tier * 2.2))}'
-                f'{icon(name, size * 0.8, colour, cx=-radius * 0.72, cy=-(20 + tier * 2.6))}'
+                f'<g transform="translate({radius:.1f},{-(12 + tier * 2.2):.1f})">'
+                f'<g class="upright">{lead}</g></g>'
+                f'<g transform="translate({-radius * 0.72:.1f},'
+                f'{-(20 + tier * 2.6):.1f})">'
+                f'<g class="upright">{trail}</g></g>'
                 f'</g>')
         elif motion == "rise":
             out.append(f'<g class="fxrise u{index % 4 + 1}">'
@@ -1661,15 +1707,16 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     # layout had, one level up.
     density = _density(len(rows), richness)
     plate = _plate(density, houses)
+    plate_ry = _plate_ry(density)
 
     parts = [
         _defs(uid, glow or "#ffd27f"),
         # The ground, which grows with the town.
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 3:.1f}" '
-        f'rx="{WIDTH * plate * 1.16:.1f}" ry="{8 + density * 2:.1f}" '
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{PLATE_CY:.1f}" '
+        f'rx="{WIDTH * plate * 1.16:.1f}" ry="{plate_ry * 1.1:.1f}" '
         f'fill="#cdb894" stroke="#a68f6a" stroke-width="1.4"/>',
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 2.2:.1f}" '
-        f'rx="{WIDTH * plate * 1.06:.1f}" ry="{6.4 + density * 1.7:.1f}" '
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{PLATE_CY - 0.8:.1f}" '
+        f'rx="{WIDTH * plate * 1.06:.1f}" ry="{plate_ry * 0.9:.1f}" '
         f'fill="#ddcaa6"/>',
     ]
 
@@ -1689,7 +1736,7 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         drift = sum(sideways for _depth, sideways in used) / len(used)
         for index, row in enumerate(rows):
             depth, sideways = used[index]
-            y, half, scale = _stand(depth, plate)
+            y, half, scale = _stand(depth, plate, plate_ry)
             standing.append((y, WIDTH / 2 + (sideways - drift) * half, scale, row))
 
     # Ordinary houses, from reach. Placed with the landmarks and sorted into the
@@ -1697,7 +1744,7 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     # keep rather than layered on top of the whole town.
     drawn: list[tuple] = []
     if rows:
-        drawn.extend(_houses(houses, plate, uid))
+        drawn.extend(_houses(houses, plate, uid, plate_ry))
 
     for y, x, scale, row in standing:
         key = str(row.get("key") or "")
@@ -1747,7 +1794,8 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
                      f'scale({scale:.2f})">{art}</g>')
 
     if rows:
-        parts.append(_life(rows, shapes, richness=richness, plate=plate, uid=uid))
+        parts.append(_life(rows, shapes, richness=richness, plate=plate,
+                           uid=uid, ry=plate_ry))
     if flag and standing:
         # Flown from the grandest building rather than parked at the edge of the
         # plate: a town's banner belongs over its centrepiece, and the
