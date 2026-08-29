@@ -96,7 +96,24 @@ _BASE_PARAMETERS: list[dict] = [
      "description": "Distinct people one message can credit. A cost ceiling, not a game rule: each named person costs two writes, so a message listing thirty people should not spend thirty times a normal message's budget."},
     {"key": "dodoland_public_base_url", "cog": "dodoland", "type": "str", "default": "",
      "label": "Public address",
-     "description": "Where this panel is reachable from outside, e.g. https://dodobot.nextstep.team. Used to build the private link /town settle hands a player. Blank makes that link relative, which will not work in Discord."},
+     "description": "Where this panel is reachable from outside, e.g. https://dodobot.nextstep.team. Used whenever a town's address has to be written somewhere outside the browser that is already on it. Blank makes such a link relative, which will not work in Discord."},
+    # --- the player-facing surface ---------------------------------------- #
+    # All three default off, and that is the point rather than caution: for its
+    # whole life DodoLand has computed standings for people who could not see
+    # them, so turning any of this on is a deliberate act by the server's owner
+    # and never something a deploy does on their behalf.
+    {"key": "dodoland_town_pages", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can open their own town",
+     "description": "Turns on the player front end: a member signs in with Discord and gets their own town — its standing, every building and tier, what the next tier costs, and the name, description and picture they can give it. They see their own town and nobody else's. Off until a server is ready to be looked at."},
+    {"key": "dodoland_world_page", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can browse the world",
+     "description": "Lets a signed-in member open the map itself and look at everybody's towns, read-only. This is the whole point of the design — a socialite's reward is being seen — but it also shows every placed town's standing to the whole server, so it is its own decision. Needs the setting above."},
+    {"key": "dodoland_player_cache_seconds", "cog": "dodoland", "type": "int", "default": 60,
+     "label": "Player page freshness (seconds)",
+     "description": "A place in a ranking only exists relative to everybody else, so showing one member their own town means scoring the whole server — the same full read the panel pays once per load. This is how long that answer is reused for. 0 recomputes it on every visit, which a server of any size will feel."},
+    {"key": "dodoland_self_settle", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can place their own town",
+     "description": "Lets a member choose where on the map their own town stands, and move it later. They can never move anybody else's. Off means placement stays an admin act, which is what keeps a curated map curated."},
     {"key": "dodoland_map_min_zoom", "cog": "dodoland", "type": "float", "default": 0.4,
      "label": "Minimum zoom",
      "description": "How far out the map can be pulled. Below 1 the whole world fits in the frame with room around it."},

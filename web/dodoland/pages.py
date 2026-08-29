@@ -327,6 +327,17 @@ def _scale_reality(bot, guild) -> str:
             f'zoom.</div>{note}')
 
 
+# Settings rendered somewhere better than the flat list, and therefore skipped
+# by it. Kept beside the sections that own them so adding one to a section is
+# one edit rather than two that can disagree.
+_MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
+                   "dodoland_town_dot_below", "dodoland_detail_above",
+                   "dodoland_map_min_zoom", "dodoland_map_max_zoom")
+_PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
+                "dodoland_self_settle", "dodoland_player_cache_seconds")
+_ELSEWHERE = set(_MAP_SCALE_KEYS) | set(_PLAYER_KEYS)
+
+
 def _map_scale_rows(bot, guild) -> str:
     """The handful of numbers that decide how the world is drawn.
 
@@ -337,10 +348,7 @@ def _map_scale_rows(bot, guild) -> str:
     from web.routes import _param_input
 
     rows = ""
-    for key in ("dodoland_town_width_pct", "dodoland_town_growth",
-                "dodoland_town_dot_below",
-                "dodoland_detail_above", "dodoland_map_min_zoom",
-                "dodoland_map_max_zoom"):
+    for key in _MAP_SCALE_KEYS:
         spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)
         entry = {**spec, "value": bot.dodoland_params.get(guild.id, key)}
         rows += f"""
@@ -393,12 +401,6 @@ def _map_html(bot, guild, towns: list[dict]) -> str:
       deliberately.</div></div>
     <a class="dlopenmap" href="/guild/{guild.id}/dodoland/map">Open the map →</a>
   </div>
-
-  <div class="tuneblocked">Nothing here is visible to the server. The public
-  map, the per-player settle page and the <code>/town</code> command were built
-  and removed again: none of this is ready to be seen, and a half-finished thing
-  behind a link somebody can paste is worse than no thing at all. It comes back
-  with a proper front end and a Discord login.</div>
 
   <h3 class="panelhead">Every town, and where it sits</h3>
   <div class="dlscroll">{_coords_table(guild, towns)}</div>
@@ -529,6 +531,68 @@ def _backfill_html(bot, guild) -> str:
 </section>"""
 
 
+def _players_html(bot, guild) -> str:
+    """What the server's own members can see, and the three switches for it.
+
+    Its own section rather than three rows in the settings list, because this is
+    the only decision on the page that changes who DodoLand is *for*. Everything
+    else tunes an economy nobody outside this panel can see; these three open it
+    to the people it has been ranking.
+    """
+    from web.dodoland import player
+    from web.routes import _param_input
+
+    rows = ""
+    for key in (player.TOWN_PAGES, player.WORLD_PAGE, player.SELF_SETTLE,
+                "dodoland_player_cache_seconds"):
+        spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)
+        entry = {**spec, "value": bot.dodoland_params.get(guild.id, key)}
+        rows += f"""
+  <div class="paramrow">
+    <div><b>{_e(spec['label'])}</b>
+      <div class="muted small">{_e(spec['description'])}</div></div>
+    {_param_input(entry, guild)}
+  </div>"""
+
+    base = str(bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").rstrip("/")
+    where = (f'<p class="muted small">Members reach it at '
+             f'<code>{_e(base)}/towns</code>, signing in with Discord. They see '
+             f'their own town and, if you allow it, the map.</p>' if base else
+             '<p class="muted small">Set the <b>Public address</b> in Settings and '
+             'this will show the address to hand people. Members sign in with '
+             'Discord at <code>/towns</code>.</p>')
+
+    if player.town_pages_on(bot, guild.id):
+        state = ('<div class="paramrow wide"><div><b>Open, right now</b>'
+                 '<div class="muted small">Every member of this server can sign '
+                 'in and see their own town. Look at it the way they do before '
+                 'you tell anybody.</div></div>'
+                 f'<a class="dlopenmap" href="/guild/{guild.id}/dodoland/me">'
+                 'Open your own town →</a></div>')
+    else:
+        state = ('<div class="tuneblocked">Nothing here is visible to the server '
+                 'yet. DodoLand has been ranking several hundred people who '
+                 'cannot see any of it, which is the state it was deliberately '
+                 'left in until there was a front end worth showing them. There '
+                 'is one now: it is a Discord sign-in and an account that can '
+                 'manage its own town, not a link that is itself the password.</div>')
+
+    return f"""
+<section class="sidepanel" data-panel="dl-players" hidden>
+  <h2 class="panelhead">\U0001F9D1 What members can see</h2>
+  <p class="muted">A town is a profile, not a ladder — the reward for building
+  one is other people looking at it. These three switches are what decide
+  whether anybody ever does.</p>
+  {where}
+  {state}
+  <div class="params">{rows}</div>
+  <p class="muted small">A member can never move a number. Naming a town,
+  describing it and picturing it are authored and change nothing; standing is
+  earned and cannot be typed in. Their page reads the same scorer this one
+  does, so it can never disagree with what you see here.</p>
+</section>"""
+
+
 def _settings_html(bot, guild) -> str:
     from web.routes import _param_input
 
@@ -536,11 +600,17 @@ def _settings_html(bot, guild) -> str:
     generated |= {dodo_params.daily_cap_key(m.key) for m in metric_registry.METRICS}
     generated |= {dodo_params.partner_cap_key(m.key) for m in metric_registry.METRICS}
     generated |= {dodo_params.channels_key(m.key) for m in metric_registry.METRICS}
+    # Settings that have a better home than a flat list: the world's scale means
+    # nothing away from the map it applies to, and the three player switches are
+    # the only decision on this page about who DodoLand is *for*. Rendering them
+    # in both places means two controls for one value, which is a control that
+    # disagrees with itself as soon as one of them is stale.
+    generated |= _ELSEWHERE
 
     rows = ""
     for spec in dodo_params.DODOLAND_PARAMETERS:
         if spec["key"] in generated:
-            continue  # shown with its metric instead
+            continue  # shown with its metric, or in its own section
         entry = {**spec, "value": bot.dodoland_params.get(guild.id, spec["key"])}
         wide = " wide" if spec["type"] in ("list_channel", "list_role", "list_str") else ""
         rows += f"""
@@ -944,6 +1014,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 async def dodoland_page(request: web.Request):
+    from web.dodoland import player as player_ui
     from web.routes import _page
 
     bot, guild, scope = request.app["bot"], request["guild"], request["scope"]
@@ -1014,6 +1085,8 @@ async def dodoland_page(request: web.Request):
         ("dl-buildings", "\U0001F3D8", "Buildings", f"{len(buildings)}"),
         ("dl-metrics", "\U0001F4CF", "What counts", f"{len(metric_registry.METRICS)} metrics"),
         ("dl-map", "\U0001F5FA", "The map", f"{len(towns)} towns"),
+        ("dl-players", "\U0001F9D1", "What members can see",
+         "open" if player_ui.town_pages_on(bot, guild.id) else "nothing yet"),
         ("dl-assets", "\U0001F9F0", "Asset library",
          f"{len(bot.dodoland_assets.list(guild.id))} things"),
         ("dl-backfill", "\U000023EA", "Rebuild history", "from the archive"),
@@ -1040,6 +1113,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_buildings_html(bot, guild, result)}
     {_metrics_html(bot, guild)}
     {_map_html(bot, guild, towns)}
+    {_players_html(bot, guild)}
     {_assets_html(bot, guild)}
     {_backfill_html(bot, guild)}
     {_settings_html(bot, guild)}

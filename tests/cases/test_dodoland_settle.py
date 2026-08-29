@@ -52,14 +52,19 @@ assert full["people"][NIK]["power"] > lean["people"][NIK]["power"]
 assert full["basis"] == "all" and lean["basis"] == "live"
 print("previews        the scorer honours the basis end to end")
 
-# Nothing in DodoLand may be reachable without a panel scope. The whole package
-# is admin-only until there is a front end built for the people it ranks.
+# Nothing in DodoLand may be reachable without a gate, and there are exactly
+# two kinds: the panel's scopes, and the player gate in ``web/dodoland/player.py``
+# (signed in, still a member, and the server has opened the surface). What must
+# never come back is a capability URL that is itself the credential — that is
+# what the public map link and the settle page were, and why they were removed.
+# ``tests/cases/test_dodoland_player.py`` holds down what the player gate means.
 routes = pathlib.Path("web/dodoland/__init__.py").read_text(encoding="utf-8")
 for line in routes.splitlines():
     stripped = line.strip()
     if stripped.startswith("web.get(") or stripped.startswith("web.post("):
-        assert "configure(" in stripped or "full(" in stripped,             f"an unscoped DodoLand route: {stripped}"
+        assert ("configure(" in stripped or "full(" in stripped
+                or "player." in stripped), f"an unscoped DodoLand route: {stripped}"
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
-print("scoping         every DodoLand route sits behind a panel scope")
+print("scoping         every DodoLand route sits behind a scope or the player gate")
 
 print("PASS")

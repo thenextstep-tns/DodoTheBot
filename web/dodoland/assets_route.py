@@ -55,6 +55,62 @@ async def town_picture(request: web.Request):
     )
 
 
+def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
+    """One town as an SVG **fragment**, drawn from what its owner has built.
+
+    Blocking (it reads the day rows), so call it in an executor. The caller
+    wraps the fragment in an ``<svg viewBox>`` of its own: the map wants a town
+    at the size of a village and the town page wants the same town at the size
+    of a picture, and neither should have to unpick a document to get it.
+
+    ``flag_url`` is where the town's picture can be read from *by whoever is
+    going to look at this drawing* — the panel and a signed-in member reach the
+    same picture by different addresses, and the flag has to point at the one
+    the viewer can actually fetch. Empty means no flag flies.
+
+    **Every argument ``town_svg`` takes is passed here.** It sat for several
+    changes calling that function with an argument list three revisions old, so
+    emblems, the rank colour, the per-town gradient id and the flag were all
+    silently dropped while the drawing code supported every one of them. The
+    towns looked plausible, which is why nothing pointed at it.
+    """
+    from helpers.dodoland import flourish as flourish_rules
+    from helpers.dodoland import standing, townart
+    from helpers.dodoland import store as store_module
+
+    buildings = bot.dodoland_buildings.buildings(guild.id)
+    window = int(bot.dodoland_params.get(guild.id, "dodoland_window_days"))
+    since = store_module.days_back(window)
+    lit_since = store_module.days_back(
+        int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
+    rows = bot.dodoland.rows(guild.id, user_id=user_id, since=since)
+    result = standing.guild_standings(
+        bot.dodoland, bot.dodoland_params, guild.id, buildings,
+        since=since, user_ids=[user_id], rows=rows,
+        pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
+    )
+    person = result["people"].get(user_id) or {}
+    built = [{"key": key, "tier": int(score["tier"]) + 1}
+             for key, score in (person.get("buildings") or {}).items()
+             if score.get("tier") is not None]
+    glow = flourish_rules.flourish_map(bot, guild.id).get(user_id) or {}
+    lit = any(str(row.get("day") or "") >= lit_since for row in rows)
+    details = bot.dodoland_towns.get(guild.id, user_id) or {}
+    return townart.town_svg(
+        built,
+        lit=lit,
+        flourish=int(glow.get("level", 0)),
+        # The rank's own colour, so a Legend glows the colour a Legend is.
+        glow=str(glow.get("colour") or ""),
+        # Unique per town, or every town on the map shares one set of
+        # gradients and they all take the colour of whichever drew last.
+        uid=str(user_id),
+        flag=flag_url if details.get("image") else "",
+        shapes={b["key"]: b.get("shape") for b in buildings},
+        symbols={b["key"]: b.get("symbol") for b in buildings},
+    )
+
+
 async def town_art(request: web.Request):
     """One town's artwork, drawn on demand.
 
@@ -68,10 +124,6 @@ async def town_art(request: web.Request):
     """
     import asyncio
 
-    from helpers.dodoland import flourish as flourish_rules
-    from helpers.dodoland import standing, townart
-    from helpers.dodoland import store as store_module
-
     bot, guild = request.app["bot"], request["guild"]
     try:
         user_id = int(request.match_info.get("uid") or 0)
@@ -80,42 +132,8 @@ async def town_art(request: web.Request):
     if not user_id:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
 
-    def draw():
-        buildings = bot.dodoland_buildings.buildings(guild.id)
-        window = int(bot.dodoland_params.get(guild.id, "dodoland_window_days"))
-        since = store_module.days_back(window)
-        lit_since = store_module.days_back(
-            int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
-        rows = bot.dodoland.rows(guild.id, user_id=user_id, since=since)
-        result = standing.guild_standings(
-            bot.dodoland, bot.dodoland_params, guild.id, buildings,
-            since=since, user_ids=[user_id], rows=rows,
-            pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
-        )
-        person = result["people"].get(user_id) or {}
-        built = [{"key": key, "tier": int(score["tier"]) + 1}
-                 for key, score in (person.get("buildings") or {}).items()
-                 if score.get("tier") is not None]
-        glow = flourish_rules.flourish_map(bot, guild.id).get(user_id) or {}
-        lit = any(str(row.get("day") or "") >= lit_since for row in rows)
-        # The town's own picture, flown as a flag over it.
-        details = bot.dodoland_towns.get(guild.id, user_id) or {}
-        flag = (f"/guild/{guild.id}/dodoland/town/{user_id}/picture"
-                if details.get("image") else "")
-        return townart.town_svg(
-            built,
-            lit=lit,
-            flourish=int(glow.get("level", 0)),
-            # The rank's own colour, so a Legend glows the colour a Legend is.
-            glow=str(glow.get("colour") or ""),
-            # Unique per town, or every town on the map shares one set of
-            # gradients and they all take the colour of whichever drew last.
-            uid=str(user_id),
-            flag=flag,
-            shapes={b["key"]: b.get("shape") for b in buildings},
-            symbols={b["key"]: b.get("symbol") for b in buildings},
-        )
-
-    art = await asyncio.get_running_loop().run_in_executor(None, draw)
+    flag = f"/guild/{guild.id}/dodoland/town/{user_id}/picture"
+    art = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: draw_town(bot, guild, user_id, flag_url=flag))
     return web.Response(text=art, content_type="image/svg+xml",
                         headers={"Cache-Control": "private, max-age=120"})

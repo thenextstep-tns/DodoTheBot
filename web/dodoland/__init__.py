@@ -5,13 +5,18 @@ Mounted from ``web/routes.py:create_app`` with a function-level import, so this
 package can import the shared chrome from ``routes`` without closing an import
 cycle at module load.
 
-**Everything here is admin-scoped, and that is the current design rather than an
-oversight.** DodoLand computes standings for every member of a server, and until
-there is a proper front end — a Discord login, and an account that can manage
-its own town — none of it should be reachable by the people it ranks. A public
-map link, a per-player settle page and a ``/town`` command were all built and
-then deliberately removed: a half-finished thing behind a URL somebody can paste
-is worse than no thing at all.
+**Every route is gated, and there are exactly two kinds of gate.**
+
+``configure``/``full`` are the panel's scopes: an administrator acting on a whole
+server, which is why those handlers take a user id — they are legitimately
+working on other people's towns.
+
+``player`` is ``web/dodoland/player.py``'s own gate: signed in with Discord,
+still a member of that guild right now, and the server has switched this surface
+on. **A player handler never reads a user id from the request** — not from the
+path, the query or the body — so there is nothing to tamper with. That property
+is what a public map link and a capability URL could not offer, which is why
+both were built here and removed again.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ def dodoland_routes() -> list:
     from web.dodoland.assets_route import (
         asset_image, town_art, town_picture,
     )
+    from web.dodoland import player
     from web.dodoland.mappage import map_page
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
@@ -58,4 +64,17 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/town", full(api_dodoland_town)),
         # Rewrites historical rows, so it takes the highest scope on the page.
         web.post("/api/guild/{gid}/dodoland/backfill", full(api_dodoland_backfill)),
+        # --- the player front end ----------------------------------------- #
+        # Its gate lives in player.py and is applied by the handlers themselves,
+        # because it has to answer three questions the panel's scopes do not:
+        # is this person still in the guild, has this server switched the
+        # surface on, and — for settling — is it the kind that lets a member
+        # place their own town. None of these take a user id.
+        web.get("/guild/{gid}/dodoland/me", player.my_town_page),
+        web.get("/guild/{gid}/dodoland/me/picture", player.my_picture),
+        web.post("/api/guild/{gid}/dodoland/me/town", player.api_my_town),
+        web.post("/api/guild/{gid}/dodoland/me/settle", player.api_my_settle),
+        # Not under /guild/{gid}: it is the page that tells somebody which
+        # guilds they have a town in, so it cannot already know one.
+        web.get("/towns", player.towns_home),
     ]

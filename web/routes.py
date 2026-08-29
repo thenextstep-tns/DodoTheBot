@@ -2841,18 +2841,25 @@ async def oauth_callback(request: web.Request):
         return web.Response(status=400, text="OAuth exchange failed.", content_type="text/plain")
     uid = int(user["id"])
     bot = request.app["bot"]
-    # Anyone with access to at least one guild may hold a session; what they can
-    # then reach is decided per request by require_scope. Owners short-circuit.
-    if not bot.visibility.is_owner(uid) and not await accessible_guilds(bot, uid):
+    # A session by itself grants nothing: what it reaches is decided per request
+    # by require_scope for the panel and by player.require_town for a town. So
+    # the only question here is whether there is *anything* for this account,
+    # which is either panel access somewhere or a server that has opened
+    # DodoLand to its members. Owners short-circuit.
+    from web.dodoland import player as dodoland_player
+
+    admin_of = [] if bot.visibility.is_owner(uid) else await accessible_guilds(bot, uid)
+    player_in = await dodoland_player.player_guilds(bot, uid)
+    if not bot.visibility.is_owner(uid) and not admin_of and not player_in:
         return web.Response(
             status=403,
             text=(
-                "No panel access.\n\n"
-                "This account isn't an admin of any server this bot is in. Access needs either "
-                "the Manage Server permission in that server, or a role the bot owner has granted "
-                "panel access to.\n\n"
-                "If you were just given a role or permission, log in again — access is read fresh "
-                "at each login."
+                "Nothing here for this account.\n\n"
+                "This Discord account isn't an admin of any server this bot is in, and none of "
+                "the servers you share with it have opened their town map to members.\n\n"
+                "Panel access needs either the Manage Server permission in that server, or a role "
+                "the bot owner has granted panel access to. If you were just given a role or "
+                "permission, log in again — access is read fresh at each login."
             ),
             content_type="text/plain",
         )
@@ -2861,7 +2868,7 @@ async def oauth_callback(request: web.Request):
     # hour isn't two events worth reading.
     try:
         who = user.get("global_name") or user.get("username") or str(uid)
-        for guild, scope in await accessible_guilds(bot, uid):
+        for guild, scope in (admin_of or await accessible_guilds(bot, uid)):
             bot.audit_log.record(
                 guild.id, uid, who, audit_log.KIND_LOGIN, "panel sign-in",
                 None, scope, is_owner=(scope == panel_access.SCOPE_OWNER),
@@ -2870,7 +2877,10 @@ async def oauth_callback(request: web.Request):
     except Exception:  # noqa: BLE001 - logging must never block a login
         pass
 
-    response = web.HTTPFound("/")
+    # Somebody with no panel access has no dashboard to land on; their reason
+    # for signing in is their town.
+    response = web.HTTPFound("/" if (admin_of or bot.visibility.is_owner(uid))
+                             else "/towns")
     _set_cookie(
         response,
         auth.SESSION_COOKIE,
@@ -2898,6 +2908,12 @@ async def dashboard(request: web.Request):
         *[s for _g, s in entries], panel_access.SCOPE_NONE
     )
     if not entries and scope != panel_access.SCOPE_OWNER:
+        # A member with a town but no panel access belongs on their town page,
+        # not on a page telling them they have no servers.
+        from web.dodoland import player as dodoland_player
+
+        if await dodoland_player.player_guilds(bot, uid):
+            raise web.HTTPFound("/towns")
         return _page(
             "No access",
             '<h1>No servers</h1><p class="muted">Your Discord account has no panel access to any '

@@ -75,6 +75,9 @@ class Visibility:
     def feature_active(self, *args, **kwargs):
         return True
 
+    def cog_enabled(self, *args, **kwargs):
+        return True
+
 
 class TrialRanks:
     """Stands in for the real manager. A read-only surface only, on purpose."""
