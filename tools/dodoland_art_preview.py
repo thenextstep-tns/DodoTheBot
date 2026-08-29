@@ -107,13 +107,19 @@ def towns_row() -> str:
                "keep": "shield", "menagerie": "paw", "chapel": "dove",
                "gate": "door"}
     cells = ""
-    for label, rows, level, reach in (("nothing built", [], 0, 0.0),
-                                      ("a newcomer", small, 0, 0.05),
-                                      ("middling", middle, 2, 0.3),
-                                      ("the biggest, a Legend", big, 6, 1.0)):
+    # Reach is given as the real thing — how many different people — so the
+    # preview shows exactly the comparison that was wrong: sixty against three
+    # hundred used to be fifteen houses against eighteen.
+    for label, rows, level, reached in (("nothing built", [], 0, 0),
+                                        ("a newcomer, 3 people", small, 0, 3),
+                                        ("middling, 60 people", middle, 2, 60),
+                                        ("the biggest, 316 people, a Legend",
+                                         big, 6, 316)):
         art = _town(rows, flourish=level, glow="#ff6ec7" if level == 6 else "",
                     uid=label.replace(" ", ""), shapes=shapes, symbols=symbols,
-                    richness=reach)
+                    richness=min(1.0, __import__("math").log1p(reached)
+                                 / __import__("math").log1p(120)),
+                    houses=min(90, reached // 4))
         cells += (f'<div class="cell wide"><span class="lab">{label}</span>'
                   f'{_svg(art, width=330, extra=f"fl{level}" if level else "")}</div>')
     return f'<section><h2>towns</h2><div class="row wrap">{cells}</div></section>'

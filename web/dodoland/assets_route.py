@@ -100,14 +100,21 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
     lit = any(str(row.get("day") or "") >= lit_since for row in rows)
     details = bot.dodoland_towns.get(guild.id, user_id) or {}
 
-    # How busy the place looks. Logarithmic against a per-server target, so the
-    # difference between reaching five people and fifty is visible and the
-    # difference between two hundred and three hundred is not — otherwise one
-    # extremely connected person's town is full and everybody else's is a
-    # hamlet, which is the same failure the town *sizing* had before it grew on
-    # a root curve.
-    target = max(1, int(bot.dodoland_params.get(guild.id, "dodoland_busy_town_reach")))
     reached = int(person.get("reached") or 0)
+
+    # How many ordinary houses stand around what they built. **Linear in reach**
+    # on purpose: this is the one number on the map that is supposed to say how
+    # connected somebody is, and a logarithm made sixty people and three hundred
+    # come out as fifteen houses and eighteen — a difference nobody could see,
+    # in the quantity the whole system exists to measure.
+    per_house = int(bot.dodoland_params.get(guild.id, "dodoland_people_per_house"))
+    cap = max(0, int(bot.dodoland_params.get(guild.id, "dodoland_max_houses")))
+    houses = min(cap, reached // per_house) if per_house > 0 else 0
+
+    # How busy the streets are, and how wide the ground starts. This one *does*
+    # saturate: past a point more figures walking about is noise rather than
+    # information, while more roofs still reads as a bigger town.
+    target = max(1, int(bot.dodoland_params.get(guild.id, "dodoland_busy_town_reach")))
     richness = min(1.0, math.log1p(reached) / math.log1p(target))
 
     return townart.town_svg(
@@ -121,6 +128,7 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
         uid=str(user_id),
         flag=flag_url if details.get("image") else "",
         richness=richness,
+        houses=houses,
         shapes={b["key"]: b.get("shape") for b in buildings},
         symbols={b["key"]: b.get("symbol") for b in buildings},
         # What its owner painted it, falling back to the stable hash per key.

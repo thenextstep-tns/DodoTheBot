@@ -361,20 +361,77 @@ def _tower(x, base, height, radius, colour, *, conical=True, tier=1) -> str:
     return "".join(out)
 
 
-def _cottage(x, base, size=7.0, colour="#b0724a") -> str:
-    """One small house. The town's filler, and its sense of scale.
+def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0) -> str:
+    """One ordinary house. The town's filler, and its sense of scale.
 
     A settlement is mostly ordinary houses; the buildings somebody has earned
     are the landmarks standing among them. Without these a Legend's capital is
-    four objects on an empty plate, which is exactly what it looked like.
+    four objects on an empty plate.
+
+    Six variants, because sixty copies of one house is a housing estate rather
+    than a town. They differ in **outline** — a gable end on, a long roof, a
+    two-storey, a lean-to, a round hut, a walled yard — rather than only in
+    colour, for the same reason the landmark families do: at this size colour
+    is the first thing to go and the silhouette is the last.
     """
     w, h = size, size * 0.72
     left, top = x - w / 2, base - h
+    door = _rect(x - w * 0.13, base - h * 0.46, w * 0.26, h * 0.46,
+                 fill=DOOR, stroke="none", width=0, rx=0.3)
+
+    if variant == 1:  # tall and narrow, two storeys, gable to the front
+        w, h = size * 0.66, size * 1.15
+        left, top = x - w / 2, base - h
+        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+                + _tri(left - 0.8, top, x, top - w * 0.6, left + w + 0.8, top, colour)
+                + _rect(x - w * 0.2, top + h * 0.22, w * 0.4, h * 0.22,
+                        fill=GLASS, width=0.5, rx=0.2)
+                + _rect(x - w * 0.16, base - h * 0.36, w * 0.32, h * 0.36,
+                        fill=DOOR, stroke="none", width=0, rx=0.2))
+
+    if variant == 2:  # long and low, roof running the length of it, a chimney
+        w, h = size * 1.35, size * 0.56
+        left, top = x - w / 2, base - h
+        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+                + _rect(left - 1, top - h * 0.5, w + 2, h * 0.55,
+                        fill=colour, width=0.9, rx=0.4)
+                + _rect(left + w * 0.72, top - h * 1.25, w * 0.13, h * 0.8,
+                        fill="#6b4a30", width=0.7, rx=0.2)
+                + door)
+
+    if variant == 3:  # a house with a lean-to shed against it
+        return (_rect(left, top, w, h, width=0.9, rx=0.3)
+                + _tri(left - 1.1, top, x, top - h * 0.8, left + w + 1.1, top, colour)
+                + f'<path d="M{left + w:.1f},{base:.1f} L{left + w:.1f},'
+                  f'{top + h * 0.3:.1f} L{left + w + size * 0.5:.1f},'
+                  f'{top + h * 0.62:.1f} L{left + w + size * 0.5:.1f},{base:.1f} Z" '
+                  f'fill="{WALL_DARK}" stroke="{LINE}" stroke-width=".8"/>'
+                + door)
+
+    if variant == 4:  # a round hut with a conical roof
+        r = size * 0.42
+        return (f'<path d="M{x - r:.1f},{base:.1f} L{x - r:.1f},{base - r * 0.9:.1f} '
+                f'A{r:.1f},{r * 0.5:.1f} 0 0 1 {x + r:.1f},{base - r * 0.9:.1f} '
+                f'L{x + r:.1f},{base:.1f} Z" fill="{WALL}" stroke="{LINE}" '
+                f'stroke-width=".9"/>'
+                + _tri(x - r * 1.35, base - r * 0.9, x, base - r * 2.5,
+                       x + r * 1.35, base - r * 0.9, colour)
+                + _rect(x - r * 0.24, base - r * 0.72, r * 0.48, r * 0.72,
+                        fill=DOOR, stroke="none", width=0, rx=0.2))
+
+    if variant == 5:  # a house behind a low walled yard
+        return (_rect(left + w * 0.12, top, w * 0.88, h, width=0.9, rx=0.3)
+                + _tri(left - 0.2, top, x + w * 0.06, top - h * 0.78,
+                       left + w + 1.1, top, colour)
+                + _rect(left - size * 0.34, base - h * 0.34, w * 0.6, h * 0.34,
+                        fill=WALL_DARK, width=0.7, rx=0.2)
+                + _bush(left - size * 0.05, base, size * 0.2)
+                + door)
+
+    # 0: the plain gabled cottage everything else is a variation on.
     return (_rect(left, top, w, h, width=0.9, rx=0.4)
             + _tri(left - 1.1, top, x, top - h * 0.75, left + w + 1.1, top, colour)
-            + _rect(x - w * 0.14, base - h * 0.5, w * 0.28, h * 0.5,
-                    fill=DOOR, stroke="none", width=0, rx=0.3))
-
+            + door)
 
 # --------------------------------------------------------------------------- #
 #  The shape families
@@ -1093,24 +1150,23 @@ _PLOTS = (
 # Where ordinary houses go. Deliberately not the same band as the landmarks:
 # they crowd the near edges and the back skyline, which is where a town's own
 # housing sits relative to its civic buildings.
-_HOUSE_PLOTS = (
-    (0.06, -0.74), (0.06, 0.72), (0.04, -0.16), (0.04, 0.22),
-    (0.30, -0.86), (0.30, 0.88), (0.68, -0.98), (0.68, 0.96),
-    (0.97, -0.34), (0.97, 0.30), (0.22, -1.02), (0.22, 1.00),
-    (0.94, -0.78), (0.94, 0.74), (0.40, -1.06), (0.40, 1.04),
-    (0.76, -0.44), (0.76, 0.40),
-)
-
-
 def _density(count: int, richness: float) -> float:
     """How full a town is, 0 to 1: what it has built and who it reached."""
     built = min(1.0, count / float(MAX_BUILDINGS))
     return max(0.0, min(1.0, 0.45 * built + 0.55 * max(0.0, min(1.0, richness))))
 
 
-def _plate(density: float) -> float:
+# The widest the ground may ever be drawn, as a fraction of the town's width.
+# Everything a town draws has to fit the 120x78 box it is given: on the map
+# those boxes sit side by side and anything wider is painted over the
+# neighbours. A big town therefore grows *denser*, not wider — which is also
+# how a real one grows once it has run out of land.
+MAX_PLATE = 0.41
+
+
+def _plate(density: float, houses: int = 0) -> float:
     """Half-width of the ground, as a fraction of the town's width."""
-    return 0.34 + 0.13 * density
+    return min(MAX_PLATE, 0.30 + 0.09 * density + min(0.05, houses / 900.0))
 
 
 def _stand(depth: float, plate: float = 0.40) -> tuple[float, float, float]:
@@ -1126,20 +1182,56 @@ def _stand(depth: float, plate: float = 0.40) -> tuple[float, float, float]:
     return y, half, scale
 
 
-def _houses(count: int, plate: float, palette: tuple) -> list[tuple]:
+def _house_spots(count: int) -> list[tuple[float, float]]:
+    """``(depth, sideways)`` for ``count`` ordinary houses, laid out in rings.
+
+    Generated rather than chosen from a list. The list held eighteen positions,
+    which meant a town connected to sixty people and one connected to three
+    hundred both filled it and looked identical — the single loudest thing
+    wrong with the map, because reach is what DodoLand actually measures and it
+    was the one quantity a town could not show.
+
+    Houses sit in the annulus **outside** the landmark band: the buildings
+    somebody earned hold the middle, and the housing rings them. Angles step by
+    the golden angle so no number of houses lands in spokes, and radius steps
+    by a square root so the rings stay evenly dense rather than piling up at
+    the edge.
+    """
+    if count <= 0:
+        return []
+    spots = []
+    golden = math.pi * (3.0 - math.sqrt(5.0))
+    for index in range(count):
+        # 0.56 keeps the innermost ring clear of the landmarks; the outer edge
+        # runs slightly past the plate so a big town's houses reach its shore.
+        radius = 0.56 + 0.50 * math.sqrt((index + 0.5) / count)
+        angle = index * golden
+        sideways = math.cos(angle) * radius
+        # Depth from the same circle, so the ring reads as a ring in
+        # perspective rather than as a line of houses at one distance.
+        depth = 0.5 + 0.46 * math.sin(angle) * radius
+        spots.append((max(0.02, min(1.0, depth)), sideways))
+    return spots
+
+
+def _houses(count: int, plate: float, uid: str = "t") -> list[tuple]:
     """``(y, x, scale, svg)`` for the ordinary houses between the landmarks."""
+    seed = int(hashlib.sha1(f"h{uid}".encode("utf-8")).hexdigest()[:8], 16)
     out = []
-    for index in range(min(count, len(_HOUSE_PLOTS))):
-        depth, sideways = _HOUSE_PLOTS[index]
+    for index, (depth, sideways) in enumerate(_house_spots(count)):
         y, half, scale = _stand(depth, plate)
+        spin = (seed >> (index * 5 % 20)) & 0x3FF
         # Houses are smaller than landmarks at the same depth, or the landmarks
         # stop being landmarks.
-        out.append((y, WIDTH / 2 + sideways * half, scale * 0.62,
-                    _cottage(0.0, 0.0, 7.4, palette[index % len(palette)])))
+        out.append((y, WIDTH / 2 + sideways * half, scale * 0.52,
+                    _cottage(0.0, 0.0, 6.4 + (spin % 5) * 0.7,
+                             HOUSE_COLOURS[spin % len(HOUSE_COLOURS)],
+                             variant=spin % 6)))
     return out
 
 
-HOUSE_COLOURS = ("#b0724a", "#a8663f", "#9c6b4b", "#b87c52", "#8f5f42")
+HOUSE_COLOURS = ("#b0724a", "#a8663f", "#9c6b4b", "#b87c52", "#8f5f42",
+                 "#a9714f", "#96613f")
 
 
 def _defs(uid: str, colour: str) -> str:
@@ -1309,81 +1401,139 @@ def _life(rows: list[dict], shapes: dict, *, richness: float = 0.0,
     return "".join(out)
 
 
+# --------------------------------------------------------------------------- #
+#  What goes on around a building
+# --------------------------------------------------------------------------- #
+# The spectacle used to be one enormous turning sun and a hoop the width of the
+# settlement, drawn over the whole town regardless of what was in it. Every town
+# on the map got the same object hanging over it, it said nothing about the
+# place underneath, and at a glance it read as weather rather than as somebody's
+# town.
+#
+# What replaces it is **topical and local**: things that belong to the building
+# they belong to, orbiting or rising around that building. A tavern has mugs and
+# music over it, a library has pages, a forge throws sparks, a menagerie has
+# butterflies and leaves, a chapel has birds. You can tell what a place is from
+# across the map by what is flying around it, which is the job the emblem was
+# doing alone.
+#
+# Each entry is (icon name, how it moves, size). ``orbit`` goes round the
+# building, ``rise`` lifts off it and fades, ``flit`` drifts side to side.
+BUILDING_FX: dict[str, tuple[tuple[str, str, float], ...]] = {
+    "inn":      (("mug", "rise", 4.6), ("music", "orbit", 4.0),
+                 ("hotmug", "rise", 4.2)),
+    "hall":     (("book", "orbit", 4.4), ("scroll", "rise", 4.0),
+                 ("feather", "flit", 4.2)),
+    "keep":     (("shield", "orbit", 4.6), ("bolt", "rise", 3.8)),
+    "chapel":   (("bird", "orbit", 4.4), ("star", "rise", 3.4),
+                 ("bell", "flit", 4.0)),
+    "pen":      (("bug", "flit", 3.8), ("leaf", "rise", 4.0),
+                 ("seedling", "orbit", 4.0)),
+    "works":    (("gear", "orbit", 4.6), ("fire", "rise", 4.0),
+                 ("hammer", "flit", 4.2)),
+    "stage":    (("music", "rise", 4.4), ("masks", "orbit", 4.6),
+                 ("star", "flit", 3.6)),
+    "monument": (("star", "orbit", 4.0), ("gem", "rise", 3.8)),
+    "gate":     (("key", "orbit", 4.2), ("compass", "flit", 4.0)),
+}
+
+
+def _building_fx(family: str, tier: int, colour: str, symbol: str = "") -> str:
+    """Things belonging to this building, moving around it. Close up only.
+
+    How many arrive is the tier, so the climb is still legible: a shed has one,
+    a wonder has the lot. The building's own emblem joins in at the top, which
+    is what makes a Dodo statue's flourish actually dodos.
+    """
+    tier = max(1, min(6, int(tier)))
+    if tier < 2:
+        return ""
+    pool = list(BUILDING_FX.get(family) or BUILDING_FX["inn"])
+    if tier >= 5 and symbol and symbol in EMBLEMS:
+        pool.append((symbol, "orbit", 4.4))
+
+    how_many = min(len(pool) * 2, tier - 1)
+    out = []
+    for index in range(how_many):
+        name, motion, size = pool[index % len(pool)]
+        lane = index // len(pool)
+        if motion == "orbit":
+            # Round the building, in its own group so the rotation has a centre.
+            radius = 15 + tier * 1.6 + lane * 5
+            out.append(
+                f'<g class="fxorbit o{index % 4 + 1}">'
+                f'{icon(name, size, colour, cx=radius, cy=-(12 + tier * 2.2))}'
+                f'{icon(name, size * 0.8, colour, cx=-radius * 0.72, cy=-(20 + tier * 2.6))}'
+                f'</g>')
+        elif motion == "rise":
+            out.append(f'<g class="fxrise u{index % 4 + 1}">'
+                       f'{icon(name, size, colour, cx=-4 + index * 5, cy=-(16 + tier * 3))}'
+                       f'</g>')
+        else:  # flit
+            out.append(f'<g class="fxflit f{index % 3 + 1}">'
+                       f'{icon(name, size, colour, cx=6 - index * 7, cy=-(10 + tier * 2))}'
+                       f'</g>')
+    return _fx("".join(out))
+
+
 def _flourish(level: int, colour: str, uid: str, plate: float) -> str:
     """What a trial rank does to a whole town. Cosmetic, always, by design.
 
-    Six levels, and each has to look like a different thing rather than the
-    same hoop at a heavier stroke — which is what it was, and why the top of
-    the ladder read as a highlighter mark round a puddle:
+    Deliberately quiet now, and low to the ground. It used to be a turning sun
+    the width of the settlement with a hoop orbiting it, which every town got
+    regardless of what stood in it — the same object hanging over three hundred
+    different places, saying nothing about any of them.
 
-      1  a warm wash over the ground
-      2  a ring, drawn with a gradient rather than a flat stroke
-      3  a slowly turning sun standing behind the town
-      4  a second, wider ring, and motes lifting off it
-      5  the sun gains long rays and the rings counter-rotate
-      6  a crown of light: rays, both rings, orbiting motes and rising sparks
+    Rank belongs *under* a town, not over it. What it does:
 
-    Nothing here uses a CSS filter and nothing fades except light.
+      1  the ground warms
+      2  lanterns come up around the edge of the plate
+      3  a low band of light hugs the shore
+      4  the band gains a second, wider one and a gradient sheen
+      5  motes lift off the ground around the town
+      6  the whole plate is lit from beneath, and the light moves
+
+    The character of a town comes from what is *in* it — see ``BUILDING_FX``,
+    which puts a tavern's mugs and a forge's sparks around the tavern and the
+    forge. This is the frame; those are the picture.
     """
     if level <= 0:
         return ""
     level = min(6, int(level))
     cx, cy = WIDTH / 2, GROUND_Y + 6
     rx = WIDTH * (plate + 0.06)
-    out = []
+    out = [f'<ellipse class="flwash" cx="{cx:.1f}" cy="{cy - 3:.1f}" '
+           f'rx="{rx * 1.02:.1f}" ry="{rx * 0.30:.1f}" '
+           f'fill="url(#au{uid})" opacity="{0.22 + level * 0.06:.2f}"/>']
 
-    # The sun, behind everything: a disc with rays, turning slowly. It is the
-    # thing that reads first at a distance and the thing that makes a Legend's
-    # town look like an event rather than a settlement with a stripe on it.
-    if level >= 3:
-        rays = ""
-        count = 8 + level * 2
-        # Kept inside the town's own box. Everything a town draws has to fit
-        # the 120x78 it is given, because on the map the boxes sit side by side
-        # and anything that overflows is painted across the neighbours.
-        length = min(WIDTH * 0.42, rx * (0.60 + 0.06 * level))
-        sun_y = HEIGHT * 0.56
-        for i in range(count):
-            angle = 2 * math.pi * i / count
-            spread = math.pi / count * 0.62
-            rays += (f'<polygon points="0,0 '
-                     f'{length * math.cos(angle - spread):.1f},'
-                     f'{length * 0.55 * math.sin(angle - spread):.1f} '
-                     f'{length * math.cos(angle + spread):.1f},'
-                     f'{length * 0.55 * math.sin(angle + spread):.1f}" '
-                     f'fill="url(#ry{uid})"/>')
-        out.append(f'<g class="sunwheel" transform="translate({cx:.1f},{sun_y:.1f})">'
-                   f'{rays}</g>')
-        out.append(f'<circle class="sundisc" cx="{cx:.1f}" cy="{sun_y:.1f}" '
-                   f'r="{length * 0.42:.1f}" fill="url(#au{uid})" opacity=".55"/>')
-
-    # A warm wash over the ground, from the first level.
-    out.insert(0, f'<ellipse class="flwash" cx="{cx:.1f}" cy="{cy - 4:.1f}" '
-                  f'rx="{rx * 1.05:.1f}" ry="{rx * 0.34:.1f}" '
-                  f'fill="url(#au{uid})" opacity="{0.25 + level * 0.07:.2f}"/>')
-
-    if level >= 2:
-        out.append(f'<ellipse class="flring" cx="{cx:.1f}" cy="{cy:.1f}" '
-                   f'rx="{rx:.1f}" ry="{rx * 0.22:.1f}" fill="none" '
-                   f'stroke="url(#rg{uid})" stroke-width="{1.4 + level * 0.5:.1f}" '
+    if level >= 2:  # lanterns standing around the edge of the plate
+        for i in range(3 + level):
+            angle = math.pi * (i + 0.5) / (3 + level)
+            lx = cx - rx * 0.94 * math.cos(angle)
+            ly = cy + rx * 0.26 * math.sin(angle)
+            out.append(f'<line x1="{lx:.1f}" y1="{ly:.1f}" x2="{lx:.1f}" '
+                       f'y2="{ly - 6:.1f}" stroke="{LINE}" stroke-width=".9"/>')
+            out.append(_lantern(lx, ly - 7, 1.5))
+    if level >= 3:  # a low band of light along the shore
+        out.append(f'<ellipse class="flring" cx="{cx:.1f}" cy="{cy + 1:.1f}" '
+                   f'rx="{rx:.1f}" ry="{rx * 0.24:.1f}" fill="none" '
+                   f'stroke="url(#rg{uid})" stroke-width="{1.2 + level * 0.45:.1f}" '
                    f'stroke-linecap="round"/>')
-    if level >= 4:  # a second ring, turning the other way
-        out.append(f'<ellipse class="flring2" cx="{cx:.1f}" cy="{cy:.1f}" '
-                   f'rx="{rx * 1.12:.1f}" ry="{rx * 0.27:.1f}" fill="none" '
-                   f'stroke="url(#rg{uid})" stroke-width="{level * 0.4:.1f}" '
-                   f'opacity=".6"/>')
-    if level >= 5:  # motes going round the town, close up only
-        motes = "".join(
-            f'<circle cx="{rx * math.cos(2 * math.pi * i / 5):.1f}" '
-            f'cy="{rx * 0.22 * math.sin(2 * math.pi * i / 5):.1f}" '
-            f'r="{1.6 + (i % 2) * 0.8:.1f}" fill="{colour}"/>' for i in range(5))
-        out.append(_fx(f'<g class="flmotes" transform="translate({cx:.1f},{cy:.1f})">'
-                       f'{motes}</g>'))
-    if level >= 6:  # sparks rising off the whole settlement
-        for i in range(4):
+    if level >= 4:
+        out.append(f'<ellipse class="flring2" cx="{cx:.1f}" cy="{cy + 2:.1f}" '
+                   f'rx="{rx * 1.09:.1f}" ry="{rx * 0.28:.1f}" fill="none" '
+                   f'stroke="url(#rg{uid})" stroke-width="{level * 0.35:.1f}" '
+                   f'opacity=".5"/>')
+    if level >= 5:  # motes lifting off the ground, not orbiting overhead
+        for i in range(5):
             out.append(_fx(f'<circle class="spark s{i + 1}" '
-                           f'cx="{cx - 18 + i * 12:.1f}" cy="{cy - 26:.1f}" '
-                           f'r="{1.4 + (i % 2) * 0.6:.1f}" fill="{colour}"/>'))
+                           f'cx="{cx - rx * 0.7 + i * rx * 0.35:.1f}" '
+                           f'cy="{cy - 2:.1f}" r="{1.3 + (i % 2) * 0.5:.1f}" '
+                           f'fill="{colour}"/>'))
+    if level >= 6:  # the plate itself lit from underneath
+        out.insert(0, f'<ellipse class="flunder" cx="{cx:.1f}" cy="{cy + 3:.1f}" '
+                      f'rx="{rx * 1.16:.1f}" ry="{rx * 0.34:.1f}" '
+                      f'fill="url(#au{uid})" opacity=".7"/>')
     return "".join(out)
 
 
@@ -1419,6 +1569,7 @@ def banner(url: str, uid: str) -> str:
 
 def town_svg(buildings: Iterable[dict], *, lit: bool = True,
              flourish: int = 0, glow: str = "", richness: float = 0.0,
+             houses: int = 0,
              uid: str = "t", flag: str = "", shapes: Optional[dict] = None,
              symbols: Optional[dict] = None,
              colours: Optional[dict] = None) -> str:
@@ -1450,8 +1601,12 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     uid = "".join(c for c in str(uid) if c.isalnum()) or "t"
 
     richness = max(0.0, min(1.0, float(richness or 0.0)))
+    houses = max(0, int(houses or 0))
+    # The ground has to hold what stands on it. A town of eighty houses on the
+    # same plate as a town of eight is the same crowding problem the fixed
+    # layout had, one level up.
     density = _density(len(rows), richness)
-    plate = _plate(density)
+    plate = _plate(density, houses)
 
     parts = [
         _defs(uid, glow or "#ffd27f"),
@@ -1480,9 +1635,7 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     # keep rather than layered on top of the whole town.
     drawn: list[tuple] = []
     if rows:
-        for y, x, scale, body in _houses(int(round(18 * richness)), plate,
-                                         HOUSE_COLOURS):
-            drawn.append((y, x, scale, body))
+        drawn.extend(_houses(houses, plate, uid))
 
     for y, x, scale, row in standing:
         key = str(row.get("key") or "")
@@ -1492,6 +1645,11 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         tint = colours.get(key) or colour_for(key)
         mark = symbols.get(key) or ""
         behind, front = _tier_effects(tier, tint, uid)
+        # What belongs to this building, moving around this building: a
+        # tavern's mugs, a forge's sparks, a menagerie's butterflies. This is
+        # what the town-wide sun used to be, and it says something about the
+        # place rather than the same thing about every place.
+        front += _building_fx(family, tier, tint, mark)
         mass = draw(0.0, 0.0, tier, tint, mark)
         if tier == 6:
             # Detached from the ground, hovering over the shadow drawn for it.

@@ -184,7 +184,7 @@ TOWN_ART_CSS = """
 /* ---- things that turn --------------------------------------------------- */
 /* Rotation rather than a fade wherever the real object would turn: a mill wheel
    that blinks is a broken mill wheel. */
-.wheel, .cog, .orbit, .sunwheel, .flmotes, .flring2 {
+.wheel, .cog, .orbit, .fxorbit {
   transform-box: fill-box; transform-origin: center; }
 .dltown.close .wheel { animation: dlspin 9s linear infinite; }
 .dltown.close .cog { animation: dlspin 14s linear infinite reverse; }
@@ -212,21 +212,48 @@ TOWN_ART_CSS = """
   50%     { transform: scale(1.08); opacity: .45; }
 }
 
+/* ---- what belongs to a building ---------------------------------------- */
+/* Topical effects: a tavern's mugs, a library's pages, a forge's sparks, a
+   menagerie's butterflies. They orbit, rise off or drift around the building
+   they belong to. This replaced a single enormous turning sun drawn over the
+   whole settlement — the same object hanging over three hundred different
+   towns, telling you nothing about any of them. */
+.fxorbit, .fxrise, .fxflit { transform-box: fill-box; transform-origin: center; }
+.dltown.close .o1 { animation: dlspin 16s linear infinite; }
+.dltown.close .o2 { animation: dlspin 22s linear infinite reverse; }
+.dltown.close .o3 { animation: dlspin 28s linear infinite; }
+.dltown.close .o4 { animation: dlspin 19s linear infinite reverse; }
+.dltown.close .u1 { animation: dlfloat 7s ease-in-out infinite; }
+.dltown.close .u2 { animation: dlfloat 9s ease-in-out infinite -2s; }
+.dltown.close .u3 { animation: dlfloat 11s ease-in-out infinite -5s; }
+.dltown.close .u4 { animation: dlfloat 8s ease-in-out infinite -3s; }
+@keyframes dlfloat {
+  0%   { opacity: 0; transform: translateY(4px) scale(.7); }
+  20%  { opacity: .95; }
+  75%  { opacity: .7; }
+  100% { opacity: 0; transform: translateY(-22px) scale(1.05); }
+}
+.dltown.close .f1 { animation: dlflit 10s ease-in-out infinite; }
+.dltown.close .f2 { animation: dlflit 13s ease-in-out infinite -4s; }
+.dltown.close .f3 { animation: dlflit 16s ease-in-out infinite -8s; }
+@keyframes dlflit {
+  0%,100% { transform: translate(0,0) scaleX(1); }
+  25%     { transform: translate(9px,-5px) scaleX(1); }
+  50%     { transform: translate(13px,-2px) scaleX(-1); }
+  75%     { transform: translate(-6px,-7px) scaleX(-1); }
+}
+
 /* ---- flourish ----------------------------------------------------------- */
-/* What a trial rank does to a whole town. It was one flat ellipse stroke at
-   every level from one to six, differing only in width — a highlighter mark
-   round a puddle, which is exactly what it looked like. The ring is now drawn
-   with a gradient and the levels above it add a slowly turning sun, a
-   counter-turning outer ring and motes going round the settlement. */
-.dltown.close .sunwheel { animation: dlspin 90s linear infinite; }
-.dltown.close .flmotes { animation: dlspin 24s linear infinite reverse; }
+/* What a trial rank does to a whole town, and it is deliberately quiet and low
+   to the ground now: a warm plate, lanterns round the shore, a band of light
+   along it. Rank frames a town; what is *in* the town gives it its character.
+   The turning sun and the orbiting hoop are gone. */
 .dltown.close .flring2 { animation: dlspin 60s linear infinite; }
-.dltown.close .sundisc { animation: dlpulse 8s ease-in-out infinite; }
-@keyframes dlpulse { 0%,100% { opacity: .5; } 50% { opacity: .78; } }
-/* The ring's own gradient sweeps round it rather than the ring blinking. */
-.flring { transform-box: fill-box; transform-origin: center; }
+.flring, .flring2 { transform-box: fill-box; transform-origin: center; }
 .dltown.close .flring { animation: dlsheen 6s ease-in-out infinite; }
+.dltown.close .flunder { animation: dlpulse 9s ease-in-out infinite; }
 @keyframes dlsheen { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
+@keyframes dlpulse { 0%,100% { opacity: .55; } 50% { opacity: .85; } }
 
 /* A town's own picture, flown as a flag over whatever it has built highest —
    and shown as the same cloth wherever else it appears, so it reads as the
@@ -247,8 +274,9 @@ TOWN_ART_CSS = """
 @media (prefers-reduced-motion: reduce) {
   .dltown .gait, .dltown .glow, .dltown .halo, .dltown .pf1, .dltown .pf2,
   .dltown .pf3, .dltown .banner, .dltown .spark, .dltown .drift,
-  .dltown .wheel, .dltown .cog, .dltown .orbit, .dltown .sunwheel,
-  .dltown .flmotes, .dltown .flring2, .dltown .flring, .dltown .sundisc,
+  .dltown .wheel, .dltown .cog, .dltown .orbit,
+  .dltown .flring2, .dltown .flring, .dltown .flunder,
+  .dltown .fxorbit, .dltown .fxrise, .dltown .fxflit,
   .dltown .lifted, .dltown .bbeam, .dltown .bring,
   .dltown .townflag .cloth, .cardflag img { animation: none; }
 }
