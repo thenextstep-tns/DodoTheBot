@@ -282,10 +282,13 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    dot, which is what every map does as you pull away from it. */
 .dltown.tiny .dlart, .dltown.tiny .dlname { display: none; }
 .dltown.tiny .dldot { display: block; }
-.dldot { display: none; width: 9px; height: 9px; border-radius: 50%;
-  background: #f0c98a; border: 2px solid #4a3524;
-  box-shadow: 0 1px 3px rgba(0,0,0,.5);
-  position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); }
+/* In flow, not absolute: when a town is a dot this is its only visible child,
+   and an absolutely positioned one left the town with no height and therefore
+   nothing to click. A dot you cannot open is not a town on a map. */
+.dldot { display: none; width: 11px; height: 11px; border-radius: 50%;
+  margin: 0 auto; background: #f0c98a; border: 2px solid #4a3524;
+  box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.dltown.tiny { min-width: 14px; }
 .dltown.dim { opacity: .5; }
 /* A filter on anything inside the scaled world rasterises it, so the selected
    town is marked with an outline on its ground plate rather than a glow. Same
@@ -364,9 +367,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .dlrow .p { font-size: 12px; opacity: .75; }
 
-.dlcard { position: fixed; left: 16px; bottom: 16px; width: 330px; z-index: 25;
+.dlcard { position: fixed; left: 16px; bottom: 16px; width: 340px; z-index: 25;
   padding: 16px 18px; border-radius: 12px; background: var(--paper);
-  border: 1px solid var(--edge); box-shadow: 0 10px 34px rgba(0,0,0,.35); }
+  border: 1px solid var(--edge); box-shadow: 0 10px 34px rgba(0,0,0,.35);
+  /* The editor makes this tall enough to run off the top of the screen, and a
+     Save button nobody can reach is a Save button that does not work. */
+  max-height: calc(100vh - 84px); overflow-y: auto; }
+.cardmsg { margin: 10px 0 0; font-size: 13px; color: var(--soft); }
+.cardmsg.bad { color: #c0392b; font-weight: 600; }
 .dlcard h3 { margin: 0 0 2px; font-size: 19px; }
 .dlcard .sub { color: var(--soft); font-size: 13px; margin-bottom: 10px; }
 .dlcard ul { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -669,8 +677,9 @@ _SCRIPT = r"""
         '<input id="tpic" type="file" accept="image/png,image/jpeg,image/gif,image/webp">' +
         (nameFields ? '<label style="margin-top:12px"><b>Building names</b></label>' +
           nameFields : '') +
-        '<div class="acts"><button data-act="save">Save</button>' +
+        '<div class="acts"><button data-act="save" class="own">Save</button>' +
         '<button data-act="clearpic">Remove picture</button></div>' +
+        '<p class="cardmsg" id="dlcardmsg"></p>' +
       '</div>';
     card.hidden = false;
     var editor = card.querySelector('.dledit');
@@ -695,6 +704,17 @@ _SCRIPT = r"""
             building_names: names
           };
           if (!chosen) { saveTown(id, payload); return; }
+          if (chosen.size > 6 * 1024 * 1024) {
+            var box = document.getElementById('dlcardmsg');
+            if (box) {
+              box.classList.add('bad');
+              box.textContent = 'That picture is ' +
+                (chosen.size / 1048576).toFixed(1) + 'MB. The limit is 6MB, so ' +
+                'nothing was saved. Pick a smaller one, or clear it and save ' +
+                'the rest.';
+            }
+            return;
+          }
           var reader = new FileReader();
           reader.onload = function () {
             payload.image = String(reader.result).split(',').pop();
@@ -708,16 +728,28 @@ _SCRIPT = r"""
   }
 
   function saveTown(id, payload) {
+    // Anything this says has to appear in the card. It used to go to the hint
+    // bar in the far corner of the map, behind the card and often off screen,
+    // so a refused save looked exactly like a button that did nothing.
+    var say = function (text, bad) {
+      var box = document.getElementById('dlcardmsg');
+      if (box) { box.textContent = text; box.classList.toggle('bad', !!bad); }
+      hint.textContent = text;
+    };
     payload.user_id = id;
-    hint.textContent = 'Saving...';
+    say('Saving...');
     fetch('/api/guild/' + D.gid + '/dodoland/town', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); }).then(function (res) {
-      if (!res.ok) { hint.textContent = res.error || 'That did not work.'; return; }
-      hint.textContent = 'Saved.';
-      window.location.reload();
-    });
+    }).then(function (r) {
+      return r.json().catch(function () {
+        return {ok: false, error: 'The server answered with ' + r.status + '.'};
+      });
+    }).then(function (res) {
+      if (!res.ok) { say(res.error || 'That did not work.', true); return; }
+      say('Saved. Reloading...');
+      setTimeout(function () { window.location.reload(); }, 400);
+    }).catch(function (err) { say(String(err), true); });
   }
   function closeCard() {
     card.hidden = true; openId = null;

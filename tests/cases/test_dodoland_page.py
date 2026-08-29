@@ -403,4 +403,32 @@ print("map             nothing rasterises the world, so it stays vector when zoo
 assert "(w <= fw)" in map_body, "the clamp cannot handle a world smaller than the frame"
 print("map             a world smaller than the frame is centred, not pinned")
 
+
+
+# --------------------------------------------------------------------------- #
+#  A save has to say what happened, where it happened
+# --------------------------------------------------------------------------- #
+# Refusals used to go to the hint bar in the far corner of the map, behind the
+# card and often off screen, so a rejected save was indistinguishable from a
+# button that did nothing at all.
+assert "dlcardmsg" in map_body, "the card cannot report anything"
+assert "cardmsg" in map_body and ".cardmsg.bad" in map_body
+print("card            a save reports its result inside the card")
+
+# The commonest refusal is a picture over the limit, so it is caught before the
+# upload rather than after it.
+assert "6 * 1024 * 1024" in map_body, "an oversized picture is not caught early"
+print("card            an oversized picture is refused with its actual size")
+
+# A dot is a town's only visible part when zoomed out, and it has to be
+# clickable. Absolutely positioned, it left the town with no height at all.
+_dot = map_body[map_body.index(".dldot {"):map_body.index(".dltown.dim")]
+assert "position: absolute" not in _dot, "a dot is out of flow, so it cannot be clicked"
+assert "margin: 0 auto" in _dot
+print("card            a dot keeps a clickable body, so a far town still opens")
+
+# The editor makes the card tall; a Save button nobody can reach does not work.
+assert "max-height: calc(100vh" in map_body, "the card can grow past the screen"
+print("card            the card scrolls rather than running off the screen")
+
 print("PASS")

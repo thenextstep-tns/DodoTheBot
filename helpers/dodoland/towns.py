@@ -23,10 +23,12 @@ from typing import Any, Optional
 MAX_NAME = 48
 MAX_BLURB = 600
 MAX_BUILDING_NAME = 48
-# A town's picture. Generous for a drawing or a short loop, mean for a video
-# somebody renamed. GIFs are allowed on purpose: a town that waves is exactly
-# the sort of thing people put effort into.
-MAX_IMAGE_BYTES = 2 * 1024 * 1024
+# A town's picture. Room for a real drawing or a short loop, and still far
+# inside Mongo's 16MB document ceiling with the rest of the row. Two megabytes
+# was mean enough that an ordinary PNG export was refused. GIFs are allowed on
+# purpose: a town that waves is exactly the sort of thing people put effort
+# into.
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
 
 
