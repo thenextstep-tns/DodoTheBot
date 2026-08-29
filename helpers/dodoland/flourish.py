@@ -75,7 +75,8 @@ def level_for_rung(index: Optional[int], total: int) -> int:
     return 1 + int(round(span * (min(index, total - 1) / (total - 1))))
 
 
-BLANK: dict = {"level": 0, "rank_name": None, "role_id": 0, **BY_KEY["none"]}
+BLANK: dict = {"level": 0, "rank_name": None, "role_id": 0, "colour": "",
+               **BY_KEY["none"]}
 
 
 def flourish_map(bot, guild_id: int) -> dict[int, dict]:
@@ -119,10 +120,20 @@ def flourish_map(bot, guild_id: int) -> dict[int, dict]:
             role_id = int(current.get("role_id") or 0)
             level = level_for_rung(positions.get(role_id), len(ranks))
             role = guild.get_role(role_id) if guild and role_id else None
+            # The rank's own colour, so a town glows in the colour the server
+            # already associates with that rank. An invented palette meant a
+            # Legend glowed lilac, which says nothing to anybody who knows what
+            # Legend looks like in the member list.
+            colour = ""
+            if role is not None and getattr(role, "colour", None):
+                value = getattr(role.colour, "value", 0)
+                if value:
+                    colour = f"#{value:06x}"
             out[user_id] = {
                 "level": level,
                 "rank_name": role.name if role else (current.get("name") or None),
                 "role_id": role_id,
+                "colour": colour,
                 **LEVELS[level],
             }
         return out

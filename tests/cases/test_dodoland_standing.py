@@ -371,4 +371,43 @@ assert pairs[0][1] < pairs[-1][1], "depth does not change how large a building i
 assert art.index(f"translate({spots[0][0]}") < art.index(f"translate({spots[-1][0]}"),     "buildings are not painted back to front"
 print("art             the far ones are smaller and drawn under the near ones")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The climb has to look like a climb
+# --------------------------------------------------------------------------- #
+# The original design had thirty tiers of escalating spectacle and was right to.
+# What was wrong with it was arithmetic that made the top unreachable, and the
+# thresholds are derived now, so there is no reason left to be timid about it.
+sizes = {}
+for tier in range(1, 7):
+    art = townart.town_svg([{"key": "k", "tier": tier}], shapes={"k": "keep"},
+                           symbols={"k": "shield"}, glow="#f1c40f", uid=f"t{tier}")
+    sizes[tier] = len(art)
+assert sizes[6] > sizes[4] > sizes[2], sizes
+print("tiers           every tier is visibly more than the one below it")
+
+top = townart.town_svg([{"key": "k", "tier": 6}], shapes={"k": "keep"},
+                       glow="#f1c40f", uid="top")
+for mark, why in (("lifted", "the top tier does not leave the ground"),
+                  ("bbeam", "no beam of light at the top"),
+                  ("orbit", "nothing orbits the top tier"),
+                  ("baura", "no aura at the top")):
+    assert mark in top, why
+print("tiers           the top tier hovers, beams, orbits and glows")
+
+# Effects must be gated so a wide view is not three hundred light shows.
+assert top.count('class="fx"') >= 4, "the spectacle is not behind the close-up gate"
+print("tiers           all of it is behind the close-up gate")
+
+# Gradients, never CSS filters: a filter inside the zoomed world rasterises it.
+assert "radialGradient" in top and "filter" not in top
+print("tiers           drawn with gradients, so it stays vector at every zoom")
+
+# Two towns must not share gradient ids, or they all take one colour.
+a = townart.town_svg([{"key": "k", "tier": 6}], glow="#ff0000", uid="111")
+b = townart.town_svg([{"key": "k", "tier": 6}], glow="#00ff00", uid="222")
+assert "au111" in a and "au222" in b and "au111" not in b
+print("tiers           each town owns its gradients, so colours cannot bleed")
+
 print("PASS")

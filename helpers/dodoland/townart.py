@@ -80,6 +80,59 @@ def _door(x, base, w=4.0, h=6.0, arch=False) -> str:
     return _rect(x - w / 2, base - h, w, h, fill=DOOR, stroke="none", width=0, rx=0.6)
 
 
+# --------------------------------------------------------------------------- #
+#  Symbols
+# --------------------------------------------------------------------------- #
+# Font Awesome glyphs, by name, as the codepoints they actually are. Drawn as
+# SVG <text> so they sit *inside* the artwork and scale with it, rather than
+# floating over it in HTML.
+#
+# The shapes carry what a building **is** and how far it has come; these carry
+# what it is *for*. A keep with a shield on its banner and a keep with a map on
+# it are the war room and the barracks, and no amount of masonry would have told
+# you which. That division is the point: mass for tier, symbol for meaning.
+GLYPHS = {
+    "mug": "", "book": "", "shield": "", "map": "",
+    "gamepad": "", "scales": "", "paw": "", "image": "",
+    "camera": "", "bread": "", "gear": "", "dove": "",
+    "bottle": "", "monument": "", "door": "", "masks": "",
+    "music": "", "utensils": "", "hammer": "", "flask": "",
+    "crown": "", "star": "", "fire": "", "anchor": "",
+    "cat": "", "dog": "", "crow": "", "fish": "",
+    "horse": "", "dragon": "", "user": "", "users": "",
+    "tree": "", "leaf": "", "feather": "", "bug": "",
+}
+# Which creatures wander near which building, once you are close enough to see
+# them. A menagerie with nothing moving in it is a shed with a fence.
+LIFE = {
+    "pen": ("cat", "dog", "crow", "horse"),
+    "inn": ("users", "user", "mug"),
+    "stage": ("masks", "music", "users"),
+    "works": ("hammer", "gear"),
+    "hall": ("book", "user"),
+    "keep": ("shield", "user"),
+    "chapel": ("dove", "feather"),
+    "monument": ("star",),
+    "gate": ("user",),
+}
+FONT = ("font-family='Font Awesome 6 Free' font-weight='900'")
+
+
+def glyph(name: str) -> str:
+    """A glyph by name, or nothing if the name is not one we know."""
+    return GLYPHS.get(str(name or ""), "")
+
+
+def _symbol(x, y, name, size=7.0, colour=LINE, extra="") -> str:
+    """One Font Awesome glyph, as SVG text so it scales with the drawing."""
+    ch = glyph(name)
+    if not ch:
+        return ""
+    return (f'<text x="{x:.1f}" y="{y:.1f}" {FONT} font-size="{size:.1f}" '
+            f'fill="{colour}" text-anchor="middle" dominant-baseline="central"'
+            f'{extra}>{ch}</text>')
+
+
 def _fx(body: str) -> str:
     """Wrap a close-up flourish.
 
@@ -448,8 +501,116 @@ def _stand(depth: float) -> tuple[float, float, float]:
     return y, half, scale
 
 
+def _defs(uid: str, colour: str) -> str:
+    """Gradients this town's effects draw with.
+
+    SVG gradients rather than CSS filters, deliberately: a filter inside the
+    zoomed world rasterises whatever it touches, and the grandest buildings were
+    the first to turn to mush when that was tried. A gradient stays vector at
+    every zoom, which is the only way the top of the ladder can look like the
+    top of the ladder.
+    """
+    return (
+        f'<defs>'
+        f'<radialGradient id="au{uid}">'
+        f'<stop offset="0%" stop-color="{colour}" stop-opacity=".85"/>'
+        f'<stop offset="55%" stop-color="{colour}" stop-opacity=".28"/>'
+        f'<stop offset="100%" stop-color="{colour}" stop-opacity="0"/>'
+        f'</radialGradient>'
+        f'<linearGradient id="bm{uid}" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0%" stop-color="{colour}" stop-opacity="0"/>'
+        f'<stop offset="45%" stop-color="{colour}" stop-opacity=".55"/>'
+        f'<stop offset="100%" stop-color="{colour}" stop-opacity="0"/>'
+        f'</linearGradient>'
+        f'</defs>'
+    )
+
+
+def _tier_effects(tier: int, colour: str, uid: str) -> tuple[str, str]:
+    """What a building gains for being grand. Returns (behind, in front).
+
+    The original design had thirty tiers of escalating spectacle and was right
+    to: a ladder whose top rung looks like its bottom rung is not worth
+    climbing. What was wrong with it was the arithmetic — it asked one person
+    for 125,000 acts on a server whose entire history is 306,927 messages — and
+    the thresholds here are derived from the server's own distribution instead,
+    so the top of this ladder is genuinely reachable. Having fixed the numbers
+    there is no reason left to be timid about the spectacle.
+
+    Effects stack rather than replace, so the climb reads as a climb:
+
+      4  the ground warms under it
+      5  it lifts off the ground, embers rise, an aura settles over it
+      6  it hovers over its own shadow, wrapped in a ring of light with motes
+         going round it and a beam standing over the whole thing
+
+    Opacity, transform and gradients only. A CSS filter in here would rasterise
+    the building it touches.
+    """
+    tier = max(1, min(6, int(tier)))
+    behind, front = "", ""
+
+    if tier >= 4:  # the ground warms
+        behind += _fx(f'<ellipse class="bglow" cx="0" cy="-1" rx="{12 + tier * 2.4:.0f}" '
+                      f'ry="{6 + tier:.0f}" fill="url(#au{uid})"/>')
+
+    if tier >= 5:  # an aura, and embers off the roof
+        behind += _fx(f'<circle class="baura" cx="0" cy="{-12 - tier * 2:.0f}" '
+                      f'r="{16 + tier * 2:.0f}" fill="url(#au{uid})" opacity=".5"/>')
+        for i in range(4):
+            front += _fx(f'<circle class="spark s{i + 1}" cx="{-6 + i * 4}" '
+                         f'cy="{-14 - tier * 3}" r="{1.2 + i * 0.2:.1f}" fill="{colour}"/>')
+
+    if tier == 6:  # it leaves the ground
+        # A shadow where it used to stand, and the building itself lifted: the
+        # single clearest way to say "this is the top" without a label.
+        behind += _fx(f'<ellipse class="bshadow" cx="0" cy="2" rx="14" ry="4" '
+                      f'fill="#2a1c12" opacity=".45"/>')
+        behind += _fx(f'<rect class="bbeam" x="-5" y="-92" width="10" height="92" '
+                      f'fill="url(#bm{uid})"/>')
+        behind += _fx(f'<ellipse class="bring" cx="0" cy="{-16 - tier * 2:.0f}" '
+                      f'rx="{20 + tier:.0f}" ry="7" fill="none" stroke="{colour}" '
+                      f'stroke-width="1.3" opacity=".7"/>')
+        front += _fx(f'<g class="orbit">'
+                     f'<circle cx="{20 + tier:.0f}" cy="{-16 - tier * 2:.0f}" r="2" '
+                     f'fill="{colour}"/>'
+                     f'<circle cx="{-(20 + tier):.0f}" cy="{-16 - tier * 2:.0f}" r="1.5" '
+                     f'fill="{colour}" opacity=".8"/></g>')
+    return behind, front
+
+
+def _life(rows: list[dict], shapes: dict) -> str:
+    """Creatures and people wandering the town, seen only up close.
+
+    Drawn from what actually stands there: a menagerie brings animals, an inn
+    brings drinkers, a chapel brings birds. A town with a zoo in it and nothing
+    moving is a shed with a fence around it.
+    """
+    out = ""
+    spots = ((0.22, 0.88), (0.72, 0.93), (0.42, 0.97), (0.85, 0.84),
+             (0.12, 0.80), (0.60, 0.86))
+    index = 0
+    for row in rows:
+        family = shapes.get(str(row.get("key") or "")) or DEFAULT_SHAPE
+        pool = LIFE.get(family) or ()
+        # One wanderer per building, two once it is grand enough to draw a crowd.
+        for step in range(1 if int(row.get("tier", 1)) < 4 else 2):
+            if index >= len(spots) or not pool:
+                break
+            fx, fy = spots[index]
+            name = pool[(index + step) % len(pool)]
+            out += _fx(f'<g class="walker w{index % 3 + 1}">'
+                       + _symbol(WIDTH * fx, HEIGHT * fy, name, size=5.5,
+                                 colour="#5b4630")
+                       + '</g>')
+            index += 1
+    return out
+
+
 def town_svg(buildings: Iterable[dict], *, lit: bool = True,
-             flourish: int = 0, shapes: Optional[dict] = None,
+             flourish: int = 0, glow: str = "", richness: float = 0.0,
+             uid: str = "t", shapes: Optional[dict] = None,
+             symbols: Optional[dict] = None,
              colours: Optional[dict] = None) -> str:
     """A whole settlement as an SVG fragment.
 
@@ -462,8 +623,12 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     rows = sorted(buildings, key=lambda b: -int(b.get("tier", 1)))[:MAX_BUILDINGS]
     shapes = shapes or {}
     colours = colours or {}
+    # Gradient ids must be unique per town or every town on the map shares one
+    # set and they all take the colour of whichever drew last.
+    uid = "".join(c for c in str(uid) if c.isalnum()) or "t"
 
     parts = [
+        _defs(uid, glow or "#ffd27f"),
         f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" rx="{WIDTH * 0.47:.1f}" '
         f'ry="10" fill="#cdb894" stroke="#a68f6a" stroke-width="1.4"/>',
         f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 5:.1f}" rx="{WIDTH * 0.43:.1f}" '
@@ -485,20 +650,49 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         for y, x, scale, row in standing:
             key = str(row.get("key") or "")
             draw = SHAPES.get(shapes.get(key) or DEFAULT_SHAPE, _inn)
-            art = draw(0.0, 0.0, int(row.get("tier", 1)),
-                       colours.get(key) or colour_for(key))
+            tier = int(row.get("tier", 1))
+            tint = colours.get(key) or colour_for(key)
+            behind, front = _tier_effects(tier, tint, uid)
+            mass = draw(0.0, 0.0, tier, tint)
+            if tier == 6:
+                # Detached from the ground, hovering over the shadow drawn for
+                # it. Straight out of the original design, and the thing that
+                # makes somebody ask how a town got like that.
+                mass = f'<g class="lifted">{mass}</g>'
+            art = behind + mass + front
+            # The building's emblem, hung above it: what the place is *for*,
+            # where the masonry only says what kind of place it is.
+            mark = (symbols or {}).get(key)
+            if mark:
+                art += _symbol(0, -(12 + tier * 3.6), mark,
+                               size=6.5 + tier * 0.5, colour=tint,
+                               extra=f' class="emblem e{min(6, tier)}"')
             # Drawn at the origin and moved into place, so one transform carries
             # both where it stands and how near it is.
             parts.append(f'<g transform="translate({x:.1f},{y:.1f}) '
                          f'scale({scale:.2f})">{art}</g>')
 
+    if rows:
+        parts.append(_life(rows, shapes))
     body = "".join(parts)
     if flourish:
-        glow = min(6, int(flourish))
-        body = (f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" '
-                f'rx="{WIDTH * 0.51:.1f}" ry="12" fill="none" '
-                f'stroke="var(--fl{glow}, #ffd27f)" stroke-width="{1 + glow * 0.5:.1f}" '
-                f'opacity=".85"/>') + body
+        level = min(6, int(flourish))
+        # The rank's own colour where the server has one, so a Legend glows the
+        # colour a Legend already is in the member list. An invented palette
+        # made every high rank lilac and told nobody anything.
+        ring = glow or "#ffd27f"
+        rings = f'<ellipse class="flring" cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" '                 f'rx="{WIDTH * 0.51:.1f}" ry="12" fill="none" stroke="{ring}" '                 f'stroke-width="{1 + level * 0.6:.1f}" opacity=".9"/>'
+        if level >= 4:  # a second, wider ring: rank should be visible at a glance
+            rings = (f'<ellipse class="flring2" cx="{WIDTH / 2:.1f}" '
+                     f'cy="{GROUND_Y + 6:.1f}" rx="{WIDTH * 0.56:.1f}" ry="14" '
+                     f'fill="none" stroke="{ring}" stroke-width="{level * 0.4:.1f}" '
+                     f'opacity=".45"/>') + rings
+        if level >= 5:  # motes of light over the town, close up only
+            for i, (mx, my) in enumerate(((0.3, 0.2), (0.55, 0.05), (0.75, 0.28))):
+                rings += _fx(f'<circle class="mote m{i + 1}" '
+                             f'cx="{WIDTH * mx:.1f}" cy="{HEIGHT * my:.1f}" r="2.2" '
+                             f'fill="{ring}"/>')
+        body = rings + body
     if not lit:
         body = f'<g opacity=".45">{body}</g>'
     return body

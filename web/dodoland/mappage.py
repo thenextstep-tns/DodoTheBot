@@ -145,6 +145,7 @@ async def map_page(request: web.Request):
     from web.routes import _page  # noqa: F401  (kept for the nav's sake)
 
     bot, guild = request.app["bot"], request["guild"]
+    viewer = str(request.get("uid") or "")
     data = await asyncio.get_running_loop().run_in_executor(None, _collect, bot, guild)
 
     image = bot.dodoland_buildings.map_image(guild.id)
@@ -211,7 +212,7 @@ async def map_page(request: web.Request):
 <aside class="dlcard" id="dlcard" hidden></aside>
 
 <script>window.DL = {json.dumps({"people": data["people"], "sizes": sizes,
-                                 "gid": str(guild.id)})};</script>
+                                 "gid": str(guild.id), "me": viewer})};</script>
 <script>{_SCRIPT}</script>
 </body></html>"""
     return web.Response(text=body, content_type="text/html")
@@ -373,6 +374,11 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   font-size: 14px; }
 .dlcard li i { width: 20px; text-align: center; color: var(--lantern); }
 .dlcard .acts { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.dlcard button.own { background: var(--lantern); color: #fff;
+  border-color: var(--lantern); }
+.yours { font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  padding: 2px 7px; border-radius: 999px; vertical-align: middle;
+  background: var(--lantern); color: #fff; }
 .dlcard .blurb { margin: 8px 0 0; font-size: 14px; color: var(--soft);
   white-space: pre-wrap; }
 .dlcard img.pic { width: 100%; border-radius: 8px; margin-top: 10px;
@@ -629,8 +635,13 @@ _SCRIPT = r"""
         escapeHtml(b.name) + '">';
     }).join('');
 
+    // Whose town this is decides what the card offers. Editing somebody
+    // else's is an administrative act and says so, rather than quietly looking
+    // like editing your own.
+    var mine = D.me && String(p.id) === String(D.me);
     card.innerHTML =
-      '<h3>' + escapeHtml(p.name) + '</h3>' +
+      '<h3>' + escapeHtml(p.name) +
+        (mine ? ' <span class="yours">yours</span>' : '') + '</h3>' +
       '<div class="sub">' + escapeHtml(p.owner) + ' · #' + p.place + ' · ' +
         p.power.toLocaleString() + ' standing · ' + p.reached.toLocaleString() +
         ' people reached' +
@@ -643,7 +654,9 @@ _SCRIPT = r"""
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
       '<div class="acts">' +
-        '<button data-act="edit">Edit</button>' +
+        (mine
+          ? '<button data-act="edit" class="own">Customise your town</button>'
+          : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
         '<button data-act="remove">Remove</button>' +
         '<button data-act="close">Close</button></div>' +
