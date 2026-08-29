@@ -996,7 +996,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_settings_html(bot, guild)}
   </div>
 </div>
-{buildings_ui.channel_options_template(guild)}\n{__import__('web.dodoland.townmap', fromlist=['x']).VIEWPORT_SCRIPT}
+{buildings_ui.channel_options_template(guild)}
 <p id="status" class="status"></p>
 {_script(guild.id)}"""
     return _page(f"DodoLand · {guild.name}", body, scope=scope, guild=guild,
