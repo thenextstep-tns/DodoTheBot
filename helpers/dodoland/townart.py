@@ -332,6 +332,21 @@ def _flag(x, y, colour, height=11.0) -> str:
     return _pennant(x, y, colour, height=height)
 
 
+def _flagpost(x, y, colour, height=10.0, banner_svg: str = "") -> str:
+    """The building's flag — or the town's banner, flying from the same pole.
+
+    A family knows where its own flag goes; nothing outside it does. When the
+    town's banner was placed from outside, at the building's overall height, it
+    ended up nine units above the roof with the building's own pennant still
+    flying below it: two flags, neither attached to anything. Handing the banner
+    *in* means there is one answer to where a flag goes, and the town's banner
+    takes the pole rather than floating over it.
+    """
+    if banner_svg:
+        return f'<g transform="translate({x:.1f},{y:.1f})">{banner_svg}</g>'
+    return _pennant(x, y, colour, height)
+
+
 def _crenels(left, top, width, teeth, fill=WALL_DARK, depth=3.2) -> str:
     """Battlements. The one thing that says fortress at any size."""
     teeth = max(2, int(teeth))
@@ -446,7 +461,7 @@ def _cottage(x, base, size=7.0, colour="#b0724a", variant: int = 0,
 # the same box up. A silhouette that only grows is a progress bar nobody can
 # read; a silhouette that gains parts is a building you can watch being built.
 
-def _inn(x, base, tier, colour, symbol="") -> str:
+def _inn(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """Wide and low, with an awning and a hanging sign. Taverns and bakeries."""
     w, h = 15 + tier * 3.2, 8 + tier * 2.4
     left, top = x - w / 2, base - h
@@ -497,11 +512,12 @@ def _inn(x, base, tier, colour, symbol="") -> str:
         for wx in (x - w * 0.3, x + w * 0.24):
             out.append(_rect(wx - 2.2, base - h * 0.82 + 3.9, 4.4, 1.4,
                              fill="#c0392b", width=0.6, rx=0.4))
-        out.append(_pennant(left + w * 0.2, top - h * 0.62 - h * 0.5, colour, 9))
+        out.append(_flagpost(left + w * 0.2, top - h * 0.62 - h * 0.5,
+                             colour, 9, banner_svg))
     return "".join(out)
 
 
-def _hall(x, base, tier, colour, symbol="") -> str:
+def _hall(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """Columns and a pediment. Libraries, galleries, moot halls."""
     w, h = 14 + tier * 2.6, 9 + tier * 3.2
     left, top = x - w / 2, base - h
@@ -569,7 +585,7 @@ def _hall(x, base, tier, colour, symbol="") -> str:
     return "".join(out)
 
 
-def _keep(x, base, tier, colour, symbol="") -> str:
+def _keep(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """A castle. Battlements, towers, a gatehouse. Barracks and war rooms.
 
     Rewritten because it was the least convincing family in the set: a box with
@@ -644,7 +660,8 @@ def _keep(x, base, tier, colour, symbol="") -> str:
         # The donjon: one tower standing over everything, which is what makes a
         # castle a castle rather than a walled yard.
         out.append(_tower(x, base - h * 0.1, h * 1.75, 6.2, colour, tier=tier))
-        out.append(_pennant(x, base - h * 0.1 - h * 1.75 - 12.4, colour, 8))
+        out.append(_flagpost(x, base - h * 0.1 - h * 1.75 - 12.4,
+                             colour, 8, banner_svg))
         for side in (-1, 1):
             out.append(_pennant(x + side * (w / 2 + 3.6),
                                 base - h * 1.06 - 9.2, colour, 6))
@@ -653,11 +670,12 @@ def _keep(x, base, tier, colour, symbol="") -> str:
                    f'L{x + 5.4:.1f},{base + 3.6:.1f} L{x - 5.4:.1f},{base + 3.6:.1f} Z" '
                    f'fill="#8a6239" stroke="{LINE}" stroke-width=".9"/>')
     elif tier >= 3:
-        out.append(_pennant(x - w / 2 - 3.6, base - h * 1.06 - 9.2, colour, 7))
+        out.append(_flagpost(x - w / 2 - 3.6, base - h * 1.06 - 9.2,
+                             colour, 7, banner_svg))
     return "".join(out)
 
 
-def _chapel(x, base, tier, colour, symbol="") -> str:
+def _chapel(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """Tall, narrow, a steep spire and a rose window. Shrines and sanctuaries.
 
     Deliberately no cross, and no religious mark of any kind: this is a quiet
@@ -683,7 +701,8 @@ def _chapel(x, base, tier, colour, symbol="") -> str:
                    f'{base - th + 11:.1f} Z" fill="#b8862b" stroke="{LINE}" '
                    f'stroke-width=".8"/>')
         if tier >= 6:
-            out.append(_pennant(tx + 3.6, base - th - 10, colour, 6))
+            out.append(_flagpost(tx + 3.6, base - th - 10, colour, 6,
+                                 banner_svg))
 
     if tier >= 5:  # a low side chapel, and flying buttresses over it
         out.append(_rect(x + w / 2, base - h * 0.42, 8.5, h * 0.42, fill=WALL_DARK))
@@ -726,7 +745,7 @@ def _chapel(x, base, tier, colour, symbol="") -> str:
     return "".join(out)
 
 
-def _pen(x, base, tier, colour, symbol="") -> str:
+def _pen(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """A fenced enclosure with shelters, trees and water. Menageries, gardens.
 
     The family that should look green from across the map: it is the only one
@@ -829,7 +848,7 @@ def _pen(x, base, tier, colour, symbol="") -> str:
     return "".join(out)
 
 
-def _works(x, base, tier, colour, symbol="") -> str:
+def _works(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """Saw-tooth roof, stacks, a wheel, a lit forge. Forges and workshops."""
     w, h = 15 + tier * 2.8, 8 + tier * 2.4
     left, top = x - w / 2, base - h
@@ -895,7 +914,7 @@ def _works(x, base, tier, colour, symbol="") -> str:
     return "".join(out)
 
 
-def _stage(x, base, tier, colour, symbol="") -> str:
+def _stage(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """A proscenium arch with curtains and a marquee. Playhouses and arenas."""
     w, h = 15 + tier * 3.2, 11 + tier * 3.0
     left, top = x - w / 2, base - h
@@ -958,11 +977,14 @@ def _stage(x, base, tier, colour, symbol="") -> str:
                            f'opacity=".28"/>'))
     if tier >= 6:
         for side in (-1, 1):
-            out.append(_pennant(x + side * w * 0.44, top - 4, colour, 8))
+            # The town's banner takes one of the two poles; the other stays a
+            # pennant, so a playhouse still looks like a playhouse.
+            out.append(_flagpost(x + side * w * 0.44, top - 4, colour, 8,
+                                 banner_svg if side < 0 else ""))
     return "".join(out)
 
 
-def _monument(x, base, tier, colour, symbol="") -> str:
+def _monument(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """A stepped plinth and a rising figure. Statues and landmarks."""
     steps = 1 + min(3, tier)
     out = []
@@ -1028,7 +1050,7 @@ def _monument(x, base, tier, colour, symbol="") -> str:
     return "".join(out)
 
 
-def _gate(x, base, tier, colour, symbol="") -> str:
+def _gate(x, base, tier, colour, symbol="", banner_svg="") -> str:
     """A free-standing arch. Wayshrines and thresholds."""
     w = 13 + tier * 2.6
     h = 13 + tier * 3.2
@@ -1866,7 +1888,11 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         # what the town-wide sun used to be, and it says something about the
         # place rather than the same thing about every place.
         front += _building_fx(family, tier, tint, mark)
-        mass = draw(0.0, 0.0, tier, tint, mark)
+        # The town's banner is handed to the building that flies it, so it takes
+        # that family's own flagpole instead of being planted above the roof
+        # beside the pennant already there.
+        carries = banner(flag, uid) if (bearer is not None and row is bearer) else ""
+        mass = draw(0.0, 0.0, tier, tint, mark, carries)
         # Everything that is *part of the building* — its emblem, and its flag
         # if it is the one flying the town's banner — is assembled here and
         # lifted with it. They used to be added outside the hovering group, so
@@ -1890,13 +1916,14 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
             # where the lot stands and how far back it is.
             ceiling = (3.0 - y) / scale + size * 0.62
             attached += _emblem(0.0, max(want, ceiling), mark, size, tint, tier)
-        if bearer is not None and row is bearer:
-            # Flown from the grandest building rather than parked at the edge of
-            # the plate: a town's banner belongs over its centrepiece, and the
-            # centrepiece is whatever it has built highest.
-            attached += (f'<g transform="translate(7,'
-                         f'{-family_height(family, tier):.1f})">'
-                         f'{banner(flag, uid)}</g>')
+        if carries and carries not in mass:
+            # This family has no flagpole of its own at this tier — a monument,
+            # a gate, a workshop. Planted at its roofline instead. Checked by
+            # looking for the banner in what was drawn rather than by keeping a
+            # list of which families fly flags, because a list is a second
+            # source of truth and this file has been bitten by one all day.
+            attached += (f'<g transform="translate(6,'
+                         f'{-family_height(family, tier) + 4:.1f})">{carries}</g>')
         if tier == 6:
             # Detached from the ground, hovering over the shadow drawn for it.
             # Straight out of the original design, and the thing that makes

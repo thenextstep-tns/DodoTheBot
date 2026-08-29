@@ -445,6 +445,27 @@ for name in townart.EMBLEMS:
     assert "font-family" not in drawn and "<text" not in drawn,         f"{name} is back to being a glyph in a webfont"
 print(f"art             all {len(townart.EMBLEMS)} emblems draw something")
 
+# One banner, on the pole the building already had. The town's flag used to be
+# planted from outside at the building's overall height, so a tier-six inn flew
+# its own pennant at the roof and the town's banner nine units above it: two
+# flags, neither attached to anything. The family is handed the banner and puts
+# it on its own pole.
+for _fam, _tier in (("inn", 6), ("keep", 6), ("stage", 6), ("chapel", 6),
+                    ("hall", 5), ("gate", 4), ("monument", 6), ("pen", 2)):
+    _one = townart.town_svg([{"key": "a", "tier": _tier}], shapes={"a": _fam},
+                            flag="/pic.png", uid="f")
+    assert _one.count('"townflag"') == 1,         f"{_fam} at tier {_tier} flies {_one.count(chr(34) + 'townflag' + chr(34))} town banners"
+print("flags           exactly one town banner, whatever the building is")
+
+# ...and at the top tier it is inside the group that hovers, or the building
+# lifts off and leaves its own flag behind in the air.
+_lifted = townart.town_svg([{"key": "a", "tier": 6}], shapes={"a": "inn"},
+                           symbols={"a": "mug"}, flag="/pic.png", uid="f")
+_inside = _lifted[_lifted.index('class="lifted"'):]
+assert "townflag" in _inside, "the banner is drawn outside the group that lifts"
+assert "emblem" in _inside, "the emblem is drawn outside the group that lifts"
+print("flags           at the top tier the banner and emblem lift with the building")
+
 # A town's picture flies as a flag, clipped so any aspect ratio reads as cloth.
 flagged = townart.town_svg([{"key": "a", "tier": 2}], flag="/pic.png", uid="7")
 assert "townflag" in flagged and "clipPath" in flagged
