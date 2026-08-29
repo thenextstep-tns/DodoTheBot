@@ -98,9 +98,23 @@ async def town_art(request: web.Request):
                  if score.get("tier") is not None]
         glow = flourish_rules.flourish_map(bot, guild.id).get(user_id) or {}
         lit = any(str(row.get("day") or "") >= lit_since for row in rows)
+        # The town's own picture, flown as a flag over it.
+        details = bot.dodoland_towns.get(guild.id, user_id) or {}
+        flag = (f"/guild/{guild.id}/dodoland/town/{user_id}/picture"
+                if details.get("image") else "")
         return townart.town_svg(
-            built, lit=lit, flourish=int(glow.get("level", 0)),
-            shapes={b["key"]: b.get("shape") for b in buildings})
+            built,
+            lit=lit,
+            flourish=int(glow.get("level", 0)),
+            # The rank's own colour, so a Legend glows the colour a Legend is.
+            glow=str(glow.get("colour") or ""),
+            # Unique per town, or every town on the map shares one set of
+            # gradients and they all take the colour of whichever drew last.
+            uid=str(user_id),
+            flag=flag,
+            shapes={b["key"]: b.get("shape") for b in buildings},
+            symbols={b["key"]: b.get("symbol") for b in buildings},
+        )
 
     art = await asyncio.get_running_loop().run_in_executor(None, draw)
     return web.Response(text=art, content_type="image/svg+xml",

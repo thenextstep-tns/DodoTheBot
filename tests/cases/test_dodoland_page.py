@@ -480,4 +480,20 @@ assert _row.get("image"), "an uploaded picture is invisible to the map"
 assert "data" not in _row["image"], "the map is paying for the picture bytes"
 print("towns           a picture's existence survives the projection, its bytes do not")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The art endpoint must pass everything the artwork needs
+# --------------------------------------------------------------------------- #
+# It was still calling town_svg with an argument list from three changes ago, so
+# emblems, the rank's colour, the per-town gradient id and the flag were all
+# quietly missing while the drawing code supported every one of them.
+_art_src = pathlib.Path("web/dodoland/assets_route.py").read_text(encoding="utf-8")
+for arg, why in (("symbols=", "buildings draw without their emblems"),
+                 ("glow=", "every town glows the same default colour"),
+                 ("uid=", "towns share gradient ids and bleed colour"),
+                 ("flag=", "an uploaded picture never flies over the town")):
+    assert arg in _art_src, f"town_art drops {arg}: {why}"
+print("art             the endpoint passes emblems, colour, id and flag")
+
 print("PASS")

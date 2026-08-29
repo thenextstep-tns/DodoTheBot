@@ -443,4 +443,28 @@ assert "townflag" in flagged and "clipPath" in flagged
 assert "townflag" not in townart.town_svg([{"key": "a", "tier": 2}])
 print("art             a town with a picture flies it, one without flies nothing")
 
+
+
+# --------------------------------------------------------------------------- #
+#  Inhabitants that walk and wait
+# --------------------------------------------------------------------------- #
+peopled = townart.town_svg(
+    [{"key": "pub", "tier": 5}, {"key": "zoo", "tier": 3}],
+    shapes={"pub": "inn", "zoo": "pen"})
+assert 'class="gait"' in peopled, "inhabitants have no gait to animate"
+assert peopled.count('class="walker') >= 3
+print("life            each inhabitant has its own gait to be animated by")
+
+# The flag flies from the grandest building, not from the edge of the plate.
+flagged = townart.town_svg(
+    [{"key": "keepy", "tier": 6}, {"key": "hut", "tier": 1}],
+    shapes={"keepy": "keep", "hut": "inn"}, flag="/pic.png", uid="5")
+assert "townflag" in flagged
+# It should sit above the ground line, which is where a building's roof is.
+import re as _re2
+_pos = _re2.search(r'translate\(([-\d.]+),([-\d.]+)\)">' + '<g class="townflag"', flagged)
+assert _pos, "the flag is not placed by a transform"
+assert float(_pos.group(2)) < townart.GROUND_Y, "the flag flies at ground level"
+print("flag            a town's banner flies over its grandest building")
+
 print("PASS")

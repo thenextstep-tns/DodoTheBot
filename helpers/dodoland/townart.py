@@ -727,9 +727,11 @@ def _life(rows: list[dict], shapes: dict) -> str:
             # of the town. Only their walking waits for close range, which is a
             # CSS animation, not a display rule.
             draw = WANDERERS.get(name) or _person
-            out += (f'<g class="walker w{index % 3 + 1}" '
+            # Each gets its own gait and its own delay, so a town does not look
+            # like a chorus line. The pauses live in the keyframes.
+            out += (f'<g class="walker w{index % 4 + 1}" '
                     f'transform="translate({WIDTH * fx:.1f},{HEIGHT * fy:.1f})">'
-                    + draw() + '</g>')
+                    f'<g class="gait">{draw()}</g></g>')
             index += 1
     return out
 
@@ -747,17 +749,20 @@ def banner(url: str, uid: str) -> str:
     """
     if not url:
         return ""
+    # Small: it flies over one building, not over the county. The pole is a
+    # third the height of a tier-six keep so it reads as a flag rather than a
+    # billboard somebody parked on the town.
     return (
         f'<g class="townflag">'
         f'<defs><clipPath id="fg{uid}">'
-        f'<path d="M0,-34 L26,-30 L26,-14 L0,-18 Z"/></clipPath></defs>'
-        f'<line x1="0" y1="2" x2="0" y2="-36" stroke="{LINE}" stroke-width="1.6"/>'
-        f'<circle cx="0" cy="-36.6" r="1.6" fill="{LINE}"/>'
+        f'<path d="M0,-17 L13,-15 L13,-7 L0,-9 Z"/></clipPath></defs>'
+        f'<line x1="0" y1="0" x2="0" y2="-18" stroke="{LINE}" stroke-width="1"/>'
+        f'<circle cx="0" cy="-18.6" r="1" fill="{LINE}"/>'
         f'<g class="cloth">'
-        f'<image href="{url}" x="0" y="-34" width="26" height="20" '
+        f'<image href="{url}" x="0" y="-17" width="13" height="10" '
         f'preserveAspectRatio="xMidYMid slice" clip-path="url(#fg{uid})"/>'
-        f'<path d="M0,-34 L26,-30 L26,-14 L0,-18 Z" fill="none" stroke="{LINE}" '
-        f'stroke-width="1.1"/></g></g>'
+        f'<path d="M0,-17 L13,-15 L13,-7 L0,-9 Z" fill="none" stroke="{LINE}" '
+        f'stroke-width=".8"/></g></g>'
     )
 
 
@@ -828,11 +833,18 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
 
     if rows:
         parts.append(_life(rows, shapes))
-    if flag:
-        # Planted at the front-left of the plate, where it does not stand in
-        # front of the buildings it belongs to.
-        parts.append(f'<g transform="translate({WIDTH * 0.12:.1f},'
-                     f'{GROUND_Y + 2:.1f})">{banner(flag, uid)}</g>')
+    if flag and rows:
+        # Flown from the grandest building rather than parked at the edge of the
+        # plate: a town's banner belongs over its centrepiece, and the
+        # centrepiece is whatever it has built highest.
+        best = max(standing, key=lambda item: int(item[3].get("tier", 1)))
+        fy, fx, fscale, _row = best
+        top = fy - (9 + int(_row.get("tier", 1)) * 4.2) * fscale
+        parts.append(f'<g transform="translate({fx + 7:.1f},{top:.1f})">'
+                     f'{banner(flag, uid)}</g>')
+    elif flag:
+        parts.append(f'<g transform="translate({WIDTH * 0.5:.1f},'
+                     f'{GROUND_Y - 6:.1f})">{banner(flag, uid)}</g>')
     body = "".join(parts)
     if flourish:
         level = min(6, int(flourish))
