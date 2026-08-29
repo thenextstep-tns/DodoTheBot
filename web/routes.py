@@ -4565,7 +4565,14 @@ async def api_lang(request: web.Request):
 #  App factory
 # --------------------------------------------------------------------------- #
 def create_app(bot) -> web.Application:
-    app = web.Application()
+    # aiohttp refuses a request body over 1MiB by default, and it does not
+    # refuse it politely: the connection is reset while the body is still being
+    # read, so the handler never runs and the browser gets no answer at all. Any
+    # upload through this panel — a DodoLand map, a town's picture, a decor
+    # asset, a rank badge — is larger than that, and every one of them looked
+    # like a button that did nothing. The individual size limits still apply in
+    # the handlers, where they can say what went wrong.
+    app = web.Application(client_max_size=16 * 1024 * 1024)
     app["bot"] = bot
     app.add_routes(
         [

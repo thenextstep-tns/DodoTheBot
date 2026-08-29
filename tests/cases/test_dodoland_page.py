@@ -431,4 +431,17 @@ print("card            a dot keeps a clickable body, so a far town still opens")
 assert "max-height: calc(100vh" in map_body, "the card can grow past the screen"
 print("card            the card scrolls rather than running off the screen")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The framework must accept an upload at all
+# --------------------------------------------------------------------------- #
+# aiohttp refuses a body over 1MiB by default, and does it by resetting the
+# connection mid-read, so the handler never runs and the browser gets no answer.
+# Every upload through this panel is larger than that, and every one of them
+# looked like a button with no handler.
+routes_src = pathlib.Path("web/routes.py").read_text(encoding="utf-8")
+assert "client_max_size" in routes_src,     "aiohttp will reset any upload over 1MiB before a handler sees it"
+print("uploads         the panel accepts a body larger than aiohttp's 1MiB default")
+
 print("PASS")
