@@ -1,0 +1,326 @@
+"""
+DodoLand's write endpoints.
+
+Three things can be changed: a tunable, the buildings, and the map. Each
+validates through the same helper the rest of the system reads from, so a value
+that reaches storage is a value the scorer can already use, and every change is
+written to the config audit the way the rest of the panel's edits are.
+"""
+
+from __future__ import annotations
+
+import base64
+
+from aiohttp import web
+
+from helpers.dodoland import buildings as building_rules
+from helpers.dodoland import parameters as dodo_params
+
+# An uploaded map is stored inline in the guild's config document, so it has to
+# stay well under Mongo's 16MB per-document ceiling with room for everything
+# else in the row. This is generous for a stylised map and mean for a photo.
+MAX_MAP_BYTES = 4 * 1024 * 1024
+ALLOWED_MAP_TYPES = ("image/png", "image/jpeg", "image/webp", "image/svg+xml")
+
+
+def _bad(error: str, status: int = 200):
+    return web.json_response({"ok": False, "error": str(error)}, status=status)
+
+
+async def api_dodoland_param(request: web.Request):
+    """Set one DodoLand tunable for this guild."""
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    key, raw = body.get("key"), body.get("value")
+    params = bot.dodoland_params
+    try:
+        old = params.get(guild.id, key)
+        value = params.set(guild.id, key, raw)
+    except KeyError:
+        return _bad(f"Unknown setting: {key}")
+    except ValueError as error:
+        return _bad(error)
+    await _record_change(request, "dodoland_param", str(key), old, value,
+                         f"DodoLand setting {key}")
+    return web.json_response({"ok": True, "value": value})
+
+
+async def api_dodoland_buildings(request: web.Request):
+    """Replace this guild's buildings."""
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    try:
+        saved = bot.dodoland_buildings.save_buildings(
+            guild.id, body.get("buildings"), guild=guild
+        )
+    except building_rules.DodoLandError as error:
+        return _bad(error)
+    except KeyError as error:
+        return _bad(f"Unknown metric: {error}")
+    await _record_change(request, "dodoland_buildings", "buildings", "",
+                         f"{len(saved)} buildings", "DodoLand buildings")
+    return web.json_response({"ok": True, "buildings": saved})
+
+
+async def api_dodoland_suggest(request: web.Request):
+    """Attach each building to the channels whose names look like it.
+
+    Only fills in buildings that have no rooms yet, so pressing it after
+    hand-tuning cannot undo the tuning, and a channel is offered to at most one
+    building. It is a starting guess meant to be corrected, the same bargain
+    "Suggest from role names" makes on the trials page.
+    """
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    current = bot.dodoland_buildings.buildings(guild.id)
+    suggested = building_rules.suggest_channels(guild, current)
+    try:
+        saved = bot.dodoland_buildings.save_buildings(guild.id, suggested, guild=guild)
+    except building_rules.DodoLandError as error:
+        return _bad(error)
+    attached = sum(len(building.get("channels") or {}) for building in saved)
+    await _record_change(request, "dodoland_buildings", "suggest", "",
+                         f"{attached} rooms attached", "DodoLand rooms suggested")
+    return web.json_response({"ok": True, "attached": attached,
+                              "buildings": len(saved)})
+
+
+async def api_dodoland_shapes(request: web.Request):
+    """Put every building back to the shape its key was designed with.
+
+    Here as a button rather than a migration because it is a repair somebody
+    should choose: a server that deliberately draws its library as a keep would
+    not thank us for a deploy that changed it back.
+    """
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    changed = bot.dodoland_buildings.reset_shapes(
+        guild.id, symbols=bool(body.get("symbols")))
+    if changed:
+        await _record_change(request, "dodoland_buildings", "shapes", "",
+                             f"{len(changed)} reset", "DodoLand shapes reset")
+    return web.json_response({"ok": True, "changed": changed})
+
+
+async def api_dodoland_asset(request: web.Request):
+    """Add, edit or remove one asset in the library.
+
+    Assets are what people put on their own patch of the world once they have
+    earned the right to. A lock is a **tier of a building**, never a point
+    total: thresholds are derived from the server's live distribution and move
+    as the server does, so a number written here would quietly mean something
+    different every week.
+    """
+    from helpers.dodoland import assets as asset_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    action = str(body.get("action") or "add")
+
+    try:
+        if action == "remove":
+            gone = bot.dodoland_assets.remove(guild.id, body.get("asset_id"))
+            if gone:
+                # Everything anybody had placed of it goes too. Left behind,
+                # the pieces render as a broken image on somebody's town, which
+                # reads as their town being broken rather than as an admin
+                # tidying the library.
+                dropped = bot.dodoland_decor.forget_asset(guild.id,
+                                                          body.get("asset_id"))
+                await _record_change(request, "dodoland_asset", "remove", "",
+                                     f"{dropped} placed", "DodoLand asset removed")
+                return web.json_response({"ok": True, "removed": True,
+                                          "unplaced": dropped})
+            return web.json_response({"ok": True, "removed": False})
+
+        if action == "update":
+            changed = bot.dodoland_assets.update(
+                guild.id, body.get("asset_id"),
+                name=body.get("name"), min_tier=body.get("min_tier"),
+                building=body.get("building"),
+                admin_only=body.get("admin_only"),
+            )
+            return web.json_response({"ok": True, "changed": bool(changed)})
+
+        content_type = str(body.get("content_type") or "").lower()
+        try:
+            blob = base64.b64decode(str(body.get("data") or "").split(",")[-1],
+                                    validate=True)
+        except Exception:
+            return _bad("That upload could not be read.")
+        row = bot.dodoland_assets.add(
+            guild.id, name=body.get("name"), data=blob, content_type=content_type,
+            min_tier=body.get("min_tier") or 0, building=body.get("building") or "",
+            admin_only=bool(body.get("admin_only")),
+        )
+        await _record_change(request, "dodoland_asset", str(row["name"]), "", "added",
+                             "DodoLand asset added")
+        return web.json_response({"ok": True, "asset": row})
+    except asset_rules.AssetError as error:
+        return _bad(error)
+
+
+async def api_dodoland_town(request: web.Request):
+    """Name a town, describe it, picture it, and name its buildings.
+
+    None of this moves a number. Standing is earned and cannot be typed in;
+    everything here is authored and belongs to the town's owner rather than to
+    the scoring. Keeping the two apart is what lets naming be free, instant and
+    reversible without a rename ever becoming an exploit.
+    """
+    from helpers.dodoland import towns as town_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    try:
+        user_id = int(body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return _bad("Which town?")
+
+    try:
+        bot.dodoland_towns.save(
+            guild.id, user_id,
+            name=body.get("name"), blurb=body.get("blurb"),
+            building_names=body.get("building_names"),
+        )
+        if body.get("clear_image"):
+            bot.dodoland_towns.save_image(guild.id, user_id, None)
+        elif body.get("image"):
+            try:
+                blob = base64.b64decode(str(body["image"]).split(",")[-1],
+                                        validate=True)
+            except Exception:
+                return _bad("That picture could not be read.")
+            bot.dodoland_towns.save_image(
+                guild.id, user_id,
+                {"data": blob, "content_type": str(body.get("content_type") or "")},
+            )
+    except town_rules.TownError as error:
+        return _bad(error)
+
+    await _record_change(request, "dodoland_town", str(user_id), "", "edited",
+                         "DodoLand town details")
+    return web.json_response({"ok": True})
+
+
+async def api_dodoland_settle(request: web.Request):
+    """Place, move or remove one town on the map.
+
+    Re-settling moves a town rather than making a second one: a person has one
+    town per server, which is what makes the map readable at a glance. Removing
+    takes it off the map and touches nothing they have earned — a town's
+    position and a town's standing have never had anything to do with each
+    other.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    try:
+        user_id = int(body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        return _bad("A town needs a person.")
+    if not user_id:
+        return _bad("A town needs a person.")
+
+    if body.get("remove"):
+        bot.dodoland_buildings.unsettle(guild.id, user_id)
+        # Their decor was placed relative to a town that is no longer on the
+        # map, so it has nowhere to be. Standing is untouched: a position and a
+        # standing have never had anything to do with each other.
+        bot.dodoland_decor.clear_town(guild.id, user_id)
+        return web.json_response({"ok": True, "removed": True})
+
+    try:
+        x, y = float(body.get("x")), float(body.get("y"))
+    except (TypeError, ValueError):
+        return _bad("A town needs a position.")
+    spot = bot.dodoland_buildings.settle(guild.id, user_id, x, y)
+    return web.json_response({"ok": True, **spot})
+
+
+async def api_dodoland_backfill(request: web.Request):
+    """Rebuild the archivable history from the message archive.
+
+    Reads the whole archive for this guild's channels, so it runs in an executor:
+    the panel is served from inside the bot process and doing this on the event
+    loop would stop the bot answering Discord for the duration.
+
+    ``preview`` aggregates and reports without writing anything, which is how to
+    look at it before letting it near real rows.
+    """
+    import asyncio
+
+    import config_py
+    from helpers.dodoland import backfill as backfill_rules
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    dry_run = bool(body.get("preview"))
+
+    def work():
+        return backfill_rules.run(bot, guild, archive=config_py.messages, dry_run=dry_run)
+
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(None, work)
+    except Exception as error:
+        return _bad(f"The backfill failed: {error}")
+
+    if not dry_run:
+        await _record_change(
+            request, "dodoland_backfill", "archive", "",
+            f"{result['written']} rows from {result['messages']} messages",
+            "DodoLand history rebuilt from the message archive",
+        )
+    return web.json_response({"ok": True, **result})
+
+
+async def api_dodoland_map(request: web.Request):
+    """Store (or clear) the uploaded base map for this server's continent.
+
+    The map is an image an admin drew or commissioned, not something generated.
+    That was a deliberate simplification: it removes the vector editor, the
+    procedural coastlines and the elevation polygons from the build entirely,
+    and it gets a handcrafted world in on day one instead of never.
+    """
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+
+    if not body.get("data"):
+        bot.dodoland_buildings.save_map(guild.id, None)
+        await _record_change(request, "dodoland_map", "map", "set", "cleared",
+                             "DodoLand map removed")
+        return web.json_response({"ok": True, "cleared": True})
+
+    content_type = str(body.get("content_type") or "").lower()
+    if content_type not in ALLOWED_MAP_TYPES:
+        return _bad("The map must be a PNG, JPEG, WebP or SVG.")
+    try:
+        blob = base64.b64decode(str(body["data"]).split(",")[-1], validate=True)
+    except Exception:
+        return _bad("That upload could not be read.")
+    if not blob:
+        return _bad("That file is empty.")
+    if len(blob) > MAX_MAP_BYTES:
+        return _bad(f"The map must be under {MAX_MAP_BYTES // (1024 * 1024)}MB.")
+
+    bot.dodoland_buildings.save_map(
+        guild.id, {"data": blob, "content_type": content_type,
+                   "width": int(body.get("width") or 0),
+                   "height": int(body.get("height") or 0)},
+    )
+    await _record_change(request, "dodoland_map", "map", "", f"{len(blob)} bytes",
+                         "DodoLand map uploaded")
+    return web.json_response({"ok": True, "bytes": len(blob)})

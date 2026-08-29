@@ -1,0 +1,499 @@
+"""DodoLand P1: buildings, derived thresholds, and town power.
+
+The thresholds are the part worth guarding. Authored numbers fail visibly (a
+tier nobody reaches); derived ones fail invisibly (a tier everybody reaches on a
+quiet server), so every property that keeps them honest is asserted here.
+"""
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from fake_mongo import FakeCollection  # noqa: E402
+
+from helpers.dodoland import buildings as B  # noqa: E402
+from helpers.dodoland import parameters as dodo_params  # noqa: E402
+from helpers.dodoland import standing  # noqa: E402
+from helpers.dodoland.store import ActivityStore  # noqa: E402
+from helpers.parameters import ParamManager  # noqa: E402
+
+GUILD = 111
+LIBRARY_CH, FASHION_CH, OFFTOPIC_CH = 900, 901, 902
+
+
+def fresh():
+    params = ParamManager(FakeCollection(), dodo_params.DODOLAND_PARAMETERS)
+    return ActivityStore(FakeCollection(), FakeCollection(), params), params
+
+
+# --------------------------------------------------------------------------- #
+#  Validation refuses what would break a page
+# --------------------------------------------------------------------------- #
+for bad, why in (
+    ({"name": "", "tiers": []}, "an empty name"),
+    ({"name": "X", "channels": {"nope": 1}}, "a non-numeric channel"),
+    ({"name": "X", "channels": {5: 99}}, "a weight above the maximum"),
+    ({"name": "X", "tiers": [{"title": "A", "percentile": 500}]}, "a percentile over 100"),
+    ({"name": "X", "tiers": [{"title": "A", "percentile": 1},
+                             {"title": "a", "percentile": 2}]}, "two tiers with one title"),
+):
+    try:
+        B.validate_building(bad)
+        raise AssertionError(f"accepted {why}")
+    except B.DodoLandError:
+        pass
+print("validation      empty names, bad channels, silly percentiles and dupes refused")
+
+try:
+    B.validate_buildings([{"name": "Hall"}, {"name": "Hall"}])
+    raise AssertionError("accepted two buildings with the same key")
+except B.DodoLandError:
+    pass
+print("validation      two buildings cannot share a key")
+
+# Tiers come back sorted easiest-first however they were entered.
+tiers = B.validate_tiers([{"title": "Hard", "percentile": 90},
+                          {"title": "Easy", "percentile": 10}])
+assert [t["title"] for t in tiers] == ["Easy", "Hard"]
+print("validation      tiers are stored in ladder order regardless of entry order")
+
+# Defaults exist, are valid, and attach to no channels: a building that silently
+# counted every room would be a building nobody configured.
+defaults = B.validate_buildings(B.default_buildings())
+assert len(defaults) >= 12, "a town needs more than a handful of buildings"
+assert all(not b["channels"] for b in defaults), "a default building claimed a room"
+assert all(len(b["tiers"]) == 6 for b in defaults)
+assert all(b["hints"] for b in defaults), "a building has no words to match channels by"
+print(f"defaults        {len(defaults)} buildings, six tiers each, no channels assumed")
+
+# Suggestion is a starting guess: it fills empty buildings, never overwrites a
+# choice, and never hands one room to two buildings.
+class _Chan:
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+
+
+class _Guild:
+    channels = [_Chan(1, "eso-help"), _Chan(2, "trials-lfg"), _Chan(3, "pet-pics"),
+                _Chan(4, "general-chat")]
+
+
+picked = B.suggest_channels(_Guild(), defaults)
+attached = [cid for b in picked for cid in b["channels"]]
+assert len(attached) == len(set(attached)), "one room was given to two buildings"
+assert attached, "the suggester matched nothing at all"
+held = [dict(b, channels={"99": 1.0}) if b["key"] == "library" else b for b in defaults]
+again = B.suggest_channels(_Guild(), held)
+kept = next(b for b in again if b["key"] == "library")
+assert kept["channels"] == {"99": 1.0}, "suggesting overwrote a hand-tuned building"
+print("defaults        suggestion fills empty buildings and never undoes a choice")
+
+
+# --------------------------------------------------------------------------- #
+#  Derived thresholds
+# --------------------------------------------------------------------------- #
+dist = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+assert standing.percentile_of(dist, 100) == 100
+assert standing.percentile_of(dist, 50) == 50
+assert standing.percentile_of([], 50) == 0
+# Zeros are not part of the distribution: people who have not started should not
+# drag every threshold to nothing.
+assert standing.percentile_of([0, 0, 0, 100], 50) == 100
+print("thresholds      percentiles read the scoring population, not the roster")
+
+# On a young server the floor wins, so "top 2%" is not reachable with one message.
+ladder = [{"title": "Foundations", "percentile": 20, "floor": 25},
+          {"title": "Legendary", "percentile": 98, "floor": 5000}]
+young = standing.resolve_tiers(ladder, [3, 5])
+assert young[0]["threshold"] == 25 and young[0]["source"] == "floor"
+assert young[1]["threshold"] == 5000
+print("thresholds      the floor protects a young server from cheap top tiers")
+
+# On a busy server the distribution wins and the ladder self-calibrates.
+busy = standing.resolve_tiers(ladder, list(range(100, 20000, 100)))
+assert busy[1]["threshold"] > 5000 and busy[1]["source"] == "percentile"
+print("thresholds      on a busy server the live distribution takes over")
+
+# Thresholds never decrease: a floor must not make an early rung harder than a
+# later one, which would leave a tier that cannot be the highest reached.
+weird = standing.resolve_tiers(
+    [{"title": "A", "percentile": 10, "floor": 900}, {"title": "B", "percentile": 90, "floor": 0}],
+    [100, 200, 300])
+assert weird[0]["threshold"] <= weird[1]["threshold"]
+print("thresholds      the ladder can never step backwards")
+
+assert standing.tier_reached(0, busy) is None
+assert standing.tier_reached(10 ** 9, busy) == 1
+print("thresholds      below tier one is None, not tier zero")
+
+
+# --------------------------------------------------------------------------- #
+#  Scoring: a building is a place, so it scores from channels
+# --------------------------------------------------------------------------- #
+store, params = fresh()
+NIK, FOX = 1, 2
+for _ in range(5):
+    store.record(GUILD, NIK, "message", channel_id=LIBRARY_CH)
+store.record(GUILD, NIK, "image", channel_id=FASHION_CH)
+for _ in range(3):
+    store.record(GUILD, NIK, "message", channel_id=OFFTOPIC_CH)
+store.record(GUILD, FOX, "message", channel_id=LIBRARY_CH)
+
+library = {"key": "library", "name": "Library", "icon": "", "metric_weights": {},
+           "channels": {LIBRARY_CH: 1.0},
+           "tiers": [{"title": "Desk", "percentile": 10, "floor": 1}]}
+menagerie = {"key": "menagerie", "name": "Menagerie", "icon": "",
+             "metric_weights": {"image": 2.0}, "channels": {FASHION_CH: 1.0},
+             "tiers": [{"title": "Paddock", "percentile": 10, "floor": 1}]}
+
+result = standing.guild_standings(store, params, GUILD, [library, menagerie])
+nik = result["people"][NIK]
+
+# 5 messages x weight 1 in the library's only channel.
+assert nik["buildings"]["library"]["points"] == 5, nik["buildings"]["library"]
+# The off-topic channel feeds no building, so those three messages are not lost,
+# they simply build nothing.
+assert OFFTOPIC_CH not in nik["buildings"]["library"]["by_channel"]
+# 1 image x weight 6 x the building's own 2.0 emphasis.
+assert nik["buildings"]["menagerie"]["points"] == 12, nik["buildings"]["menagerie"]
+print("scoring         channels decide which building a room builds")
+print("scoring         a building's own emphasis multiplies without touching others")
+
+# The breakdown adds up to the total, which is what makes the number arguable.
+assert sum(nik["buildings"]["library"]["by_metric"].values()) == nik["buildings"]["library"]["points"]
+print("scoring         every score carries the breakdown that produced it")
+
+# Town power is buildings plus people reached, and places are ranked on it.
+assert nik["power"] == 5 + 12 + nik["reach_points"]
+assert nik["place"] == 1 and result["people"][FOX]["place"] == 2
+print("scoring         town power is buildings plus reach, and it orders the board")
+
+# Reach is channel-agnostic, so it belongs to the town and not to any building.
+store2, params2 = fresh()
+store2.record(GUILD, NIK, "mention_received", channel_id=LIBRARY_CH, partner_id=FOX)
+res2 = standing.guild_standings(store2, params2, GUILD, [library])
+assert res2["people"][NIK]["reached"] == 1 and res2["people"][FOX]["reached"] == 1
+assert res2["people"][FOX]["power"] > 0, "a person with only ties still has a town"
+print("scoring         reach sits on the town, and ties alone still make one")
+
+
+
+# --------------------------------------------------------------------------- #
+#  The suggest endpoint: the one click that makes any of this score
+# --------------------------------------------------------------------------- #
+import asyncio  # noqa: E402
+
+from helpers.dodoland.buildings import BuildingStore  # noqa: E402
+from web.dodoland import api as dodoland_api  # noqa: E402
+
+
+class _Ch:
+    def __init__(self, cid, name):
+        self.id, self.name = cid, name
+
+
+class _G:
+    id, name = GUILD, "G"
+    channels = [_Ch(901, "eso-help"), _Ch(902, "trials-lfg"), _Ch(903, "pet-pics")]
+
+    def get_member(self, uid):
+        return None
+
+
+class _Audit:
+    def record(self, *a, **k):
+        pass
+
+
+class _Bot:
+    def __init__(self):
+        self.dodoland_buildings = BuildingStore(FakeCollection())
+        self.audit_log = self.audit_notify = _Audit()
+
+    def get_guild(self, gid):
+        return _G()
+
+
+class _Req(dict):
+    def __init__(self, app, body):
+        super().__init__()
+        self.app, self._b = app, body
+        self.match_info = {"gid": str(GUILD)}
+
+    async def json(self):
+        return self._b
+
+
+_bot = _Bot()
+_req = _Req({"bot": _bot}, {})
+_req["guild"], _req["scope"], _req["uid"] = _G(), "owner", 1
+
+# Nothing scores until rooms are attached, so this endpoint is the one click
+# that turns a configured server into a scoring one. It must actually persist.
+assert not any(b["channels"] for b in _bot.dodoland_buildings.buildings(GUILD))
+_resp = asyncio.run(dodoland_api.api_dodoland_suggest(_req))
+assert _resp.status == 200, _resp.text
+assert '"ok": true' in _resp.text, _resp.text
+saved = _bot.dodoland_buildings.buildings(GUILD)
+attached = {cid for b in saved for cid in b["channels"]}
+assert attached == {'901', '902', '903'}, attached
+assert _bot.dodoland_buildings.is_configured(GUILD), "suggesting did not persist"
+print("suggest         one click attaches this server's real rooms, and it sticks")
+
+# Running it again must not disturb what it already did.
+asyncio.run(dodoland_api.api_dodoland_suggest(_req))
+again = {cid for b in _bot.dodoland_buildings.buildings(GUILD) for cid in b["channels"]}
+assert again == attached, "a second suggest moved rooms around"
+print("suggest         pressing it twice changes nothing")
+
+
+
+# --------------------------------------------------------------------------- #
+#  Channels are offered in the order Discord draws them
+# --------------------------------------------------------------------------- #
+import discord  # noqa: E402
+
+from web.dodoland import buildings_ui  # noqa: E402
+
+
+class _Cat:
+    def __init__(self, cid, name, position):
+        self.id, self.name, self.position = cid, name, position
+
+
+class _Room(discord.TextChannel):
+    def __init__(self, cid, name, category, position):
+        self.id, self.name, self.position = cid, name, position
+        self._cat = category
+
+    @property
+    def category(self):
+        return self._cat
+
+
+_info, _admin, _social = _Cat(1, "Information", 0), _Cat(2, "Admin", 1), _Cat(3, "Social", 2)
+
+
+class _Server:
+    id = GUILD
+    channels = [_Room(30, "general", _social, 1), _Room(10, "announcements", _info, 0),
+                _Room(21, "moderators", _admin, 1), _Room(20, "raid-leading", _admin, 0),
+                _Room(31, "big-walk", _social, 0), _Room(11, "wayshrine", _info, 1)]
+
+    def get_channel(self, cid):
+        return next((c for c in self.channels if c.id == cid), None)
+
+
+# With sixty-odd channels the only ordering anybody knows is their own sidebar.
+order = [c.id for c in buildings_ui.ordered_channels(_Server())]
+assert order == [10, 11, 20, 21, 31, 30], order
+print("channels        offered in Discord's own category and channel order")
+
+assert buildings_ui.channel_label(_Server().channels[0]) == "Social / general"
+print("channels        labelled by category, so searching one finds its rooms")
+
+# A hint may match a whole category, which is how servers are really organised.
+picked = B.suggest_channels(_Server(), B.validate_buildings(B.default_buildings()))
+tavern = next(b for b in picked if b["key"] == "tavern")
+assert set(tavern["channels"]) == {"30", "31"}, tavern["channels"]
+print("channels        a hint can claim a whole category, not one room at a time")
+
+
+
+# --------------------------------------------------------------------------- #
+#  A forum's posts are separate rooms; ordinary threads are not
+# --------------------------------------------------------------------------- #
+class _Forum(discord.ForumChannel):
+    def __init__(self, cid, name, category, position):
+        self.id, self.name, self.position = cid, name, position
+        self._cat = category
+
+    @property
+    def category(self):
+        return self._cat
+
+
+class _Post:
+    """A forum post. Only the attributes the picker and labeller read."""
+
+    def __init__(self, tid, name, parent):
+        self.id, self.name, self.parent = tid, name, parent
+
+
+_feed = _Forum(40, "personal-feed", _social, 2)
+_food = _Post(401, "Salvalicious food pics", _feed)
+_safe = _Post(402, "Safe Space", _feed)
+
+
+class _WithForum(_Server):
+    channels = _Server.channels + [_feed]
+    threads = [_safe, _food]
+
+
+ids = [c.id for c in buildings_ui.ordered_channels(_WithForum())]
+assert 40 in ids, "the forum itself is missing"
+assert ids.index(401) > ids.index(40) and ids.index(402) > ids.index(40), ids
+print("forums          each forum's posts are listed as rooms, under their forum")
+
+label = buildings_ui.channel_label(_food)
+assert label == "Social / personal-feed / Salvalicious food pics", label
+print("forums          a post is labelled by its category and its forum")
+
+# The listener charges a forum post to itself and an ordinary thread to its
+# parent. Collapsing forum posts made the food feed, the safe space and the
+# selfies thread one indistinguishable channel.
+src = pathlib.Path("cogs/dodoland.py").read_text(encoding="utf-8")
+assert "isinstance(parent, discord.ForumChannel)" in src,     "forum posts are being collapsed into their forum again"
+print("forums          a post is its own room; a thread in a channel is not")
+
+
+
+# --------------------------------------------------------------------------- #
+#  A town has depth, not a queue of houses
+# --------------------------------------------------------------------------- #
+import re as _re  # noqa: E402
+
+from helpers.dodoland import townart  # noqa: E402
+
+art = townart.town_svg([{"key": f"b{i}", "tier": 6 - i} for i in range(5)])
+# Only what stands on a plot. Inhabitants and emblems are also a translate and
+# a scale, so matching the transform alone counted the crowd as buildings.
+spots = _re.findall(
+    r'class="lot[^"]*"[^>]*transform="translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)',
+    art)
+assert len(spots) == 5, spots
+xs = {round(float(x)) for x, _y, _s in spots}
+ys = {round(float(y)) for _x, y, _s in spots}
+assert len(xs) > 1, "every building stands at the same x: that is a row, not a town"
+assert len(ys) > 1, "every building stands on one line: the town has no depth"
+print("art             buildings are spread across the plate, not lined up")
+
+# Further back is smaller, and drawn first so the near ones cover it.
+pairs = sorted((float(y), float(s)) for _x, y, s in spots)
+assert pairs[0][1] < pairs[-1][1], "depth does not change how large a building is"
+assert art.index(f"translate({spots[0][0]}") < art.index(f"translate({spots[-1][0]}"),     "buildings are not painted back to front"
+print("art             the far ones are smaller and drawn under the near ones")
+
+
+
+# --------------------------------------------------------------------------- #
+#  The climb has to look like a climb
+# --------------------------------------------------------------------------- #
+# The original design had thirty tiers of escalating spectacle and was right to.
+# What was wrong with it was arithmetic that made the top unreachable, and the
+# thresholds are derived now, so there is no reason left to be timid about it.
+sizes = {}
+for tier in range(1, 7):
+    art = townart.town_svg([{"key": "k", "tier": tier}], shapes={"k": "keep"},
+                           symbols={"k": "shield"}, glow="#f1c40f", uid=f"t{tier}")
+    sizes[tier] = len(art)
+assert sizes[6] > sizes[4] > sizes[2], sizes
+print("tiers           every tier is visibly more than the one below it")
+
+top = townart.town_svg([{"key": "k", "tier": 6}], shapes={"k": "keep"},
+                       glow="#f1c40f", uid="top")
+for mark, why in (("lifted", "the top tier does not leave the ground"),
+                  ("bbeam", "no beam of light at the top"),
+                  ("orbit", "nothing orbits the top tier"),
+                  ("baura", "no aura at the top")):
+    assert mark in top, why
+print("tiers           the top tier hovers, beams, orbits and glows")
+
+# Effects must be gated so a wide view is not three hundred light shows.
+assert top.count('class="fx"') >= 4, "the spectacle is not behind the close-up gate"
+print("tiers           all of it is behind the close-up gate")
+
+# Gradients, never CSS filters: a filter inside the zoomed world rasterises it.
+assert "radialGradient" in top and "filter" not in top
+print("tiers           drawn with gradients, so it stays vector at every zoom")
+
+# Two towns must not share gradient ids, or they all take one colour.
+a = townart.town_svg([{"key": "k", "tier": 6}], glow="#ff0000", uid="111")
+b = townart.town_svg([{"key": "k", "tier": 6}], glow="#00ff00", uid="222")
+assert "au111" in a and "au222" in b and "au111" not in b
+print("tiers           each town owns its gradients, so colours cannot bleed")
+
+
+
+# --------------------------------------------------------------------------- #
+#  Nothing on a town depends on a font arriving
+# --------------------------------------------------------------------------- #
+# The emblems and the inhabitants were Font Awesome glyphs set as SVG text. They
+# did not render: emblems were missing above every building and the wanderers
+# came out as whatever the fallback font had at those codepoints. A webfont
+# fails silently and at a distance, which is the worst way for the part people
+# are meant to look at to fail.
+art = townart.town_svg(
+    [{"key": "zoo", "tier": 4}, {"key": "pub", "tier": 5}],
+    shapes={"zoo": "pen", "pub": "inn"},
+    symbols={"zoo": "paw", "pub": "mug"},
+)
+assert "font-family" not in art and "<text" not in art,     "a town depends on a webfont again, and it will fail silently"
+print("art             nothing on a town needs a font to arrive")
+
+assert art.count('class="walker') >= 2, "a town has no inhabitants"
+assert art.count('class="emblem') == 2, "buildings lost their emblems"
+print("art             inhabitants and emblems are drawn shapes")
+
+# Every emblem a building can be given has to be drawable, and every one of
+# them is a Font Awesome path rather than a glyph in a font. The font version
+# rendered nothing at all and did it silently.
+for name in townart.EMBLEMS:
+    drawn = townart.icon(name, colour="#000")
+    assert drawn and "<path" in drawn, f"{name} draws nothing"
+    assert "font-family" not in drawn and "<text" not in drawn,         f"{name} is back to being a glyph in a webfont"
+print(f"art             all {len(townart.EMBLEMS)} emblems draw something")
+
+# One banner, on the pole the building already had. The town's flag used to be
+# planted from outside at the building's overall height, so a tier-six inn flew
+# its own pennant at the roof and the town's banner nine units above it: two
+# flags, neither attached to anything. The family is handed the banner and puts
+# it on its own pole.
+for _fam, _tier in (("inn", 6), ("keep", 6), ("stage", 6), ("chapel", 6),
+                    ("hall", 5), ("gate", 4), ("monument", 6), ("pen", 2)):
+    _one = townart.town_svg([{"key": "a", "tier": _tier}], shapes={"a": _fam},
+                            flag="/pic.png", uid="f")
+    assert _one.count('"townflag"') == 1,         f"{_fam} at tier {_tier} flies {_one.count(chr(34) + 'townflag' + chr(34))} town banners"
+print("flags           exactly one town banner, whatever the building is")
+
+# ...and at the top tier it is inside the group that hovers, or the building
+# lifts off and leaves its own flag behind in the air.
+_lifted = townart.town_svg([{"key": "a", "tier": 6}], shapes={"a": "inn"},
+                           symbols={"a": "mug"}, flag="/pic.png", uid="f")
+_inside = _lifted[_lifted.index('class="lifted"'):]
+assert "townflag" in _inside, "the banner is drawn outside the group that lifts"
+assert "emblem" in _inside, "the emblem is drawn outside the group that lifts"
+print("flags           at the top tier the banner and emblem lift with the building")
+
+# A town's picture flies as a flag, clipped so any aspect ratio reads as cloth.
+flagged = townart.town_svg([{"key": "a", "tier": 2}], flag="/pic.png", uid="7")
+assert "townflag" in flagged and "clipPath" in flagged
+assert "townflag" not in townart.town_svg([{"key": "a", "tier": 2}])
+print("art             a town with a picture flies it, one without flies nothing")
+
+
+
+# --------------------------------------------------------------------------- #
+#  Inhabitants that walk and wait
+# --------------------------------------------------------------------------- #
+peopled = townart.town_svg(
+    [{"key": "pub", "tier": 5}, {"key": "zoo", "tier": 3}],
+    shapes={"pub": "inn", "zoo": "pen"})
+assert 'class="gait"' in peopled, "inhabitants have no gait to animate"
+assert peopled.count('class="walker') >= 3
+print("life            each inhabitant has its own gait to be animated by")
+
+# The flag flies from the grandest building, not from the edge of the plate.
+flagged = townart.town_svg(
+    [{"key": "keepy", "tier": 6}, {"key": "hut", "tier": 1}],
+    shapes={"keepy": "keep", "hut": "inn"}, flag="/pic.png", uid="5")
+assert "townflag" in flagged
+# It should sit above the ground line, which is where a building's roof is.
+import re as _re2
+_pos = _re2.search(r'translate\(([-\d.]+),([-\d.]+)\)">' + '<g class="townflag"', flagged)
+assert _pos, "the flag is not placed by a transform"
+assert float(_pos.group(2)) < townart.GROUND_Y, "the flag flies at ground level"
+print("flag            a town's banner flies over its grandest building")
+
+print("PASS")

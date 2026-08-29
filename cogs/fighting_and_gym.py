@@ -1,0 +1,152 @@
+"""
+Gym cog — ``gym`` lets a user pick one of their eligible cats and send it to
+train a chosen attribute; the attribute is increased after the session ends.
+"""
+
+import asyncio
+import datetime
+
+import bson
+
+import discord
+from discord.ext import commands, tasks
+from discord.ext.commands import Context
+
+import config_py
+import lang
+
+# Keyed by the labels the menu actually offers (``lang.GYM_MUSCLE_GROUPS``).
+# They used to read 'Library' and 'Grooming', which are not what the dropdown
+# says, so choosing brain or beauty raised a KeyError inside a background task
+# and trained nothing, silently.
+_ATTRIBUTE_MAPPING = dict(zip(lang.GYM_MUSCLE_GROUPS,
+                              ("strength", "agility", "intellect", "charm")))
+
+
+class _PetSelect(discord.ui.Select):
+    """Dropdown for choosing which eligible cat to send to the gym."""
+
+    def __init__(self, pets: list[dict]):
+        options = [discord.SelectOption(label=pet["name"], description=str(pet["_id"])) for pet in pets]
+        super().__init__(placeholder=lang.GYM_SELECT_PET_PLACEHOLDER, min_values=1, max_values=1, options=options)
+        self.selected: str | None = None
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.selected = self.values[0]
+        await interaction.response.defer()
+        self.view.stop()
+
+
+class _MuscleGroupSelect(discord.ui.Select):
+    """Dropdown for choosing what to train, which starts the session."""
+
+    def __init__(self, cog: "Gym", user_id: int, pet_id: str, member: discord.Member):
+        options = [discord.SelectOption(label=group) for group in lang.GYM_MUSCLE_GROUPS]
+        super().__init__(placeholder=lang.GYM_SELECT_TRAIN_PLACEHOLDER, min_values=1, max_values=1, options=options)
+        self.cog = cog
+        self.user_id = user_id
+        self.pet_id = pet_id
+        self.member = member
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        muscle_group = self.values[0]
+        guild_id = self.member.guild.id if self.member.guild else None
+        await self.cog.register_gym_session(self.user_id, self.pet_id, muscle_group, guild_id)
+        await interaction.response.send_message(
+            lang.GYM_TRAINING_STARTED.format(name=self.member.display_name, muscle_group=muscle_group), ephemeral=True
+        )
+        self.view.stop()
+
+
+class Gym(commands.Cog, name="gym"):
+    """Send cats to the gym to raise their attributes."""
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.hybrid_command(
+        name="gym", aliases=["train"], description="Send one of your cats to the gym to train an attribute."
+    )
+    async def gym(self, context: Context, member: discord.Member = None) -> None:
+        """Pick an eligible cat and a muscle group, then start a training session."""
+        member = member or context.author
+
+        pets = await self.fetch_gym_eligible_pets(member.id)
+        if not pets:
+            await context.send(lang.GYM_NO_PETS)
+            return
+
+        pet_id = await self._select_pet(pets, context)
+        if pet_id is None:
+            return
+
+        view = discord.ui.View(timeout=180)
+        view.add_item(_MuscleGroupSelect(self, member.id, pet_id, member))
+        await context.send(lang.GYM_SELECT_TRAIN_PROMPT, view=view)
+
+    async def _select_pet(self, pets: list[dict], context: Context) -> str | None:
+        """Show the pet dropdown and return the chosen pet's identifier (or None)."""
+        select = _PetSelect(pets)
+        view = discord.ui.View(timeout=60)
+        view.add_item(select)
+        await context.send(lang.GYM_SELECT_PET_PROMPT, view=view)
+        await view.wait()
+        if select.selected is None:
+            await context.send(lang.GYM_SELECT_PET_TIMEOUT)
+        return select.selected
+
+    async def fetch_gym_eligible_pets(self, user_id: int) -> list[dict]:
+        """Return the user's gym-eligible cats that aren't already training."""
+        all_pets = list(config_py.catcollection.find({"owner": user_id, "GYM": 1}))
+        training = {session["cat_id"] for session in config_py.gym_sessions.find()}
+        return [pet for pet in all_pets if pet["name"] not in training]
+
+    async def register_gym_session(self, user_id: int, cat_id: str, muscle_group: str, guild_id: int | None = None) -> None:
+        """Record a training session and schedule the attribute increase. Session
+        length and stat gain are per-guild parameters, captured now at start."""
+        hours = self.bot.params.get(guild_id, "gym_session_hours")
+        gain = self.bot.params.get(guild_id, "gym_stat_gain")
+        start_time = datetime.datetime.now()
+        end_time = start_time + datetime.timedelta(hours=hours)
+        config_py.gym_sessions.insert_one(
+            {"cat_id": cat_id, "start_time": start_time, "end_time": end_time, "muscle_group": muscle_group}
+        )
+        self._schedule_attribute_increase(cat_id, muscle_group, end_time, gain)
+
+    def _schedule_attribute_increase(self, cat_id: str, muscle_group: str, end_time: datetime.datetime, gain: int) -> None:
+        """Increase the trained attribute once the session's end time is reached."""
+
+        @tasks.loop(count=1)
+        async def increase_attribute():
+            await asyncio.sleep((end_time - datetime.datetime.now()).total_seconds())
+            await self._increase_cat_attribute(cat_id, muscle_group, gain)
+
+        increase_attribute.start()
+
+    async def _increase_cat_attribute(self, cat_id, muscle_group: str, gain: int = 1) -> None:
+        """Apply the per-session gain to the cat's trained attribute.
+
+        This is also how a cat recovers: losing a scrap costs it a point of each
+        of its governing attributes, and the gym is the only way back. It writes
+        to ``config_py.catcollection`` — it used to write to a collection
+        literally named "catcollection", which does not exist and was created
+        empty on first write, so no cat has ever actually been trained by it.
+        """
+        attribute = _ATTRIBUTE_MAPPING.get(muscle_group)
+        if attribute is None:
+            self.bot.logger.warning("Gym: no attribute for muscle group %r", muscle_group)
+            return
+        try:
+            object_id = bson.ObjectId(cat_id)
+        except (bson.errors.InvalidId, TypeError):
+            self.bot.logger.warning("Gym: %r is not a cat id", cat_id)
+            return
+        result = config_py.catcollection.update_one({"_id": object_id}, {"$inc": {attribute: gain}})
+        if not result.matched_count:
+            self.bot.logger.warning("Gym: cat %s no longer exists", cat_id)
+            return
+        self.bot.logger.debug(f"Updated {attribute} (+{gain}) for cat {cat_id}")
+
+
+async def setup(bot):
+    await bot.add_cog(Gym(bot))

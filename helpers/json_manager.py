@@ -1,35 +1,27 @@
-""""
-Copyright © Krypton 2021 - https://github.com/kkrypt0nn (https://krypt0n.co.uk)
-Description:
-This is a template to create your own discord bot in python.
-
-Version: 4.1
+"""
+Small helpers for reading and writing the file-based blacklist (``blacklist.json``).
 """
 
 import json
 
+BLACKLIST_FILE = "blacklist.json"
+
 
 def add_user_to_blacklist(user_id: int) -> None:
-    """
-    This function will add a user based on its ID in the blacklist.json file.
-    :param user_id: The ID of the user that should be added into the blacklist.json file.
-    """
-    with open("blacklist.json", "r+") as file:
-        file_data = json.load(file)
-        file_data["ids"].append(user_id)
-    with open("blacklist.json", "w") as file:
-        file.seek(0)
-        json.dump(file_data, file, indent=4)
+    """Add a user ID to the blacklist."""
+    with open(BLACKLIST_FILE, encoding="utf-8") as file:
+        data = json.load(file)
+    if user_id not in data["ids"]:
+        data["ids"].append(user_id)
+    with open(BLACKLIST_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4)
 
 
 def remove_user_from_blacklist(user_id: int) -> None:
-    """
-    This function will remove a user based on its ID from the blacklist.json file.
-    :param user_id: The ID of the user that should be removed from the blacklist.json file.
-    """
-    with open("blacklist.json", "r") as file:
-        file_data = json.load(file)
-        file_data["ids"].remove(user_id)
-    with open("blacklist.json", "w") as file:
-        file.seek(0)
-        json.dump(file_data, file, indent=4)
+    """Remove a user ID from the blacklist (no-op if not present)."""
+    with open(BLACKLIST_FILE, encoding="utf-8") as file:
+        data = json.load(file)
+    if user_id in data["ids"]:
+        data["ids"].remove(user_id)
+    with open(BLACKLIST_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4)

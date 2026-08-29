@@ -1,0 +1,504 @@
+{
+ "version": 1,
+ "note": "Verbs. Data, not code - docs/dnd/03-KNOWLEDGE-BASE.md S7. One record per thing a character can decide to do, replacing eight hand-maintained tables across five modules. `risk`/`norm`/`social_sign`/`traits`/`relation`/`needs`/`goals` are what the scorer reads; `records` names the interaction kind it counts as between two people (see interactions.json); `report` and `gist` are how it reads back. Whether a scene physically PERMITS a verb is the ruleset's job, not this file's.",
+ "verbs": [
+  {
+   "key": "attack",
+   "label": "Attack",
+   "description": "Violence, offered. The heaviest thing in the list and the one most campaigns want a say over.",
+   "directed": true,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.9,
+   "norm": -0.85,
+   "social_sign": -1.0,
+   "needs": [
+    "safety"
+   ],
+   "traits": {
+    "boldness": 0.6,
+    "warmth": -0.5,
+    "volatility": 0.4
+   },
+   "relation": {
+    "affinity": -0.6,
+    "trust": -0.3,
+    "fear": 0.3,
+    "respect": -0.2
+   },
+   "goals": {
+    "harm": 1.0,
+    "protect": 0.6
+   },
+   "records": "attacked",
+   "report": "went for",
+   "gist": ""
+  },
+  {
+   "key": "flee",
+   "label": "Flee",
+   "description": "Get out. Needs a way out that is not sealed.",
+   "directed": false,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.35,
+   "norm": -0.25,
+   "social_sign": -0.3,
+   "needs": [
+    "safety"
+   ],
+   "traits": {
+    "boldness": -0.7,
+    "fear_of_death": 0.5
+   },
+   "relation": {
+    "fear": 0.6,
+    "trust": -0.2
+   },
+   "goals": {
+    "avoid": 1.0,
+    "reach": 0.5
+   },
+   "records": "",
+   "report": "got out",
+   "gist": "{a} got out"
+  },
+  {
+   "key": "speak",
+   "label": "Speak",
+   "description": "Say something to somebody. The cheapest social move there is.",
+   "directed": true,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.1,
+   "norm": 0.3,
+   "social_sign": 0.8,
+   "needs": [
+    "belonging",
+    "desire"
+   ],
+   "traits": {
+    "warmth": 0.5,
+    "openness": 0.4,
+    "belonging": 0.3
+   },
+   "relation": {
+    "affinity": 0.5,
+    "familiarity": 0.3,
+    "trust": 0.2,
+    "desire": 0.4
+   },
+   "goals": {
+    "acquire": 0.3,
+    "protect": 0.3,
+    "learn": 0.9,
+    "befriend": 1.0
+   },
+   "records": "talked",
+   "report": "spoke to",
+   "gist": ""
+  },
+  {
+   "key": "give",
+   "label": "Give",
+   "description": "Hand something over. The only unambiguously warm verb here.",
+   "directed": true,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.1,
+   "norm": 0.45,
+   "social_sign": 1.0,
+   "needs": [
+    "belonging",
+    "desire"
+   ],
+   "traits": {
+    "warmth": 0.6,
+    "greed": -0.5,
+    "honour": 0.3
+   },
+   "relation": {
+    "affinity": 0.6,
+    "trust": 0.3,
+    "debt": 0.4,
+    "desire": 0.3
+   },
+   "goals": {
+    "protect": 0.4,
+    "befriend": 0.9
+   },
+   "records": "gifted",
+   "report": "gave something to",
+   "gist": ""
+  },
+  {
+   "key": "take",
+   "label": "Take",
+   "description": "Take what is not yours, from a person or from the room.",
+   "directed": true,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.6,
+   "norm": -0.6,
+   "social_sign": -0.8,
+   "needs": [
+    "hunger",
+    "thirst"
+   ],
+   "traits": {
+    "greed": 0.7,
+    "honour": -0.5,
+    "boldness": 0.2
+   },
+   "relation": {
+    "affinity": -0.4,
+    "trust": -0.3,
+    "respect": -0.3
+   },
+   "goals": {
+    "acquire": 1.0,
+    "harm": 0.3
+   },
+   "records": "stole",
+   "report": "took from",
+   "gist": ""
+  },
+  {
+   "key": "hide",
+   "label": "Hide",
+   "description": "Get out of sight. Wants the dark or something to get behind.",
+   "directed": false,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.2,
+   "norm": -0.35,
+   "social_sign": -0.3,
+   "needs": [
+    "safety"
+   ],
+   "traits": {
+    "boldness": -0.5,
+    "openness": -0.2,
+    "honour": -0.2
+   },
+   "relation": {
+    "fear": 0.5
+   },
+   "goals": {
+    "avoid": 0.8,
+    "learn": 0.3
+   },
+   "records": "",
+   "report": "went to ground",
+   "gist": "{a} went to ground"
+  },
+  {
+   "key": "wait",
+   "label": "Wait",
+   "description": "Do nothing. The null action every decision falls back to, and the one verb with no off switch.",
+   "directed": false,
+   "uncommitted": true,
+   "switchable": false,
+   "risk": 0.0,
+   "norm": 0.05,
+   "social_sign": 0.0,
+   "needs": [
+    "fatigue"
+   ],
+   "traits": {
+    "diligence": 0.3,
+    "volatility": -0.4,
+    "boldness": -0.2
+   },
+   "relation": {},
+   "goals": {},
+   "records": "",
+   "report": "did nothing",
+   "gist": "{a} did nothing"
+  },
+  {
+   "key": "watch",
+   "label": "Watch",
+   "description": "Hang back and work out who these people are. The middle band between doing nothing and committing.",
+   "directed": false,
+   "uncommitted": true,
+   "switchable": true,
+   "risk": 0.05,
+   "norm": 0.1,
+   "social_sign": 0.0,
+   "needs": [
+    "safety"
+   ],
+   "traits": {
+    "diligence": 0.5,
+    "curiosity": 0.5,
+    "openness": 0.3,
+    "volatility": -0.3
+   },
+   "relation": {
+    "familiarity": -0.4,
+    "trust": -0.3,
+    "fear": 0.2
+   },
+   "goals": {
+    "avoid": 0.2,
+    "protect": 0.5,
+    "learn": 1.0
+   },
+   "records": "",
+   "report": "hung back and watched",
+   "gist": "{a} hung back and watched"
+  },
+  {
+   "key": "use",
+   "label": "Use",
+   "description": "Use what you have, or what the room has.",
+   "directed": false,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.2,
+   "norm": 0.0,
+   "social_sign": 0.0,
+   "needs": [
+    "hunger",
+    "thirst",
+    "pain",
+    "warmth"
+   ],
+   "traits": {
+    "diligence": 0.4,
+    "curiosity": 0.3
+   },
+   "relation": {},
+   "goals": {
+    "acquire": 0.4,
+    "learn": 0.4
+   },
+   "records": "",
+   "report": "used what they had",
+   "gist": "{a} used what {a_had}"
+  },
+  {
+   "key": "move",
+   "label": "Move",
+   "description": "Go somewhere else in the scene, without it being flight.",
+   "directed": false,
+   "uncommitted": false,
+   "switchable": true,
+   "risk": 0.1,
+   "norm": 0.0,
+   "social_sign": 0.0,
+   "needs": [
+    "warmth",
+    "safety"
+   ],
+   "traits": {
+    "curiosity": 0.2
+   },
+   "relation": {},
+   "goals": {
+    "avoid": 0.5,
+    "protect": 0.5,
+    "reach": 1.0
+   },
+   "records": "",
+   "report": "moved off",
+   "gist": "{a} moved off"
+  },
+  {
+   "key": "help",
+   "label": "Help",
+   "directed": true,
+   "description": "Lend a hand to somebody who needs one. Warm, cheap, and it puts them in your debt.",
+   "risk": 0.15,
+   "norm": 0.55,
+   "social_sign": 0.9,
+   "needs": [
+    "belonging"
+   ],
+   "traits": {
+    "warmth": 0.6,
+    "honour": 0.4,
+    "greed": -0.3,
+    "diligence": 0.2
+   },
+   "relation": {
+    "affinity": 0.6,
+    "trust": 0.4,
+    "respect": 0.2,
+    "fear": -0.2
+   },
+   "goals": {
+    "protect": 0.8,
+    "befriend": 0.7,
+    "acquire": 0.2
+   },
+   "records": "helped",
+   "report": "helped",
+   "uncommitted": false,
+   "switchable": true,
+   "gist": ""
+  },
+  {
+   "key": "protect",
+   "label": "Protect",
+   "directed": true,
+   "description": "Put yourself between somebody and what is coming at them. The verb the whole intent parser example turns on - *I put myself between Rook and Ondry* - and until now there was no way to express it at all.",
+   "risk": 0.75,
+   "norm": 0.6,
+   "social_sign": 0.8,
+   "needs": [
+    "belonging",
+    "safety"
+   ],
+   "traits": {
+    "boldness": 0.6,
+    "honour": 0.7,
+    "warmth": 0.5,
+    "fear_of_death": -0.4
+   },
+   "relation": {
+    "affinity": 0.7,
+    "trust": 0.3,
+    "respect": 0.4
+   },
+   "goals": {
+    "protect": 1.0,
+    "befriend": 0.5
+   },
+   "records": "protected",
+   "report": "stepped in for",
+   "uncommitted": false,
+   "switchable": true,
+   "gist": ""
+  },
+  {
+   "key": "threaten",
+   "label": "Threaten",
+   "directed": true,
+   "description": "Violence promised rather than done. It has been a *relationship* kind since P2 - people could be recorded as having been threatened - but no NPC could ever choose to do it, which is the four-tables-disagreeing shape again.",
+   "risk": 0.5,
+   "norm": -0.65,
+   "social_sign": -0.7,
+   "needs": [
+    "safety"
+   ],
+   "traits": {
+    "boldness": 0.5,
+    "warmth": -0.4,
+    "volatility": 0.35,
+    "honour": -0.2
+   },
+   "relation": {
+    "affinity": -0.4,
+    "fear": 0.5,
+    "trust": -0.3,
+    "respect": -0.1
+   },
+   "goals": {
+    "harm": 0.7,
+    "protect": 0.4,
+    "acquire": 0.4
+   },
+   "records": "threatened",
+   "report": "leaned on",
+   "uncommitted": false,
+   "switchable": true,
+   "gist": ""
+  },
+  {
+   "key": "follow",
+   "label": "Follow",
+   "directed": true,
+   "description": "Go after somebody, or stay with them. Records nothing between the two of you on its own - being followed is not something done *to* you until something comes of it.",
+   "risk": 0.2,
+   "norm": -0.1,
+   "social_sign": 0.1,
+   "needs": [
+    "belonging",
+    "safety"
+   ],
+   "traits": {
+    "curiosity": 0.5,
+    "diligence": 0.3,
+    "openness": 0.2,
+    "boldness": 0.2
+   },
+   "relation": {
+    "affinity": 0.3,
+    "trust": 0.2,
+    "fear": -0.2,
+    "respect": 0.2
+   },
+   "goals": {
+    "reach": 0.8,
+    "learn": 0.6,
+    "harm": 0.3,
+    "protect": 0.5
+   },
+   "records": "",
+   "report": "went after",
+   "gist": "{a} followed after",
+   "uncommitted": false,
+   "switchable": true
+  },
+  {
+   "key": "search",
+   "label": "Search",
+   "directed": false,
+   "description": "Look through the place properly - not at people, at what is here. The undirected half of curiosity, which `watch` never covered.",
+   "risk": 0.15,
+   "norm": -0.05,
+   "social_sign": 0.0,
+   "needs": [
+    "hunger",
+    "thirst",
+    "safety"
+   ],
+   "traits": {
+    "curiosity": 0.7,
+    "diligence": 0.5,
+    "greed": 0.3
+   },
+   "relation": {},
+   "goals": {
+    "learn": 0.9,
+    "acquire": 0.7
+   },
+   "records": "",
+   "report": "went through the place",
+   "gist": "{a} searched the place",
+   "uncommitted": false,
+   "switchable": true
+  },
+  {
+   "key": "listen",
+   "label": "Listen",
+   "directed": false,
+   "description": "Attend to something in particular and wait it out. Distinct from `watch`, which is appraising the room; this is waiting *for* something. Not one of the uncommitted pair - it is a choice, not the floor.",
+   "risk": 0.05,
+   "norm": 0.1,
+   "social_sign": 0.05,
+   "needs": [
+    "safety",
+    "belonging"
+   ],
+   "traits": {
+    "diligence": 0.5,
+    "curiosity": 0.4,
+    "volatility": -0.5,
+    "openness": 0.2
+   },
+   "relation": {},
+   "goals": {
+    "learn": 0.8,
+    "avoid": 0.4
+   },
+   "records": "",
+   "report": "listened for something",
+   "gist": "{a} listened, and waited",
+   "uncommitted": false,
+   "switchable": true
+  }
+ ]
+}

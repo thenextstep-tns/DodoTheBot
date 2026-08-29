@@ -1,0 +1,233 @@
+"""
+Per-guild tunables for DodoLand — **separate from ``helpers/parameters.py``.**
+
+Same idea and the same typed-spec shape as the bot's parameter registry, but its
+own list and its own collection, so town settings never appear among the general
+cog settings. The DodoLand panel page renders these itself, the way tabletop
+does (see ``helpers/dnd/parameters.py``, which this follows deliberately).
+
+**The per-metric knobs are generated, not written.** Every entry in
+:data:`helpers.dodoland.metrics.METRICS` produces a weight, a daily cap and (for
+social acts) a per-partner cap. Nobody has to remember to expose a new metric's
+numbers, because there is nowhere to forget: adding the metric adds the
+parameters. That is the standing "everything is tweakable" rule made structural
+instead of aspirational.
+
+``ParamManager`` and ``coerce`` are reused from ``helpers/parameters.py`` rather
+than reimplemented — that is machinery, not surface, and forking it would mean
+fixing every coercion bug twice. What is separate is the spec list and the
+collection.
+"""
+
+from __future__ import annotations
+
+from config.database import db
+from helpers.dodoland import metrics as metric_registry
+from helpers.parameters import ParamManager
+
+# DodoLand's own store, so a general settings reset never rewrites a server's
+# town economy and vice versa.
+dodoland_params_col = db["DodoLandParams"]
+
+# Prefixes for the generated per-metric knobs. Kept as constants because the
+# store and the panel both have to rebuild these keys.
+WEIGHT_PREFIX = "dodoland_w_"
+DAILY_CAP_PREFIX = "dodoland_cap_"
+PARTNER_CAP_PREFIX = "dodoland_pcap_"
+CHANNELS_PREFIX = "dodoland_ch_"
+
+
+def weight_key(metric_key: str) -> str:
+    return f"{WEIGHT_PREFIX}{metric_key}"
+
+
+def daily_cap_key(metric_key: str) -> str:
+    return f"{DAILY_CAP_PREFIX}{metric_key}"
+
+
+def partner_cap_key(metric_key: str) -> str:
+    return f"{PARTNER_CAP_PREFIX}{metric_key}"
+
+
+def channels_key(metric_key: str) -> str:
+    return f"{CHANNELS_PREFIX}{metric_key}"
+
+
+def metric_setup(params, guild_id: int, metric_key: str) -> dict:
+    """Every knob for one metric, resolved. What the panel renders a block from.
+
+    One function so the panel, the scorer and any future surface can never
+    disagree about what a metric's configuration is.
+    """
+    from helpers.dodoland import metrics as metric_registry
+
+    metric = metric_registry.get(metric_key)
+    setup = {
+        "key": metric.key,
+        "label": metric.label,
+        "description": metric.description,
+        "kind": metric.kind,
+        "backfill": metric.backfill,
+        "weight": int(params.get(guild_id, weight_key(metric.key))),
+        "daily_cap": int(params.get(guild_id, daily_cap_key(metric.key))),
+        "channels": list(params.get(guild_id, channels_key(metric.key)) or []),
+    }
+    setup["partner_cap"] = (
+        int(params.get(guild_id, partner_cap_key(metric.key))) if metric.is_social else None
+    )
+    return setup
+
+
+# --------------------------------------------------------------------------- #
+#  Hand-written parameters: what is tracked, and over what window
+# --------------------------------------------------------------------------- #
+_BASE_PARAMETERS: list[dict] = [
+    {"key": "dodoland_tracked_channels", "cog": "dodoland", "type": "list_channel", "default": [],
+     "label": "Tracked channels",
+     "description": "Channels DodoLand counts activity in. Leave empty to count every channel the bot can see, minus the ignored list."},
+    {"key": "dodoland_ignored_channels", "cog": "dodoland", "type": "list_channel", "default": [],
+     "label": "Ignored channels",
+     "description": "Never counted, even when the tracked list is empty. Bot-spam and command channels belong here, or the town gets built out of /pumpkin presses."},
+    {"key": "dodoland_min_message_chars", "cog": "dodoland", "type": "int", "default": 4,
+     "label": "Minimum message length",
+     "description": "Shorter messages are not counted at all. Stops 'k', '+' and 'f' from being currency."},
+    {"key": "dodoland_max_mentions", "cog": "dodoland", "type": "int", "default": 5,
+     "label": "Mentions counted per message",
+     "description": "Distinct people one message can credit. A cost ceiling, not a game rule: each named person costs two writes, so a message listing thirty people should not spend thirty times a normal message's budget."},
+    {"key": "dodoland_public_base_url", "cog": "dodoland", "type": "str", "default": "",
+     "label": "Public address",
+     "description": "Where this panel is reachable from outside, e.g. https://dodobot.nextstep.team. Used whenever a town's address has to be written somewhere outside the browser that is already on it. Blank makes such a link relative, which will not work in Discord."},
+    # --- the player-facing surface ---------------------------------------- #
+    # All three default off, and that is the point rather than caution: for its
+    # whole life DodoLand has computed standings for people who could not see
+    # them, so turning any of this on is a deliberate act by the server's owner
+    # and never something a deploy does on their behalf.
+    {"key": "dodoland_town_pages", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can open their own town",
+     "description": "Turns on the player front end: a member signs in with Discord and gets their own town — its standing, every building and tier, what the next tier costs, and the name, description and picture they can give it. They see their own town and nobody else's. Off until a server is ready to be looked at."},
+    {"key": "dodoland_world_page", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can browse the world",
+     "description": "Lets a signed-in member open the map itself and look at everybody's towns, read-only. This is the whole point of the design — a socialite's reward is being seen — but it also shows every placed town's standing to the whole server, so it is its own decision. Needs the setting above."},
+    {"key": "dodoland_people_per_house", "cog": "dodoland", "type": "int", "default": 4,
+     "label": "People reached per house",
+     "description": "One ordinary house appears in somebody's town for every this many different people they have reached. This is the main thing that makes a well-connected person's town look like a town: at 4, reaching sixty people is fifteen houses and reaching three hundred is seventy-five, which is the difference between a village and a city. Set it to 0 to stop drawing houses at all."},
+    {"key": "dodoland_max_houses", "cog": "dodoland", "type": "int", "default": 90,
+     "label": "Most houses a town can have",
+     "description": "A ceiling, so the single most connected person on a very large server does not end up with a thousand roofs in one settlement. Reach it and the town is as big as towns get here."},
+    {"key": "dodoland_busy_town_reach", "cog": "dodoland", "type": "int", "default": 120,
+     "label": "A town's streets are full at this much reach",
+     "description": "How many different people somebody has to have reached before their streets are as busy as they get — how many inhabitants walk about, and how wide the ground is before the houses widen it further. Separate from the houses above because a crowd and a housing count are different things: past a point more people in the street is noise, while more houses still reads as a bigger town."},
+    {"key": "dodoland_player_cache_seconds", "cog": "dodoland", "type": "int", "default": 60,
+     "label": "Player page freshness (seconds)",
+     "description": "A place in a ranking only exists relative to everybody else, so showing one member their own town means scoring the whole server — the same full read the panel pays once per load. This is how long that answer is reused for. 0 recomputes it on every visit, which a server of any size will feel."},
+    {"key": "dodoland_self_settle", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Members can place their own town",
+     "description": "Lets a member choose where on the map their own town stands, and move it later. They can never move anybody else's. Off means placement stays an admin act, which is what keeps a curated map curated."},
+    {"key": "dodoland_map_min_zoom", "cog": "dodoland", "type": "float", "default": 0.4,
+     "label": "Minimum zoom",
+     "description": "How far out the map can be pulled. Below 1 the whole world fits in the frame with room around it."},
+    {"key": "dodoland_map_max_zoom", "cog": "dodoland", "type": "float", "default": 8.0,
+     "label": "Maximum zoom",
+     "description": "How far in the map can be pushed. High values are only useful on a large, detailed base image."},
+    {"key": "dodoland_map_name_zoom", "cog": "dodoland", "type": "float", "default": 1.8,
+     "label": "Zoom names appear at",
+     "description": "Town names stay hidden until the map is zoomed at least this far. Three hundred labels drawn at once is a grey mat rather than a map, so they arrive as you look closer."},
+    {"key": "dodoland_town_width_pct", "cog": "dodoland", "type": "float", "default": 3.0,
+     "label": "Base town width (% of the map)",
+     "description": "How wide the *smallest* town is drawn, as a percentage of the map's width. A proportion rather than a pixel count, for the same reason positions are: re-uploading the map at another resolution then changes neither where a town sits nor how big it looks. Every town grows from this by its standing."},
+    {"key": "dodoland_town_growth", "cog": "dodoland", "type": "float", "default": 2.5,
+     "label": "Largest town is this many times the base",
+     "description": "The strongest town on the server is drawn this much wider than the smallest, and everything in between is placed on a square-root curve. The root matters: growth linear in standing would make one prolific person's town swallow the map while everybody else stayed a speck. 1 makes every town the same size."},
+    {"key": "dodoland_detail_above", "cog": "dodoland", "type": "int", "default": 70,
+     "label": "Show close-up detail above (px)",
+     "description": "When a town is drawn wider than this many screen pixels, its high-tier flourishes wake up: smoke, lit windows, hovering, orbiting motes, and the inhabitants start walking. At map scale that would be noise on three hundred towns at once. Keep it well under what a town can actually reach, which is the map's width times the town width times the maximum zoom — set too high, nothing ever happens at any zoom."},
+    {"key": "dodoland_town_dot_below", "cog": "dodoland", "type": "int", "default": 26,
+     "label": "Collapse to a dot below (px)",
+     "description": "When a town would be drawn narrower than this many screen pixels, it is replaced by a dot. Buildings at that size are illegible smudges, and every real map does the same thing as you zoom out."},
+    {"key": "dodoland_big_town", "cog": "dodoland", "type": "float", "default": 2.2,
+     "label": "Always-labelled size",
+     "description": "Towns at least this many times the base size keep their name at every zoom level, so the map has landmarks to orient on."},
+    {"key": "dodoland_asset_size", "cog": "dodoland", "type": "int", "default": 28,
+     "label": "Decor size (px)",
+     "description": "How large a placed decoration is drawn at 100% zoom."},
+    {"key": "dodoland_newcomer_days", "cog": "dodoland", "type": "int", "default": 3,
+     "label": "Newcomer window (days)",
+     "description": "How long after joining somebody still counts as new, so talking to them scores as welcoming. Short on purpose: it is a welcome, not a friendship."},
+    {"key": "dodoland_voice_min_minutes", "cog": "dodoland", "type": "int", "default": 5,
+     "label": "Minimum shared voice (min)",
+     "description": "How long two people must be in a voice channel together before it counts as sharing one. Stops walking through a channel from making you everybody's friend."},
+    {"key": "dodoland_count_bots", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Count bots",
+     "description": "Whether bot accounts earn and grant standing. Off, in every sane configuration."},
+    {"key": "dodoland_count_self_acts", "cog": "dodoland", "type": "bool", "default": False,
+     "label": "Count acts on yourself",
+     "description": "Whether reacting to or replying to your own message scores. Off: it is the cheapest farm there is."},
+    {"key": "dodoland_window_days", "cog": "dodoland", "type": "int", "default": 365,
+     "label": "Standing window (days)",
+     "description": "How far back standing is totalled. This is a window, not a decay: days outside it are still stored and still count toward all-time records."},
+    {"key": "dodoland_lit_days", "cog": "dodoland", "type": "int", "default": 30,
+     "label": "Lit window (days)",
+     "description": "A town with activity inside this window is drawn lit, otherwise dim. This is the only thing dormancy ever costs anyone: brightness, never progress."},
+    {"key": "dodoland_keep_days", "cog": "dodoland", "type": "int", "default": 1095,
+     "label": "Keep daily rows (days)",
+     "description": "How long the per-day rows are retained. Three years by default. Lowering this permanently discards history."},
+    {"key": "dodoland_partner_weight", "cog": "dodoland", "type": "int",
+     "default": metric_registry.PARTNER_WEIGHT,
+     "label": f"Points: {metric_registry.PARTNER_LABEL}",
+     "description": metric_registry.PARTNER_DESCRIPTION},
+    {"key": "dodoland_partner_daily_cap", "cog": "dodoland", "type": "int",
+     "default": metric_registry.PARTNER_DAILY_CAP,
+     "label": "Daily cap: new people reached",
+     "description": "How many different people can score in one day. A ceiling on a genuinely good day, not a limit on how many people you may talk to."},
+]
+
+
+# --------------------------------------------------------------------------- #
+#  Generated parameters: three per metric
+# --------------------------------------------------------------------------- #
+def _metric_parameters() -> list[dict]:
+    """A weight, a daily cap and (for social acts) a partner cap per metric."""
+    out: list[dict] = []
+    for metric in metric_registry.METRICS:
+        out.append({
+            "key": weight_key(metric.key), "cog": "dodoland", "type": "int",
+            "default": metric.weight,
+            "label": f"Points: {metric.label}",
+            "description": f"{metric.description} Set to 0 to stop this counting toward standing without losing the record of it.",
+        })
+        out.append({
+            "key": daily_cap_key(metric.key), "cog": "dodoland", "type": "int",
+            "default": metric.daily_cap,
+            "label": f"Daily cap: {metric.label}",
+            "description": "How many of these can score for one person in a day. 0 removes the cap entirely.",
+        })
+        out.append({
+            "key": channels_key(metric.key), "cog": "dodoland", "type": "list_channel",
+            "default": [],
+            "label": f"Channels: {metric.label}",
+            "description": (
+                "Channels this metric counts in. Empty means wherever DodoLand tracks at all, "
+                "which is the setting most metrics want; narrow it when a metric only makes "
+                "sense somewhere specific, such as pictures in the fashion and housing rooms."
+            ),
+        })
+        if metric.is_social:
+            out.append({
+                "key": partner_cap_key(metric.key), "cog": "dodoland", "type": "int",
+                "default": metric.partner_cap,
+                "label": f"Per-person cap: {metric.label}",
+                "description": (
+                    "How many of these can score from one other person in a day. This is the "
+                    "anti-farm number: past it the act still happens and simply stops scoring, "
+                    "so two friends cannot build each other a city. 0 removes the cap."
+                ),
+            })
+    return out
+
+
+DODOLAND_PARAMETERS: list[dict] = _BASE_PARAMETERS + _metric_parameters()
+
+
+def manager() -> ParamManager:
+    """A ``ParamManager`` over DodoLand's own specs and collection."""
+    return ParamManager(dodoland_params_col, DODOLAND_PARAMETERS)

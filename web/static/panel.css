@@ -1,0 +1,1720 @@
+/* ==========================================================================
+   Dodo Control Panel — styled on the Airbnb design system.
+   Tokens (colour, type, space, radii, elevation) come from that system; the
+   legacy --bg/--panel/--line/... names below are kept as aliases so every rule
+   in this file keeps working. Deviations, both for density (this is a dense
+   admin tool, not an editorial site): control padding is scaled down from the
+   48px-tall website controls, and --on/--warning are status colours the source
+   system doesn't define (it specifies only an error red).
+   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Brand & accent */
+  --color-primary:          #ff385c;
+  --color-primary-active:   #e00b41;
+  --color-primary-disabled: #ffd1da;
+  /* Surface */
+  --color-canvas:           #ffffff;
+  --color-surface-soft:     #f7f7f7;
+  --color-surface-strong:   #f2f2f2;
+  /* Hairlines */
+  --color-hairline:         #dddddd;
+  --color-hairline-soft:    #ebebeb;
+  --color-border-strong:    #c1c1c1;
+  /* Text */
+  --color-ink:              #222222;
+  --color-body:             #3f3f3f;
+  --color-muted:            #6a6a6a;
+  --color-muted-soft:       #929292;
+  --color-on-primary:       #ffffff;
+  /* Semantic */
+  --color-error:            #c13515;
+  --color-success:          #008a05;  /* not in the source system — status only */
+  --color-warning:          #b35309;  /* not in the source system — status only */
+
+  --font-sans: 'Inter', Circular, -apple-system, system-ui, Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600; --weight-bold: 700;
+
+  --space-xs: 4px; --space-sm: 8px; --space-md: 12px; --space-base: 16px;
+  --space-lg: 24px; --space-xl: 32px;
+
+  --radius-sm: 8px;      /* buttons, inputs        */
+  --radius-md: 14px;     /* cards                  */
+  --radius-full: 9999px; /* pills, chips, avatars  */
+
+  /* The only shadow tier in the system; everything else stays flat. */
+  --shadow-float: rgba(0, 0, 0, 0.02) 0 0 0 1px,
+                  rgba(0, 0, 0, 0.04) 0 2px 6px 0,
+                  rgba(0, 0, 0, 0.1)  0 4px 8px 0;
+
+  /* Legacy aliases — what the rest of this file already references. */
+  --bg: var(--color-surface-soft);
+  --panel: var(--color-canvas);
+  --line: var(--color-hairline);
+  --text: var(--color-ink);
+  --muted: var(--color-muted);
+  --accent: var(--color-primary);
+  --on: var(--color-success);
+  --off: var(--color-error);
+  --warning: var(--color-warning);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: var(--weight-regular) 16px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
+header { display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 22px; background: var(--color-canvas); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20; }
+.brand { font-weight: 700; color: var(--text); text-decoration: none; }
+.logout, .back { color: var(--muted); text-decoration: none; }
+.logout:hover, .back:hover { color: var(--text); }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 22px 60px; }
+h1 { font-size: 22px; line-height: 1.18; letter-spacing: -0.44px;
+  font-weight: var(--weight-bold); margin: 28px 0 12px; }
+h2 { font-size: 16px; line-height: 1.25; font-weight: var(--weight-semibold); margin: 0; }
+.muted { color: var(--muted); font-weight: 400; font-size: 13px; }
+a { color: var(--accent); }
+
+/* Dashboard: guild cards with logos */
+.guildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.guildcard { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--radius-md); text-decoration: none; color: var(--text);
+  transition: border-color .15s, transform .05s; }
+.guildcard:hover { border-color: transparent; box-shadow: var(--shadow-float); }
+.guildcard:active { transform: translateY(1px); }
+.ginfo { display: flex; flex-direction: column; min-width: 0; }
+.ginfo b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glogo { border-radius: 50%; flex: none; object-fit: cover; }
+.glogo.placeholder { display: grid; place-items: center; background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 700; font-size: 20px; }
+
+/* Guild page: fixed left sidebar + fluid content. Full-width on this page only. */
+main:has(.guildpage) { max-width: none; }
+.guildpage { display: flex; align-items: flex-start; gap: 20px; }
+.sidebar { width: 280px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 14px;
+  max-height: calc(100vh - 80px); overflow-y: auto; }
+.content { flex: 1 1 auto; min-width: 0; }
+.sidebar .back { display: inline-block; margin-bottom: 10px; font-size: 13px; }
+.ghead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.toolbar #cogfilter { flex: 1 1 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font-size: 13px; }
+.toolbar button { margin: 0; padding: 5px 10px; font-size: 12px; }
+
+.cognav { display: block; }
+.navroot { font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--muted); padding: 4px 2px 8px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.navcat { display: block; margin-bottom: 4px; }
+.navcat > summary { cursor: pointer; padding: 6px 2px; font-size: 13px; font-weight: 600;
+  list-style: none; }
+.navcat > summary::-webkit-details-marker { display: none; }
+.navcat > summary::before { content: "▸ "; color: var(--muted); }
+.navcat[open] > summary::before { content: "▾ "; }
+.navcog { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 16px; }
+.navcog a { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); text-decoration: none; font-size: 13px;
+  font-family: var(--font-mono); }
+.navcog a:hover { color: var(--text); }
+.navbtns { display: flex; gap: 4px; flex: none; }
+.navbtns button { margin: 0; padding: 2px 7px; font-size: 11px; }
+.navbtns button[data-action="unload"], .navbtns button[data-action="load"] {
+  background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.navbtns button[data-action="unload"]:hover, .navbtns button[data-action="load"]:hover { color: var(--text); }
+
+@media (max-width: 820px) {
+  .guildpage { flex-direction: column; }
+  .sidebar { width: 100%; position: static; max-height: none; }
+}
+
+/* Command cards */
+.cmdgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;
+  padding: 12px 14px; }
+.cmdcard { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line);
+  border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cmdcard.lvl-admin { border-left-color: var(--warning); }
+.cmdcard.lvl-owner { border-left-color: var(--off); }
+.cmdcard .cmdname { color: var(--text); font-weight: 700; font-size: 13px; }
+.cmdcard .cmddesc { flex: 1; }
+.cmdcard select.level { width: 100%; }
+
+@media (max-width: 760px) {
+  .guildpage { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; }
+}
+
+table { width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+.cogbtns { text-align: right; white-space: nowrap; }
+
+button { background: var(--color-primary); color: var(--color-on-primary); border: 0;
+  border-radius: var(--radius-sm); padding: 9px 16px;
+  font: var(--weight-medium) 14px/1.2 var(--font-sans);
+  cursor: pointer; margin-left: 6px; transition: background-color .15s; }
+button:hover { background: var(--color-primary-active); }
+button:active { transform: translateY(1px); }
+button:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
+
+.on { color: var(--on); font-weight: 600; }
+.off { color: var(--off); font-weight: 600; }
+
+.small { font-size: 12px; }
+
+/* Category ("meta-cog") cards */
+.catcard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  margin-bottom: 14px; overflow: hidden; }
+.cathead { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 14px 18px; }
+.cattitle { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cattitle h2 { font-size: 17px; margin: 0; }
+.catemoji { font-size: 20px; }
+.switch.master { font-weight: 600; color: var(--text); white-space: nowrap; }
+.switch.master input { vertical-align: middle; }
+.catbody > summary { cursor: pointer; padding: 10px 18px; color: var(--muted); font-size: 13px;
+  border-top: 1px solid var(--line); list-style: none; }
+.catbody > summary::-webkit-details-marker { display: none; }
+.catbody > summary::before { content: "▸ "; }
+.catbody[open] > summary::before { content: "▾ "; }
+.catbody[open] > summary { color: var(--text); }
+
+.cogcard { background: var(--color-surface-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); margin: 0 14px 12px; }
+.catbody > .cogcard:first-of-type { margin-top: 12px; }
+.coghead { display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.coghead h3 { font-size: 14px; margin: 0; font-family: var(--font-mono); }
+.coghead:last-child { border-bottom: none; }
+.cogcard > p.muted { padding: 10px 14px; margin: 0; }
+.switch { font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+.features { border-bottom: 1px solid var(--line); }
+.feathead { padding: 8px 14px 2px; text-transform: uppercase; letter-spacing: .5px; font-size: 11px; }
+.featrow { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 8px 14px; }
+.featrow + .featrow { border-top: 1px solid var(--line); }
+.featrow b { font-size: 13px; }
+.params { border-bottom: 1px solid var(--line); }
+.paramrow { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 8px 14px; }
+.paramrow + .paramrow { border-top: 1px solid var(--line); }
+.paramrow b { font-size: 13px; }
+.paramrow input[type="number"], .paramrow input[type="text"] { width: 120px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.paramrow select { max-width: 220px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.paramrow select[multiple] { min-height: 66px; }
+.paramrow.wide { flex-direction: column; align-items: stretch; gap: 8px; }
+.paramrow.wide textarea { width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; resize: vertical;
+  font-family: var(--font-mono); font-size: 13px;
+  line-height: 1.5; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; }
+.paramrow.wide textarea:focus { outline: none; border-color: var(--accent); }
+
+/* Searchable chip multi-select (list_role / list_channel) */
+.multiselect { width: 100%; }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ms-chips:empty { display: none; }
+.ms-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 56, 92, .10);
+  color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px 3px 9px; font-size: 13px; }
+.ms-chip b { cursor: pointer; color: var(--muted); font-weight: 700; padding: 0 4px; border-radius: 4px; }
+.ms-chip b:hover { color: var(--off); background: var(--bg); }
+.ms-search { width: 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font-size: 13px; margin-bottom: 6px; }
+.ms-search:focus { outline: none; border-color: var(--accent); }
+.ms-options { max-height: 200px; overflow-y: auto; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg); }
+.ms-opt { padding: 7px 10px; cursor: pointer; font-size: 13px; border-top: 1px solid var(--line); }
+.ms-opt:first-child { border-top: none; }
+.ms-opt:hover { background: var(--panel); color: var(--text); }
+table.cmds { border: 0; border-radius: 0; background: transparent; }
+table.cmds code { color: var(--text); }
+table.cmds td { border-bottom: 1px solid var(--line); }
+table.cmds tr:last-child td { border-bottom: none; }
+select.level { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 8px; }
+
+nav { display: flex; gap: 16px; align-items: center; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover { color: var(--text); }
+
+#langsearch { width: 100%; padding: 11px 14px; margin: 6px 0 18px; background: var(--panel);
+  color: var(--text); border: 1px solid var(--line); border-radius: 9px; font-size: 14px; }
+#langsearch:focus { outline: none; border-color: var(--accent); }
+
+details.group { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  margin-bottom: 12px; overflow: hidden; }
+details.group > summary { cursor: pointer; padding: 14px 18px; font-weight: 700; font-size: 15px;
+  letter-spacing: .3px; list-style: none; }
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary::before { content: "▸"; color: var(--muted); margin-right: 10px;
+  display: inline-block; transition: transform .15s; }
+details.group[open] > summary::before { transform: rotate(90deg); }
+details.group[open] > summary { border-bottom: 1px solid var(--line); }
+
+.langrow { padding: 16px 18px; border-top: 1px solid var(--line); }
+.langrow:first-of-type { border-top: none; }
+.langhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.langhead .k { font-family: var(--font-mono);
+  font-weight: 700; font-size: 13px; color: var(--text); }
+.fields { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.fields code { background: rgba(255, 56, 92, .08); border: 1px solid transparent;
+  border-radius: 5px; padding: 2px 6px; font-size: 12px; color: var(--accent);
+  font-family: var(--font-mono); }
+.langrow textarea { display: block; width: 100%; min-height: 42px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  font-family: var(--font-mono); font-size: 13px;
+  line-height: 1.55; resize: vertical; }
+.langrow textarea:focus { outline: none; border-color: var(--accent); }
+.langrow.saved textarea { border-color: var(--on); }
+details.def { margin: 8px 0 0; }
+details.def summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; }
+details.def summary::-webkit-details-marker { display: none; }
+details.def summary::before { content: "default ▸"; }
+details.def[open] summary { color: var(--text); }
+details.def[open] summary::before { content: "default ▾"; }
+details.def summary { font-size: 0; }
+details.def summary::before { font-size: 12px; }
+details.def pre { white-space: pre-wrap; word-break: break-word; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 11px; margin: 8px 0 0;
+  color: var(--muted); font-size: 12px; line-height: 1.5; }
+.langbtns { margin-top: 10px; display: flex; gap: 8px; }
+.langbtns button { margin: 0; }
+/* Secondary: white with a 1px edge (the system's outlined button). */
+button.ghost { background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-border-strong); }
+button.ghost:hover { background: var(--color-surface-soft); border-color: var(--color-ink); }
+
+.status { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 16px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.status.show { opacity: 1; }
+.status.err { border-color: var(--off); color: var(--off); }
+.status.ok { border-color: var(--on); color: var(--on); }
+
+/* ---------------------------------------------------------------- Stats page */
+.statslink { display: block; margin-bottom: 12px; padding: 8px 10px; text-align: center;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  text-decoration: none; font-size: 13px; font-weight: 600; }
+.statslink:hover { border-color: var(--accent); }
+main:has(.statspage) { max-width: 1180px; }
+.statshead { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.statshead h1 { margin: 6px 0 0; }
+.statshead .back { display: inline-block; font-size: 13px; }
+.sh { font-size: 15px; margin: 26px 0 10px; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips.wrap { margin-bottom: 4px; }
+.chip { padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); text-decoration: none; font-size: 13px; }
+.chip:hover { color: var(--text); border-color: var(--muted); }
+.chip.on { background: var(--color-primary); border-color: var(--color-primary);
+  color: var(--color-on-primary); font-weight: var(--weight-medium); }
+.chip.static { color: var(--text); }
+.chip code { color: var(--accent); }
+.chip.static code { font-size: 12px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tlabel { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.tvalue { font-size: 22px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.statsgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; }
+table.stats { width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+table.stats th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--muted); font-weight: 600; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+table.stats td { padding: 9px 12px; border-top: 1px solid var(--line); position: relative; }
+table.stats tbody tr:first-child td { border-top: none; }
+table.stats .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.stats .rank { width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; }
+table.stats code { color: var(--accent); font-size: 12px; }
+.rankbar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent); opacity: .55; }
+
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 2px; font-size: 13px; }
+
+svg.chart { width: 100%; height: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+svg.chart .bar { fill: var(--accent); }
+svg.chart .bar:hover { fill: var(--color-primary-active); }
+svg.chart .guide { stroke: var(--line); stroke-width: 1; }
+svg.chart .axis { fill: var(--muted); font-size: 11px; }
+
+/* ------------------------------------------------------------- Settings page */
+.sidelinks { display: flex; gap: 8px; margin-bottom: 12px; }
+.sidelinks .statslink { flex: 1 1 0; margin-bottom: 0; }
+main:has(.settingspage) { max-width: 1180px; }
+#setsearch { width: 100%; padding: 9px 11px; margin: 4px 0 16px; background: var(--panel);
+  color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.settings { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 10px; }
+.setrow { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: center;
+  padding: 11px 12px; border-bottom: 1px solid var(--line); }
+.setrow:last-child { border-bottom: none; }
+.setrow.wide { grid-template-columns: 1fr; }
+.setrow code { color: var(--muted); font-size: 11px; }
+.setrow .on { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: rgba(0, 138, 5, .10); color: var(--on); }
+.setctl { display: flex; gap: 8px; align-items: flex-start; }
+.setctl > select, .setctl > input, .setctl > textarea, .setctl > .multiselect { flex: 1 1 auto; min-width: 0; }
+.setctl .setreset { flex: none; padding: 5px 10px; font-size: 12px; margin: 0; }
+.setctl input.emoji { flex: 0 0 64px; text-align: center; font-size: 16px; }
+.setrow select, .setrow input, .setrow textarea { padding: 7px 9px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
+.setrow textarea { width: 100%; resize: vertical; line-height: 1.5; }
+
+/* --------------------------------------------------------------- Events page */
+main:has(.eventspage) { max-width: 1000px; }
+#addrule { margin: 4px 0 14px; }
+.rulecard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 14px 16px; margin-bottom: 12px; }
+.rulecard.off { opacity: .55; }
+.rulehead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rulename { flex: 1 1 auto; padding: 7px 10px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font-weight: 600; }
+.rulehead .ruledelete { margin: 0; padding: 5px 10px; font-size: 12px; }
+.rulegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
+.rulegrid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+.rulecard select, .rulecard input, .rulecard textarea { padding: 7px 9px; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
+.rulecard textarea { width: 100%; resize: vertical; line-height: 1.5; }
+.rulecard code { color: var(--accent); font-size: 12px; }
+.rulebtns { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.rulebtns button { margin: 0; }
+@media (max-width: 720px) { .rulegrid { grid-template-columns: 1fr; } }
+
+/* Chat string listeners share the rule-card chrome; their fields stack, because
+   a trigger is mostly prose (patterns, how she feels, canned lines). */
+.trigpage { margin-top: 36px; }
+.trigcard > label { display: flex; flex-direction: column; gap: 5px; font-size: 13px;
+  color: var(--muted); margin-bottom: 4px; }
+.trigcard > label + .muted { margin: -2px 0 10px; }
+.trigcard .rulegrid { grid-template-columns: repeat(4, 1fr); margin-top: 10px; }
+.trigcard .rulegrid label.inline { flex-direction: row; align-items: center; gap: 8px; }
+.trigcard .rulegrid label.inline input { width: auto; }
+@media (max-width: 900px) { .trigcard .rulegrid { grid-template-columns: 1fr 1fr; } }
+
+/* The activity log: what she decided about recent messages, and why. */
+.trigjumps { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 18px; }
+.trigjump { background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; font-size: 13px; text-decoration: none; }
+.trigjump:hover { border-color: var(--accent); }
+.acttable { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); }
+.acttable table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.acttable th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+  font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .04em; }
+.acttable td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.acttable tr:last-child td { border-bottom: 0; }
+.acttable .nowrap { white-space: nowrap; }
+.acttable .saidline { margin-top: 3px; color: var(--accent); font-size: 12.5px; }
+.act-ok td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.act-warn td:first-child { box-shadow: inset 3px 0 0 #d9a441; }
+.act-bad td:first-child { box-shadow: inset 3px 0 0 #d05a5a; }
+.act-muted { opacity: .72; }
+
+/* ------------------------------------------------------- Panel access (owner) */
+.accessbody { padding: 12px 16px 16px; }
+.accessbody table.stats { margin-bottom: 12px; }
+.accessbody .grantdel { margin: 0; padding: 4px 9px; font-size: 12px; }
+.grantadd { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grantadd select, .grantadd input { padding: 7px 9px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 13px; }
+.grantadd button { margin: 0; }
+.sidechips { flex-direction: column; margin-bottom: 12px; }
+.sidechips .chip { text-align: center; }
+
+
+/* ------------------------------------------------- Form controls (system spec) */
+input, select, textarea {
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+}
+input::placeholder, textarea::placeholder { color: var(--color-muted); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--color-ink); /* reads as the spec's 2px edge, no layout shift */
+}
+input:disabled, select:disabled, textarea:disabled {
+  background: var(--color-surface-soft); color: var(--color-muted-soft);
+  border-color: var(--color-hairline-soft);
+}
+/* The old dark-theme fills would now be light-on-light. */
+.toolbar #cogfilter, .ms-search, .ms-options, .paramrow input[type="number"],
+.paramrow input[type="text"], .paramrow.wide textarea, .langrow textarea,
+.setrow select, .setrow input, .setrow textarea, .rulecard select, .rulecard input,
+.rulecard textarea, .grantadd select, .grantadd input, #setsearch, #langsearch,
+.rulename, details.def pre { background: var(--color-canvas); color: var(--color-ink); }
+.ms-opt:hover { background: var(--color-surface-soft); }
+.langrow textarea:focus, .paramrow.wide textarea:focus, .ms-search:focus,
+#langsearch:focus, .setrow input:focus, .setrow textarea:focus {
+  border-color: var(--color-ink);
+}
+/* Level accents on command cards, in the system's palette. */
+.cmdcard.lvl-admin { border-left-color: var(--color-warning); }
+.cmdcard.lvl-owner { border-left-color: var(--color-primary); }
+.ms-chip { color: var(--color-ink); border-color: transparent; }
+.status { box-shadow: var(--shadow-float); }
+
+/* --------------------------------------------------- Legibility corrections
+   Rausch is a CTA/brand colour, not a small-text colour: at 12-13px it lands
+   around 3.3:1 on white, under the 4.5:1 needed. The source system agrees —
+   its links are ink (only legal copy uses a blue). So small text and links go
+   ink, and Rausch stays for buttons, bars, badges and other brand moments. */
+a { color: var(--color-ink); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--color-primary-active); }
+nav a, .chip, .navcog a, .statslink, .guildcard, .logout, .back { text-decoration: none; }
+table.stats code, .chip code, .setrow code { color: var(--color-ink); }
+.fields code { color: var(--color-primary-active); }
+/* Selected pill: ink fill, as in the system's selected filter chips (white on
+   Rausch at 13px would be 3.5:1). */
+.chip.on { background: var(--color-ink); border-color: var(--color-ink); }
+.chip.on:hover { color: var(--color-on-primary); }
+
+/* ------------------------------------------------------------ Change log page */
+main:has(.logpage) { max-width: 1180px; }
+.logfilters { display: flex; gap: 8px; margin: 10px 0 16px; flex-wrap: wrap; }
+.logfilters select { padding: 7px 9px; font: inherit; font-size: 13px; }
+.logfilters button { margin: 0; }
+.logpage table.stats td { vertical-align: top; }
+
+/* --- multi-choice type-to-find picker ---------------------------------- */
+/* One control, two shapes: chips for what is chosen, a box for finding more.
+   The whole thing is styled as a single field so it sits in a filter row next
+   to plain selects without looking like a different species. */
+.mspick { position: relative; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px; flex: 1 1 220px; min-width: 0; padding: 3px 6px;
+  background: var(--color-canvas); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); }
+.mspick:focus-within { border-color: var(--color-primary); }
+.ms-chips { display: contents; }
+.ms-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 2px 4px 2px 8px; font-size: 12px; border-radius: var(--radius-full);
+  background: var(--color-surface-soft); border: 1px solid var(--color-hairline);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-x { margin: 0; padding: 0 3px; line-height: 1; font-size: 14px;
+  background: transparent; border: 0; color: var(--color-muted); cursor: pointer; }
+.ms-x:hover { background: transparent; color: var(--color-primary); }
+.ms-text { flex: 1 1 80px; min-width: 60px; padding: 4px 2px; font: inherit;
+  font-size: 13px; background: transparent; color: var(--color-ink); border: 0; }
+.ms-text:focus { outline: none; }
+.ms-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 30;
+  max-height: 280px; overflow-y: auto; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.ms-item { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px;
+  font-size: 13px; cursor: pointer; }
+.ms-item:hover, .ms-item.active { background: var(--color-surface-soft); }
+.ms-sub { color: var(--color-muted); font-size: 12px; }
+.ms-empty { padding: 8px 10px; font-size: 13px; color: var(--color-muted); }
+
+/* --- server log: what Discord did ------------------------------------- */
+/* A log is read by scanning, so the layout is tuned for rows-per-screen: one
+   line of chrome per event, everything else given to what actually happened. */
+
+/* The filter row is a grid, so where it breaks is a decision rather than
+   whatever the widths happened to add up to. What is being looked for goes on
+   the top line; when, and the buttons, go underneath. Before this the row wrapped
+   wherever it ran out of pixels and left "to" stranded beside the buttons. */
+.logfilters { display: grid; gap: 6px; align-items: stretch;
+  grid-template-columns: minmax(140px, .9fr) repeat(3, minmax(150px, 1fr)); }
+.logfilters select, .logfilters button, .logfilters input[type="date"] {
+  height: 34px; padding: 0 9px; font-size: 13px; }
+.logfilters .mspick { min-height: 34px; padding: 2px 6px; }
+.logdates { grid-column: 1 / -1; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 8px; }
+.logactions { display: flex; gap: 6px; margin-left: auto; }
+.logfilters .datefield { display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+.logfilters input[type="date"] { font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.logfilters button { margin: 0; }
+.logfilters a.chip { display: flex; align-items: center; }
+.nowrap { white-space: nowrap; }
+
+/* The description takes every pixel the other two do not need. */
+.logtable { table-layout: auto; }
+.logtable td { padding: 7px 10px; vertical-align: top; }
+.logtable th { padding: 7px 10px; }
+.logtable tr:hover td { background: var(--color-surface-soft); }
+
+/* Date over time: half the width of one long string, and the pair drops back
+   onto a single line on a narrow screen. */
+.logwhen { width: 1%; white-space: nowrap; }
+.logday, .logclock { display: block; font-size: 12px;
+  font-variant-numeric: tabular-nums; line-height: 1.35; }
+.logday { color: var(--color-muted); }
+.logclock { color: var(--color-body); font-weight: var(--weight-semibold); }
+
+/* The chip used to wrap mid-phrase ("Message" / "edited") because the column is
+   as narrow as its content and nothing stopped it breaking. */
+.logkind { width: 1%; }
+.logkind .chip { white-space: nowrap; font-size: 11px; padding: 2px 8px; }
+
+.logbody { line-height: 1.45; font-size: 13px; word-break: break-word; }
+/* The raw snowflake after a name is there to be copied, not read. */
+.logbody code { font-size: 11px; color: var(--color-muted-soft); }
+.logbody a { color: var(--color-primary); }
+
+/* Attached values (before/after, content) hang off a rule, with the label as a
+   gutter so several of them line up down the left rather than each starting
+   wherever its own name ended. */
+.logfield { display: flex; gap: 8px; margin-top: 3px; padding-left: 8px;
+  border-left: 2px solid var(--color-hairline); }
+/* Wide enough for the longest label there is, and nowrap so it can never break
+   into "ATTACHMENT" over "S" again. */
+.logfieldname { flex: 0 0 96px; font-size: 10px; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--color-muted); line-height: 1.7;
+  white-space: nowrap; }
+/* One flex item for the whole value. Without it every span inside became an
+   item of its own and the sentence came out in vertical strips. */
+.logfieldvalue { flex: 1 1 auto; min-width: 0; }
+
+/* Mentions read as mentions rather than as raw snowflakes, and a deleted one
+   says so instead of showing an id nobody can look up. */
+.mention { padding: 0 4px; border-radius: var(--radius-sm);
+  background: var(--color-surface-soft); color: var(--color-primary);
+  white-space: nowrap; }
+.mention.role { color: var(--color-warning); }
+.mention.chan { color: var(--color-body); }
+.mention.gone { color: var(--color-muted-soft); background: transparent;
+  text-decoration: line-through; }
+/* A custom emoji has no image here, so it reads as the name people call it. */
+.cemoji { padding: 0 3px; border-radius: var(--radius-sm); font-size: 12px;
+  background: var(--color-surface-soft); color: var(--color-muted); }
+/* A spoilered word is a word with a cover on it, nothing more: it sits in the
+   line it was typed in and takes a click to read. box-decoration-break: clone is
+   what keeps a spoiler that wraps from painting one slab over both lines, and
+   the descendant rule covers mentions and emoji inside it, which set their own
+   colours and would otherwise show straight through. */
+.spoiler { border-radius: 3px; cursor: pointer;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.spoiler:not(.open) { background: var(--color-muted-soft); color: transparent; }
+.spoiler:not(.open) * { color: transparent; background: transparent;
+  border-color: transparent; }
+
+/* Below this the three columns stop being columns. A log row is a timestamp, a
+   label and a paragraph; on a phone that is a card, not a table. */
+@media (max-width: 760px) {
+  .logtable, .logtable tbody, .logtable tr, .logtable td { display: block;
+    width: auto; }
+  .logtable thead { display: none; }
+  .logtable tr { padding: 9px 11px; border-bottom: 1px solid var(--color-hairline-soft); }
+  .logtable tr:last-child { border-bottom: 0; }
+  .logtable td { padding: 0; border: 0; width: auto; }
+  /* Time and kind share the card's header line. Qualified by .logtable so they
+     outrank the `.logtable td { display: block }` above, which is a stronger
+     selector and was quietly stacking them. */
+  .logtable .logwhen, .logtable .logkind { display: inline-block;
+    vertical-align: middle; }
+  .logtable .logwhen { margin-right: 8px; }
+  .logday, .logclock { display: inline; }
+  .logday { margin-right: 5px; }
+  .logbody { margin-top: 5px; }
+  .logfield { flex-direction: column; gap: 1px; margin-top: 5px; }
+  .logfieldname { flex: none; line-height: 1.4; }
+  /* One filter per line: three pickers side by side on a phone are three boxes
+     too narrow to show what is in any of them. */
+  .logfilters { grid-template-columns: 1fr; }
+  .logdates { display: grid; grid-template-columns: 1fr 1fr; }
+  .logactions { grid-column: 1 / -1; margin-left: 0; }
+  .logactions > * { flex: 1 1 0; justify-content: center; }
+  .logfilters .datefield { justify-content: space-between; }
+  .logfilters input[type="date"] { flex: 1 1 auto; min-width: 0; }
+  .logpage .statshead h1 { font-size: 20px; }
+}
+
+select.coglevel { margin-left: auto; margin-right: 10px; padding: 4px 8px; font-size: 12px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+
+/* ---------------------------------------------------------------- Tribes page */
+main:has(.tribespage) { max-width: 1080px; }
+.tribeactions { display: flex; gap: 8px; margin: 4px 0 16px; }
+.tribeactions button { margin: 0; }
+.tribecard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 14px 16px; margin-bottom: 12px; }
+.tribecard.off { opacity: .55; }
+.tribesummary { margin: -4px 0 10px; font-family: var(--font-mono); }
+.rulebuilder { margin: 6px 0 4px; }
+.condnode { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px;
+  margin: 6px 0; background: var(--color-surface-soft); }
+.condhead { display: flex; align-items: center; gap: 8px; }
+.condremove { margin: 0 0 0 auto; padding: 1px 8px; font-size: 13px; line-height: 1.2; }
+.condbody { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.condkids { width: 100%; padding-left: 14px; border-left: 2px solid var(--color-hairline); }
+.condnode select, .condnode input { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.condnode input[type="number"] { width: 90px; }
+.condnode select[multiple] { min-width: 190px; }
+
+/* Points constructor */
+.modeswitch { display: flex; gap: 16px; margin: 8px 0 10px; font-size: 13px; }
+.modeswitch label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pointsbuilder { border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: var(--color-surface-soft); }
+.pointshead { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 6px; }
+.ptrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.ptrow input, .ptrow select { padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.ptrow input[type="number"] { width: 90px; }
+.ptrow .pt-name { width: 150px; }
+.pt-remove { margin: 0; padding: 1px 8px; font-size: 13px; line-height: 1.2; }
+.exclusivewrap { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* ------------------------------------------------------- Trial ranking page */
+main:has(.trialspage) { max-width: 1080px; }
+.trialbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0 10px;
+  padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); }
+.trialbar button { margin: 0; }
+.warnline { color: var(--color-error); font-size: 13px; margin: 6px 0; }
+.trialsection { padding: 10px 14px 14px; }
+.rolefilter { width: 100%; padding: 8px 10px; margin-bottom: 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.scorerows { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px; }
+.scorerow { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); }
+.scorerow .rolename { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.scorerow input { width: 92px; flex: none; padding: 5px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.scorerow.unpriced { background: rgba(193, 53, 21, .06); border-color: rgba(193, 53, 21, .35); }
+.scorerow.isrank { background: rgba(255, 56, 92, .06); border-color: rgba(255, 56, 92, .35); }
+.nopoints { font-size: 11px; color: var(--color-error); white-space: nowrap; }
+
+/* Top-bar guild navigation */
+nav { flex-wrap: wrap; gap: 12px; }
+nav .navguild { color: var(--color-muted); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .4px; padding-left: 8px; border-left: 1px solid var(--line); }
+nav a.active { color: var(--color-ink); font-weight: var(--weight-semibold); }
+
+/* Trial ranking: balance sandbox */
+.sandbox { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 12px 14px; margin-bottom: 14px; }
+.sandboxrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sandboxrow input { flex: 1 1 320px; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.sandboxrow button { margin: 0; }
+#previewout { margin-top: 12px; }
+#previewout table.previewtable td { cursor: help; }
+#previewout tr.moved { background: rgba(255, 56, 92, .07); }
+#previewout tr.moved td:last-child { font-weight: var(--weight-semibold); }
+#trialpush { background: var(--color-primary); }
+
+/* Trial ranking: the fixed ladder */
+.ladder { display: flex; flex-direction: column; gap: 6px; }
+.rankrow { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); }
+.rankrow.mapped { background: rgba(255, 56, 92, .05); border-color: rgba(255, 56, 92, .3); }
+.rankmain { display: flex; align-items: center; gap: 10px; }
+.rankindex { width: 20px; text-align: center; color: var(--color-muted); font-size: 12px;
+  font-variant-numeric: tabular-nums; flex: none; }
+.rankrow select { flex: 1 1 auto; min-width: 0; }
+.rankrow select, .rankrow input, .rankrow textarea { padding: 6px 8px; font: inherit;
+  font-size: 13px; background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.rankrow input[type="number"] { width: 96px; flex: none; }
+.rankdesc { width: 100%; resize: vertical; }
+.rankdel { flex: none; }
+
+/* Per-rank badge: shown on the /rank card, optional everywhere. */
+.rankimg { display: flex; align-items: center; gap: 6px; flex: none; }
+.rankimg-preview { width: 32px; height: 32px; object-fit: cover; flex: none;
+  border-radius: var(--radius-sm); border: 1px solid var(--color-hairline); }
+.rankimg-empty { width: 72px; font-size: 11px; color: var(--color-muted-soft); }
+
+/* The rollout board */
+.pilotstats { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 10px 0; }
+.pilotstat { font-size: 13px; color: var(--color-body); }
+.pilotstat b { font-size: 17px; color: var(--color-ink); margin-right: 4px;
+  font-variant-numeric: tabular-nums; }
+.pilotadd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.pilotadd input { flex: 1 1 240px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+/* The everyone-at-once row. Set apart from the one-person box above it and
+   marked in the warning colour: it is the only control on this page that
+   overrides an answer somebody already gave. */
+/* A URL is long and the box sits in a row of controls, so it takes the slack. */
+.urlbox { flex: 1 1 320px; min-width: 0; padding: 7px 9px; font: inherit; font-size: 12px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+
+.pilotall { padding-top: 10px; border-top: 1px dashed var(--color-hairline); }
+.pilotall button { border-color: var(--color-warning); }
+.pilotall .small { flex: 1 1 320px; }
+
+/* A slot's score sits with its role: mapping a clear and pricing it are one job. */
+.slotcell { display: flex; flex-direction: column; gap: 4px; }
+.slotpoints { width: 100%; padding: 5px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.slotpoints[hidden] { display: none; }
+.subhead { font-size: 14px; font-weight: var(--weight-semibold); margin: 22px 0 4px;
+  padding-top: 16px; border-top: 1px solid var(--color-hairline); }
+.extrarow { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.extrarow .rolepick { flex: 1 1 auto; }
+.extrarow .rolepoints { width: 90px; flex: none; padding: 6px 8px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+#trialsearch { width: 100%; margin-bottom: 10px; }
+
+/* Sticky side menu + one panel at a time, same shape as the cogs page. Built for
+   trial ranks (six stacked accordions meant scrolling a 46-row table to reach
+   anything) and reused by tabletop tuning, which had the same problem with 34
+   settings. The generic .side* names are the reusable half; .trial* stays as an
+   alias so that page's markup did not need rewriting to share this. */
+main:has(.trialspage) { max-width: none; }
+.triallayout, .sidepanels { display: flex; align-items: flex-start; gap: 20px; }
+.trialnav, .sidenav { width: 250px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+  display: flex; flex-direction: column; gap: 2px; }
+.trialnavitem, .sidenavitem { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto;
+  column-gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm);
+  text-decoration: none; color: var(--color-body); border: 1px solid transparent; }
+.trialnavitem:hover, .sidenavitem:hover { background: var(--color-surface-soft); }
+.trialnavitem.active, .sidenavitem.active { background: rgba(255, 56, 92, .07); border-color: rgba(255, 56, 92, .3); }
+.trialnavitem .navemoji, .sidenavitem .navemoji { grid-row: 1 / 3; font-size: 16px; text-align: center; }
+.trialnavitem .navlabel, .sidenavitem .navlabel { font-size: 13px; font-weight: var(--weight-semibold);
+  color: var(--color-ink); }
+.trialnavitem.active .navlabel, .sidenavitem.active .navlabel { color: var(--color-primary); }
+.trialnavitem .navhint, .sidenavitem .navhint { font-size: 11px; color: var(--color-muted); }
+.navfoot { margin: 12px 4px 0; padding-top: 10px; border-top: 1px solid var(--color-hairline); }
+.triallayout > .content, .sidepanels > .content { flex: 1 1 auto; min-width: 0; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); padding: 18px 20px; }
+.panelhead { font-size: 16px; font-weight: var(--weight-semibold); margin: 0 0 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--color-hairline-soft); }
+.trialpanel[hidden], .sidepanel[hidden] { display: none; }
+
+@media (max-width: 900px) {
+  .triallayout, .sidepanels { flex-direction: column; }
+  .trialnav, .sidenav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+  .trialnavitem, .sidenavitem { flex: 1 1 auto; }
+  .trialnavitem .navhint, .sidenavitem .navhint, .navfoot { display: none; }
+}
+
+/* Tabletop pages stack; they are not the cogs page. They borrowed .guildpage for
+   its full width and inherited its two-column flex, which turned every heading,
+   card and tuning group on the page into a narrow column of its own. */
+main:has(.ttpage) { max-width: 1240px; }
+.ttpage > .cogcard { margin-left: 0; margin-right: 0; }
+.ttpage > h2 { margin-bottom: 4px; }
+
+/* Tabletop tuning rows. A setting is a wide label column and a narrow control,
+   never a card in a column pile — the description has to be readable at a glance
+   or the knob may as well not have a name. */
+.tunerow { align-items: flex-start; gap: 24px; padding: 12px 2px; }
+.tunerow + .tunerow { border-top: 1px solid var(--color-hairline-soft); }
+.tunelabel { flex: 1 1 auto; min-width: 0; }
+.tunelabel .tunedesc { margin: 3px 0 0; line-height: 1.5; max-width: 68ch; }
+.tunelabel .tunemeta { margin-top: 4px; display: flex; align-items: center; gap: 7px;
+  flex-wrap: wrap; }
+.tunelabel .tunemeta code { background: var(--color-surface-soft); border-radius: 4px;
+  padding: 1px 6px; font-size: 11px; font-family: var(--font-mono); color: var(--color-muted); }
+.tunectl { flex: none; display: flex; align-items: center; gap: 6px; padding-top: 1px; }
+.tuneclear { margin: 0; padding: 4px 9px; font-size: 13px; line-height: 1.2;
+  background: var(--color-canvas); color: var(--color-muted);
+  border: 1px solid var(--color-hairline); }
+.tuneclear:hover { background: var(--color-surface-soft); color: var(--color-ink);
+  border-color: var(--color-ink); }
+
+/* Prog interest: one row per raid, drawn against the twelve a group needs. */
+.proggrid { display: flex; flex-direction: column; gap: 6px; }
+.progrow { border: 1px solid var(--color-hairline); border-left: 4px solid var(--color-ink);
+  border-radius: var(--radius-sm); background: var(--color-canvas); }
+.progrow > summary { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  cursor: pointer; list-style: none; }
+.progrow > summary::-webkit-details-marker { display: none; }
+.progname { flex: 1 1 auto; min-width: 0; font-weight: var(--weight-semibold); font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progcount { flex: none; font-size: 13px; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.progpips { display: flex; gap: 3px; flex: none; }
+.pip { width: 9px; height: 16px; border-radius: 2px; background: var(--color-surface-strong); }
+.pip.on { background: var(--color-ink); }
+/* 0–5 stays ink, 6–9 yellow, 10+ green — the only question is "can we run it". */
+.progrow.lvl-warm { border-left-color: var(--color-warning); }
+.progrow.lvl-warm .pip.on { background: var(--color-warning); }
+.progrow.lvl-warm .progcount { color: var(--color-warning); }
+.progrow.lvl-ready { border-left-color: var(--color-success); }
+.progrow.lvl-ready .pip.on { background: var(--color-success); }
+.progrow.lvl-ready .progcount { color: var(--color-success); }
+.lvl-warm-ink { color: var(--color-warning); }
+.lvl-ready-ink { color: var(--color-success); }
+.progbody { padding: 0 14px 12px 34px; }
+/* Per-boss/title/clear inside a raid — which fight the night gets built around. */
+.progclears { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.progclear { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.progclearname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.progclearbar { flex: 0 0 120px; height: 6px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); overflow: hidden; }
+.progclearbar > i { display: block; height: 100%; background: var(--color-ink); }
+.progclear.lvl-warm .progclearbar > i { background: var(--color-warning); }
+.progclear.lvl-ready .progclearbar > i { background: var(--color-success); }
+.progclearcount { flex: none; width: 42px; text-align: right; font-size: 12px;
+  font-variant-numeric: tabular-nums; color: var(--color-muted); }
+.proglist { margin: 0; padding: 0; list-style: none; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 3px; font-size: 13px;
+  border-top: 1px solid var(--color-hairline-soft); padding-top: 8px; }
+.progneeds { color: var(--color-muted); font-size: 12px; }
+.progneeds::before { content: " — "; }
+
+.announcebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px;
+  padding: 12px; background: var(--color-surface-soft); border-radius: var(--radius-sm); }
+.announcebar > div:first-child { flex: 1 1 260px; }
+.announcebar select { flex: 0 1 240px; min-width: 0; padding: 7px 9px; font: inherit;
+  font-size: 13px; background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+
+.rungoff { font-size: 11px; color: var(--color-muted-soft); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-full); padding: 1px 8px; }
+
+/* Type-to-pick role selector */
+.rolepick { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+.rolepick-text { width: 100%; padding: 6px 26px 6px 9px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.rolepick-clear { position: absolute; right: 4px; margin: 0; padding: 0 6px; line-height: 1.3;
+  background: transparent; color: var(--color-muted); border: 0; font-size: 15px; }
+.rolepick-clear:hover { background: transparent; color: var(--color-ink); }
+.rolepick-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 30;
+  max-height: 240px; overflow-y: auto; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float); }
+.rolepick-item { padding: 7px 10px; font-size: 13px; cursor: pointer; }
+.rolepick-item:hover, .rolepick-item.active { background: var(--color-surface-soft); }
+.rolepick-empty { padding: 7px 10px; font-size: 13px; color: var(--color-muted); }
+.rankmid { color: var(--color-muted); font-size: 12px; flex: none; }
+.explain { font-size: 13px; color: var(--color-body); margin-bottom: 12px; }
+.explain p { margin: 0 0 8px; }
+
+.scorerow.suggestedrow { background: rgba(0, 0, 0, .02); border-color: var(--color-hairline-soft); }
+.suggested { font-size: 11px; color: var(--color-muted-soft); white-space: nowrap; }
+
+/* Trial families */
+.families { display: flex; flex-direction: column; gap: 6px; }
+.famrow { display: flex; gap: 10px; align-items: baseline; padding: 6px 0;
+  border-top: 1px solid var(--color-hairline-soft); }
+.famrow:first-child { border-top: none; }
+.famkey { flex: 0 0 64px; font-family: var(--font-mono); font-size: 12px; color: var(--color-muted); }
+.famchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.famrole { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-full);
+  border: 1px solid var(--color-hairline); background: var(--color-canvas); }
+.famrole.superseded { color: var(--color-muted-soft); text-decoration: line-through;
+  background: var(--color-surface-soft); }
+
+/* Trial clear-role mapping */
+.trialactions { display: flex; gap: 8px; margin: 10px 0 14px; }
+.trialactions button { margin: 0; }
+.trialrow { border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-bottom: 10px; background: var(--color-surface-soft); }
+.trialhead { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.trialname { flex: 1 1 auto; padding: 6px 9px; font: inherit; font-size: 13px; font-weight: 600;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.trialdel { margin: 0; padding: 1px 9px; font-size: 14px; line-height: 1.3; }
+.slotgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.slotcell { display: flex; flex-direction: column; gap: 4px; }
+.slotlabel { font-size: 11px; color: var(--color-muted); text-transform: uppercase;
+  letter-spacing: .3px; }
+
+/* Unsaved edits in the points grid */
+.scorerow.edited, .rankrow.edited { outline: 2px solid var(--color-primary);
+  outline-offset: -1px; border-radius: var(--radius-sm); background: rgba(255, 56, 92, .05); }
+.scorerow.edited input, .rankrow.edited input { border-color: var(--color-primary); }
+.wasvalue { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--color-muted); white-space: nowrap; }
+.wasvalue.up { color: var(--color-success); }
+.wasvalue.down { color: var(--color-error); }
+
+/* Presets: a named copy of a whole ruleset, so a rebalance can be undone. */
+.presetbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px;
+  padding: 10px 12px; background: var(--color-surface-soft); border-radius: var(--radius-sm); }
+.presetbar select { flex: 0 1 240px; min-width: 0; padding: 6px 9px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.presetbar button { margin: 0; }
+
+/* Preview: filters, and movement you can see without reading two columns. */
+.previewfilters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.previewfilters input, .previewfilters select { padding: 6px 9px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.previewfilters input { flex: 1 1 220px; min-width: 0; }
+.previewtable tr.promoted { background: rgba(0, 138, 5, .09); }
+.previewtable tr.demoted { background: rgba(193, 53, 21, .09); }
+.previewtable .pvmove { width: 26px; text-align: center; font-size: 11px; }
+.previewtable tr.promoted .pvmove { color: var(--color-success); }
+.previewtable tr.demoted .pvmove { color: var(--color-error); }
+.pvtag { display: block; margin: 2px 0 0; padding: 0; background: none; border: 0;
+  color: var(--color-muted); font: inherit; font-size: 11px; text-decoration: underline dotted;
+  cursor: pointer; }
+.pvtag:hover { color: var(--color-primary); background: none; }
+.pvdetail > td { background: var(--color-surface-soft); }
+.pvbreak { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.pvchip { font-size: 12px; padding: 2px 8px; border-radius: var(--radius-full);
+  background: var(--color-canvas); border: 1px solid var(--color-hairline); }
+.pvchip.superseded { color: var(--color-muted-soft); text-decoration: line-through; }
+
+/* The whole preview row is the hit target, not just the username. */
+.previewtable tbody tr:not(.pvdetail) { cursor: pointer; }
+.previewtable tbody tr:not(.pvdetail):hover { background: var(--color-surface-strong); }
+.previewtable tr.promoted:hover { background: rgba(0, 138, 5, .16); }
+.previewtable tr.demoted:hover { background: rgba(193, 53, 21, .16); }
+.previewtable .pvchev { width: 20px; text-align: center; color: var(--color-muted-soft);
+  font-size: 10px; }
+.previewtable tr.open .pvchev { color: var(--color-ink); }
+.pvtag { display: block; margin: 2px 0 0; color: var(--color-muted); font-size: 11px; }
+
+/* Dashboard status board */
+.statusbanner { padding: 18px 22px; border-radius: var(--radius-md); color: #fff;
+  font-size: 18px; font-weight: var(--weight-semibold); margin-bottom: 16px; }
+.statusbanner.ok { background: #5aa832; }
+.statusbanner.warn { background: var(--color-warning); }
+.statusbanner.down { background: var(--color-error); }
+.statustiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 16px; }
+.statustile { display: flex; flex-direction: column; gap: 1px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.tilevalue { font-size: 22px; font-weight: var(--weight-bold); line-height: 1.15;
+  font-variant-numeric: tabular-nums; }
+.tilelabel { font-size: 13px; font-weight: var(--weight-semibold); }
+.tilehint { font-size: 11px; color: var(--color-muted); }
+.statuscard { padding: 16px 18px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); }
+.statushead { display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 10px; }
+/* One bar per day. "No data" is a gap, not a pass — see _status_board. */
+.hbars { display: flex; gap: 2px; align-items: stretch; height: 34px; }
+.hbar { flex: 1 1 0; min-width: 2px; border-radius: 2px; background: #5aa832; }
+.hbar.degraded { background: var(--color-warning); }
+.hbar.down { background: var(--color-error); }
+.hbar.none { background: var(--color-surface-strong); }
+.hscale { display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 11px; color: var(--color-muted); }
+
+/* Status bars: hover card, the way a status page does it. */
+.statuscard { position: relative; }
+.hbar { cursor: pointer; transition: opacity .1s; }
+.hbar:hover, .hbar:focus { opacity: .65; outline: none; }
+.hpop { position: absolute; z-index: 40; min-width: 230px; padding: 14px 16px;
+  background: var(--color-canvas); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-float); }
+.hpop[hidden] { display: none; }
+.hpop-day { font-size: 14px; font-weight: var(--weight-semibold); margin-bottom: 8px; }
+.hpop-none { font-size: 13px; color: var(--color-muted); }
+.hpop-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--radius-sm); background: var(--color-surface-soft); font-size: 13px; }
+.hpop-row.warn { color: var(--color-warning); }
+.hpop-row.down { color: var(--color-error); }
+.hpop-what { flex: 1 1 auto; color: var(--color-ink); }
+.hpop-dur { font-variant-numeric: tabular-nums; color: var(--color-ink); }
+.hpop-meta { margin-top: 8px; font-size: 11px; color: var(--color-muted); }
+
+/* Bot-wide tooling in the top bar: separated from the per-guild links so it
+   doesn't read as one of them, and doesn't float alone on the dashboard. */
+.navtool { margin-left: 10px; padding-left: 14px; border-left: 1px solid var(--line);
+  color: var(--muted); text-decoration: none; font-size: 13px; }
+.navtool:hover { color: var(--text); }
+
+
+/* Strings page: an index plus one editor, instead of 597 live textareas. */
+main:has(.langpage) { max-width: none; }
+.langbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+#langsearch { flex: 1 1 320px; min-width: 0; padding: 9px 12px; font: inherit; font-size: 14px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.langlayout { display: flex; align-items: flex-start; gap: 20px; }
+.langnav { width: 220px; flex: none; position: sticky; top: 76px; align-self: flex-start;
+  max-height: calc(100vh - 110px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px; }
+.langnavitem { display: flex; flex-direction: column; padding: 7px 10px; text-decoration: none;
+  border-radius: var(--radius-sm); border: 1px solid transparent; }
+.langnavitem:hover { background: var(--color-surface-soft); }
+.langnavitem.active { background: rgba(255, 56, 92, .07); border-color: rgba(255, 56, 92, .3); }
+.langnavitem .navlabel { font-size: 13px; font-weight: var(--weight-semibold);
+  color: var(--color-ink); }
+.langnavitem.active .navlabel { color: var(--color-primary); }
+.langnavitem .navhint { font-size: 11px; color: var(--color-muted); }
+.langlist { flex: 1 1 auto; min-width: 0; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); overflow: hidden; }
+.langpanel[hidden] { display: none; }
+.langrow { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 14px;
+  border-bottom: 1px solid var(--color-hairline-soft); cursor: pointer; align-items: center; }
+.langrow:hover { background: var(--color-surface-soft); }
+.langrow[hidden] { display: none; }
+.langmain { min-width: 0; }
+.langrow .k { font-size: 12px; font-weight: var(--weight-semibold); color: var(--color-ink); }
+.langpreview { font-size: 13px; color: var(--color-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.langmarks { display: flex; align-items: center; gap: 4px; flex: none; }
+.langtag { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-full);
+  border: 1px solid var(--color-hairline); color: var(--color-muted); }
+.langtag.edited { border-color: var(--color-primary); color: var(--color-primary); }
+code.ph { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--color-body); }
+
+/* One drawer: a single place an edit is made, and a single place it's checked. */
+.langdrawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(560px, 100%);
+  z-index: 60; display: flex; flex-direction: column; background: var(--color-canvas);
+  border-left: 1px solid var(--color-hairline); box-shadow: var(--shadow-float); }
+.langdrawer[hidden] { display: none; }
+.drawerhead { display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid var(--color-hairline); }
+.drawerhead .k { font-size: 13px; font-weight: var(--weight-semibold); }
+.drawerbody { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px; }
+.drawerph { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.drawerph code.ph { cursor: pointer; }
+.drawerph code.ph:hover { background: var(--color-primary); color: var(--color-on-primary); }
+#drawervalue { width: 100%; padding: 10px 12px; font: inherit; font-size: 14px;
+  background: var(--color-canvas); color: var(--color-ink); resize: vertical;
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.drawerwarn { margin-top: 10px; padding: 10px 12px; font-size: 12px;
+  background: rgba(179, 83, 9, .08); color: var(--color-warning);
+  border-radius: var(--radius-sm); }
+.drawerwarn > div + div { margin-top: 4px; }
+.drawerfoot { display: flex; align-items: center; gap: 8px; padding: 14px 18px;
+  border-top: 1px solid var(--color-hairline); }
+.drawerfoot .overlimit { color: var(--color-warning); font-weight: var(--weight-semibold); }
+@media (max-width: 900px) {
+  .langlayout { flex-direction: column; }
+  .langnav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+  .langnavitem { flex: 1 1 auto; }
+}
+
+/* The master switch being off is load-bearing information, not a checkbox state. */
+.offline { padding: 12px 16px; margin: 12px 0; font-size: 14px;
+  background: rgba(193, 53, 21, .08); color: var(--color-error);
+  border: 1px solid rgba(193, 53, 21, .35); border-radius: var(--radius-sm); }
+
+/* World records: a per-person bonus, shown with the person. */
+.wrmedals { white-space: nowrap; font-size: 15px; }
+.pilotadd input[type="number"] { flex: 0 0 110px; }
+.pvchip.record { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* Member picker: same shape as the role picker, over people. */
+.mpick { position: relative; flex: 1 1 240px; min-width: 0; display: flex; align-items: center; }
+.mpick-text { width: 100%; padding: 7px 26px 7px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.mpick-clear { position: absolute; right: 4px; margin: 0; padding: 0 6px; line-height: 1.3;
+  background: transparent; color: var(--color-muted); border: 0; font-size: 15px; }
+.mpick-clear:hover { background: transparent; color: var(--color-ink); }
+.mpick-list { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 30;
+  max-height: 260px; overflow-y: auto; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float); }
+.mpick-item { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px;
+  font-size: 13px; cursor: pointer; }
+.mpick-item:hover, .mpick-item.active { background: var(--color-surface-soft); }
+.mpick-tag { color: var(--color-muted); font-size: 12px; }
+.mpick-empty { padding: 7px 10px; font-size: 13px; color: var(--color-muted); }
+
+/* The link is shown once, so it has to be obvious and easy to copy. */
+.sharelink { margin: 10px 0; padding: 12px 14px; background: rgba(0, 138, 5, .07);
+  border: 1px solid rgba(0, 138, 5, .35); border-radius: var(--radius-sm); }
+.sharelink[hidden] { display: none; }
+.sharelink input { width: 100%; margin-top: 8px; padding: 8px 10px; font: inherit;
+  font-size: 13px; font-family: var(--font-mono); background: var(--color-canvas);
+  color: var(--color-ink); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); }
+
+/* The public board: its own page, no panel chrome. */
+body.board { background: var(--color-surface-soft); }
+.boardmain { max-width: 720px; margin: 0 auto; padding: 40px 20px 60px; }
+.boardtable { width: 100%; border-collapse: collapse; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); overflow: hidden; }
+.boardtable th { text-align: left; padding: 10px 14px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px; color: var(--color-muted);
+  border-bottom: 1px solid var(--color-hairline); }
+.boardtable td { padding: 11px 14px; border-bottom: 1px solid var(--color-hairline-soft); }
+.boardtable tr:last-child td { border-bottom: 0; }
+.boardtable .pos { width: 42px; color: var(--color-muted);
+  font-variant-numeric: tabular-nums; }
+.boardtable .who { font-weight: var(--weight-semibold); }
+.boardtable .med { font-weight: 400; }
+.boardtable .pts { text-align: right; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.boardtable .rk { color: var(--color-body); }
+.boardtable .none { color: var(--color-muted); text-align: center; padding: 24px; }
+
+/* Public board: filters, podium, expandable rows, comparison. */
+/* Sticky at every width: a board of over a thousand players is scrolled a long
+   way, and a filter you have to scroll back up to reach is one you stop using.
+   The negative margin plus matching padding lets the background reach the edge
+   of the column so rows do not show through beside it. */
+.boardbar { position: sticky; top: 0; z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 16px -20px 12px; padding: 10px 20px;
+  background: var(--color-surface-soft);
+  border-bottom: 1px solid var(--color-hairline); }
+#bsearch { flex: 1 1 240px; min-width: 0; padding: 9px 12px; font: inherit; font-size: 14px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.brow { cursor: pointer; }
+.brow:hover { background: var(--color-surface-soft); }
+/* The podium is the first three overall, so a filter can't invent a winner. */
+.brow.gold   { background: linear-gradient(90deg, rgba(212,175,55,.20), transparent 65%); }
+.brow.silver { background: linear-gradient(90deg, rgba(160,160,168,.20), transparent 65%); }
+.brow.bronze { background: linear-gradient(90deg, rgba(176,115,60,.20), transparent 65%); }
+.brow.gold:hover   { background: linear-gradient(90deg, rgba(212,175,55,.32), transparent 65%); }
+.brow.silver:hover { background: linear-gradient(90deg, rgba(160,160,168,.32), transparent 65%); }
+.brow.bronze:hover { background: linear-gradient(90deg, rgba(176,115,60,.32), transparent 65%); }
+.boardtable .bchev { width: 22px; text-align: center; color: var(--color-muted-soft);
+  font-size: 10px; }
+/* The rank badge borrows the Discord role's own colour. */
+.rankpill { display: inline-block; padding: 2px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--color-hairline); font-size: 12px;
+  font-weight: var(--weight-semibold); }
+.bdetail > td { background: var(--color-surface-soft); }
+.bchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.bchip { font-size: 12px; padding: 2px 9px; border-radius: var(--radius-full);
+  background: var(--color-canvas); border: 1px solid var(--color-hairline); }
+.bchip.superseded { color: var(--color-muted-soft); text-decoration: line-through; }
+.bchip.record { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* The opened row: the same card /rank sends, laid out for a page rather than
+   for a Discord embed. Same numbers, same order, so the two never read as two
+   different systems. */
+.bcard { display: flex; flex-direction: column; gap: 8px; }
+.bcardhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.bcardrank { font-size: 15px; font-weight: var(--weight-semibold); color: var(--color-ink); }
+.bstars { font-size: 12px; letter-spacing: 1px; }
+.bcardabout { margin: 0; font-size: 13px; color: var(--color-body); }
+.bprog { height: 6px; border-radius: var(--radius-full); overflow: hidden;
+  background: var(--color-canvas); border: 1px solid var(--color-hairline); }
+.bprog > span { display: block; height: 100%; background: var(--color-primary); }
+.bprognums { font-size: 12px; color: var(--color-body);
+  font-variant-numeric: tabular-nums; }
+.bcardsub { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--color-muted); margin-top: 4px; }
+.bsteps { margin: 0; padding-left: 18px; font-size: 13px; color: var(--color-body); }
+.bsteps li { margin: 2px 0; }
+.bsteps b { color: var(--color-ink); font-variant-numeric: tabular-nums; }
+.bnothing { margin: 0; font-size: 13px; color: var(--color-muted); }
+
+.bpick { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.bpick select { flex: 1 1 0; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+#bcompareui { padding: 16px; margin-bottom: 16px; background: var(--color-canvas);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-md); }
+#bcompareui[hidden] { display: none; }
+.bcmphead { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-hairline); margin-bottom: 8px; }
+.bcmphead > div:last-child { text-align: right; }
+.bcmprow { display: grid; grid-template-columns: 28px 1fr 44px 28px; align-items: center;
+  gap: 8px; padding: 4px 0; font-size: 13px;
+  border-bottom: 1px solid var(--color-hairline-soft); }
+.bcmprow:last-child { border-bottom: 0; }
+.cmpcell { text-align: center; font-weight: var(--weight-bold); border-radius: var(--radius-sm); }
+.cmpcell.yes { color: var(--color-success); background: rgba(0,138,5,.10); }
+.cmpcell.no  { color: var(--color-error);   background: rgba(193,53,21,.10); }
+.cmpname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmppts { text-align: right; color: var(--color-muted); font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+
+/* Compare: type-to-find, grouped by trial, matching rows stated as equal. */
+.boardbar select, .boardbar .bwr { font-size: 13px; }
+.boardbar select { padding: 8px 10px; font: inherit; background: var(--color-canvas);
+  color: var(--color-ink); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); max-width: 220px; }
+.bwr { display: flex; align-items: center; gap: 6px; color: var(--color-body); }
+.bpickone { flex: 1 1 0; min-width: 0; display: flex; }
+.bpickone input { width: 100%; padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--color-canvas); color: var(--color-ink);
+  border: 1px solid var(--color-hairline); border-radius: var(--radius-sm); }
+.bpick .vs { color: var(--color-muted); font-size: 12px; }
+.bcmpgroup { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; margin: 14px 0 4px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-hairline); font-size: 13px; }
+.gdiff { font-size: 12px; font-variant-numeric: tabular-nums; }
+.gdiff.up { color: var(--color-success); }
+.gdiff.down { color: var(--color-error); }
+.gdiff.flat { color: var(--color-muted); }
+.cmpcell.eq { color: var(--color-muted-soft); background: transparent; }
+.bcmprow.same .cmpname { color: var(--color-muted); }
+.bnote { margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--color-hairline-soft);
+  font-size: 13px; color: var(--color-muted); text-align: center; }
+
+/* Fixed columns: expanding a row must not let the browser re-measure the table
+   and shift every column under the reader's cursor. */
+.boardtable { table-layout: fixed; }
+.boardtable .c-pos  { width: 52px; }
+.boardtable .c-pts  { width: 86px; }
+.boardtable .c-rank { width: 150px; }
+.boardtable .c-chev { width: 26px; }
+.boardtable td, .boardtable th { overflow: hidden; }
+.boardtable .who { vertical-align: middle; }
+.whoname { font-weight: var(--weight-semibold); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.whotag { font-size: 11px; color: var(--color-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.boardtable .rk { overflow: visible; }
+.rankpill { max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; vertical-align: middle; }
+
+/* Mobile: the three fixed number columns add up to 314px, which on a 375px
+   phone left about twenty for the name and rendered the whole board as "M…".
+   Points and rank stack into one right-hand column instead, and the name takes
+   everything they give back. */
+@media (max-width: 620px) {
+  .boardmain { padding: 20px 12px 44px; }
+
+  /* The filters stay put. A leaderboard is scrolled a long way, and a filter
+     you have to scroll back up to reach is one you stop using. */
+  .boardbar { position: sticky; top: 0; z-index: 20;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin: 12px -12px 10px; padding: 10px 12px;
+    background: var(--color-surface-soft);
+    border-bottom: 1px solid var(--color-hairline); }
+  .boardbar #bsearch, .boardbar #bcount { grid-column: 1 / -1; }
+  .boardbar select { max-width: none; width: 100%; }
+  .boardbar button { margin: 0; }
+  #bcount { text-align: center; }
+
+  /* The row stops being four columns and becomes two, with the numbers stacked
+     on the right where they need no width of their own. */
+  .boardtable { display: block; table-layout: auto; }
+  .boardtable colgroup, .boardtable thead { display: none; }
+  .boardtable tbody, .boardtable tr { display: block; }
+  .boardtable .brow { display: grid; align-items: center; column-gap: 8px;
+    grid-template-columns: 26px minmax(0, 1fr) auto 12px; padding: 7px 10px; }
+  .boardtable .brow td { display: block; padding: 0; border: 0; overflow: visible; }
+  .boardtable .brow .pos { grid-area: 1 / 1 / 3 / 2; }
+  .boardtable .brow .who { grid-area: 1 / 2 / 3 / 3; min-width: 0; }
+  .boardtable .brow .pts { grid-area: 1 / 3 / 2 / 4; text-align: right;
+    line-height: 1.2; }
+  .boardtable .brow .rk { grid-area: 2 / 3 / 3 / 4; text-align: right; }
+  .boardtable .brow .bchev { grid-area: 1 / 4 / 3 / 5; }
+  .rankpill { font-size: 11px; padding: 1px 8px; }
+  /* The longest names wrap rather than ellipsis. A leaderboard whose point is
+     who is on it should not be the one place a name gets cut. */
+  .whoname { white-space: normal; overflow: visible; line-height: 1.3; }
+  .boardtable .bdetail > td, .boardtable .bmark > td { display: block; }
+  .bmarkline { margin: 2px 10px; }
+}
+
+/* A rank requirement, drawn across the standings without breaking the table. */
+.bmark > td { padding: 0; border-bottom: 0; }
+.bmarkline { display: flex; align-items: center; gap: 10px; margin: 2px 14px;
+  padding: 3px 0; font-size: 11px; font-weight: var(--weight-semibold);
+  letter-spacing: .3px; text-transform: uppercase; color: var(--color-muted);
+  border-color: var(--color-hairline); white-space: nowrap; }
+.bmarkline::before, .bmarkline::after { content: ""; flex: 1 1 auto;
+  border-top: 1px dashed currentColor; opacity: .45; }
+.bmarkline::before { flex: 0 0 8px; }
+
+/* Tabletop: a campaign is played from sections, not one long scroll. */
+.camppage .chips { margin-bottom: 14px; }
+.camppanel[hidden] { display: none; }
+.camppanel > .panelhead:first-child { margin-top: 0; }
+.camppanel h2 { margin-top: 22px; }
+
+/* Overwriting a disposition by hand is possible and discouraged. */
+.traitoverride { margin: 10px 0 4px; }
+.traitoverride > summary { cursor: pointer; padding: 8px 10px; font-size: 13px;
+  color: var(--color-muted); border: 1px dashed var(--color-hairline);
+  border-radius: var(--radius-sm); list-style: none; }
+.traitoverride > summary::-webkit-details-marker { display: none; }
+.traitoverride[open] > summary { color: var(--color-error); border-style: solid; }
+.warnbox { border-left: 3px solid var(--color-warning); padding: 10px 14px;
+  margin: 10px 0; background: var(--color-surface-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.warnbox p { margin: 0 0 6px; }
+.warnbox p:last-child { margin-bottom: 0; }
+
+/* Axis meters. Signed axes diverge from the centre: warmth −0.33 must not draw
+   a third of a bar from the left, which reads as mildly warm and means the
+   opposite. Colours are tokens, not the hardcoded charcoal that used to render
+   as black-on-black in the light theme. */
+.metrow { display: inline-flex; align-items: center; gap: 10px; }
+.metval { font-family: var(--font-mono); font-size: 12px; color: var(--color-muted);
+  font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; }
+.meter { position: relative; display: inline-block; width: 132px; height: 9px;
+  background: var(--color-surface-soft); border: 1px solid var(--color-hairline);
+  border-radius: 5px; vertical-align: middle; overflow: hidden; flex: none; }
+.meter > i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.meter > i.pos { background: var(--color-primary); }
+.meter > i.neg { background: var(--color-ink); opacity: .55; }
+.meter.signed::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 1px; background: var(--color-hairline); z-index: 1; }
+
+/* The neutral tick sits wherever the axis actually rests — mid-scale for
+   temperament and drives, at the left edge for a magnitude, where it is hidden. */
+.meter > b { position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--color-hairline); z-index: 1; }
+
+/* Tabletop archetypes: nine leanings per card, which is a grid of sliders or it
+   is an unreadable row of number boxes. Was the latter, briefly. */
+.packcard { border: 1px solid var(--color-hairline); border-radius: var(--radius-sm);
+  padding: 0; margin-bottom: 8px; background: var(--color-canvas); }
+.packcard > summary { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; cursor: pointer; }
+.packcard[open] > summary { border-bottom: 1px solid var(--color-hairline-soft); }
+.packcard > *:not(summary) { margin-left: 12px; margin-right: 12px; }
+.packcard > *:last-child { margin-bottom: 12px; }
+.packname, .packdesc { display: block; width: 100%; box-sizing: border-box; margin-top: 10px;
+  padding: 7px 10px; font: inherit; font-size: 13px; background: var(--color-canvas);
+  color: var(--color-ink); border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm); }
+.packname { font-weight: var(--weight-semibold); }
+.packweights { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 4px 18px; margin-top: 12px; }
+.packweight { display: grid; grid-template-columns: 5.5em 1fr 2.6em; align-items: center;
+  gap: 9px; font-size: 13px; padding: 3px 0; }
+.packweight > span { color: var(--color-body); }
+.packweight input[type="range"] { width: 100%; margin: 0; accent-color: var(--color-ink); }
+.packweight output { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--color-muted); }
+.packweight.lead > span { font-weight: var(--weight-semibold); color: var(--color-ink); }
+.packweight.lead output { color: var(--color-ink); }
+.packcard button { margin-top: 12px; margin-right: 6px; }
+.packlayer { font-size: 12px; color: var(--color-muted); margin: 0 0 10px; }
+
+/* The decision trace: the reason a GM trusts the engine instead of suspecting it. */
+.decisiontable .utilcell { width: 60px; text-align: right; font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold); }
+.decisiontable tr.chosenrow { background: rgba(255, 56, 92, .06); }
+.decisiontable tr.chosenrow .utilcell { color: var(--color-primary); }
+.decisiontable .chips { gap: 4px; }
+.decisiontable .chip { font-size: 11px; padding: 2px 8px; }
+
+/* A setting a safety line is currently overruling: it is not broken, it is
+   outranked, and the row has to say which. */
+.tuneblocked { margin-top: 6px; padding: 6px 10px; font-size: 12px;
+  background: rgba(179, 83, 9, .08); color: var(--color-warning);
+  border-radius: var(--radius-sm); }
+
+/* ==========================================================================
+   Scrap lab — the cat-fight balance sandbox (bot owner only)
+   ========================================================================== */
+.scrappage .panelhead h1 { margin: 0; font-size: 20px; }
+.scraparena { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-base); margin: var(--space-base) 0; }
+@media (max-width: 760px) { .scraparena { grid-template-columns: 1fr; } }
+.scrapside { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scrapside .panelhead { margin-top: 0; }
+.scraproster { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+.scrapcat { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-sm); }
+.scrapcathead { display: flex; gap: var(--space-sm); align-items: center; }
+.scrapcathead input[type=text] { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font: inherit;
+  font-size: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapcatclass { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.scrapstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; }
+.scrapstats label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.scrapstats input { width: 100%; padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapdrop { background: none; border: 0; cursor: pointer; color: var(--muted); font-size: 16px; padding: 0 4px; }
+.scrapdrop:hover { color: var(--color-error); }
+.scrapadd { display: flex; gap: var(--space-sm); margin-top: var(--space-sm); }
+.scrapadd select { flex: 1 1 auto; padding: 6px 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapprops, .scrapseed { display: flex; gap: 6px; align-items: center; font-size: 12px;
+  color: var(--muted); margin-top: var(--space-sm); }
+.scrapprops select, .scrapseed input { padding: 5px 8px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapseed input { width: 90px; }
+
+/* The fight log */
+.scrapout { margin-top: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.scraprnd { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-sm); }
+.scraprndhead { font-size: 12px; font-weight: var(--weight-semibold); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.scrapbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.scrapbar { font-size: 12px; }
+.scrapbarname { display: flex; justify-content: space-between; gap: var(--space-sm); }
+.scraphp { height: 8px; border-radius: var(--radius-full); background: var(--color-surface-strong);
+  overflow: hidden; margin-top: 3px; }
+.scraphp > i { display: block; height: 100%; background: var(--on); transition: width .2s; }
+.scrapbar.sideB .scraphp > i { background: var(--accent); }
+.scrapbar.dead { opacity: .45; }
+.scrapbar.dead .scraphp > i { background: var(--color-muted-soft); }
+.scrapev { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.scrapev span { color: var(--text); }
+.scrapev .ev-miss, .scrapev .ev-status { color: var(--muted); }
+.scrapev .ev-crit { font-weight: var(--weight-semibold); color: var(--color-error); }
+.scrapev .ev-prop, .scrapev .ev-ult { color: var(--warning); }
+.scrapev .ev-perk { color: var(--accent); }
+.scrapev .ev-ko { font-weight: var(--weight-semibold); }
+.scrapwinner { font-size: 15px; font-weight: var(--weight-semibold); padding: var(--space-sm);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.scrapodds { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* Tuning + reference */
+.scraptuning { margin-top: var(--space-base); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scraptuning summary { cursor: pointer; font-weight: var(--weight-semibold); }
+.scraptunes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px; margin: var(--space-sm) 0; }
+.scraptune { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.scraptune input { padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scrapref { margin-top: var(--space-base); }
+.scrapclasses { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-sm); }
+.scrapclass { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-md); }
+.scrapclass p { margin: 6px 0 0; font-size: 13px; }
+.scrapclasshead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.scrapemoji { font-size: 18px; }
+.scraptag { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--muted); }
+.scraptag.warm { background: #fdecd8; color: var(--warning); }
+
+.scrapwhy { font-style: italic; }
+
+/* ==========================================================================
+   Reaction grid — 1,400 objects down the side, every class across the top
+   ========================================================================== */
+.rxpage .panelhead h1 { margin: 0; font-size: 20px; }
+.rxbar { display: flex; gap: var(--space-base); align-items: center; flex-wrap: wrap;
+  margin: var(--space-base) 0 var(--space-sm); }
+.rxfilters { display: flex; gap: var(--space-sm); align-items: center; flex-wrap: wrap; }
+.rxfilters select, .rxfilters input { padding: 7px 10px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxfilters input { min-width: 220px; }
+.rxfilters button { margin: 0; }
+.rxcoverage { margin-left: auto; display: flex; gap: var(--space-sm); align-items: center; }
+.rxmeter { width: 140px; height: 8px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); overflow: hidden; }
+.rxmeter > i { display: block; height: 100%; background: var(--on); }
+.rxpager { display: flex; gap: var(--space-sm); align-items: center; margin: var(--space-sm) 0; }
+
+/* The table scrolls inside its own box; the page never scrolls sideways. */
+.rxscroll { overflow: auto; max-height: 74vh; border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--panel); }
+.rxgrid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.rxgrid th, .rxgrid td { border-bottom: 1px solid var(--color-hairline-soft);
+  border-right: 1px solid var(--color-hairline-soft); vertical-align: top; }
+
+.rxcorner, .rxhead { position: sticky; left: 0; z-index: 2; background: var(--panel);
+  min-width: 148px; max-width: 148px; text-align: left; padding: 6px 8px; }
+.rxcorner { z-index: 4; top: 0; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); }
+.rxclass { position: sticky; top: 0; z-index: 3; background: var(--panel);
+  min-width: 168px; max-width: 168px; padding: 6px 8px; text-align: left; }
+.rxclassemoji { font-size: 15px; margin-right: 4px; }
+.rxclassname { font-weight: var(--weight-semibold); }
+.rxclasspair { display: block; font-size: 10px; color: var(--muted); letter-spacing: .03em; }
+.rxglyph { font-size: 20px; margin-right: 6px; vertical-align: middle; }
+.rxcustom { width: 22px; height: 22px; margin-right: 6px; vertical-align: middle; border-radius: 4px; }
+.rxname { color: var(--muted); font-size: 11px; }
+
+.rxcell { padding: 6px 8px; cursor: pointer; }
+.rxcell:hover { background: var(--bg); }
+.rxcell:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rxtext { display: block; }
+.rxempty { color: var(--color-muted-soft); font-style: italic; }
+.rxmark { float: right; color: var(--muted); font-size: 11px; margin-left: 4px; }
+.rx-guild { background: #f3fbf4; }
+.rx-guild .rxmark { color: var(--on); }
+.rxstats { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.rxstat { font-size: 10px; padding: 0 5px; border-radius: var(--radius-full);
+  background: var(--color-surface-strong); color: var(--muted); }
+.rxstat.up { color: var(--on); }
+.rxstat.down { color: var(--color-error); }
+
+/* The editor floats over the grid so the row stays visible behind it. */
+.rxeditor { position: fixed; right: 20px; bottom: 20px; z-index: 40; width: 340px;
+  background: var(--panel); border: 1px solid var(--border-strong, var(--line));
+  border-radius: var(--radius-md); padding: var(--space-md);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .18); }
+.rxeditorhead { display: flex; justify-content: space-between; align-items: center;
+  gap: var(--space-sm); margin-bottom: var(--space-sm); }
+.rxclose { background: none; border: 0; cursor: pointer; font-size: 15px; color: var(--muted);
+  margin: 0; padding: 0 4px; }
+.rxtextarea { width: 100%; padding: 8px; font: inherit; font-size: 13px; resize: vertical;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxeditorstats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin: var(--space-sm) 0; }
+.rxeditorstats label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); }
+.rxeditorstats input { width: 100%; padding: 4px 6px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.rxeditorfoot { display: flex; gap: var(--space-sm); align-items: center; }
+.rxeditorfoot button { margin: 0; }
+
+/* --- DodoLand ---------------------------------------------------------- */
+/* The town map's own page. Everything else on it reuses the shared panel,
+   rule-card and multiselect styling; these are the few shapes it adds. */
+.dlmetric, .dlbuilding { margin-bottom: 14px; }
+.dlfields { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 4px; }
+.dlfield { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
+.dlfield input { width: 100%; }
+.dltiers { margin-top: 10px; }
+.dljson { width: 100%; font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.5; padding: 10px; border-radius: 8px;
+  border: 1px solid var(--color-border); background: var(--color-surface-soft);
+  color: var(--color-text); }
+/* The uploaded base map. Capped in height so a tall image cannot push the
+   controls under it off the page. */
+.dlmap { display: block; max-width: 100%; max-height: 420px; margin: 10px 0;
+  border-radius: 10px; border: 1px solid var(--color-border); }
+
+/* The map canvas: the uploaded image with towns positioned over it in
+   percentages, so a redrawn map of another size moves nothing. */
+.dlcanvas { position: relative; display: inline-block; max-width: 100%;
+  margin: 10px 0; line-height: 0; }
+.dlcanvas .dlmap { margin: 0; max-height: none; }
+.dltown { position: absolute; transform: translate(-50%, -50%); display: flex;
+  flex-direction: column; align-items: center; gap: 2px; padding: 0;
+  background: none; border: 0; cursor: pointer; line-height: 1; }
+.dltowndot { display: block; width: calc(9px * var(--dl-size, 1));
+  height: calc(9px * var(--dl-size, 1)); border-radius: 50%;
+  background: var(--color-primary); border: 2px solid rgba(255, 255, 255, .85); }
+.dltownname { font-size: 10px; font-weight: var(--weight-semibold);
+  color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .95); white-space: nowrap; }
+/* Dormancy is a view, never a subtraction: a quiet town is dim, not smaller. */
+.dltown.dim { opacity: .45; }
+.dltown.armed .dltowndot { outline: 2px dashed var(--color-primary);
+  outline-offset: 3px; }
+
+/* Flourish. Earned only from trial rank, purely visual, and never a tier.
+   Each level is deliberately distinguishable at a glance on a crowded map. */
+.dltown.fl1 .dltowndot { box-shadow: 0 0 6px 1px rgba(255, 214, 130, .95); }
+.dltown.fl2 .dltowndot { box-shadow: 0 0 9px 2px rgba(255, 184, 77, .95); }
+.dltown.fl3 .dltowndot { box-shadow: 0 0 12px 3px rgba(255, 196, 61, .95);
+  border-color: #ffd970; }
+.dltown.fl4 .dltowndot { box-shadow: 0 0 16px 5px rgba(120, 190, 255, .9);
+  border-color: #cfe8ff; }
+.dltown.fl5 .dltowndot { box-shadow: 0 0 20px 7px rgba(150, 130, 255, .9);
+  border-color: #e2dbff; animation: dlpulse 3.2s ease-in-out infinite; }
+.dltown.fl6 .dltowndot { box-shadow: 0 0 26px 9px rgba(255, 120, 200, .9);
+  border-color: #fff; animation: dlpulse 2s ease-in-out infinite; }
+@keyframes dlpulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.18); filter: brightness(1.35); }
+}
+/* Forty animated towns is a phone's whole frame budget, so the motion is the
+   first thing to go for anybody who has asked for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .dltown.fl5 .dltowndot, .dltown.fl6 .dltowndot { animation: none; }
+}
+
+/* The player's own settle page: no panel chrome, just the map. */
+.dlsettlepage main { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+/* On that page a town is a marker rather than a control, so it must not eat the
+   click meant for the map underneath it. */
+.dlsettlepage .dltown { pointer-events: none; }
+.dlsettlepage .dlcanvas { cursor: crosshair; }
+.dltown.mine .dltowndot { border-color: #fff;
+  box-shadow: 0 0 0 3px var(--color-primary), 0 0 14px 4px rgba(0, 0, 0, .4); }
+.dltown.mine .dltownname { color: #fff; font-size: 11px; }
+
+/* DodoLand buildings editor */
+.dlbhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 6px; }
+.dlbicon { width: 52px; text-align: center; font-size: 18px; }
+.dlbname { flex: 1 1 220px; font-weight: var(--weight-semibold); font-size: 15px; }
+.dlbdel { margin-left: auto; }
+.dlmore { margin: 10px 0; }
+.dlmore summary { cursor: pointer; }
+.dltiers { margin-top: 10px; }
+.dltier { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;
+  padding: 6px 0; border-top: 1px solid var(--color-border); }
+.dltiertitle { flex: 1 1 180px; }
+.dltiernow { flex: 1 1 200px; }
+.dltier .dlfield { min-width: 96px; }
+.dlbtnbar { position: sticky; top: 64px; z-index: 3; padding: 8px 0;
+  background: var(--color-canvas); }
+
+/* Wide content scrolls inside its own box; the page body never scrolls
+   sideways. Fifteen buildings as fifteen columns pushed the whole panel
+   off-screen, which is what this exists to prevent. */
+.dlscroll { overflow-x: auto; max-width: 100%; }
+.dlscroll .previewtable { min-width: 720px; }
+.dlscroll .chips { flex-wrap: wrap; gap: 4px; }
+
+/* DodoLand's side menu. The shared .sidenavitem grid assumes its anchor fills
+   the column; here the items were shrink-to-fit and centring themselves, which
+   drew the menu as a staircase. Pinned explicitly rather than left to inherit. */
+.dlnav { align-items: stretch; }
+.dlnav .sidenavitem { width: 100%; box-sizing: border-box; text-align: left;
+  justify-items: start; }
+.dlnav .sidenavitem .navemoji { justify-self: center; width: 22px; }
+.dlnav .sidenavitem .navlabel,
+.dlnav .sidenavitem .navhint { justify-self: start; text-align: left; }
+
+/* --- DodoLand map viewport (panel copy) --------------------------------- */
+/* The player pages carry their own copy of these rules in their inline cosy
+   stylesheet. The markup is generated once in townmap.py so both surfaces show
+   the same map; only the palette differs, so only the palette is repeated. */
+.dlstage { position: relative; margin: 14px 0 0; width: 100%; }
+.dlframe { position: relative; height: min(70vh, 760px); overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--color-border);
+  background: var(--color-surface-soft);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, .18);
+  touch-action: none; cursor: grab; }
+.dlframe.dragging { cursor: grabbing; }
+.dlworld { position: absolute; top: 0; left: 0; transform-origin: 0 0;
+  will-change: transform; }
+.dlworld img { display: block; width: 100%; height: auto;
+  -webkit-user-drag: none; user-select: none; pointer-events: none; }
+.dlzoom { position: absolute; right: 12px; top: 12px; display: flex;
+  flex-direction: column; gap: 6px; z-index: 4; }
+.dlzoom button { width: 36px; height: 36px; font-size: 17px; line-height: 1;
+  border-radius: 9px; cursor: pointer; }
+.dlhint { position: absolute; left: 12px; bottom: 12px; z-index: 4;
+  padding: 4px 9px; border-radius: 8px; font-size: 12px;
+  background: rgba(0, 0, 0, .5); color: #fff; }
+.dltown { position: absolute; transform: translate(-50%, -50%);
+  pointer-events: none; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; }
+.dltowndot { display: block;
+  width: calc(var(--dl-base, 10px) * var(--dl-size, 1));
+  height: calc(var(--dl-base, 10px) * var(--dl-size, 1)); border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff6e2, #d98d3a 70%);
+  border: 2px solid rgba(255, 245, 225, .9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+/* Three hundred names at once is a grey mat, not a map. */
+.dltownname { font-size: 10px; color: #fff8ea; white-space: nowrap; opacity: 0;
+  transition: opacity .12s ease; text-shadow: 0 1px 3px rgba(0, 0, 0, .95); }
+.dlworld.named .dltownname { opacity: 1; }
+.dltown.big .dltownname { opacity: 1; }
+.dltown.dim { opacity: .45; }
+.dltown.fl1 .dltowndot { box-shadow: 0 0 8px 2px rgba(255, 214, 130, .9); }
+.dltown.fl2 .dltowndot { box-shadow: 0 0 11px 3px rgba(255, 184, 77, .9); }
+.dltown.fl3 .dltowndot { box-shadow: 0 0 15px 4px rgba(255, 196, 61, .95); }
+.dltown.fl4 .dltowndot { box-shadow: 0 0 19px 6px rgba(120, 190, 255, .9); }
+.dltown.fl5 .dltowndot { box-shadow: 0 0 24px 8px rgba(150, 130, 255, .9);
+  animation: dlbreathe 3.4s ease-in-out infinite; }
+.dltown.fl6 .dltowndot { box-shadow: 0 0 30px 11px rgba(255, 140, 210, .9);
+  animation: dlbreathe 2.2s ease-in-out infinite; }
+@keyframes dlbreathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.16); filter: brightness(1.3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dltown.fl5 .dltowndot, .dltown.fl6 .dltowndot { animation: none; }
+}
+
+/* The asset library */
+.dlassets { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.dlasset { display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+  border: 1px solid var(--color-border); border-radius: 10px; }
+.dlasset img { width: 48px; height: 48px; object-fit: contain; flex: none;
+  border-radius: 8px; background: var(--color-surface-soft); padding: 4px; }
+.dlassetmeta { flex: 1 1 auto; min-width: 0; }
+
+/* The way through to the map's own page. */
+.dlopenmap { display: inline-block; padding: 10px 18px; border-radius: 10px;
+  text-decoration: none; font-weight: var(--weight-semibold);
+  background: var(--color-primary); color: #fff; white-space: nowrap; }
+.dlopenmap:hover { filter: brightness(1.08); }

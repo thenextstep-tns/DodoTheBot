@@ -1,0 +1,285 @@
+{
+ "version": 1,
+ "note": "Interaction kinds. Data, not code - docs/dnd/03-KNOWLEDGE-BASE.md S7. One kind is one thing a person can do to another: how big it is (`magnitude`, before anyone's circumstances apply), how it moves the two of them (`deltas`, written from the point of view of the person it happened TO - debt is positive when they owe the other), how it reads in a memory (`phrase`), and which optional need it belongs to if any (`requires`). Replaces four separate Python tables that had already drifted apart.",
+ "interactions": [
+  {
+   "key": "attacked",
+   "label": "Attacked",
+   "phrase": "attacked",
+   "description": "Violence done to them.",
+   "magnitude": 0.8,
+   "deltas": {
+    "affinity": -0.35,
+    "fear": 0.35,
+    "trust": -0.25
+   },
+   "requires": ""
+  },
+  {
+   "key": "bested",
+   "label": "Bested",
+   "phrase": "bested",
+   "description": "Beat them at something. They think more of you and like you less.",
+   "magnitude": 0.4,
+   "deltas": {
+    "respect": 0.2,
+    "fear": 0.15,
+    "affinity": -0.05
+   },
+   "requires": ""
+  },
+  {
+   "key": "betrayed",
+   "label": "Betrayed",
+   "phrase": "betrayed",
+   "description": "Trust used against them. The one act meant to be decisive.",
+   "magnitude": 0.9,
+   "deltas": {
+    "affinity": -0.5,
+    "trust": -0.7,
+    "fear": 0.2,
+    "desire": -0.25
+   },
+   "requires": ""
+  },
+  {
+   "key": "courted",
+   "label": "Courted",
+   "phrase": "made their interest plain to",
+   "description": "Interest, plainly meant.",
+   "magnitude": 0.5,
+   "deltas": {
+    "affinity": 0.15,
+    "trust": 0.05,
+    "desire": 0.2
+   },
+   "requires": "desire"
+  },
+  {
+   "key": "flirted",
+   "label": "Flirted",
+   "phrase": "flirted with",
+   "description": "Interest, lightly shown.",
+   "magnitude": 0.25,
+   "deltas": {
+    "affinity": 0.08,
+    "familiarity": 0.05,
+    "desire": 0.12
+   },
+   "requires": "desire"
+  },
+  {
+   "key": "gifted",
+   "label": "Gave a gift",
+   "phrase": "gave something to",
+   "description": "Something given, freely.",
+   "magnitude": 0.5,
+   "deltas": {
+    "affinity": 0.1,
+    "debt": 1
+   },
+   "requires": ""
+  },
+  {
+   "key": "healed",
+   "label": "Healed",
+   "phrase": "healed",
+   "description": "Hurt undone.",
+   "magnitude": 0.7,
+   "deltas": {
+    "affinity": 0.2,
+    "trust": 0.15,
+    "debt": 1
+   },
+   "requires": ""
+  },
+  {
+   "key": "helped",
+   "label": "Helped",
+   "phrase": "helped",
+   "description": "A hand when it was needed. Small, and it puts them in your debt.",
+   "magnitude": 0.5,
+   "deltas": {
+    "affinity": 0.15,
+    "trust": 0.1,
+    "debt": 1
+   },
+   "requires": ""
+  },
+  {
+   "key": "insulted",
+   "label": "Insulted",
+   "phrase": "insulted",
+   "description": "Said ill of them, to their face or where it got back.",
+   "magnitude": 0.3,
+   "deltas": {
+    "affinity": -0.15,
+    "respect": -0.1
+   },
+   "requires": ""
+  },
+  {
+   "key": "kept_word",
+   "label": "Kept their word",
+   "phrase": "kept their word to",
+   "description": "Did what they said they would. Moves trust rather than warmth.",
+   "magnitude": 0.4,
+   "deltas": {
+    "trust": 0.2,
+    "respect": 0.1
+   },
+   "requires": ""
+  },
+  {
+   "key": "lay_with",
+   "label": "Lay with",
+   "phrase": "spent the night with",
+   "description": "The night together.",
+   "magnitude": 0.7,
+   "deltas": {
+    "affinity": 0.2,
+    "trust": 0.1,
+    "familiarity": 0.3,
+    "desire": -0.25
+   },
+   "requires": "desire"
+  },
+  {
+   "key": "lied",
+   "label": "Lied to",
+   "phrase": "lied to",
+   "description": "Told them something untrue. Only trust moves \u2014 they may never know why.",
+   "magnitude": 0.4,
+   "deltas": {
+    "trust": -0.3
+   },
+   "requires": ""
+  },
+  {
+   "key": "met",
+   "label": "Met",
+   "phrase": "met",
+   "description": "Two people who did not know each other now do, barely.",
+   "magnitude": 0.2,
+   "deltas": {
+    "familiarity": 0.1
+   },
+   "requires": ""
+  },
+  {
+   "key": "praised",
+   "label": "Praised",
+   "phrase": "praised",
+   "description": "Said well of them, and meant it.",
+   "magnitude": 0.3,
+   "deltas": {
+    "affinity": 0.1,
+    "respect": 0.05
+   },
+   "requires": ""
+  },
+  {
+   "key": "protected",
+   "label": "Stepped in front of them",
+   "phrase": "stepped in front of",
+   "description": "Put themselves in the way of something coming at you. Lighter than being saved outright - the danger was taken on, not necessarily taken away - but it is the same kind of debt.",
+   "magnitude": 0.75,
+   "deltas": {
+    "affinity": 0.28,
+    "trust": 0.22,
+    "respect": 0.25,
+    "debt": 1
+   },
+   "requires": ""
+  },
+  {
+   "key": "rebuffed",
+   "label": "Turned down",
+   "phrase": "turned down",
+   "description": "Turned down. Costs wanting far more than it costs warmth.",
+   "magnitude": 0.4,
+   "deltas": {
+    "affinity": -0.1,
+    "respect": -0.05,
+    "desire": -0.3
+   },
+   "requires": "desire"
+  },
+  {
+   "key": "repelled",
+   "label": "Repelled",
+   "phrase": "was repelled by",
+   "description": "Not a courtship that failed \u2014 somebody who turns your stomach. Bleeds into how you see them the more you see of them.",
+   "magnitude": 0.5,
+   "deltas": {
+    "affinity": -0.2,
+    "respect": -0.1,
+    "desire": -0.5
+   },
+   "requires": "desire"
+  },
+  {
+   "key": "saved",
+   "label": "Saved their life",
+   "phrase": "saved",
+   "description": "They would not have come out of it alone. The heaviest good thing one person does for another.",
+   "magnitude": 1.0,
+   "deltas": {
+    "affinity": 0.35,
+    "trust": 0.25,
+    "respect": 0.2,
+    "debt": 2
+   },
+   "requires": ""
+  },
+  {
+   "key": "stole",
+   "label": "Stole from",
+   "phrase": "stole from",
+   "description": "Took what was theirs.",
+   "magnitude": 0.6,
+   "deltas": {
+    "affinity": -0.25,
+    "trust": -0.4
+   },
+   "requires": ""
+  },
+  {
+   "key": "talked",
+   "label": "Talked",
+   "phrase": "talked with",
+   "description": "A conversation. The smallest thing that counts as anything.",
+   "magnitude": 0.2,
+   "deltas": {
+    "familiarity": 0.05,
+    "affinity": 0.02
+   },
+   "requires": ""
+  },
+  {
+   "key": "threatened",
+   "label": "Threatened",
+   "phrase": "threatened",
+   "description": "Violence promised. Buys fear and a little respect, and costs warmth.",
+   "magnitude": 0.6,
+   "deltas": {
+    "fear": 0.3,
+    "respect": 0.1,
+    "affinity": -0.2
+   },
+   "requires": ""
+  },
+  {
+   "key": "travelled",
+   "label": "Travelled with",
+   "phrase": "travelled with",
+   "description": "Time on the road together, which closes distance faster than talk.",
+   "magnitude": 0.3,
+   "deltas": {
+    "familiarity": 0.15,
+    "affinity": 0.05
+   },
+   "requires": ""
+  }
+ ]
+}
