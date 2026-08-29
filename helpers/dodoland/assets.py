@@ -80,7 +80,8 @@ class AssetStore:
                                    "asset_id": str(asset_id)})
 
     def add(self, guild_id: int, *, name: str, data: bytes, content_type: str,
-            min_tier: int = 0, building: str = "") -> dict:
+            min_tier: int = 0, building: str = "",
+            admin_only: bool = False) -> dict:
         """Store one asset. Returns the stored row without its bytes."""
         self._ensure_indexes()
         guild_id = int(guild_id)
@@ -104,6 +105,11 @@ class AssetStore:
             # mean something different every week.
             "min_tier": max(0, int(min_tier or 0)),
             "building": str(building or "").strip(),
+            # Scenery rather than a reward: a forest, a mountain range, a river.
+            # An admin places it on the world and no amount of standing puts it
+            # in anybody's toolkit. Distinct from "unlocked by nothing", which
+            # means everybody gets it on day one.
+            "admin_only": bool(admin_only),
         }
         self._col.insert_one(dict(row))
         row.pop("data", None)
@@ -117,7 +123,8 @@ class AssetStore:
 
     def update(self, guild_id: int, asset_id: str, *, name: Optional[str] = None,
                min_tier: Optional[int] = None,
-               building: Optional[str] = None) -> bool:
+               building: Optional[str] = None,
+               admin_only: Optional[bool] = None) -> bool:
         """Rename an asset or change what unlocks it. Never touches the bytes."""
         self._ensure_indexes()
         changes: dict = {}
@@ -127,6 +134,8 @@ class AssetStore:
             changes["min_tier"] = max(0, int(min_tier))
         if building is not None:
             changes["building"] = str(building).strip()
+        if admin_only is not None:
+            changes["admin_only"] = bool(admin_only)
         if not changes:
             return False
         result = self._col.update_one(
@@ -134,13 +143,26 @@ class AssetStore:
         return bool(getattr(result, "modified_count", 0))
 
 
+def placeable_by_players(assets: list[dict]) -> list[dict]:
+    """The library minus the scenery.
+
+    Admin-only assets are not a locked reward, they are the world's furniture,
+    so they never appear in a player's toolkit at all — not even dimmed. A lock
+    says "you can earn this"; showing a mountain range behind one would be a
+    promise nobody can keep.
+    """
+    return [row for row in assets if not row.get("admin_only")]
+
+
 def unlocked_for(assets: list[dict], person: Optional[dict]) -> set[str]:
     """Which assets a person has earned the right to place.
 
     An asset with no building named is unlocked for everybody: that is the
     starter decor, and a library where nothing is available on day one gives
-    nobody a reason to open the map twice.
+    nobody a reason to open the map twice. An **admin-only** asset is never
+    unlocked for anybody, however much they have built.
     """
+    assets = placeable_by_players(assets)
     if not person:
         return {row["asset_id"] for row in assets if not row.get("building")}
     reached = {key: (score.get("tier") if score.get("tier") is not None else -1)

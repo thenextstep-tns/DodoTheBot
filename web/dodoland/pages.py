@@ -434,15 +434,24 @@ def _assets_html(bot, guild) -> str:
 
     rows = bot.dodoland_assets.list(guild.id)
     buildings = bot.dodoland_buildings.buildings(guild.id)
-    options = '<option value="">Everybody (starter decor)</option>' + "".join(
-        f'<option value="{_e(b["key"])}">{_e(b["name"])}</option>' for b in buildings)
+    # One question — who may place this — rather than two controls that between
+    # them could not express "nobody but me". "No building" already meant
+    # "everybody", so scenery needed an answer of its own.
+    options = ('<option value="__admin__">Admins only (map scenery)</option>'
+               '<option value="" selected>Everybody (starter decor)</option>'
+               + "".join(f'<option value="{_e(b["key"])}">{_e(b["name"])}</option>'
+                         for b in buildings))
 
     cards = ""
     for row in rows:
-        need = (f'tier {int(row.get("min_tier", 0))} of {row["building"]}'
-                if row.get("building") else "available to everybody")
+        if row.get("admin_only"):
+            need = "admins only — map scenery"
+        elif row.get("building"):
+            need = f'tier {int(row.get("min_tier", 0))} of {row["building"]}'
+        else:
+            need = "available to everybody"
         cards += f"""
-  <div class="dlasset" data-asset="{_e(row['asset_id'])}">
+  <div class="dlasset{" adminonly" if row.get("admin_only") else ""}" data-asset="{_e(row['asset_id'])}">
     <img alt="{_e(row['name'])}" loading="lazy"
          src="/guild/{guild.id}/dodoland/asset/{_e(row['asset_id'])}">
     <div class="dlassetmeta">
@@ -462,7 +471,11 @@ def _assets_html(bot, guild) -> str:
   Upload an icon, say what unlocks it, and it appears in everybody's toolkit
   under the map — dimmed until they have earned it, because a reward nobody can
   see rewards nobody.</p>
-  <p class="muted small">A lock is a <b>tier of a building</b>, never a point
+  <p class="muted small"><b>Admins only</b> is for the world's own furniture —
+  forests, mountains, rivers, a ruin on a headland. It never appears in anybody's
+  toolkit, not even dimmed, because a lock promises something can be earned and
+  scenery cannot. Everything else is a reward, and a lock is a
+  <b>tier of a building</b>, never a point
   total. Thresholds are derived from the server's live distribution and move as
   the server does, so a number here would quietly mean something different every
   week. PNG, WebP, GIF or SVG, under {asset_rules.MAX_BYTES // 1024}KB.</p>
@@ -1000,6 +1013,19 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   var assetMsg = document.getElementById('dlassetmsg');
+
+  // The tier only means anything when a building is what unlocks it.
+  var whoSel = document.getElementById('dlassetbuilding');
+  var tierBox = document.getElementById('dlassettier');
+  function syncAssetTier() {
+    if (!whoSel || !tierBox) return;
+    var needsTier = whoSel.value && whoSel.value !== '__admin__';
+    tierBox.disabled = !needsTier;
+    tierBox.title = needsTier ? '' :
+      'Only a building can lock something behind a tier.';
+  }
+  if (whoSel) whoSel.addEventListener('change', syncAssetTier);
+  syncAssetTier();
   var addAsset = document.getElementById('dlassetadd');
   if (addAsset) addAsset.addEventListener('click', function () {
     var file = document.getElementById('dlassetfile');
@@ -1010,9 +1036,15 @@ document.addEventListener('DOMContentLoaded', function () {
     var reader = new FileReader();
     reader.onload = function () {
       say(assetMsg, 'Uploading...', true);
+      // One control answers "who may place this", so the sentinel is unpacked
+      // here rather than the form carrying a second checkbox that can disagree
+      // with the select next to it.
+      var who = (document.getElementById('dlassetbuilding') || {}).value || '';
+      var adminOnly = who === '__admin__';
       post('asset', {
         action: 'add', name: name,
-        building: (document.getElementById('dlassetbuilding') || {}).value || '',
+        building: adminOnly ? '' : who,
+        admin_only: adminOnly,
         min_tier: parseInt((document.getElementById('dlassettier') || {}).value || '0', 10),
         data: String(reader.result).split(',').pop(),
         content_type: chosen.type

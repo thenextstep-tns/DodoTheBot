@@ -146,6 +146,7 @@ async def api_dodoland_asset(request: web.Request):
                 guild.id, body.get("asset_id"),
                 name=body.get("name"), min_tier=body.get("min_tier"),
                 building=body.get("building"),
+                admin_only=body.get("admin_only"),
             )
             return web.json_response({"ok": True, "changed": bool(changed)})
 
@@ -158,6 +159,7 @@ async def api_dodoland_asset(request: web.Request):
         row = bot.dodoland_assets.add(
             guild.id, name=body.get("name"), data=blob, content_type=content_type,
             min_tier=body.get("min_tier") or 0, building=body.get("building") or "",
+            admin_only=bool(body.get("admin_only")),
         )
         await _record_change(request, "dodoland_asset", str(row["name"]), "", "added",
                              "DodoLand asset added")

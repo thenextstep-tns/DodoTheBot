@@ -1746,6 +1746,11 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     if rows:
         drawn.extend(_houses(houses, plate, uid, plate_ry))
 
+    # Which building flies the town's banner, decided before anything is drawn
+    # so the flag can be built into that building rather than parked over it.
+    bearer = (max(standing, key=lambda item: int(item[3].get("tier", 1)))[3]
+              if (flag and standing) else None)
+
     for y, x, scale, row in standing:
         key = str(row.get("key") or "")
         family = shapes.get(key) or DEFAULT_SHAPE
@@ -1760,12 +1765,12 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         # place rather than the same thing about every place.
         front += _building_fx(family, tier, tint, mark)
         mass = draw(0.0, 0.0, tier, tint, mark)
-        if tier == 6:
-            # Detached from the ground, hovering over the shadow drawn for it.
-            # Straight out of the original design, and the thing that makes
-            # somebody ask how a town got like that.
-            mass = f'<g class="lifted">{mass}</g>'
-        art = behind + mass + front
+        # Everything that is *part of the building* — its emblem, and its flag
+        # if it is the one flying the town's banner — is assembled here and
+        # lifted with it. They used to be added outside the hovering group, so
+        # a tier-six building rose off the ground and left its own medallion and
+        # its own flag hanging in the air behind it.
+        attached = ""
         if mark:
             # The emblem hangs over its building as a medallion: the masonry
             # says what kind of place it is, the emblem says what it is *for*.
@@ -1782,7 +1787,22 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
             # In the lot's own coordinates, so the clamp has to account for
             # where the lot stands and how far back it is.
             ceiling = (3.0 - y) / scale + size * 0.62
-            art += _emblem(0.0, max(want, ceiling), mark, size, tint, tier)
+            attached += _emblem(0.0, max(want, ceiling), mark, size, tint, tier)
+        if bearer is not None and row is bearer:
+            # Flown from the grandest building rather than parked at the edge of
+            # the plate: a town's banner belongs over its centrepiece, and the
+            # centrepiece is whatever it has built highest.
+            attached += (f'<g transform="translate(7,'
+                         f'{-family_height(family, tier):.1f})">'
+                         f'{banner(flag, uid)}</g>')
+        if tier == 6:
+            # Detached from the ground, hovering over the shadow drawn for it.
+            # Straight out of the original design, and the thing that makes
+            # somebody ask how a town got like that.
+            mass = f'<g class="lifted">{mass}{attached}</g>'
+        else:
+            mass += attached
+        art = behind + mass + front
         drawn.append((y, x, scale, art))
 
     # Painter's algorithm: the far ones first, so the near ones cover them.
@@ -1796,17 +1816,7 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     if rows:
         parts.append(_life(rows, shapes, richness=richness, plate=plate,
                            uid=uid, ry=plate_ry))
-    if flag and standing:
-        # Flown from the grandest building rather than parked at the edge of the
-        # plate: a town's banner belongs over its centrepiece, and the
-        # centrepiece is whatever it has built highest.
-        best = max(standing, key=lambda item: int(item[3].get("tier", 1)))
-        fy, fx, fscale, _row = best
-        best_family = shapes.get(str(_row.get("key") or "")) or DEFAULT_SHAPE
-        top = fy - family_height(best_family, int(_row.get("tier", 1))) * fscale
-        parts.append(f'<g transform="translate({fx + 7:.1f},{top:.1f})">'
-                     f'{banner(flag, uid)}</g>')
-    elif flag:
+    if flag and not standing:
         parts.append(f'<g transform="translate({WIDTH * 0.5:.1f},'
                      f'{GROUND_Y - 6:.1f})">{banner(flag, uid)}</g>')
 

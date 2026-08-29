@@ -167,7 +167,9 @@ async def api_town_toolkit(request: web.Request):
     bot, guild, uid = request.app["bot"], request["guild"], request["uid"]
     allowed = await asyncio.get_running_loop().run_in_executor(
         None, _unlocked, bot, guild, uid)
-    library = bot.dodoland_assets.list(guild.id)
+    # Scenery is filtered out rather than shown locked: a lock says "you can
+    # earn this", and a mountain range is not a thing anybody earns.
+    library = asset_rules.placeable_by_players(bot.dodoland_assets.list(guild.id))
     placed = bot.dodoland_decor.town(guild.id, uid)
     return web.json_response({
         "ok": True,
