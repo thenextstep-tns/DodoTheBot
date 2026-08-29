@@ -381,4 +381,26 @@ scorer = pathlib.Path("helpers/dodoland/standing.py").read_text(encoding="utf-8"
 assert "town_rules" not in scorer and "building_names" not in scorer,     "naming a building has become able to move a number"
 print("names           naming a town or a building moves no number at all")
 
+
+
+# --------------------------------------------------------------------------- #
+#  The map must stay vector at every zoom
+# --------------------------------------------------------------------------- #
+# Anything that promotes the world to its own composited layer, or filters an
+# element inside it, makes the browser rasterise once and then scale that
+# bitmap. An uploaded SVG map then stops being an SVG the moment anybody zooms,
+# and every town blurs with it. This is the whole reason the zoom looked broken.
+_world_css = map_body[map_body.index(".dlworld {"):map_body.index(".dlzoom {")]
+assert "will-change" not in _world_css,     "the world is promoted to a layer again, so zooming will rasterise the map"
+_scaled = map_body[map_body.index(".dltown {"):map_body.index(".dldrawer {")]
+# Comments talk about filters on purpose; only real declarations matter.
+_rules = re.sub(r"/\*.*?\*/", "", _scaled, flags=re.S)
+assert "filter:" not in _rules,     "a filter inside the scaled world will rasterise whatever it touches"
+print("map             nothing rasterises the world, so it stays vector when zoomed")
+
+# Zooming out and back in must not leave the map somewhere absurd. The old rule
+# took a min of one bound and a max of another that had crossed over.
+assert "(w <= fw)" in map_body, "the clamp cannot handle a world smaller than the frame"
+print("map             a world smaller than the frame is centred, not pinned")
+
 print("PASS")

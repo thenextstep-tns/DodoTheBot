@@ -248,8 +248,12 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   cursor: grab; touch-action: none; background: var(--deep); }
 .dlframe.dragging { cursor: grabbing; }
 .dlframe.placing { cursor: crosshair; }
-.dlworld { position: absolute; top: 0; left: 0; transform-origin: 0 0;
-  will-change: transform; }
+/* No will-change here, and it must stay that way. Promoting this to its own
+   composited layer makes the browser rasterise it once at whatever size it
+   happened to be and then scale that bitmap, so an SVG map stops being vector
+   the moment anybody zooms and every town blurs with it. The transform is
+   cheap enough without the hint. */
+.dlworld { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 .dlworld img { display: block; width: 100%; height: auto;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .dlnomap { padding: 40px; color: var(--soft); }
@@ -282,7 +286,11 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   box-shadow: 0 1px 3px rgba(0,0,0,.5);
   position: absolute; left: 50%; bottom: 0; transform: translate(-50%, 50%); }
 .dltown.dim { opacity: .5; }
-.dltown.on svg { filter: drop-shadow(0 0 6px var(--lantern)); }
+/* A filter on anything inside the scaled world rasterises it, so the selected
+   town is marked with an outline on its ground plate rather than a glow. Same
+   reason will-change is banned above: keep the vectors vectors. */
+.dltown.on .dlart { outline: none; }
+.dltown.on ellipse:first-of-type { stroke: var(--lantern); stroke-width: 3; }
 .dltown.on .dldot { box-shadow: 0 0 0 3px var(--lantern); }
 /* The name is drawn at a constant screen size, because a label that shrinks
    with the map stops being a label. It is the one thing here that is
@@ -299,9 +307,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    chimneys at map scale is noise rather than detail. */
 .fx { display: none; }
 .dltown.close .fx { display: inline; }
-.dltown.close .glow { filter: blur(1.6px); animation: dlflicker 4s ease-in-out infinite; }
-.dltown.close .halo { filter: blur(2.4px); opacity: .75;
-  animation: dlflicker 3s ease-in-out infinite; }
+.dltown.close .glow { animation: dlflicker 4s ease-in-out infinite; }
+.dltown.close .halo { opacity: .55; animation: dlflicker 3s ease-in-out infinite; }
 .dltown.close .pf1 { animation: dlrise 5s linear infinite; }
 .dltown.close .pf2 { animation: dlrise 5s linear infinite 1.6s; }
 .dltown.close .pf3 { animation: dlrise 5s linear infinite 3.2s; }
@@ -323,9 +330,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Flourish colours the ring the town art draws on its own ground plate. */
 .fl1 { --fl1: #ffd682; } .fl2 { --fl2: #ffb84d; } .fl3 { --fl3: #ffc43d; }
 .fl4 { --fl4: #78beff; } .fl5 { --fl5: #9682ff; } .fl6 { --fl6: #ff8cd2; }
-.fl5 svg, .fl6 svg { animation: dlglow 3s ease-in-out infinite; }
-@keyframes dlglow { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.3); } }
-@media (prefers-reduced-motion: reduce) { .fl5 svg, .fl6 svg { animation: none; } }
+/* Animated on the flourish ring alone, and by opacity rather than a filter:
+   filtering a whole town rasterises it and the highest-tier settlements were
+   the ones that blurred first. */
+.fl5 ellipse:first-of-type, .fl6 ellipse:first-of-type {
+  animation: dlglow 3s ease-in-out infinite; }
+@keyframes dlglow { 0%,100% { opacity: .85; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .fl5 ellipse:first-of-type, .fl6 ellipse:first-of-type { animation: none; } }
 
 /* Drawers float over the map rather than stealing its width. */
 .dldrawer { position: fixed; top: 52px; bottom: 0; right: 0; width: 340px;
@@ -407,12 +419,20 @@ _SCRIPT = r"""
     levelOfDetail();
   }
   function clamp() {
-    var w = nat.w * view.k, h = nat.h * view.k, s = 90;
-    view.x = Math.min(frame.clientWidth - s, Math.max(s - w, view.x));
-    view.y = Math.min(frame.clientHeight - s, Math.max(s - h, view.y));
+    // Two different jobs depending on which is bigger. When the world is larger
+    // than the frame, stop it being dragged past its own edges. When it is
+    // smaller, centre it instead: the old rule took a min of one bound and a
+    // max of another that had crossed over, which pinned the map to a nonsense
+    // position and is what made zooming out and back in leave a mess.
+    var w = nat.w * view.k, h = nat.h * view.k;
+    var fw = frame.clientWidth, fh = frame.clientHeight;
+    view.x = (w <= fw) ? (fw - w) / 2 : Math.min(0, Math.max(fw - w, view.x));
+    view.y = (h <= fh) ? (fh - h) / 2 : Math.min(0, Math.max(fh - h, view.y));
   }
   function fit() {
     if (!nat.w || !nat.h) return;
+    // Re-read: a resize or a replaced image can change these underneath us.
+    if (base && base.naturalWidth) { nat.w = base.naturalWidth; nat.h = base.naturalHeight; }
     // Measured after layout: called too early the frame has no height yet and
     // the map ends up stranded in the middle of a black screen, which is what
     // it did. A little air so the coastline is not flush against the edges.
@@ -421,8 +441,7 @@ _SCRIPT = r"""
     var pad = 24;
     view.k = Math.min((fw - pad * 2) / nat.w, (fh - pad * 2) / nat.h);
     view.k = Math.min(D.sizes.max_zoom, Math.max(D.sizes.min_zoom, view.k));
-    view.x = (fw - nat.w * view.k) / 2;
-    view.y = (fh - nat.h * view.k) / 2;
+    clamp();
     apply();
   }
   function zoom(f, cx, cy) {
@@ -439,8 +458,10 @@ _SCRIPT = r"""
     var box = base.getBoundingClientRect();
     nat.w = base.naturalWidth || Math.round(box.width) || frame.clientWidth;
     nat.h = base.naturalHeight || Math.round(box.height) || frame.clientHeight;
+    // Width only: the image carries its own aspect, and pinning a height too
+    // means any disagreement between the two shows as the world drifting away
+    // from the coastline drawn on it.
     world.style.width = nat.w + 'px';
-    world.style.height = nat.h + 'px';
     requestAnimationFrame(fit);
   }
   if (base) { if (base.complete && base.naturalWidth) measure();
