@@ -588,6 +588,44 @@ class BuildingStore:
         self.invalidate(guild_id)
         return count
 
+    def reset_shapes(self, guild_id: int, *, symbols: bool = False) -> list[dict]:
+        """Put every building back to the shape its key was designed with.
+
+        Only touches ``shape`` (and ``symbol`` when asked): rooms, tiers,
+        weights, names and everything else are left exactly as they are, because
+        this is repairing a drawing mistake and not resetting a server.
+
+        A key that is not one of the built-in defaults is left alone — there is
+        nothing to put it back *to*, and guessing would be worse than the thing
+        being wrong.
+
+        Returns ``[{key, from, to}]`` for what actually changed, so the panel
+        can say what it did rather than claiming success.
+        """
+        stored = (self.config(guild_id).get("buildings") or [])
+        if not stored:
+            return []
+        known = {spec[0]: spec for spec in _DEFAULT_SET}
+        changed = []
+        out = []
+        for building in stored:
+            building = dict(building)
+            key = str(building.get("key") or "")
+            spec = known.get(key)
+            if spec is not None:
+                if building.get("shape") != spec[4]:
+                    changed.append({"key": key, "from": building.get("shape") or "",
+                                    "to": spec[4]})
+                    building["shape"] = spec[4]
+                if symbols and not building.get("symbol"):
+                    building["symbol"] = spec[5]
+            out.append(building)
+        if changed:
+            self._col.update_one({"_id": int(guild_id)},
+                                 {"$set": {"buildings": out}}, upsert=True)
+            self.invalidate(guild_id)
+        return changed
+
     def save_buildings(self, guild_id: int, value: Any, *, guild=None) -> list[dict]:
         buildings = validate_buildings(value, guild=guild)
         self._col.update_one({"_id": int(guild_id)},

@@ -90,6 +90,25 @@ async def api_dodoland_suggest(request: web.Request):
                               "buildings": len(saved)})
 
 
+async def api_dodoland_shapes(request: web.Request):
+    """Put every building back to the shape its key was designed with.
+
+    Here as a button rather than a migration because it is a repair somebody
+    should choose: a server that deliberately draws its library as a keep would
+    not thank us for a deploy that changed it back.
+    """
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await request.json()
+    changed = bot.dodoland_buildings.reset_shapes(
+        guild.id, symbols=bool(body.get("symbols")))
+    if changed:
+        await _record_change(request, "dodoland_buildings", "shapes", "",
+                             f"{len(changed)} reset", "DodoLand shapes reset")
+    return web.json_response({"ok": True, "changed": changed})
+
+
 async def api_dodoland_asset(request: web.Request):
     """Add, edit or remove one asset in the library.
 

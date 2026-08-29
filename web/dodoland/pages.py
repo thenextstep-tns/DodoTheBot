@@ -869,6 +869,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  // Repairing a drawing mistake, so it says exactly what it changed rather
+  // than reporting success and leaving somebody to go and look.
+  var shapes = document.getElementById('dlshapes');
+  if (shapes) shapes.addEventListener('click', function () {
+    if (!window.confirm('Put every building back to the silhouette its key was ' +
+        'designed with? Rooms, tiers, weights and names are not touched.')) return;
+    say(bmsg, 'Resetting shapes...', true);
+    post('shapes', {symbols: true}).then(function (res) {
+      if (!res.ok) { say(bmsg, 'Refused: ' + res.error, false); return; }
+      if (!res.changed.length) {
+        say(bmsg, 'Every building already has its intended shape.', true);
+        return;
+      }
+      say(bmsg, res.changed.length + ' changed: ' + res.changed.map(function (c) {
+        return c.key + ' ' + (c.from || 'none') + '->' + c.to;
+      }).join(', ') + '. Reloading...', true);
+      setTimeout(function () { location.reload(); }, 1400);
+    });
+  });
+
   document.querySelectorAll('.dlbdel').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var card = btn.closest('.dlbuilding');

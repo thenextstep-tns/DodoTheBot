@@ -30,7 +30,7 @@ def dodoland_routes() -> list:
     from web.dodoland.api import (
         api_dodoland_asset, api_dodoland_backfill, api_dodoland_buildings,
         api_dodoland_map, api_dodoland_param, api_dodoland_settle,
-        api_dodoland_suggest, api_dodoland_town,
+        api_dodoland_shapes, api_dodoland_suggest, api_dodoland_town,
     )
     from web.dodoland.assets_route import (
         asset_image, town_art, town_picture,
@@ -61,6 +61,7 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/map", full(api_dodoland_map)),
         web.post("/api/guild/{gid}/dodoland/asset", full(api_dodoland_asset)),
         web.post("/api/guild/{gid}/dodoland/suggest", full(api_dodoland_suggest)),
+        web.post("/api/guild/{gid}/dodoland/shapes", full(api_dodoland_shapes)),
         # Moving somebody's town is configuration while there is no player-facing
         # way for them to move it themselves.
         web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),

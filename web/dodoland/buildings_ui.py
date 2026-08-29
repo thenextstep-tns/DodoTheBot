@@ -330,6 +330,7 @@ def buildings_section(bot, guild, result: dict) -> str:
   {warning}
   <div class="rulebtns dlbtnbar">
     <button id="dlsuggest">Suggest from channel names</button>
+    <button id="dlshapes" title="Put every building back to the silhouette its key was designed with">Reset shapes to the suggested ones</button>
     <button id="dlbadd">Add a building</button>
     <button id="dlsavebuildings">Save buildings</button>
     <span id="dlbuildingsmsg" class="muted small"></span>
