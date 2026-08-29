@@ -516,9 +516,35 @@ print(f"motion          all {len(_names)} animations are both defined and used")
 # The inhabitants specifically: the markup carries a gait, so something has to
 # animate it, or they stand still forever.
 assert 'class="gait"' in map_body or ".gait {" in map_body
-assert ".w1 .gait" in map_body, "nothing animates an inhabitant"
-for route in ("dlwalkA", "dlwalkB"):
+assert ".r1  .gait" in map_body or ".r1 .gait" in map_body,     "nothing animates an inhabitant"
+for route in ("dlwalkA", "dlwalkB", "dlwalkC", "dlwalkD"):
     assert f"@keyframes {route}" in map_body, f"{route} is referenced but undefined"
-print("motion          inhabitants have a walk, and it is defined")
+# Twelve routes, not two. With two, half a crowd stepped right in unison and
+# the other half stepped left, which read as choreography rather than as people.
+routes = {m for m in re.findall(r"\.r(\d+)\s+\.gait", map_body)}
+assert len(routes) >= 8, f"a crowd only has {len(routes)} ways to walk"
+print(f"motion          inhabitants have {len(routes)} walks, and all are defined")
+
+# Everything the artwork emits that is *inert without a rule* must have one.
+# `lifted`, `orbit`, `spark`, `bbeam` and `bring` were each emitted for months
+# with no CSS at all: the top of the climb shipped a building that was supposed
+# to hover over its own shadow with motes going round it, and it sat flat on
+# the ground next to a shadow that made no sense. A class with no rule is the
+# quietest way for this page to be wrong.
+_top_art = townart.town_svg([{"key": "k", "tier": 6}], shapes={"k": "keep"},
+                            symbols={"k": "shield"}, flourish=6,
+                            glow="#f1c40f", uid="zz", richness=1.0)
+_emitted = set()
+for _cls in re.findall(r'class="([a-z][\w ]*)"', _top_art):
+    _emitted.update(_cls.split())
+# These are static: a wash, a shadow, a plot, a wrapper. They are drawn once and
+# never move, so having no rule is correct rather than a symptom.
+_static = {"fx", "lot", "emblem", "flwash", "bglow", "baura", "bshadow",
+           "walker", "cloth", "townflag", "gait"}
+_needs_rule = {c for c in _emitted if c not in _static and not re.fullmatch(r"e\d", c)}
+assert _needs_rule, "the top tier emitted no effect classes at all"
+for _one in sorted(_needs_rule):
+    assert f".{_one}" in map_body,         f"the artwork emits .{_one} and nothing in the stylesheet mentions it"
+print(f"motion          all {len(_needs_rule)} effect classes the artwork emits are styled")
 
 print("PASS")

@@ -357,7 +357,11 @@ import re as _re  # noqa: E402
 from helpers.dodoland import townart  # noqa: E402
 
 art = townart.town_svg([{"key": f"b{i}", "tier": 6 - i} for i in range(5)])
-spots = _re.findall(r"translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)", art)
+# Only what stands on a plot. Inhabitants and emblems are also a translate and
+# a scale, so matching the transform alone counted the crowd as buildings.
+spots = _re.findall(
+    r'class="lot" transform="translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)',
+    art)
 assert len(spots) == 5, spots
 xs = {round(float(x)) for x, _y, _s in spots}
 ys = {round(float(y)) for _x, y, _s in spots}
@@ -432,9 +436,13 @@ assert art.count('class="walker') >= 2, "a town has no inhabitants"
 assert art.count('class="emblem') == 2, "buildings lost their emblems"
 print("art             inhabitants and emblems are drawn shapes")
 
-# Every emblem a building can be given has to be drawable.
+# Every emblem a building can be given has to be drawable, and every one of
+# them is a Font Awesome path rather than a glyph in a font. The font version
+# rendered nothing at all and did it silently.
 for name in townart.EMBLEMS:
-    assert townart._symbol(0, 0, name, colour="#000"), f"{name} draws nothing"
+    drawn = townart.icon(name, colour="#000")
+    assert drawn and "<path" in drawn, f"{name} draws nothing"
+    assert "font-family" not in drawn and "<text" not in drawn,         f"{name} is back to being a glyph in a webfont"
 print(f"art             all {len(townart.EMBLEMS)} emblems draw something")
 
 # A town's picture flies as a flag, clipped so any aspect ratio reads as cloth.

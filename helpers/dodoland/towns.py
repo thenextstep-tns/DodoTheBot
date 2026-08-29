@@ -20,9 +20,15 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import re
+
 MAX_NAME = 48
 MAX_BLURB = 600
 MAX_BUILDING_NAME = 48
+# A colour an owner painted one of their buildings. Six-digit hex only: it goes
+# straight into an SVG ``fill``, so anything that is not provably a colour is a
+# place for markup to get in, and "rgb(...)" and "url(#...)" are both valid CSS.
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 # A town's picture. Room for a real drawing or a short loop, and still far
 # inside Mongo's 16MB document ceiling with the rest of the row. Two megabytes
 # was mean enough that an ordinary PNG export was refused. GIFs are allowed on
@@ -85,7 +91,8 @@ class TownStore:
 
     def save(self, guild_id: int, user_id: int, *, name: Optional[str] = None,
              blurb: Optional[str] = None,
-             building_names: Optional[dict] = None) -> dict:
+             building_names: Optional[dict] = None,
+             building_colours: Optional[dict] = None) -> dict:
         """Set any of the authored fields. Absent ones are left alone."""
         self._ensure_indexes()
         changes: dict = {}
@@ -102,6 +109,18 @@ class TownStore:
                 if label:
                     cleaned[str(key)[:40]] = label
             changes["building_names"] = cleaned
+        if building_colours is not None:
+            if not isinstance(building_colours, dict):
+                raise TownError("Building colours must be a mapping.")
+            painted = {}
+            for key, value in building_colours.items():
+                text = str(value or "").strip()
+                if not text:
+                    continue  # cleared: fall back to the stable hashed colour
+                if not _HEX.match(text):
+                    raise TownError(f"{text!r} is not a colour. Use #rrggbb.")
+                painted[str(key)[:40]] = text.lower()
+            changes["building_colours"] = painted
         if not changes:
             return self.get(guild_id, user_id)
         self._col.update_one(
@@ -142,3 +161,15 @@ def building_label(details: dict, key: str, fallback: str) -> str:
     """What to call one building: its owner's name for it, or the tier's."""
     named = ((details or {}).get("building_names") or {}).get(str(key))
     return str(named or "").strip() or fallback
+
+
+def building_colour(details: dict, key: str, fallback: str = "") -> str:
+    """What colour its owner painted one building, or nothing.
+
+    Empty means "not painted", and the artwork falls back to the stable hashed
+    colour per building key. Painting is authored the same way naming is: free,
+    instant, reversible, and it moves no number.
+    """
+    painted = ((details or {}).get("building_colours") or {}).get(str(key))
+    text = str(painted or "").strip()
+    return text if _HEX.match(text) else fallback

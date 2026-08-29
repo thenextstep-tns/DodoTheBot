@@ -74,9 +74,12 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
     silently dropped while the drawing code supported every one of them. The
     towns looked plausible, which is why nothing pointed at it.
     """
+    import math
+
     from helpers.dodoland import flourish as flourish_rules
     from helpers.dodoland import standing, townart
     from helpers.dodoland import store as store_module
+    from helpers.dodoland import towns as town_rules
 
     buildings = bot.dodoland_buildings.buildings(guild.id)
     window = int(bot.dodoland_params.get(guild.id, "dodoland_window_days"))
@@ -96,6 +99,17 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
     glow = flourish_rules.flourish_map(bot, guild.id).get(user_id) or {}
     lit = any(str(row.get("day") or "") >= lit_since for row in rows)
     details = bot.dodoland_towns.get(guild.id, user_id) or {}
+
+    # How busy the place looks. Logarithmic against a per-server target, so the
+    # difference between reaching five people and fifty is visible and the
+    # difference between two hundred and three hundred is not — otherwise one
+    # extremely connected person's town is full and everybody else's is a
+    # hamlet, which is the same failure the town *sizing* had before it grew on
+    # a root curve.
+    target = max(1, int(bot.dodoland_params.get(guild.id, "dodoland_busy_town_reach")))
+    reached = int(person.get("reached") or 0)
+    richness = min(1.0, math.log1p(reached) / math.log1p(target))
+
     return townart.town_svg(
         built,
         lit=lit,
@@ -106,8 +120,12 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
         # gradients and they all take the colour of whichever drew last.
         uid=str(user_id),
         flag=flag_url if details.get("image") else "",
+        richness=richness,
         shapes={b["key"]: b.get("shape") for b in buildings},
         symbols={b["key"]: b.get("symbol") for b in buildings},
+        # What its owner painted it, falling back to the stable hash per key.
+        colours={b["key"]: town_rules.building_colour(details, b["key"], "")
+                 for b in buildings},
     )
 
 

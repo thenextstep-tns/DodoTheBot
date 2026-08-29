@@ -150,3 +150,9 @@ swapfile
 Призывники*.txt
 temp_thumbnail.png
 .preview/
+
+# Scratch renders from tools/dodoland_art_preview.py — look at them, never commit them.
+dodoland_art.html
+dodoland_map.html
+dodoland_art-shapes.html
+dodoland_art-emblems.html
