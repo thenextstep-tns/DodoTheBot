@@ -444,4 +444,23 @@ routes_src = pathlib.Path("web/routes.py").read_text(encoding="utf-8")
 assert "client_max_size" in routes_src,     "aiohttp will reset any upload over 1MiB before a handler sees it"
 print("uploads         the panel accepts a body larger than aiohttp's 1MiB default")
 
+
+
+# --------------------------------------------------------------------------- #
+#  A click has to reach the town it landed on
+# --------------------------------------------------------------------------- #
+# Taking pointer capture on pointerdown routes every following event to the
+# frame, so a plain click on a town never reached the town and nothing opened.
+# Capture is taken only once movement makes it a drag.
+assert "moved > 4" in map_body, "pointer capture is taken before it is a drag"
+_down = map_body[map_body.index("frame.addEventListener('pointerdown'"):
+                 map_body.index("frame.addEventListener('pointermove'")]
+assert "setPointerCapture" not in _down,     "capture on pointerdown steals the click from every town"
+print("clicks          a town opens on click, because capture waits for a drag")
+
+# The inhabitants are part of the town, not a reward for zooming. On a small
+# base image a town is never drawn wide enough for the close-up gate to open.
+assert ".walker { display: inline; }" in map_body,     "the wanderers are back behind the close-up gate and will never be seen"
+print("life            people and animals are drawn whenever the buildings are")
+
 print("PASS")

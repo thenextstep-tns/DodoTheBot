@@ -288,6 +288,45 @@ def _preview_html(bot, guild, result: dict, buildings: list[dict],
 # --------------------------------------------------------------------------- #
 #  The map
 # --------------------------------------------------------------------------- #
+def _scale_reality(bot, guild) -> str:
+    """What a town can actually be drawn at on *this* map.
+
+    The two thresholds below are in screen pixels while a town's size is a
+    percentage of the base image, so whether they can ever be crossed depends on
+    the image. A detail threshold above what the map can reach means the
+    close-up effects never appear at any zoom, which is impossible to work out
+    from the numbers alone.
+    """
+    image = bot.dodoland_buildings.map_image(guild.id)
+    if not image:
+        return ""
+    get = bot.dodoland_params.get
+    pct = float(get(guild.id, "dodoland_town_width_pct"))
+    growth = max(1.0, float(get(guild.id, "dodoland_town_growth")))
+    top_zoom = float(get(guild.id, "dodoland_map_max_zoom"))
+    detail = int(get(guild.id, "dodoland_detail_above"))
+
+    # The base image's own width, which is what a percentage is a percentage of.
+    # Recorded at upload time by the browser, which has already decoded the
+    # image and knows; the server would have to parse it to find out.
+    width = int(image.get("width") or 0)
+    if not width:
+        return ('<div class="muted small">Upload a map to see what size towns '
+                "reach on it.</div>")
+    smallest = width * pct / 100
+    largest = smallest * growth
+    note = ""
+    if largest * top_zoom < detail:
+        note = ('<div class="tuneblocked"><b>Nothing will ever show close-up '
+                "detail.</b> Even the largest town at maximum zoom reaches "
+                f"{largest * top_zoom:.0f}px, and the detail threshold is "
+                f"{detail}px. Lower the threshold, or make towns wider.</div>")
+    return (f'<div class="muted small">On this map a town is drawn between '
+            f'<b>{smallest:.0f}</b> and <b>{largest:.0f}</b> pixels wide at 100% '
+            f'zoom, so up to <b>{largest * top_zoom:.0f}px</b> at maximum '
+            f'zoom.</div>{note}')
+
+
 def _map_scale_rows(bot, guild) -> str:
     """The handful of numbers that decide how the world is drawn.
 
@@ -343,6 +382,7 @@ def _map_html(bot, guild, towns: list[dict]) -> str:
   <h3 class="panelhead">How the world is drawn</h3>
   <p class="muted small">Set once per server, here rather than buried in the
   settings, because these only mean anything next to the map they apply to.</p>
+  {_scale_reality(bot, guild)}
   {_map_scale_rows(bot, guild)}
 
   <div class="paramrow wide">
@@ -817,13 +857,22 @@ document.addEventListener('DOMContentLoaded', function () {
     var reader = new FileReader();
     reader.onload = function () {
       say(mapMsg, 'Uploading...', true);
-      post('map', {data: String(reader.result).split(',').pop(),
-                   content_type: chosen.type}).then(function (res) {
-        if (res.ok) {
-          say(mapMsg, 'Map saved. Reloading...', true);
-          setTimeout(function () { location.reload(); }, 500);
-        } else { say(mapMsg, 'Refused: ' + res.error, false); }
-      });
+      // The browser has already decoded this and knows its size; the server
+      // would have to parse the file to find out. Sent along so the panel can
+      // say what size towns actually reach on this map.
+      var probe = new Image();
+      probe.onload = probe.onerror = function () {
+        post('map', {data: String(reader.result).split(',').pop(),
+                     content_type: chosen.type,
+                     width: probe.naturalWidth || 0,
+                     height: probe.naturalHeight || 0}).then(function (res) {
+          if (res.ok) {
+            say(mapMsg, 'Map saved. Reloading...', true);
+            setTimeout(function () { location.reload(); }, 500);
+          } else { say(mapMsg, 'Refused: ' + res.error, false); }
+        });
+      };
+      probe.src = String(reader.result);
     };
     reader.readAsDataURL(chosen);
   });

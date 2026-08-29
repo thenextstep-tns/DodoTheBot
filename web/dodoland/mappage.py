@@ -309,8 +309,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Close-up flourishes: smoke, lit windows, waving banners, lantern halos. Off
    until the map says we are close enough, because three hundred smoking
    chimneys at map scale is noise rather than detail. */
+/* Close-up flourishes stay hidden until the map says we are close. The
+   wanderers do not: a town with a zoo in it and nothing alive in it is a shed
+   with a fence, and on a small base image a town is never drawn wide enough for
+   the close-up gate to open at all. They are always there; only their walking
+   waits for close range. */
 .fx { display: none; }
 .dltown.close .fx { display: inline; }
+.walker { display: inline; }
 .dltown.close .glow { animation: dlflicker 4s ease-in-out infinite; }
 .dltown.close .halo { opacity: .55; animation: dlflicker 3s ease-in-out infinite; }
 .dltown.close .pf1 { animation: dlrise 5s linear infinite; }
@@ -488,21 +494,32 @@ _SCRIPT = r"""
     zoom(ev.deltaY < 0 ? 1.15 : 1 / 1.15, ev.clientX - b.left, ev.clientY - b.top);
   }, {passive: false});
 
-  var dragging = false, moved = 0, last = null;
+  // Pointer capture is taken only once a drag has actually started. Taking it
+  // on pointerdown routes every following event to the frame, so a plain click
+  // on a town never reaches the town and nothing opens. That is why towns and
+  // dots were unclickable.
+  var down = false, captured = false, moved = 0, last = null, pid = null;
   frame.addEventListener('pointerdown', function (ev) {
-    dragging = true; moved = 0; last = {x: ev.clientX, y: ev.clientY};
-    frame.classList.add('dragging'); frame.setPointerCapture(ev.pointerId);
+    down = true; captured = false; moved = 0; pid = ev.pointerId;
+    last = {x: ev.clientX, y: ev.clientY};
   });
   frame.addEventListener('pointermove', function (ev) {
-    if (!dragging) return;
+    if (!down) return;
     var dx = ev.clientX - last.x, dy = ev.clientY - last.y;
     moved += Math.abs(dx) + Math.abs(dy);
+    if (!captured && moved > 4) {
+      // Now it is a drag rather than a click, so hold on to the pointer.
+      captured = true;
+      frame.classList.add('dragging');
+      try { frame.setPointerCapture(pid); } catch (e) {}
+    }
+    if (!captured) return;
     view.x += dx; view.y += dy; last = {x: ev.clientX, y: ev.clientY};
     clamp(); apply();
   });
   ['pointerup', 'pointercancel'].forEach(function (e) {
     frame.addEventListener(e, function () {
-      dragging = false; frame.classList.remove('dragging');
+      down = false; captured = false; frame.classList.remove('dragging');
     });
   });
   document.getElementById('dlin').onclick = function () {

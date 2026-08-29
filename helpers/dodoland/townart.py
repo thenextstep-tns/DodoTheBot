@@ -599,10 +599,13 @@ def _life(rows: list[dict], shapes: dict) -> str:
                 break
             fx, fy = spots[index]
             name = pool[(index + step) % len(pool)]
-            out += _fx(f'<g class="walker w{index % 3 + 1}">'
-                       + _symbol(WIDTH * fx, HEIGHT * fy, name, size=5.5,
-                                 colour="#5b4630")
-                       + '</g>')
+            # Not wrapped in the close-up gate: a town's inhabitants are part
+            # of the town. Only their walking waits for close range, which is a
+            # CSS animation, not a display rule.
+            out += (f'<g class="walker w{index % 3 + 1}">'
+                    + _symbol(WIDTH * fx, HEIGHT * fy, name, size=5.5,
+                              colour="#5b4630")
+                    + '</g>')
             index += 1
     return out
 
