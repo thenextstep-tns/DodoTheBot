@@ -31,6 +31,8 @@ These have each cost real time, twice in production.
 | **Bash heredocs mangle this codebase's content** | A `\n` inside a patch script's replacement became a real newline, split a string literal, and **took the whole tabletop cog offline in production** | Use the **Edit tool** for any replacement containing an escape, a quote or a `"""`. Write patch scripts to a *file* and run them with `py` — never through a heredoc |
 | **Discord caps an application at 100 top-level slash commands** | `CommandLimitReached` at load, and the **whole cog** goes offline | `tests/test_command_names.py` fails at 96. **Group new commands** — a group costs one slot however many subcommands it holds |
 
+| **aiohttp caps a request body at 1MiB** | The connection is reset *while the body is read*, so the handler never runs and the browser gets no response. Every panel upload — a rank badge, a map, a town picture, a decor asset — silently looks like a button with no handler | `create_app` passes `client_max_size`. Per-file limits belong in the handler, where a refusal can explain itself |
+
 Two more that are not environment but behave like it:
 
 - **A cog that loads fine in isolation can still fail in production.** Both

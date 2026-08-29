@@ -211,6 +211,12 @@ beside new ones and the bot kept a town it should never have had.
 enough: people mention the bot constantly, and it built a 10,560-point town out
 of being talked to.
 
+**aiohttp refuses a request body over 1MiB by default**, and does it by
+resetting the connection mid-read, so the handler never runs and the browser
+gets no answer at all. Every upload this panel offers is larger than that.
+`create_app` sets `client_max_size`; the per-file limits live in the handlers,
+where a refusal can say what was wrong. This was blamed on DodoLand twice.
+
 **The panel reads its collections once per page load.** It did eight full scans
 of a 32,000-row collection at one point, which was 5.6 seconds of database time.
 `guild_standings` takes pre-fetched rows for exactly this.
