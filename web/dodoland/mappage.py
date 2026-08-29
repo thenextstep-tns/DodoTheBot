@@ -456,6 +456,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    whatever it touches, which is the same rule the towns live under. */
 .dlpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px;
   border-radius: 3px; }
+/* Grabbable, and grabbed. touch-action stops the browser treating a drag on a
+   piece as a scroll of the page underneath it. */
+.dlpiece { touch-action: none; cursor: grab; }
+.dlpiece.dragging { cursor: grabbing; opacity: .85; }
 /* Town decor belongs to a town and sits under its buildings, so a cart parked
    outside the tavern is outside the tavern rather than on its roof. */
 .dlpiece.town { z-index: 3; }
@@ -709,6 +713,8 @@ _SCRIPT = r"""
       // A dot needs no artwork, which is most of the saving on a wide view.
       if (!tiny) needArt(p, el);
     });
+    // Decor is sized against the base image, which is 0 until it has loaded.
+    if (typeof resizeDecor === 'function') resizeDecor();
   }
 
   function escapeHtml(s) {
@@ -720,7 +726,6 @@ _SCRIPT = r"""
     world.querySelectorAll('.dltown').forEach(function (n) { n.remove(); });
     nodes = {};
     levelOfDetail();
-    if (typeof redrawDecor === 'function') redrawDecor();
     var on = D.people.filter(function (p) { return p.plot; }).length;
     document.getElementById('dlplaced').textContent = on;
     document.getElementById('dlwaiting').textContent = D.people.length - on;
@@ -911,7 +916,10 @@ _SCRIPT = r"""
     // Settling a town and placing decor are the same gesture on the same
     // surface, so only one of them may ever be armed at a time.
     if (armed) { place(armed, at); return; }
-    if (armedAsset) { placeDecor(at); }
+    if (armedAsset) { placeDecor(at); return; }
+    // Nothing armed and nothing under the pointer: let go. Without this a
+    // selected piece stayed selected for ever and Remove kept pointing at it.
+    if (heldPiece) { hold(heldPiece); }
   });
 
   // --- the list ---------------------------------------------------------- //
@@ -1006,20 +1014,69 @@ _SCRIPT = r"""
     });
   }
 
+  function pieceWidth(piece) {
+    // A percentage of the base image, so decor shrinks with the coastline the
+    // same way a town does. `nat.w` is 0 until the map image has loaded, and
+    // dividing by 1 then made every piece twenty-eight times the width of the
+    // world — so a piece drawn before the image arrives is redrawn after it.
+    if (!nat.w) return null;
+    return (D.decorsize * piece.s / nat.w * 100) + '%';
+  }
+
   function drawPiece(piece) {
     var el = document.createElement('div');
     el.className = 'dlpiece' + (piece.f ? ' flip' : '');
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
-    // Sized in the map's own units so it shrinks with the coastline, the same
-    // bargain the towns make. Never counter-scaled.
-    el.style.width = (D.decorsize * piece.s / (nat.w || 1) * 100) + '%';
+    var w = pieceWidth(piece);
+    if (w) el.style.width = w;
     el.innerHTML = '<img alt="" src="' + assetUrl(piece.a) + '">';
-    el.onclick = function (ev) {
+
+    // Dragging, and clicking, from one gesture. The frame owns panning and
+    // takes pointer capture as soon as a drag starts, so a piece that only
+    // listened for `click` could be selected and never moved: every attempt to
+    // drag one panned the map underneath it instead. Stopping the event here
+    // is what keeps the map still while a piece is being moved.
+    el.addEventListener('pointerdown', function (ev) {
       ev.stopPropagation();
-      hold(piece.id);
-    };
+      ev.preventDefault();
+      var start = {x: ev.clientX, y: ev.clientY};
+      var from = {x: piece.x, y: piece.y};
+      var travelled = 0;
+      try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+      el.classList.add('dragging');
+
+      function onMove(move) {
+        var dx = move.clientX - start.x, dy = move.clientY - start.y;
+        travelled = Math.abs(dx) + Math.abs(dy);
+        if (travelled <= 3 || !nat.w) return;
+        // Screen pixels back into the map's own percentages: undo the zoom,
+        // then divide by the base image's size.
+        piece.x = from.x + (dx / view.k / nat.w) * 100;
+        piece.y = from.y + (dy / view.k / nat.h) * 100;
+        el.style.left = piece.x + '%';
+        el.style.top = piece.y + '%';
+      }
+
+      function onUp() {
+        el.removeEventListener('pointermove', onMove);
+        el.removeEventListener('pointerup', onUp);
+        el.removeEventListener('pointercancel', onUp);
+        el.classList.remove('dragging');
+        try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
+        if (travelled <= 3) { hold(piece.id); return; }
+        hold(piece.id, true);
+        decorPost({action: 'move', piece_id: piece.id,
+                   x: Math.round(piece.x * 1000) / 1000,
+                   y: Math.round(piece.y * 1000) / 1000},
+                  function () { kitSay('Moved.'); });
+      }
+
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+    });
     world.appendChild(el);
     pieces[piece.id] = el;
     return el;
@@ -1032,6 +1089,15 @@ _SCRIPT = r"""
     if (heldPiece && pieces[heldPiece]) pieces[heldPiece].classList.add('on');
   }
 
+  function resizeDecor() {
+    // Only the widths, so this can run on every zoom without rebuilding the
+    // nodes — and without throwing away a piece mid-drag.
+    D.world.forEach(function (piece) {
+      var el = pieces[piece.id], w = pieceWidth(piece);
+      if (el && w) el.style.width = w;
+    });
+  }
+
   function pieceById(id) {
     for (var i = 0; i < D.world.length; i++) {
       if (D.world[i].id === id) return D.world[i];
@@ -1039,8 +1105,8 @@ _SCRIPT = r"""
     return null;
   }
 
-  function hold(id) {
-    heldPiece = (heldPiece === id) ? null : id;
+  function hold(id, keep) {
+    heldPiece = (!keep && heldPiece === id) ? null : id;
     armedAsset = null;
     frame.classList.remove('placing');
     world.querySelectorAll('.dlpiece').forEach(function (n) {
@@ -1079,9 +1145,11 @@ _SCRIPT = r"""
 
   if (kitScale) kitScale.oninput = function () {
     var p = heldPiece && pieceById(heldPiece);
-    if (!p) return;
+    if (!p) { kitSay('Click a placed piece first.', true); return; }
     p.s = parseFloat(kitScale.value) || 1;
-    redrawDecor();
+    // Just the width. Rebuilding every node on each step of a slider threw the
+    // element out from under the pointer.
+    resizeDecor();
   };
   if (kitScale) kitScale.onchange = function () {
     var p = heldPiece && pieceById(heldPiece);

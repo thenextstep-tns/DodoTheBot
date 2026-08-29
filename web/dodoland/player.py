@@ -778,6 +778,9 @@ textarea { min-height: 84px; resize: vertical; }
 /* An outline, never a filter: a filter rasterises what it touches, and the
    artwork under it is the one thing that must stay vector. */
 .kitpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px; }
+/* touch-action stops a drag on a piece being taken as a scroll of the page. */
+.kitpiece { touch-action: none; cursor: grab; }
+.kitpiece.dragging { cursor: grabbing; opacity: .85; }
 .kitgrid { display: grid; gap: 8px; margin-top: 10px;
   grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
 .kititem { border: 1px solid var(--edge); border-radius: 9px; padding: 6px;
@@ -925,16 +928,61 @@ _SCRIPT = r"""
         '%;top:' + p.y + '%;width:' + (11 * p.scale) + '%">';
     }).join('');
     kitLayer.querySelectorAll('.kitpiece').forEach(function (el) {
-      el.onclick = function (ev) {
+      var p = byPiece(el.dataset.p);
+      if (!p) return;
+      // Drag and select from one gesture. A piece that only listened for
+      // `click` could be picked up and never moved, which is not much of a
+      // toolkit.
+      el.addEventListener('pointerdown', function (ev) {
+        ev.preventDefault();
         ev.stopPropagation();
-        held = (held === el.dataset.p) ? null : el.dataset.p;
-        armed = null;
-        townArt.classList.remove('placing');
-        var p = byPiece(held);
-        if (p) { kitScale.value = p.scale; kitSay('Held.'); } else { kitSay(''); }
-        renderPlaced();
-        renderKit();
-      };
+        var box = townArt.getBoundingClientRect();
+        var start = {x: ev.clientX, y: ev.clientY};
+        var from = {x: p.x, y: p.y};
+        var travelled = 0;
+        try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+        el.classList.add('dragging');
+
+        function onMove(move) {
+          var dx = move.clientX - start.x, dy = move.clientY - start.y;
+          travelled = Math.abs(dx) + Math.abs(dy);
+          if (travelled <= 3) return;
+          // A percentage of the town's own box, which is what the position
+          // means, so a piece keeps its place when the town is moved or grows.
+          p.x = from.x + (dx / box.width) * 100;
+          p.y = from.y + (dy / box.height) * 100;
+          el.style.left = p.x + '%';
+          el.style.top = p.y + '%';
+        }
+
+        function onUp() {
+          el.removeEventListener('pointermove', onMove);
+          el.removeEventListener('pointerup', onUp);
+          el.removeEventListener('pointercancel', onUp);
+          el.classList.remove('dragging');
+          try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
+          if (travelled <= 3) {
+            held = (held === p.piece_id) ? null : p.piece_id;
+            armed = null;
+            townArt.classList.remove('placing');
+            if (held) { kitScale.value = p.scale; kitSay('Held.'); }
+            else { kitSay(''); }
+            renderPlaced();
+            renderKit();
+            return;
+          }
+          held = p.piece_id;
+          renderPlaced();
+          kitPost({action: 'move', piece_id: p.piece_id,
+                   x: Math.round(p.x * 1000) / 1000,
+                   y: Math.round(p.y * 1000) / 1000},
+                  function () { kitSay('Moved.'); });
+        }
+
+        el.addEventListener('pointermove', onMove);
+        el.addEventListener('pointerup', onUp);
+        el.addEventListener('pointercancel', onUp);
+      });
     });
     kitLayer.classList.toggle('busy', kit.placed.length > 0);
   }
@@ -961,7 +1009,12 @@ _SCRIPT = r"""
   }
 
   if (townArt) townArt.onclick = function (ev) {
-    if (!armed) return;
+    if (!armed) {
+      // Nothing armed and nothing under the pointer: let go of whatever was
+      // held, or Remove keeps pointing at a piece nobody is looking at.
+      if (held) { held = null; kitSay(''); renderPlaced(); }
+      return;
+    }
     var b = townArt.getBoundingClientRect();
     kitPost({action: 'place', asset_id: armed,
              x: ((ev.clientX - b.left) / b.width) * 100,
@@ -977,11 +1030,18 @@ _SCRIPT = r"""
       });
   };
 
+  if (kitScale) kitScale.oninput = function () {
+    var p = byPiece(held);
+    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
+    p.scale = parseFloat(kitScale.value) || 1;
+    // The width only. Re-rendering the layer on every step of a slider throws
+    // the element out from under the pointer.
+    var el = kitLayer.querySelector('[data-p="' + p.piece_id + '"]');
+    if (el) el.style.width = (11 * p.scale) + '%';
+  };
   if (kitScale) kitScale.onchange = function () {
     var p = byPiece(held);
     if (!p) return;
-    p.scale = parseFloat(kitScale.value) || 1;
-    renderPlaced();
     kitPost({action: 'move', piece_id: p.piece_id, scale: p.scale},
             function () { kitSay('Resized.'); });
   };
