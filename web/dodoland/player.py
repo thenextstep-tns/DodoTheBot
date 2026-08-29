@@ -416,10 +416,13 @@ async def my_town_page(request: web.Request):
 <script>var GID = "{guild.id}";</script>
 <script>{_SCRIPT}</script>"""
 
-    links = ""
-    if world_page_on(bot, guild.id):
-        links += f'<a class="dlghost" href="/guild/{guild.id}/dodoland/world">The world</a>'
-    links += '<a class="dlghost" href="/logout">Log out</a>'
+    # No link to the world yet, and deliberately none rather than a broken one.
+    # The map page is built for an administrator — it carries the settle
+    # controls and the admin toolkit — so handing it to a member would show them
+    # buttons whose endpoints refuse them. ``dodoland_world_page`` currently
+    # gates self-settling only. This linked to a route that was never
+    # registered, which is a 404 for anybody who switched the world on.
+    links = '<a class="dlghost" href="/logout">Log out</a>'
     return web.Response(
         text=_shell(f"{name} · {guild.name}", theme.bar(
             back=("/towns", "Your towns"), title=name,

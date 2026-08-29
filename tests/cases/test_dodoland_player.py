@@ -364,4 +364,18 @@ for call in calls:
     assert gated, f"a player route with no gate on it: {call}"
 print("routes          every player route carries the gate, none is bare")
 
+# Every link the town page offers has to go somewhere. It offered "The world"
+# to a route that was never registered, so a member who switched the world on
+# got a 404 from the one page built for them.
+_hrefs = set(re.findall(r'href="(/guild/\{?[^"]*)"', body)) | set(
+    re.findall(r"href=\"(/[a-z][^\"]*)\"", body))
+_paths = " ".join(routes.split())
+for _href in sorted(_hrefs):
+    _path = re.sub(r"/\d{2,}", "/{gid}", _href).split("?")[0]
+    if _path in ("/towns", "/logout", "/login"):
+        continue
+    _tail = _path.split("/dodoland", 1)[-1]
+    assert f"/dodoland{_tail}" in _paths,         f"the town page links to {_href}, which is not in the route table"
+print(f"links           all {len(_hrefs)} links on the town page go somewhere real")
+
 print("PASS")
