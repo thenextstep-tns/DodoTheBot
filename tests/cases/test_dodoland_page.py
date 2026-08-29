@@ -463,4 +463,21 @@ print("clicks          a town opens on click, because capture waits for a drag")
 assert ".walker { display: inline; }" in map_body,     "the wanderers are back behind the close-up gate and will never be seen"
 print("life            people and animals are drawn whenever the buildings are")
 
+
+
+# --------------------------------------------------------------------------- #
+#  An uploaded picture has to come back out
+# --------------------------------------------------------------------------- #
+# TownStore.all() projected the whole image field away, so "has a picture" was
+# permanently false: a picture uploaded correctly and then never appeared
+# anywhere. The bytes are still withheld; their existence is not.
+bot.dodoland_towns.save(GUILD_ID, 1, name="Beanburg")
+bot.dodoland_towns.save_image(GUILD_ID, 1,
+                              {"data": b"x" * 64, "content_type": "image/png"})
+_row = bot.dodoland_towns.all(GUILD_ID)[1]
+assert _row.get("name") == "Beanburg", _row
+assert _row.get("image"), "an uploaded picture is invisible to the map"
+assert "data" not in _row["image"], "the map is paying for the picture bytes"
+print("towns           a picture's existence survives the projection, its bytes do not")
+
 print("PASS")

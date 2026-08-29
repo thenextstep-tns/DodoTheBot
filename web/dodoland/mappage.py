@@ -395,8 +395,23 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   background: var(--lantern); color: #fff; }
 .dlcard .blurb { margin: 8px 0 0; font-size: 14px; color: var(--soft);
   white-space: pre-wrap; }
-.dlcard img.pic { width: 100%; border-radius: 8px; margin-top: 10px;
+/* The same cloth as the flag over the town, so the picture reads as the town's
+   banner in both places rather than as a photograph in one and a flag in the
+   other. */
+.cardflag { margin-top: 10px; overflow: hidden; border-radius: 8px;
   border: 1px solid var(--edge); }
+.cardflag img { display: block; width: 100%; transform-origin: left center;
+  animation: dlcloth 5s ease-in-out infinite; }
+@keyframes dlcloth {
+  0%, 100% { transform: perspective(300px) rotateY(0deg) skewY(0deg); }
+  50% { transform: perspective(300px) rotateY(-6deg) skewY(-1.2deg); }
+}
+/* The flag flying over the town itself. */
+.townflag .cloth { transform-box: fill-box; transform-origin: left center; }
+.dltown.close .townflag .cloth { animation: dlwave 3.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .cardflag img, .dltown.close .townflag .cloth { animation: none; }
+}
 .dledit { margin-top: 12px; display: none; }
 .dledit.open { display: block; }
 .dledit label { display: block; font-size: 12px; color: var(--soft);
@@ -673,8 +688,10 @@ _SCRIPT = r"""
         (p.rank ? ' · ' + escapeHtml(p.flourish_label) + ' (' + escapeHtml(p.rank) + ')' : '') +
         '</div>' +
       (p.blurb ? '<p class="blurb">' + escapeHtml(p.blurb) + '</p>' : '') +
-      (p.has_image ? '<img class="pic" alt="" src="/guild/' + D.gid +
-        '/dodoland/town/' + p.id + '/picture">' : '') +
+      (p.has_image
+        ? '<div class="cardflag"><img alt="" src="/guild/' + D.gid +
+          '/dodoland/town/' + p.id + '/picture"></div>'
+        : '') +
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +

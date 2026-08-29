@@ -410,4 +410,37 @@ b = townart.town_svg([{"key": "k", "tier": 6}], glow="#00ff00", uid="222")
 assert "au111" in a and "au222" in b and "au111" not in b
 print("tiers           each town owns its gradients, so colours cannot bleed")
 
+
+
+# --------------------------------------------------------------------------- #
+#  Nothing on a town depends on a font arriving
+# --------------------------------------------------------------------------- #
+# The emblems and the inhabitants were Font Awesome glyphs set as SVG text. They
+# did not render: emblems were missing above every building and the wanderers
+# came out as whatever the fallback font had at those codepoints. A webfont
+# fails silently and at a distance, which is the worst way for the part people
+# are meant to look at to fail.
+art = townart.town_svg(
+    [{"key": "zoo", "tier": 4}, {"key": "pub", "tier": 5}],
+    shapes={"zoo": "pen", "pub": "inn"},
+    symbols={"zoo": "paw", "pub": "mug"},
+)
+assert "font-family" not in art and "<text" not in art,     "a town depends on a webfont again, and it will fail silently"
+print("art             nothing on a town needs a font to arrive")
+
+assert art.count('class="walker') >= 2, "a town has no inhabitants"
+assert art.count('class="emblem') == 2, "buildings lost their emblems"
+print("art             inhabitants and emblems are drawn shapes")
+
+# Every emblem a building can be given has to be drawable.
+for name in townart.EMBLEMS:
+    assert townart._symbol(0, 0, name, colour="#000"), f"{name} draws nothing"
+print(f"art             all {len(townart.EMBLEMS)} emblems draw something")
+
+# A town's picture flies as a flag, clipped so any aspect ratio reads as cloth.
+flagged = townart.town_svg([{"key": "a", "tier": 2}], flag="/pic.png", uid="7")
+assert "townflag" in flagged and "clipPath" in flagged
+assert "townflag" not in townart.town_svg([{"key": "a", "tier": 2}])
+print("art             a town with a picture flies it, one without flies nothing")
+
 print("PASS")

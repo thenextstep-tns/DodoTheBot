@@ -81,56 +81,180 @@ def _door(x, base, w=4.0, h=6.0, arch=False) -> str:
 
 
 # --------------------------------------------------------------------------- #
-#  Symbols
+#  Symbols and inhabitants, drawn rather than typed
 # --------------------------------------------------------------------------- #
-# Font Awesome glyphs, by name, as the codepoints they actually are. Drawn as
-# SVG <text> so they sit *inside* the artwork and scale with it, rather than
-# floating over it in HTML.
+# These were Font Awesome glyphs set as SVG text. They did not render: the
+# emblems were missing above every building and the wanderers came out as
+# whatever the fallback font had at those codepoints. A webfont is a dependency
+# that fails silently and at a distance, which is the worst way for the part
+# people are meant to look at to fail, so everything here is drawn the same way
+# the buildings are.
 #
 # The shapes carry what a building **is** and how far it has come; these carry
-# what it is *for*. A keep with a shield on its banner and a keep with a map on
-# it are the war room and the barracks, and no amount of masonry would have told
-# you which. That division is the point: mass for tier, symbol for meaning.
-GLYPHS = {
-    "mug": "", "book": "", "shield": "", "map": "",
-    "gamepad": "", "scales": "", "paw": "", "image": "",
-    "camera": "", "bread": "", "gear": "", "dove": "",
-    "bottle": "", "monument": "", "door": "", "masks": "",
-    "music": "", "utensils": "", "hammer": "", "flask": "",
-    "crown": "", "star": "", "fire": "", "anchor": "",
-    "cat": "", "dog": "", "crow": "", "fish": "",
-    "horse": "", "dragon": "", "user": "", "users": "",
-    "tree": "", "leaf": "", "feather": "", "bug": "",
+# what it is *for*. A keep with a shield on it and a keep with a map on it are
+# the barracks and the war room, and no amount of masonry would have said which.
+
+def _emblem_mug(c):
+    return (f'<rect x="-3" y="-3.4" width="5.4" height="6.6" rx="1" fill="{c}" '
+            f'stroke="{LINE}" stroke-width=".9"/>'
+            f'<path d="M2.6,-1.6 A2.2,2.2 0 0 1 2.6,2.2" fill="none" '
+            f'stroke="{LINE}" stroke-width=".9"/>')
+
+
+def _emblem_book(c):
+    return (f'<path d="M-4,-3 L0,-2 L0,3.4 L-4,2.4 Z" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".8"/>'
+            f'<path d="M4,-3 L0,-2 L0,3.4 L4,2.4 Z" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".8" opacity=".8"/>')
+
+
+def _emblem_shield(c):
+    return (f'<path d="M0,-3.8 L3.6,-2.2 L3.6,1 Q3.6,3.2 0,4.2 Q-3.6,3.2 -3.6,1 '
+            f'L-3.6,-2.2 Z" fill="{c}" stroke="{LINE}" stroke-width=".9"/>')
+
+
+def _emblem_map(c):
+    return (f'<path d="M-4,-2.6 L-1.2,-3.6 L1.2,-2.2 L4,-3.2 L4,2.8 L1.2,3.8 '
+            f'L-1.2,2.4 L-4,3.4 Z" fill="{c}" stroke="{LINE}" stroke-width=".8"/>')
+
+
+def _emblem_masks(c):
+    return (f'<circle cx="-1.6" cy="0" r="3" fill="{c}" stroke="{LINE}" stroke-width=".8"/>'
+            f'<circle cx="1.8" cy="0.6" r="2.6" fill="{WALL}" stroke="{LINE}" '
+            f'stroke-width=".8" opacity=".95"/>')
+
+
+def _emblem_paw(c):
+    return (f'<ellipse cx="0" cy="1.4" rx="3" ry="2.4" fill="{c}"/>'
+            f'<circle cx="-2.4" cy="-1.8" r="1.2" fill="{c}"/>'
+            f'<circle cx="0" cy="-2.6" r="1.2" fill="{c}"/>'
+            f'<circle cx="2.4" cy="-1.8" r="1.2" fill="{c}"/>')
+
+
+def _emblem_frame(c):
+    return (f'<rect x="-3.8" y="-3" width="7.6" height="6.2" rx=".6" fill="{WALL}" '
+            f'stroke="{LINE}" stroke-width=".9"/>'
+            f'<path d="M-3,2 L-0.6,-1 L1,0.8 L2.4,-0.6 L3,2 Z" fill="{c}"/>')
+
+
+def _emblem_bread(c):
+    return (f'<path d="M-4,2.2 Q-4,-3 0,-3 Q4,-3 4,2.2 Z" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".9"/>'
+            f'<path d="M-1.6,-2.4 L-2.4,1.6 M0.6,-2.6 L0,1.8" stroke="{LINE}" '
+            f'stroke-width=".6" fill="none"/>')
+
+
+def _emblem_gear(c):
+    spokes = "".join(
+        f'<rect x="-.8" y="-4.4" width="1.6" height="2.2" fill="{c}" '
+        f'transform="rotate({a})"/>' for a in range(0, 360, 45))
+    return (spokes + f'<circle cx="0" cy="0" r="2.8" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".8"/><circle cx="0" cy="0" r="1" fill="{WALL}"/>')
+
+
+def _emblem_dove(c):
+    return (f'<path d="M-3.6,1.4 Q-1,-2.6 3.2,-2.2 Q1.6,1.6 -1,2.2 Z" fill="{c}" '
+            f'stroke="{LINE}" stroke-width=".7"/>'
+            f'<path d="M-1,-0.6 Q0.6,-3.4 2.6,-3.6" fill="none" stroke="{LINE}" '
+            f'stroke-width=".7"/>')
+
+
+def _emblem_bottle(c):
+    return (f'<path d="M-1.2,-4 L1.2,-4 L1.2,-1.6 Q2.6,-0.6 2.6,1 L2.6,3.4 '
+            f'L-2.6,3.4 L-2.6,1 Q-2.6,-0.6 -1.2,-1.6 Z" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".8"/>')
+
+
+def _emblem_scales(c):
+    return (f'<line x1="0" y1="-3.6" x2="0" y2="3.2" stroke="{LINE}" stroke-width="1"/>'
+            f'<line x1="-3.6" y1="-2.4" x2="3.6" y2="-2.4" stroke="{LINE}" stroke-width="1"/>'
+            f'<path d="M-5,-2.4 L-2.2,-2.4 L-3.6,0.6 Z" fill="{c}"/>'
+            f'<path d="M2.2,-2.4 L5,-2.4 L3.6,0.6 Z" fill="{c}"/>')
+
+
+def _emblem_door(c):
+    return (f'<path d="M-2.8,3.4 L-2.8,-1.4 A2.8,2.8 0 0 1 2.8,-1.4 L2.8,3.4 Z" '
+            f'fill="{c}" stroke="{LINE}" stroke-width=".9"/>'
+            f'<circle cx="1.4" cy="1.2" r=".7" fill="{WALL}"/>')
+
+
+def _emblem_monument(c):
+    return (f'<path d="M-2,3.4 L-1,-3.6 L1,-3.6 L2,3.4 Z" fill="{c}" stroke="{LINE}" '
+            f'stroke-width=".8"/>'
+            f'<rect x="-3.2" y="3.2" width="6.4" height="1.4" fill="{c}" '
+            f'stroke="{LINE}" stroke-width=".7"/>')
+
+
+def _emblem_gamepad(c):
+    return (f'<rect x="-4.2" y="-2.2" width="8.4" height="4.6" rx="2.2" fill="{c}" '
+            f'stroke="{LINE}" stroke-width=".8"/>'
+            f'<circle cx="2" cy="0" r=".9" fill="{WALL}"/>'
+            f'<rect x="-3" y="-.6" width="2.4" height=".9" fill="{WALL}"/>')
+
+
+EMBLEMS = {
+    "mug": _emblem_mug, "book": _emblem_book, "shield": _emblem_shield,
+    "map": _emblem_map, "masks": _emblem_masks, "paw": _emblem_paw,
+    "image": _emblem_frame, "camera": _emblem_frame, "bread": _emblem_bread,
+    "gear": _emblem_gear, "dove": _emblem_dove, "bottle": _emblem_bottle,
+    "scales": _emblem_scales, "door": _emblem_door,
+    "monument": _emblem_monument, "gamepad": _emblem_gamepad,
 }
-# Which creatures wander near which building, once you are close enough to see
-# them. A menagerie with nothing moving in it is a shed with a fence.
+# Kept as the panel's vocabulary so a building can be given any of them.
+GLYPHS = EMBLEMS
+
+
+def _person(c="#5b4630"):
+    """Somebody, at map scale. A head and a coat is all that survives."""
+    return (f'<circle cx="0" cy="-2.6" r="1.5" fill="{c}"/>'
+            f'<path d="M-1.8,2.6 Q-1.8,-1.2 0,-1.2 Q1.8,-1.2 1.8,2.6 Z" fill="{c}"/>')
+
+
+def _beast(c="#5b4630"):
+    """A four-legged thing: body, head, tail, legs."""
+    return (f'<ellipse cx="0" cy="0" rx="2.6" ry="1.5" fill="{c}"/>'
+            f'<circle cx="2.4" cy="-1.2" r="1.1" fill="{c}"/>'
+            f'<path d="M-2.4,-0.6 Q-4,-1.8 -3.4,-2.8" fill="none" stroke="{c}" '
+            f'stroke-width=".8"/>'
+            f'<path d="M-1.4,1.2 L-1.4,2.6 M1.2,1.2 L1.2,2.6" stroke="{c}" '
+            f'stroke-width=".9"/>')
+
+
+def _bird(c="#5b4630"):
+    """Two arcs. Every child draws a bird this way and everybody reads it."""
+    return (f'<path d="M-3,0 Q-1.5,-2 0,0 Q1.5,-2 3,0" fill="none" stroke="{c}" '
+            f'stroke-width="1"/>')
+
+
+WANDERERS = {"person": _person, "beast": _beast, "bird": _bird}
+
+# Who wanders where, once there is something for them to wander around.
 LIFE = {
-    "pen": ("cat", "dog", "crow", "horse"),
-    "inn": ("users", "user", "mug"),
-    "stage": ("masks", "music", "users"),
-    "works": ("hammer", "gear"),
-    "hall": ("book", "user"),
-    "keep": ("shield", "user"),
-    "chapel": ("dove", "feather"),
-    "monument": ("star",),
-    "gate": ("user",),
+    "pen": ("beast", "beast", "bird"),
+    "inn": ("person", "person"),
+    "stage": ("person", "person"),
+    "works": ("person",),
+    "hall": ("person",),
+    "keep": ("person",),
+    "chapel": ("bird", "person"),
+    "monument": ("person",),
+    "gate": ("person",),
 }
-FONT = ("font-family='Font Awesome 6 Free' font-weight='900'")
 
 
 def glyph(name: str) -> str:
-    """A glyph by name, or nothing if the name is not one we know."""
-    return GLYPHS.get(str(name or ""), "")
+    """Whether an emblem by this name exists. Kept for validation."""
+    return name if name in EMBLEMS else ""
 
 
 def _symbol(x, y, name, size=7.0, colour=LINE, extra="") -> str:
-    """One Font Awesome glyph, as SVG text so it scales with the drawing."""
-    ch = glyph(name)
-    if not ch:
+    """One emblem, drawn at a point and scaled to roughly ``size`` across."""
+    draw = EMBLEMS.get(str(name or ""))
+    if draw is None:
         return ""
-    return (f'<text x="{x:.1f}" y="{y:.1f}" {FONT} font-size="{size:.1f}" '
-            f'fill="{colour}" text-anchor="middle" dominant-baseline="central"'
-            f'{extra}>{ch}</text>')
+    scale = size / 8.0
+    return (f'<g transform="translate({x:.1f},{y:.1f}) scale({scale:.2f})"'
+            f'{extra}>{draw(colour)}</g>')
 
 
 def _fx(body: str) -> str:
@@ -602,17 +726,44 @@ def _life(rows: list[dict], shapes: dict) -> str:
             # Not wrapped in the close-up gate: a town's inhabitants are part
             # of the town. Only their walking waits for close range, which is a
             # CSS animation, not a display rule.
-            out += (f'<g class="walker w{index % 3 + 1}">'
-                    + _symbol(WIDTH * fx, HEIGHT * fy, name, size=5.5,
-                              colour="#5b4630")
-                    + '</g>')
+            draw = WANDERERS.get(name) or _person
+            out += (f'<g class="walker w{index % 3 + 1}" '
+                    f'transform="translate({WIDTH * fx:.1f},{HEIGHT * fy:.1f})">'
+                    + draw() + '</g>')
             index += 1
     return out
 
 
+def banner(url: str, uid: str) -> str:
+    """A town's own picture, flying as a flag over it.
+
+    A picture sitting in a card is a picture. A picture on a pole above your
+    town, rippling, is a thing somebody made and put up where everybody can see
+    it, which is the entire point of letting people upload one.
+
+    The ripple is a repeating skew on the cloth alone; the pole stays still.
+    Clipped to the flag's shape so any aspect ratio looks like cloth rather than
+    a photograph nailed to a stick.
+    """
+    if not url:
+        return ""
+    return (
+        f'<g class="townflag">'
+        f'<defs><clipPath id="fg{uid}">'
+        f'<path d="M0,-34 L26,-30 L26,-14 L0,-18 Z"/></clipPath></defs>'
+        f'<line x1="0" y1="2" x2="0" y2="-36" stroke="{LINE}" stroke-width="1.6"/>'
+        f'<circle cx="0" cy="-36.6" r="1.6" fill="{LINE}"/>'
+        f'<g class="cloth">'
+        f'<image href="{url}" x="0" y="-34" width="26" height="20" '
+        f'preserveAspectRatio="xMidYMid slice" clip-path="url(#fg{uid})"/>'
+        f'<path d="M0,-34 L26,-30 L26,-14 L0,-18 Z" fill="none" stroke="{LINE}" '
+        f'stroke-width="1.1"/></g></g>'
+    )
+
+
 def town_svg(buildings: Iterable[dict], *, lit: bool = True,
              flourish: int = 0, glow: str = "", richness: float = 0.0,
-             uid: str = "t", shapes: Optional[dict] = None,
+             uid: str = "t", flag: str = "", shapes: Optional[dict] = None,
              symbols: Optional[dict] = None,
              colours: Optional[dict] = None) -> str:
     """A whole settlement as an SVG fragment.
@@ -677,6 +828,11 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
 
     if rows:
         parts.append(_life(rows, shapes))
+    if flag:
+        # Planted at the front-left of the plate, where it does not stand in
+        # front of the buildings it belongs to.
+        parts.append(f'<g transform="translate({WIDTH * 0.12:.1f},'
+                     f'{GROUND_Y + 2:.1f})">{banner(flag, uid)}</g>')
     body = "".join(parts)
     if flourish:
         level = min(6, int(flourish))

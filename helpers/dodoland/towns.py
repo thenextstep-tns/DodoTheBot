@@ -71,12 +71,15 @@ class TownStore:
     def all(self, guild_id: int, *, with_images: bool = False) -> dict[int, dict]:
         """``{user_id: details}`` for a guild.
 
-        Images are left out by default: the map needs every town's name and
-        every town's picture is megabytes, so a map that fetched both would pay
-        for the gallery on every load.
+        The image *bytes* are left out by default, but the field itself is
+        kept: the map needs to know which towns have a picture without paying
+        for the gallery on every load. Excluding the whole ``image`` field
+        instead — which is what this did — made "has a picture" permanently
+        false, so an uploaded picture saved correctly and then never appeared
+        anywhere.
         """
         self._ensure_indexes()
-        fields = None if with_images else {"image": 0}
+        fields = None if with_images else {"image.data": 0}
         return {int(row["user_id"]): row
                 for row in self._col.find({"guild_id": int(guild_id)}, fields)}
 

@@ -66,6 +66,40 @@ def _matches(doc: dict, query: dict) -> bool:
     return True
 
 
+def _project(doc: dict, projection: dict) -> dict:
+    """Apply a projection the way Mongo does.
+
+    Mongo has two kinds and they cannot be mixed: naming fields with 1 keeps
+    only those, naming them with 0 keeps everything *except* those. This stub
+    only understood the first, so an exclusion projection came back as a
+    document containing nothing but ``_id`` — and the caller, quite reasonably,
+    read that as "the field is not there". That is how an uploaded town picture
+    saved correctly and then never appeared anywhere.
+
+    Dotted paths are honoured on the exclusion side, which is the whole point of
+    ``{"image.data": 0}``: keep the fact that there is a picture, drop the
+    megabytes.
+    """
+    wanted = {k: v for k, v in projection.items() if k != "_id"}
+    including = any(wanted.values())
+    if including:
+        keep = {k.split(".")[0] for k, v in wanted.items() if v}
+        out = {k: v for k, v in doc.items() if k in keep}
+    else:
+        out = {k: v for k, v in doc.items()}
+        for path in wanted:
+            head, _, tail = path.partition(".")
+            if not tail:
+                out.pop(head, None)
+            elif isinstance(out.get(head), dict):
+                out[head] = {k: v for k, v in out[head].items() if k != tail}
+    if not projection.get("_id", 1):
+        out.pop("_id", None)
+    elif "_id" in doc:
+        out.setdefault("_id", doc["_id"])
+    return out
+
+
 def _resolve(doc: dict, dotted: str) -> Any:
     """Read a possibly-dotted path, e.g. ``identity.name``."""
     current: Any = doc
@@ -117,10 +151,7 @@ class FakeCollection:
     def find(self, query: dict | None = None, projection: dict | None = None):
         found = [dict(d) for d in self.docs if _matches(d, query or {})]
         if projection:
-            keep = {k for k, v in projection.items() if v} | {"_id"}
-            if not projection.get("_id", 1):
-                keep.discard("_id")
-            found = [{k: v for k, v in doc.items() if k in keep} for doc in found]
+            found = [_project(doc, projection) for doc in found]
         return _FakeCursor(found)
 
     def count_documents(self, query: dict | None = None) -> int:
