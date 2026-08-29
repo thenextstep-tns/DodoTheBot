@@ -195,6 +195,52 @@ def _tier_rows(building: dict, resolved: list[dict]) -> str:
     return rows
 
 
+def _shape_select(building: dict) -> str:
+    from helpers.dodoland import townart
+
+    current = str(building.get("shape") or townart.DEFAULT_SHAPE)
+    options = "".join(
+        f'<option value="{_e(key)}"{" selected" if key == current else ""}>'
+        f'{_e(townart.SHAPE_LABELS.get(key, key))}</option>'
+        for key in townart.SHAPES)
+    return f'<select class="dlbshape">{options}</select>'
+
+
+def _symbol_select(building: dict) -> str:
+    from helpers.dodoland import townart
+
+    current = str(building.get("symbol") or "")
+    options = ['<option value=""%s>None</option>'
+               % ("" if current else " selected")]
+    options += [
+        f'<option value="{_e(name)}"{" selected" if name == current else ""}>'
+        f'{_e(name)}</option>' for name in sorted(townart.EMBLEMS)]
+    return f'<select class="dlbsymbol">{"".join(options)}</select>'
+
+
+def _shape_preview(building: dict) -> str:
+    """The building as it will actually be drawn, at a middling tier.
+
+    Shown because this whole family of mistakes was invisible: the shape was
+    stored, wrong, and nothing on the page said so.
+    """
+    from helpers.dodoland import townart
+
+    shape = str(building.get("shape") or townart.DEFAULT_SHAPE)
+    art = townart.one_svg(shape, 4, symbol=str(building.get("symbol") or ""))
+    return (f'<svg viewBox="18 16 84 52" width="96" height="60" '
+            f'xmlns="http://www.w3.org/2000/svg">{art}</svg>')
+
+
+def shape_previews() -> str:
+    """Every shape at a middling tier, so the picker can show the choice live."""
+    import json
+
+    from helpers.dodoland import townart
+
+    return json.dumps({key: townart.one_svg(key, 4) for key in townart.SHAPES})
+
+
 def building_card(guild, building: dict, resolved: list[dict], population: int) -> str:
     """One building, fully editable."""
     return f"""
@@ -207,6 +253,24 @@ def building_card(guild, building: dict, resolved: list[dict], population: int) 
            maxlength="60" aria-label="Building name">
     <code>{_e(building['key'])}</code>
     <button class="dlbdel" title="Remove this building">Remove</button>
+  </div>
+
+  <div class="paramrow wide">
+    <div><b>How it is drawn</b>
+      <div class="muted small">The silhouette says what <i>kind</i> of place it
+      is and grows with its tier; the emblem says what it is <i>for</i>. A keep
+      with a shield and a keep with a map are the barracks and the war room, and
+      no amount of masonry would have said which.</div>
+      <div class="muted small">Neither of these had a control here, and a save
+      wrote the generic shape over whatever was set — which is how every
+      building on this server came to be drawn as an inn.</div></div>
+    <div class="dlbdraw">
+      <div class="dlbpreview" data-preview>{_shape_preview(building)}</div>
+      <label class="dlfield"><span class="muted small">Shape</span>
+        {_shape_select(building)}</label>
+      <label class="dlfield"><span class="muted small">Emblem</span>
+        {_symbol_select(building)}</label>
+    </div>
   </div>
 
   <div class="paramrow wide">

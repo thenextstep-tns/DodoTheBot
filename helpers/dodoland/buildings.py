@@ -182,6 +182,20 @@ def validate_metric_weights(value: Any) -> dict[str, float]:
     return out
 
 
+def _default_shape_for(key: str) -> str:
+    """The shape this key was designed with, or the generic one.
+
+    Read from the built-in set rather than hardcoded, so adding a default
+    building adds its shape here with nothing to remember.
+    """
+    from helpers.dodoland import townart
+
+    for spec in _DEFAULT_SET:
+        if spec[0] == key:
+            return spec[4]
+    return townart.DEFAULT_SHAPE
+
+
 def validate_building(value: Any, *, guild=None) -> dict:
     """One building, fully checked, ready to store."""
     if not isinstance(value, dict):
@@ -208,12 +222,21 @@ def validate_building(value: Any, *, guild=None) -> dict:
     symbol = str(value.get("symbol") or "").strip()
     if symbol and symbol not in townart.GLYPHS:
         raise DodoLandError(f"There is no {symbol!r} emblem.")
+    key = _slug(value.get("key") or name)
+    # A save that says nothing about the shape must not *decide* one. It used to
+    # fall back to the global default, so every save from the panel — and the
+    # editor has never had a shape control, and "Suggest rooms" saves too —
+    # wrote "inn" over all fifteen buildings on the server. Symbols survived the
+    # same treatment only because a blank one is filled in on read, and "inn" is
+    # not blank. Falling back to *this key's own* default keeps a library a hall.
+    if not shape:
+        shape = _default_shape_for(key)
     return {
-        "key": _slug(value.get("key") or name),
+        "key": key,
         "name": name,
         "icon": icon,
         "fa": fa or "fa-house",
-        "shape": shape or townart.DEFAULT_SHAPE,
+        "shape": shape,
         "symbol": symbol,
         "channels": validate_channels(value.get("channels") or {}, guild=guild),
         "metric_weights": validate_metric_weights(value.get("metric_weights") or {}),

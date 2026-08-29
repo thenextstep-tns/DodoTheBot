@@ -774,6 +774,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var bmsg = document.getElementById('dlbuildingsmsg');
 
+  // The picker draws what it is choosing. Every shape at a middling tier ships
+  // with the page, because the alternative is a dropdown of nine words.
+  function bindShapePreviews(root) {
+    (root || document).querySelectorAll('.dlbuilding').forEach(function (card) {
+      var sel = card.querySelector('.dlbshape');
+      var box = card.querySelector('[data-preview]');
+      if (!sel || !box || sel.dataset.bound) return;
+      sel.dataset.bound = '1';
+      sel.onchange = function () {
+        var art = (window.DLSHAPES || {})[sel.value] || '';
+        box.innerHTML = '<svg viewBox="18 16 84 52" width="96" height="60" ' +
+          'xmlns="http://www.w3.org/2000/svg">' + art + '</svg>';
+      };
+    });
+  }
+  bindShapePreviews();
+
   function readBuilding(card) {
     var channels = {};
     var picker = card.querySelector('.dlchannels');
@@ -808,12 +825,19 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     var name = card.querySelector('.dlbname');
     var icon = card.querySelector('.dlbicon');
+    var shape = card.querySelector('.dlbshape');
+    var symbol = card.querySelector('.dlbsymbol');
     var hints = [];
     try { hints = JSON.parse(card.dataset.hints || '[]'); } catch (e) { hints = []; }
+    // Shape and emblem must travel with every save. They did not, so the
+    // validator filled in a default and every building on the server was
+    // rewritten as an inn the first time anybody pressed Save.
     return {
       key: card.dataset.key,
       name: name ? name.value : '',
       icon: icon ? icon.value : '',
+      shape: shape ? shape.value : '',
+      symbol: symbol ? symbol.value : '',
       hints: hints,
       channels: channels, metric_weights: emphasis, tiers: tiers
     };
@@ -1120,6 +1144,7 @@ Nothing here is visible to anybody but this panel.</p>
   </div>
 </div>
 {buildings_ui.channel_options_template(guild)}
+<script>window.DLSHAPES = {buildings_ui.shape_previews()};</script>
 <p id="status" class="status"></p>
 {_script(guild.id)}"""
     return _page(f"DodoLand · {guild.name}", body, scope=scope, guild=guild,
