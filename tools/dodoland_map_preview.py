@@ -32,6 +32,7 @@ from helpers.dodoland import parameters as dodo_params  # noqa: E402
 from helpers.dodoland.assets import AssetStore  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
 from helpers.dodoland.towns import TownStore  # noqa: E402
 from helpers.parameters import ParamManager  # noqa: E402
 from web.dodoland import mappage  # noqa: E402
@@ -126,6 +127,7 @@ class Bot:
         self.dodoland_buildings = BuildingStore(FakeCollection())
         self.dodoland_assets = AssetStore(FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
+        self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()
         self.trial_ranks = TrialRanks()
         self._guild = guild
@@ -187,6 +189,26 @@ def build() -> str:
         if rng.random() < 0.8:
             bot.dodoland_buildings.settle(GUILD_ID, member.id,
                                           rng.uniform(8, 92), rng.uniform(10, 88))
+    # A few assets in the library, so the toolkit has something in it. Drawn
+    # here rather than uploaded: the point is to exercise the placement, not the
+    # upload path.
+    for name, body in (
+        ("Pine wood", '<circle cx="32" cy="26" r="18" fill="#2f7f52"/>'
+                      '<rect x="28" y="40" width="8" height="20" fill="#7a5233"/>'),
+        ("Mountain", '<polygon points="6,58 32,8 58,58" fill="#8d8577"/>'
+                     '<polygon points="22,26 32,8 42,26" fill="#f2f0ea"/>'),
+        ("Ruin", '<rect x="12" y="26" width="10" height="32" fill="#b9b1a2"/>'
+                 '<rect x="30" y="16" width="10" height="42" fill="#b9b1a2"/>'
+                 '<rect x="46" y="34" width="10" height="24" fill="#b9b1a2"/>'),
+        ("Bonfire", '<polygon points="32,14 44,50 20,50" fill="#ff9a3c"/>'
+                    '<ellipse cx="32" cy="52" rx="16" ry="5" fill="#6b4a30"/>'),
+    ):
+        bot.dodoland_assets.add(
+            GUILD_ID, name=name,
+            data=(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+                  f'{body}</svg>').encode("utf-8"),
+            content_type="image/svg+xml")
+
     bot.dodoland_towns.save(GUILD_ID, 1, name="Beanburg",
                             blurb="Mostly soup, some regrets.")
 

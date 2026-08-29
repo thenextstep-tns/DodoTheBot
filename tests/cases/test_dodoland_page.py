@@ -22,6 +22,8 @@ from fake_mongo import FakeCollection  # noqa: E402
 from helpers.dodoland import flourish, parameters as dodo_params  # noqa: E402
 from helpers.dodoland.assets import AssetStore  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
 from helpers.dodoland.towns import TownStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
 from helpers.parameters import ParamManager  # noqa: E402
@@ -97,6 +99,7 @@ class Bot:
         self.dodoland_buildings = BuildingStore(FakeCollection())
         self.dodoland_assets = AssetStore(FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
+        self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()
         self.trial_ranks = TrialRanks()
         self._guild = None

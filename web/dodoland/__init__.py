@@ -36,6 +36,10 @@ def dodoland_routes() -> list:
         asset_image, town_art, town_picture,
     )
     from web.dodoland import player
+    from web.dodoland.decor_api import (
+        api_town_decor, api_town_toolkit, api_world_decor,
+        player_asset_image,
+    )
     from web.dodoland.mappage import map_page
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
@@ -74,6 +78,16 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/me/picture", player.my_picture),
         web.post("/api/guild/{gid}/dodoland/me/town", player.api_my_town),
         web.post("/api/guild/{gid}/dodoland/me/settle", player.api_my_settle),
+        # The toolkit. An admin dresses the map; a member dresses their own
+        # town and only their own — the handler never reads a user id from the
+        # request, and the tier locks are enforced there rather than in the UI.
+        web.post("/api/guild/{gid}/dodoland/decor", full(api_world_decor)),
+        web.get("/api/guild/{gid}/dodoland/me/toolkit",
+                player.require_town(api_town_toolkit)),
+        web.post("/api/guild/{gid}/dodoland/me/decor",
+                 player.require_town(api_town_decor)),
+        web.get("/guild/{gid}/dodoland/me/asset/{aid}",
+                player.require_town(player_asset_image)),
         # Not under /guild/{gid}: it is the page that tells somebody which
         # guilds they have a town in, so it cannot already know one.
         web.get("/towns", player.towns_home),

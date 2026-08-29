@@ -110,9 +110,17 @@ async def api_dodoland_asset(request: web.Request):
         if action == "remove":
             gone = bot.dodoland_assets.remove(guild.id, body.get("asset_id"))
             if gone:
-                await _record_change(request, "dodoland_asset", "remove", "", "",
-                                     "DodoLand asset removed")
-            return web.json_response({"ok": True, "removed": bool(gone)})
+                # Everything anybody had placed of it goes too. Left behind,
+                # the pieces render as a broken image on somebody's town, which
+                # reads as their town being broken rather than as an admin
+                # tidying the library.
+                dropped = bot.dodoland_decor.forget_asset(guild.id,
+                                                          body.get("asset_id"))
+                await _record_change(request, "dodoland_asset", "remove", "",
+                                     f"{dropped} placed", "DodoLand asset removed")
+                return web.json_response({"ok": True, "removed": True,
+                                          "unplaced": dropped})
+            return web.json_response({"ok": True, "removed": False})
 
         if action == "update":
             changed = bot.dodoland_assets.update(
@@ -205,6 +213,10 @@ async def api_dodoland_settle(request: web.Request):
 
     if body.get("remove"):
         bot.dodoland_buildings.unsettle(guild.id, user_id)
+        # Their decor was placed relative to a town that is no longer on the
+        # map, so it has nowhere to be. Standing is untouched: a position and a
+        # standing have never had anything to do with each other.
+        bot.dodoland_decor.clear_town(guild.id, user_id)
         return web.json_response({"ok": True, "removed": True})
 
     try:

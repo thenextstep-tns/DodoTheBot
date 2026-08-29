@@ -147,3 +147,8 @@ dodoland_assets = db["DodoLandAssets"]       # {guild_id, asset_id, name, data, 
 # What a person calls their town, what they say about it, and its picture.
 # Authored, never scored: nothing in here changes a single number.
 dodoland_towns = db["DodoLandTowns"]    # {guild_id, user_id, name, blurb, image, building_names}
+# Things from the library that have actually been put on the ground. Two scopes
+# in one collection because they are the same shape and one toolkit places both:
+# `world` is the map's own dressing and belongs to the server, `town` belongs to
+# one person and travels with their settlement.
+dodoland_decor = db["DodoLandDecor"]    # {guild_id, piece_id, scope, owner_id, asset_id, x, y, scale}

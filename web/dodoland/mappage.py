@@ -93,6 +93,11 @@ def _collect(bot, guild) -> dict:
            if str(row.get("day") or "") >= lit_since}
 
     details = bot.dodoland_towns.all(guild.id)
+    # The toolkit's output: what an admin has put on the map, and what each
+    # person has put around their own town. One read each rather than one per
+    # settlement.
+    world_decor = bot.dodoland_decor.world(guild.id)
+    town_decor = bot.dodoland_decor.towns(guild.id)
     base_pct = float(bot.dodoland_params.get(guild.id, "dodoland_town_width_pct"))
     growth = max(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_town_growth")))
     biggest = max((p["power"] for p in result["order"]), default=0)
@@ -138,8 +143,24 @@ def _collect(bot, guild) -> dict:
             # swallow the map while everybody else stayed a speck, which is the
             # same reason the old marker sizing used a root.
             "w": round(base_pct * (1 + (growth - 1) * _grown(person["power"], biggest)), 4),
+            # Placed relative to the town's own box, so it travels with the
+            # town when the town is moved or grows.
+            "decor": [{"id": d["piece_id"], "a": d["asset_id"],
+                       "x": float(d.get("x", 50)), "y": float(d.get("y", 50)),
+                       "s": float(d.get("scale", 1.0)),
+                       "f": bool(d.get("flip"))}
+                      for d in town_decor.get(uid, ())],
         })
-    return {"people": people, "buildings": buildings, "total": len(result["people"])}
+    return {"people": people, "buildings": buildings,
+            "total": len(result["people"]),
+            "world": [{"id": d["piece_id"], "a": d["asset_id"],
+                       "x": float(d.get("x", 50)), "y": float(d.get("y", 50)),
+                       "s": float(d.get("scale", 1.0)),
+                       "f": bool(d.get("flip"))} for d in world_decor],
+            "assets": [{"id": a["asset_id"], "name": a.get("name") or "",
+                        "building": a.get("building") or "",
+                        "tier": int(a.get("min_tier") or 0)}
+                       for a in bot.dodoland_assets.list(guild.id)]}
 
 
 async def map_page(request: web.Request):
@@ -163,6 +184,8 @@ async def map_page(request: web.Request):
 
     placed = [p for p in data["people"] if p["plot"]]
     unplaced = [p for p in data["people"] if not p["plot"]]
+    # How large a piece of decor is drawn at 100% zoom, before its own scale.
+    decor_size = int(bot.dodoland_params.get(guild.id, "dodoland_asset_size"))
     sizes = {
         # A proportion of the map's width, not a pixel count. Positions are
         # percentages for the same reason: re-uploading the map at another
@@ -188,6 +211,7 @@ async def map_page(request: web.Request):
     <b id="dlwaiting">{len(unplaced)}</b> waiting ·
     {len(data['people'])} with standing</span>
   <span class="dlspacer"></span>
+  <button id="dlkit" class="dlghost">🧰 Toolkit</button>
   <button id="dltoggle" class="dlghost">Towns list</button>
 </div>
 
@@ -211,10 +235,30 @@ async def map_page(request: web.Request):
   <div class="dllist" id="dllist"></div>
 </aside>
 
+<aside class="dldrawer dlkitdrawer" id="dlkitdrawer">
+  <div class="dldhead">
+    <b>Toolkit</b>
+    <button class="dlghost" id="dlkitclose">&times;</button>
+  </div>
+  <p class="dlkithint">Pick something, then click the map to put it down.
+  Click a placed piece to pick it up again.</p>
+  <div class="dlkitgrid" id="dlkitgrid"></div>
+  <div class="dlkitfoot">
+    <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
+      step="0.05" value="1"></label>
+    <button class="dlghost" id="dlkitflip">Mirror</button>
+    <button class="dlghost" id="dlkitdel">Remove</button>
+  </div>
+  <p class="dlkitmsg" id="dlkitmsg"></p>
+</aside>
+
 <aside class="dlcard" id="dlcard" hidden></aside>
 
 <script>window.DL = {json.dumps({"people": data["people"], "sizes": sizes,
-                                 "gid": str(guild.id), "me": viewer})};</script>
+                                 "gid": str(guild.id), "me": viewer,
+                                 "world": data["world"],
+                                 "assets": data["assets"],
+                                 "decorsize": decor_size})};</script>
 <script>{_SCRIPT}</script>
 </body></html>"""
     return web.Response(text=body, content_type="text/html")
@@ -256,8 +300,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .dlnomap { padding: 40px; color: var(--soft); }
 
-.dlzoom { position: absolute; right: 16px; top: 16px; display: flex;
-  flex-direction: column; gap: 6px; z-index: 12; }
+/* Above the drawers, and out from under the open one. These sat at z-index 12
+   under a 340px drawer that opens by default, so the whole control column was
+   invisible and every press landed on the drawer instead — which looks exactly
+   like four buttons with no handlers. */
+.dlzoom { position: fixed; right: 16px; top: 68px; display: flex;
+  flex-direction: column; gap: 6px; z-index: 26;
+  transition: right .18s ease; }
+.dlzoom.shifted { right: 356px; }
 .dlzoom button { width: 38px; height: 38px; border-radius: 9px; cursor: pointer;
   border: 1px solid var(--edge); background: var(--paper); color: var(--ink);
   box-shadow: 0 2px 10px rgba(0,0,0,.35); }
@@ -362,6 +412,53 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border: 1px solid var(--edge); background: var(--deep); color: var(--ink);
   font: inherit; font-size: 13px; cursor: pointer; }
 .dlcard button:hover { background: var(--edge); }
+
+/* ---- the toolkit -------------------------------------------------------- */
+/* Decor sits inside `.dlworld`, so it scales and pans with the coastline
+   exactly as a town does. It is placed at a percentage of the base image for
+   the same reason towns are: re-uploading a redrawn map at another resolution
+   must move nothing. */
+.dlpiece { position: absolute; transform: translate(-50%, -85%);
+  z-index: 4; cursor: pointer; }
+.dlpiece img { display: block; width: 100%; height: auto;
+  -webkit-user-drag: none; user-select: none; pointer-events: none; }
+.dlpiece.flip img { transform: scaleX(-1); }
+/* An outline rather than a filter: a filter inside the scaled world rasterises
+   whatever it touches, which is the same rule the towns live under. */
+.dlpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px;
+  border-radius: 3px; }
+/* Town decor belongs to a town and sits under its buildings, so a cart parked
+   outside the tavern is outside the tavern rather than on its roof. */
+.dlpiece.town { z-index: 3; }
+
+.dlkitdrawer { left: 0; right: auto; border-left: 0;
+  border-right: 1px solid var(--edge); transform: translateX(-100%);
+  box-shadow: 6px 0 24px rgba(0,0,0,.28); }
+.dlkitdrawer.open { transform: translateX(0); }
+.dlkithint { margin: 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft); }
+.dlkitgrid { flex: 1 1 auto; overflow-y: auto; display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); padding: 0 14px 14px; }
+.dlkititem { border: 1px solid var(--edge); border-radius: 9px; padding: 6px;
+  background: var(--deep); cursor: pointer; display: flex; flex-direction: column;
+  align-items: center; gap: 4px; font: inherit; color: inherit; }
+.dlkititem img { width: 100%; height: 42px; object-fit: contain; }
+.dlkititem span { font-size: 10px; text-align: center; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.dlkititem.armed { border-color: var(--lantern); background: var(--paper);
+  box-shadow: 0 0 0 2px var(--lantern) inset; }
+/* A locked thing is shown, not hidden. Knowing the gilded banner exists at the
+   third tier of the Gallery is the reason to want the third tier. */
+.dlkititem.locked { opacity: .42; cursor: not-allowed; }
+.dlkititem.locked span::after { content: " 🔒"; }
+.dlkitfoot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 10px 14px; border-top: 1px solid var(--edge); }
+.dlkitfoot label { font-size: 12px; color: var(--soft); display: flex;
+  align-items: center; gap: 6px; flex: 1 1 120px; }
+.dlkitfoot input[type=range] { flex: 1 1 auto; min-width: 60px; }
+.dlkitmsg { margin: 0; padding: 0 14px 12px; font-size: 12px; color: var(--soft); }
+.dlkitmsg.bad { color: #c0392b; font-weight: 600; }
+.dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
+
 @media (max-width: 720px) {
   .dldrawer { width: 100%; }
   .dlcard { left: 8px; right: 8px; width: auto; }
@@ -584,6 +681,7 @@ _SCRIPT = r"""
     world.querySelectorAll('.dltown').forEach(function (n) { n.remove(); });
     nodes = {};
     levelOfDetail();
+    if (typeof redrawDecor === 'function') redrawDecor();
     var on = D.people.filter(function (p) { return p.plot; }).length;
     document.getElementById('dlplaced').textContent = on;
     document.getElementById('dlwaiting').textContent = D.people.length - on;
@@ -754,12 +852,16 @@ _SCRIPT = r"""
     });
   }
   frame.addEventListener('click', function (ev) {
-    if (!armed || moved > 6 || !nat.w) return;
+    if (moved > 6 || !nat.w) return;
     var b = frame.getBoundingClientRect();
-    place(armed, {
+    var at = {
       x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
       y: ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100
-    });
+    };
+    // Settling a town and placing decor are the same gesture on the same
+    // surface, so only one of them may ever be armed at a time.
+    if (armed) { place(armed, at); return; }
+    if (armedAsset) { placeDecor(at); }
   });
 
   // --- the list ---------------------------------------------------------- //
@@ -790,15 +892,188 @@ _SCRIPT = r"""
     });
   }
   search.addEventListener('input', renderList);
+  // The zoom controls have to stay reachable whichever drawer is open, so
+  // they step aside rather than hide behind it.
+  var zoombar = document.querySelector('.dlzoom');
+  function placeZoom() {
+    zoombar.classList.toggle('shifted', drawer.classList.contains('open'));
+  }
   document.getElementById('dltoggle').onclick = function () {
     drawer.classList.toggle('open');
+    kitDrawer.classList.remove('open');
+    placeZoom();
   };
   document.getElementById('dlclose').onclick = function () {
     drawer.classList.remove('open');
+    placeZoom();
   };
 
+
+  // --- the toolkit ------------------------------------------------------- //
+  // Two things it does, and they are one gesture each: pick something from the
+  // library and click the ground to put it there, or click a piece already on
+  // the ground to take hold of it. Everything else — size, mirror, remove —
+  // acts on whatever is held.
+  //
+  // Positions are percentages of the base image, exactly like a town's, so a
+  // redrawn map at another resolution moves nothing that has been placed.
+  var kitDrawer = document.getElementById('dlkitdrawer'),
+      kitGrid = document.getElementById('dlkitgrid'),
+      kitMsg = document.getElementById('dlkitmsg'),
+      kitScale = document.getElementById('dlkitscale');
+  var armedAsset = null, heldPiece = null, pieces = {};
+
+  function kitSay(text, bad) {
+    if (!kitMsg) return;
+    kitMsg.textContent = text || '';
+    kitMsg.classList.toggle('bad', !!bad);
+  }
+
+  function assetUrl(id) {
+    return '/guild/' + D.gid + '/dodoland/asset/' + id;
+  }
+
+  function renderKit() {
+    if (!D.assets.length) {
+      kitGrid.innerHTML = '<p class="dlkitempty">The asset library is empty. ' +
+        'Upload something on the DodoLand page first.</p>';
+      return;
+    }
+    kitGrid.innerHTML = D.assets.map(function (a) {
+      return '<button class="dlkititem' +
+        (armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
+        '<img alt="" src="' + assetUrl(a.id) + '">' +
+        '<span>' + escapeHtml(a.name) + '</span></button>';
+    }).join('');
+    kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {
+      el.onclick = function () {
+        armedAsset = (armedAsset === el.dataset.asset) ? null : el.dataset.asset;
+        heldPiece = null;
+        frame.classList.toggle('placing', !!armedAsset);
+        kitSay(armedAsset ? 'Click the map to place it.' : '');
+        renderKit();
+      };
+    });
+  }
+
+  function drawPiece(piece) {
+    var el = document.createElement('div');
+    el.className = 'dlpiece' + (piece.f ? ' flip' : '');
+    el.dataset.id = piece.id;
+    el.style.left = piece.x + '%';
+    el.style.top = piece.y + '%';
+    // Sized in the map's own units so it shrinks with the coastline, the same
+    // bargain the towns make. Never counter-scaled.
+    el.style.width = (D.decorsize * piece.s / (nat.w || 1) * 100) + '%';
+    el.innerHTML = '<img alt="" src="' + assetUrl(piece.a) + '">';
+    el.onclick = function (ev) {
+      ev.stopPropagation();
+      hold(piece.id);
+    };
+    world.appendChild(el);
+    pieces[piece.id] = el;
+    return el;
+  }
+
+  function redrawDecor() {
+    world.querySelectorAll('.dlpiece').forEach(function (n) { n.remove(); });
+    pieces = {};
+    D.world.forEach(drawPiece);
+    if (heldPiece && pieces[heldPiece]) pieces[heldPiece].classList.add('on');
+  }
+
+  function pieceById(id) {
+    for (var i = 0; i < D.world.length; i++) {
+      if (D.world[i].id === id) return D.world[i];
+    }
+    return null;
+  }
+
+  function hold(id) {
+    heldPiece = (heldPiece === id) ? null : id;
+    armedAsset = null;
+    frame.classList.remove('placing');
+    world.querySelectorAll('.dlpiece').forEach(function (n) {
+      n.classList.toggle('on', n.dataset.id === heldPiece);
+    });
+    var p = heldPiece && pieceById(heldPiece);
+    if (p) { kitScale.value = p.s; kitSay('Held. Drag the size, mirror it, or remove it.'); }
+    else { kitSay(''); }
+  }
+
+  function decorPost(payload, then) {
+    fetch('/api/guild/' + D.gid + '/dodoland/decor', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().catch(function () {
+        return {ok: false, error: 'The server answered with ' + r.status + '.'};
+      });
+    }).then(function (res) {
+      if (!res.ok) { kitSay(res.error || 'That did not work.', true); return; }
+      then(res);
+    }).catch(function (err) { kitSay(String(err), true); });
+  }
+
+  function placeDecor(point) {
+    decorPost({action: 'place', asset_id: armedAsset, x: point.x, y: point.y,
+               scale: parseFloat(kitScale.value) || 1},
+      function (res) {
+        D.world.push({id: res.piece.piece_id, a: res.piece.asset_id,
+                      x: res.piece.x, y: res.piece.y, s: res.piece.scale,
+                      f: !!res.piece.flip});
+        redrawDecor();
+        kitSay('Placed. Click again to place another.');
+      });
+  }
+
+  if (kitScale) kitScale.oninput = function () {
+    var p = heldPiece && pieceById(heldPiece);
+    if (!p) return;
+    p.s = parseFloat(kitScale.value) || 1;
+    redrawDecor();
+  };
+  if (kitScale) kitScale.onchange = function () {
+    var p = heldPiece && pieceById(heldPiece);
+    if (!p) return;
+    decorPost({action: 'move', piece_id: p.id, scale: p.s},
+              function () { kitSay('Resized.'); });
+  };
+  document.getElementById('dlkitflip').onclick = function () {
+    var p = heldPiece && pieceById(heldPiece);
+    if (!p) { kitSay('Click a placed piece first.', true); return; }
+    p.f = !p.f;
+    redrawDecor();
+    decorPost({action: 'move', piece_id: p.id, flip: p.f},
+              function () { kitSay('Mirrored.'); });
+  };
+  document.getElementById('dlkitdel').onclick = function () {
+    var p = heldPiece && pieceById(heldPiece);
+    if (!p) { kitSay('Click a placed piece first.', true); return; }
+    decorPost({action: 'remove', piece_id: p.id}, function () {
+      D.world = D.world.filter(function (q) { return q.id !== p.id; });
+      heldPiece = null;
+      redrawDecor();
+      kitSay('Removed.');
+    });
+  };
+  document.getElementById('dlkit').onclick = function () {
+    kitDrawer.classList.toggle('open');
+    drawer.classList.remove('open');
+    if (typeof placeZoom === 'function') placeZoom();
+  };
+  document.getElementById('dlkitclose').onclick = function () {
+    kitDrawer.classList.remove('open');
+    armedAsset = null;
+    frame.classList.remove('placing');
+    renderKit();
+  };
+  renderKit();
+
   redraw();
+  redrawDecor();
   renderList();
   drawer.classList.add('open');
+  placeZoom();
 })();
 """

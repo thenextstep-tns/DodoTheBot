@@ -21,6 +21,8 @@ from helpers.dodoland import parameters as dodo_params  # noqa: E402
 from helpers.dodoland.assets import AssetStore  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
 from helpers.dodoland.towns import TownStore  # noqa: E402
 from helpers.parameters import ParamManager  # noqa: E402
 from web.dodoland import player  # noqa: E402
@@ -95,6 +97,7 @@ class Bot:
         self.dodoland_buildings = BuildingStore(FakeCollection())
         self.dodoland_assets = AssetStore(FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
+        self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()
         self.trial_ranks = TrialRanks()
         self._guild = guild
@@ -335,21 +338,30 @@ assert "status=403" not in source, "a refusal tells somebody the server exists"
 assert "status=404" in source
 print("safety          a refusal is 404, so it confirms nothing")
 
-# Every route in the table is gated by one of exactly three things.
+# Every route in the table is gated by one of exactly three things. Read with
+# the newlines collapsed: a route whose handler no longer fits on one line is
+# still a route, and a line-by-line scan quietly stopped covering it.
 routes = pathlib.Path("web/dodoland/__init__.py").read_text(encoding="utf-8")
-for line in routes.splitlines():
-    stripped = line.strip()
-    if stripped.startswith(("web.get(", "web.post(")):
-        assert ("configure(" in stripped or "full(" in stripped
-                or "player." in stripped), f"an unscoped DodoLand route: {stripped}"
+flat = " ".join(routes.split())
+calls = re.findall(r"web\.(?:get|post|delete|put)\(.*?\)\),", flat)
+assert len(calls) >= 15, f"only found {len(calls)} routes; the scan is broken"
+for call in calls:
+    assert ("configure(" in call or "full(" in call
+            or "player." in call), f"an unscoped DodoLand route: {call}"
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
-print("routes          every route is behind a panel scope or the player gate")
+print(f"routes          all {len(calls)} routes are behind a panel scope or the player gate")
 
 # Every player handler in the table actually carries the gate. A handler exposed
 # without it would be a public page, which is the exact thing that was removed.
-for name in re.findall(r"player\.(\w+)\)", routes):
-    handler = getattr(player, name)
-    assert hasattr(handler, "__wrapped__") or name == "towns_home",         f"{name} is routed without the player gate"
+for call in calls:
+    if "player." not in call:
+        continue
+    # Either a handler player.py already wrapped, or one it wraps at the route.
+    gated = ("player.require_town(" in call
+             or any(hasattr(getattr(player, n, None), "__wrapped__")
+                    for n in re.findall(r"player\.(\w+)", call))
+             or "player.towns_home" in call)
+    assert gated, f"a player route with no gate on it: {call}"
 print("routes          every player route carries the gate, none is bare")
 
 print("PASS")

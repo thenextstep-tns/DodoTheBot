@@ -6,6 +6,7 @@ half-finished thing behind a URL somebody can paste is worse than no thing at
 all. What survives is the part that was never about those pages.
 """
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -59,12 +60,16 @@ print("previews        the scorer honours the basis end to end")
 # what the public map link and the settle page were, and why they were removed.
 # ``tests/cases/test_dodoland_player.py`` holds down what the player gate means.
 routes = pathlib.Path("web/dodoland/__init__.py").read_text(encoding="utf-8")
-for line in routes.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("web.get(") or stripped.startswith("web.post("):
-        assert ("configure(" in stripped or "full(" in stripped
-                or "player." in stripped), f"an unscoped DodoLand route: {stripped}"
+# Read as one string with the newlines collapsed: a route whose handler no
+# longer fits on one line is still a route, and checking line by line quietly
+# stopped covering it.
+_flat = " ".join(routes.split())
+_calls = re.findall(r"web\.(?:get|post|delete|put)\(.*?\)\),", _flat)
+assert len(_calls) >= 15, f"only found {len(_calls)} routes; the scan is broken"
+for call in _calls:
+    assert ("configure(" in call or "full(" in call
+            or "player." in call), f"an unscoped DodoLand route: {call}"
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
-print("scoping         every DodoLand route sits behind a scope or the player gate")
+print(f"scoping         all {len(_calls)} DodoLand routes sit behind a scope or the player gate")
 
 print("PASS")

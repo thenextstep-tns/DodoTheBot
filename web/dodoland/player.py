@@ -388,8 +388,10 @@ async def my_town_page(request: web.Request):
 <main class="doc">
   <section class="hero">
     <div class="art dltown close {"fl" + str(town["flourish"].get("level", 0))
-                                  if town["flourish"].get("level") else ""}">
+                                  if town["flourish"].get("level") else ""}"
+         id="townart">
       <svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">{art}</svg>
+      <div class="kitlayer" id="kitlayer"></div>
     </div>
     <div class="heroinfo">
       <h1 id="townname">{e(name)}</h1>
@@ -403,6 +405,7 @@ async def my_town_page(request: web.Request):
   </section>
 
   {_flourish_html(town)}
+  {_decorate_html(guild)}
   {_climb_html(town)}
   {_friends_html(town)}
   {_customise_html(guild, town, name)}
@@ -422,6 +425,35 @@ async def my_town_page(request: web.Request):
             back=("/towns", "Your towns"), title=name,
             note=f"in {guild.name}", links=links) + body),
         content_type="text/html")
+
+
+def _decorate_html(guild) -> str:
+    """The toolkit, for the person whose town it is.
+
+    Deliberately empty in the markup and filled from
+    ``/api/guild/{gid}/dodoland/me/toolkit``: what somebody may place depends on
+    what they have built, so it is an answer the server has to give rather than
+    something the page can assume. Locked things come back too and are shown
+    dimmed — a reward you cannot see is not a reward, and knowing the gilded
+    banner exists at the third tier of the Gallery is the reason to want the
+    third tier of the Gallery.
+    """
+    return f"""
+<section class="card">
+  <h2>Decorate</h2>
+  <p class="muted">Things you have earned the right to put around your town.
+  Pick one, then click your town above to put it down; click a piece you have
+  placed to pick it up again.</p>
+  <div class="kitgrid" id="kitgrid"><p class="muted small">Loading…</p></div>
+  <div class="acts">
+    <label class="kitsize">Size
+      <input type="range" id="kitscale" min="0.25" max="6" step="0.05" value="1">
+    </label>
+    <button id="kitflip">Mirror</button>
+    <button id="kitdel">Remove</button>
+  </div>
+  <p class="cardmsg" id="kitmsg"></p>
+</section>"""
 
 
 def _flourish_html(town: dict) -> str:
@@ -730,6 +762,38 @@ textarea { min-height: 84px; resize: vertical; }
 .gicon.ph { width: 52px; height: 52px; display: grid; place-items: center;
   background: var(--deep); font-size: 22px; }
 .foot { color: var(--soft); font-size: 13px; }
+
+/* The artwork doubles as the placement surface, so decor sits over it in the
+   same coordinate space: a percentage of the town's own box, which is what
+   lets a piece travel with the town when it is moved on the map. */
+.art { position: relative; }
+.art.placing { cursor: crosshair; }
+.kitlayer { position: absolute; inset: 0; }
+.kitpiece { position: absolute; transform: translate(-50%, -85%);
+  cursor: pointer; }
+.kitpiece.flip { transform: translate(-50%, -85%) scaleX(-1); }
+/* An outline, never a filter: a filter rasterises what it touches, and the
+   artwork under it is the one thing that must stay vector. */
+.kitpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px; }
+.kitgrid { display: grid; gap: 8px; margin-top: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+.kititem { border: 1px solid var(--edge); border-radius: 9px; padding: 6px;
+  background: var(--deep); cursor: pointer; display: flex;
+  flex-direction: column; align-items: center; gap: 4px; font: inherit;
+  color: inherit; }
+.kititem img { width: 100%; height: 44px; object-fit: contain; }
+.kititem span { font-size: 10px; text-align: center; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%; }
+.kititem.armed { border-color: var(--lantern);
+  box-shadow: 0 0 0 2px var(--lantern) inset; }
+/* Locked things are shown, not hidden: knowing the gilded banner exists at the
+   third tier of the Gallery is the reason to want the third tier. */
+.kititem.locked { opacity: .4; cursor: not-allowed; }
+.kititem.locked span::after { content: " F512"; }
+.kitsize { flex: 1 1 140px; display: flex; align-items: center; gap: 8px;
+  margin: 0; }
+.kitsize input { flex: 1 1 auto; }
 @media (max-width: 620px) {
   .art { flex-basis: 100%; }
 }
@@ -795,5 +859,162 @@ _SCRIPT = r"""
 
   var clear = document.getElementById('tclear');
   if (clear) clear.onclick = function () { post({clear_image: true}); };
+
+  // --- the toolkit ------------------------------------------------------- //
+  // Pick something from the library, click your town to put it down. Click a
+  // piece already down to take hold of it, then size it, mirror it or remove
+  // it. Positions are a percentage of the town's own box, so a piece travels
+  // with the town when it is moved on the map and keeps its place when the
+  // town grows.
+  var kitGrid = document.getElementById('kitgrid'),
+      kitLayer = document.getElementById('kitlayer'),
+      kitMsg = document.getElementById('kitmsg'),
+      kitScale = document.getElementById('kitscale'),
+      townArt = document.getElementById('townart');
+  var kit = {assets: [], placed: [], limit: 0}, armed = null, held = null;
+
+  function kitSay(text, bad) {
+    if (!kitMsg) return;
+    kitMsg.textContent = text || '';
+    kitMsg.classList.toggle('bad', !!bad);
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+  function assetUrl(id) {
+    return '/guild/' + GID + '/dodoland/me/asset/' + id;
+  }
+
+  function renderKit() {
+    if (!kit.assets.length) {
+      kitGrid.innerHTML = '<p class="muted small">Nothing in the library yet. ' +
+        'An admin uploads the things people can put on their towns.</p>';
+      return;
+    }
+    kitGrid.innerHTML = kit.assets.map(function (a) {
+      // Locked things are shown rather than hidden: knowing a thing exists is
+      // the reason to want the tier that unlocks it.
+      return '<button class="kititem' + (a.locked ? ' locked' : '') +
+        (armed === a.asset_id ? ' armed' : '') + '" data-a="' + a.asset_id +
+        '"' + (a.locked ? ' disabled' : '') + '>' +
+        '<img alt="" src="' + assetUrl(a.asset_id) + '">' +
+        '<span>' + esc(a.name) + '</span></button>';
+    }).join('');
+    kitGrid.querySelectorAll('.kititem').forEach(function (el) {
+      el.onclick = function () {
+        if (el.classList.contains('locked')) return;
+        armed = (armed === el.dataset.a) ? null : el.dataset.a;
+        held = null;
+        townArt.classList.toggle('placing', !!armed);
+        kitSay(armed ? 'Now click your town to put it down.' : '');
+        renderKit();
+      };
+    });
+  }
+
+  function renderPlaced() {
+    kitLayer.innerHTML = kit.placed.map(function (p) {
+      return '<img class="kitpiece' + (p.flip ? ' flip' : '') +
+        (held === p.piece_id ? ' on' : '') + '" data-p="' + p.piece_id +
+        '" alt="" src="' + assetUrl(p.asset_id) + '" style="left:' + p.x +
+        '%;top:' + p.y + '%;width:' + (11 * p.scale) + '%">';
+    }).join('');
+    kitLayer.querySelectorAll('.kitpiece').forEach(function (el) {
+      el.onclick = function (ev) {
+        ev.stopPropagation();
+        held = (held === el.dataset.p) ? null : el.dataset.p;
+        armed = null;
+        townArt.classList.remove('placing');
+        var p = byPiece(held);
+        if (p) { kitScale.value = p.scale; kitSay('Held.'); } else { kitSay(''); }
+        renderPlaced();
+        renderKit();
+      };
+    });
+    kitLayer.classList.toggle('busy', kit.placed.length > 0);
+  }
+
+  function byPiece(id) {
+    for (var i = 0; i < kit.placed.length; i++) {
+      if (kit.placed[i].piece_id === id) return kit.placed[i];
+    }
+    return null;
+  }
+
+  function kitPost(payload, then) {
+    fetch('/api/guild/' + GID + '/dodoland/me/decor', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().catch(function () {
+        return {ok: false, error: 'The server answered with ' + r.status + '.'};
+      });
+    }).then(function (res) {
+      if (!res.ok) { kitSay(res.error || 'That did not work.', true); return; }
+      then(res);
+    }).catch(function (err) { kitSay(String(err), true); });
+  }
+
+  if (townArt) townArt.onclick = function (ev) {
+    if (!armed) return;
+    var b = townArt.getBoundingClientRect();
+    kitPost({action: 'place', asset_id: armed,
+             x: ((ev.clientX - b.left) / b.width) * 100,
+             y: ((ev.clientY - b.top) / b.height) * 100,
+             scale: parseFloat(kitScale.value) || 1},
+      function (res) {
+        kit.placed.push({piece_id: res.piece.piece_id,
+                         asset_id: res.piece.asset_id, x: res.piece.x,
+                         y: res.piece.y, scale: res.piece.scale,
+                         flip: !!res.piece.flip});
+        renderPlaced();
+        kitSay('Placed. ' + kit.placed.length + ' of ' + kit.limit + '.');
+      });
+  };
+
+  if (kitScale) kitScale.onchange = function () {
+    var p = byPiece(held);
+    if (!p) return;
+    p.scale = parseFloat(kitScale.value) || 1;
+    renderPlaced();
+    kitPost({action: 'move', piece_id: p.piece_id, scale: p.scale},
+            function () { kitSay('Resized.'); });
+  };
+  var flipBtn = document.getElementById('kitflip');
+  if (flipBtn) flipBtn.onclick = function () {
+    var p = byPiece(held);
+    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
+    p.flip = !p.flip;
+    renderPlaced();
+    kitPost({action: 'move', piece_id: p.piece_id, flip: p.flip},
+            function () { kitSay('Mirrored.'); });
+  };
+  var delBtn = document.getElementById('kitdel');
+  if (delBtn) delBtn.onclick = function () {
+    var p = byPiece(held);
+    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
+    kitPost({action: 'remove', piece_id: p.piece_id}, function () {
+      kit.placed = kit.placed.filter(function (q) {
+        return q.piece_id !== p.piece_id;
+      });
+      held = null;
+      renderPlaced();
+      kitSay('Removed.');
+    });
+  };
+
+  // What may be placed depends on what has been built, so the server answers
+  // it rather than the page assuming.
+  fetch('/api/guild/' + GID + '/dodoland/me/toolkit')
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.ok) { kitSay('The toolkit could not be loaded.', true); return; }
+      kit = res;
+      renderKit();
+      renderPlaced();
+    })
+    .catch(function () { kitSay('The toolkit could not be loaded.', true); });
 })();
 """
