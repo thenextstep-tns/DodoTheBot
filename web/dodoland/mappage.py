@@ -74,9 +74,22 @@ def _grown(power: int, biggest: int) -> float:
     return min(1.0, (power / biggest) ** 0.5)
 
 
+def _rooms_of(guild, building: dict) -> list[str]:
+    """The channels that build one building, named the way Discord names them."""
+    out = []
+    for channel_id in (building.get("channels") or {}):
+        channel = guild.get_channel(int(channel_id))
+        if channel is None and hasattr(guild, "get_thread"):
+            channel = guild.get_thread(int(channel_id))
+        out.append(f"#{channel.name}" if channel is not None
+                   else f"#{channel_id}")
+    return sorted(out)
+
+
 def _collect(bot, guild) -> dict:
     """Everything the page needs, in one pass. Blocking; call in an executor."""
     buildings = bot.dodoland_buildings.buildings(guild.id)
+    rooms = {b["key"]: _rooms_of(guild, b) for b in buildings}
     window = int(bot.dodoland_params.get(guild.id, "dodoland_window_days"))
     since = store_module.days_back(window)
     lit_since = store_module.days_back(
@@ -119,6 +132,9 @@ def _collect(bot, guild) -> dict:
                 "tier": int(score["tier"]) + 1,
                 "title": score["tier_title"],
                 "points": score["points"],
+                # What actually builds it. The map makes somebody ask why a
+                # building is there, and this is the answer.
+                "rooms": rooms.get(key, []),
             })
         built.sort(key=lambda b: -b["tier"])
         shine = glow.get(uid) or flourish_rules.BLANK
@@ -391,6 +407,19 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlcard ul { list-style: none; margin: 8px 0 0; padding: 0; }
 .dlcard li { display: flex; align-items: center; gap: 8px; padding: 3px 0;
   font-size: 14px; }
+/* A building's own line, and the rooms that build it once it is the one being
+   asked about. Every building's channels at once is a wall of names; the
+   question is only ever asked about the one somebody just clicked. */
+.dlcard li.bline { display: block; padding: 4px 0; }
+.dlcard .btop { display: flex; align-items: center; gap: 8px; }
+.dlcard li.bline.focus { background: var(--deep); border-radius: 8px;
+  padding: 6px 8px; margin: 2px -8px; }
+.brooms { font-size: 12px; color: var(--soft); margin-top: 3px;
+  word-break: break-word; }
+/* The lot under the pointer says it can be opened, and the one that is open is
+   picked out by its ground plate rather than by a filter — a filter inside the
+   scaled world rasterises whatever it touches. */
+.lot.named { cursor: pointer; }
 .dlcard li i { width: 20px; text-align: center; color: var(--lantern); }
 .dlcard .acts { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .dlcard button.own { background: var(--lantern); color: #fff;
@@ -607,7 +636,17 @@ _SCRIPT = r"""
     el.addEventListener('click', function (ev) {
       ev.stopPropagation();
       if (moved > 6) return;
-      open(person.id);
+      // Which building was clicked, if any. A town is a pile of overlapping
+      // silhouettes and the one you want is often behind another, so clicking
+      // it brings it out and opens the card on it.
+      var lot = ev.target.closest && ev.target.closest('.lot.named');
+      var key = lot && lot.getAttribute('data-building');
+      if (lot) {
+        // Paint order is document order in SVG, so moving the group to the end
+        // of its parent is what "bring to the front" means here.
+        lot.parentNode.appendChild(lot);
+      }
+      open(person.id, key || null);
     });
     world.appendChild(el);
     nodes[person.id] = el;
@@ -689,7 +728,7 @@ _SCRIPT = r"""
 
   // --- the town card ----------------------------------------------------- //
   var openId = null;
-  function open(id) {
+  function open(id, focusKey) {
     var p = byId[id];
     if (!p) return;
     openId = id;
@@ -697,10 +736,21 @@ _SCRIPT = r"""
       n.classList.toggle('on', n.dataset.id === id);
     });
     var rows = p.built.map(function (b) {
-      return '<li><span>' + escapeHtml(b.name) + ' — <b>' +
+      // The rooms that build it, on the one that was clicked. Every building
+      // at once is a wall of channel names; the question is only ever asked
+      // about the building somebody just pointed at.
+      var on = focusKey && b.key === focusKey;
+      var rooms = (b.rooms && b.rooms.length)
+        ? b.rooms.map(escapeHtml).join(' ')
+        : 'No rooms are attached to it yet.';
+      return '<li class="bline' + (on ? ' focus' : '') + '"' +
+        ' data-key="' + escapeHtml(b.key) + '">' +
+        '<div class="btop"><span>' + escapeHtml(b.name) + ' — <b>' +
         escapeHtml(b.title) + '</b></span>' +
         '<span style="margin-left:auto;opacity:.7">' + b.points.toLocaleString() +
-        '</span></li>';
+        '</span></div>' +
+        (on ? '<div class="brooms">Built by ' + rooms + '</div>' : '') +
+        '</li>';
     }).join('') || '<li style="opacity:.7">Nothing built yet.</li>';
 
     // Every building can be renamed, which is why they are inputs rather than

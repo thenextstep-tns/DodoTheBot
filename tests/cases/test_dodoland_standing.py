@@ -360,7 +360,7 @@ art = townart.town_svg([{"key": f"b{i}", "tier": 6 - i} for i in range(5)])
 # Only what stands on a plot. Inhabitants and emblems are also a translate and
 # a scale, so matching the transform alone counted the crowd as buildings.
 spots = _re.findall(
-    r'class="lot" transform="translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)',
+    r'class="lot[^"]*"[^>]*transform="translate\(([-\d.]+),([-\d.]+)\) scale\(([\d.]+)\)',
     art)
 assert len(spots) == 5, spots
 xs = {round(float(x)) for x, _y, _s in spots}

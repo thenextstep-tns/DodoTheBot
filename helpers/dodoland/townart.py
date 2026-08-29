@@ -1178,14 +1178,22 @@ DEFAULT_SHAPE = "inn"
 # plate's half-width at that depth, so nothing stands off its own ground.
 # Fixed rather than seeded, so a town does not rearrange itself between two
 # page loads.
+# Seven plots, and the thing they have to achieve is that a building never
+# hides another one. Two rules do most of that work: **no two share a depth**,
+# so anything in front of another is also lower down and offset rather than
+# squarely on top of it; and the sideways steps get larger as the buildings do,
+# because a tier-six keep is three times the width of a tier-one shed. The
+# previous table had four of the seven inside a third of the plate of each
+# other and the grandest three at almost the same depth, which is why a town
+# with everything built came out as a pile.
 _PLOTS = (
-    (0.46,  0.00),   # the centrepiece: mid-depth, on the axis
-    (0.13, -0.46),   # back left
-    (0.13,  0.48),   # back right
-    (0.86, -0.60),   # front left, overlapping the middle
-    (0.86,  0.56),   # front right
-    (0.52, -0.94),   # the far edges of the middle band
-    (0.52,  0.92),
+    (0.40,  0.00),   # the centrepiece, mid-depth and on the axis
+    (0.10, -0.56),   # back left, well clear of it
+    (0.16,  0.60),   # back right, a little nearer so the two do not pair up
+    (0.72, -0.78),   # front left
+    (0.80,  0.74),   # front right, nearest of all
+    (0.30, -0.92),   # the far shoulders of the plate
+    (0.56,  0.94),
 )
 
 # Where ordinary houses go. Deliberately not the same band as the landmarks:
@@ -1576,6 +1584,84 @@ def _building_fx(family: str, tier: int, colour: str, symbol: str = "") -> str:
     return _fx("".join(out))
 
 
+def town_wall(tier: int, plate: float, ry: float, colour: str) -> tuple[str, str]:
+    """A wall around the whole settlement. Returns (behind, in front).
+
+    Earned by having a **gate** — a wayshrine, a threshold, whatever the server
+    calls that building. A gate standing on its own in a field is a doorway to
+    nowhere; a gate is the thing you put in a wall, so building one builds the
+    wall it belongs to. It is the only building that changes the *town* rather
+    than adding to it, which is exactly what makes it worth having.
+
+    The wall follows the plate's own ellipse, and it is split so the town sits
+    inside it: the far half is drawn under everything, the near half over the
+    housing. Its height and how far round it reaches both come from the gate's
+    tier, so a tier-one wayshrine is a few stones at the back and a tier-six one
+    encloses the place.
+    """
+    tier = max(1, min(6, int(tier)))
+    cx = WIDTH / 2
+    rx = WIDTH * plate * 1.10
+    band = ry * 1.02
+    height = 3.0 + tier * 1.3
+    # How far round it has come. A wall is built outward from the back, so a
+    # young one is an arc behind the town and a finished one meets at the front.
+    reach = 0.30 + 0.70 * (tier / 6.0)
+
+    def arc(start: float, end: float, lift: float) -> str:
+        points = []
+        steps = 26
+        for i in range(steps + 1):
+            angle = start + (end - start) * i / steps
+            points.append((cx + rx * math.cos(angle),
+                           PLATE_CY + band * math.sin(angle) - lift))
+        return " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+
+    def wall(start: float, end: float, tall: float) -> str:
+        top = arc(start, end, tall)
+        bottom = " ".join(reversed(arc(start, end, 0.0).split(" ")))
+        out = (f'<polygon points="{top} {bottom}" fill="{WALL_DARK}" '
+               f'stroke="{LINE}" stroke-width="1.1" stroke-linejoin="round"/>')
+        # Stone courses following the same curve, so a wall is masonry rather
+        # than a blank slab across the front of the town.
+        for course in (0.34, 0.68):
+            out += (f'<polyline points="{arc(start, end, tall * course)}" '
+                    f'fill="none" stroke="{LINE}" stroke-width=".4" '
+                    f'opacity=".25"/>')
+        teeth = max(3, int(abs(end - start) / 0.26))
+        for i in range(teeth):
+            angle = start + (end - start) * (i + 0.5) / teeth
+            tx = cx + rx * math.cos(angle)
+            ty = PLATE_CY + band * math.sin(angle) - tall
+            out += _rect(tx - 1.2, ty - 1.9, 2.4, 2.3, fill=WALL_DARK,
+                         width=0.7, rx=0.2)
+        return out
+
+    # Angles run from the left of the plate, over the back, to the right.
+    span = math.pi * reach
+    back = wall(math.pi + (math.pi - span) / 2,
+                math.pi + (math.pi + span) / 2, height)
+    # Towers where the wall ends, so it stops rather than being cut off.
+    for angle in (math.pi + (math.pi - span) / 2, math.pi + (math.pi + span) / 2):
+        tx = cx + rx * math.cos(angle)
+        ty = PLATE_CY + band * math.sin(angle)
+        back += _tower(tx, ty, height + 4 + tier, 2.4 + tier * 0.2, colour,
+                       tier=tier)
+
+    front = ""
+    if tier >= 4:
+        # It has come round the front. Left open where the gate stands, because
+        # a wall with no way in is a pen.
+        # Deliberately low. The near wall stands in front of the housing, and
+        # at the back wall's height it hid the whole front of the town behind a
+        # blank band — a rampart the houses look over reads as enclosure, a
+        # screen across the picture does not.
+        gap = 0.34
+        for a, b in ((0.06, math.pi / 2 - gap), (math.pi / 2 + gap, math.pi - 0.06)):
+            front += wall(a, b, height * 0.5)
+    return back, front
+
+
 def _flourish(level: int, colour: str, uid: str, plate: float) -> str:
     """What a trial rank does to a whole town. Cosmetic, always, by design.
 
@@ -1720,6 +1806,19 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         f'fill="#ddcaa6"/>',
     ]
 
+    # A gate builds the wall it belongs to. Drawn in two halves so the town
+    # sits inside it rather than in front of it.
+    wall_behind = wall_front = ""
+    for row in rows:
+        key = str(row.get("key") or "")
+        if (shapes.get(key) or DEFAULT_SHAPE) == "gate":
+            wall_behind, wall_front = town_wall(
+                int(row.get("tier", 1)), plate, plate_ry,
+                colours.get(key) or colour_for(key))
+            break
+    if wall_behind:
+        parts.append(wall_behind)
+
     standing: list[tuple] = []
     if not rows:
         cx = WIDTH / 2
@@ -1744,7 +1843,10 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     # keep rather than layered on top of the whole town.
     drawn: list[tuple] = []
     if rows:
-        drawn.extend(_houses(houses, plate, uid, plate_ry))
+        # Ordinary houses have no key: they are not anybody's building and
+        # there is nothing to open when one is clicked.
+        drawn.extend((y, x, sc, body, "")
+                     for y, x, sc, body in _houses(houses, plate, uid, plate_ry))
 
     # Which building flies the town's banner, decided before anything is drawn
     # so the flag can be built into that building rather than parked over it.
@@ -1803,16 +1905,22 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         else:
             mass += attached
         art = behind + mass + front
-        drawn.append((y, x, scale, art))
+        drawn.append((y, x, scale, art, key))
 
     # Painter's algorithm: the far ones first, so the near ones cover them.
     drawn.sort(key=lambda item: item[0])
-    for y, x, scale, art in drawn:
+    for y, x, scale, art, key in drawn:
         # Drawn at the origin and moved into place, so one transform carries
         # both where it stands and how near it is.
-        parts.append(f'<g class="lot" transform="translate({x:.1f},{y:.1f}) '
+        handle = f' data-building="{key}"' if key else ""
+        parts.append(f'<g class="lot{" named" if key else ""}"{handle} '
+                     f'transform="translate({x:.1f},{y:.1f}) '
                      f'scale({scale:.2f})">{art}</g>')
 
+    # The near half of the wall goes over the housing, so the town is enclosed
+    # rather than standing in front of a fence.
+    if wall_front:
+        parts.append(wall_front)
     if rows:
         parts.append(_life(rows, shapes, richness=richness, plate=plate,
                            uid=uid, ry=plate_ry))
