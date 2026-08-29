@@ -1091,6 +1091,46 @@ SHAPES = {
     "pen": _pen, "works": _works, "stage": _stage, "monument": _monument,
     "gate": _gate,
 }
+def family_height(family: str, tier: int) -> float:
+    """Roughly how tall a family stands at a tier, in the town's own units.
+
+    Needed because the emblem hangs *over* its building and the flag flies from
+    the top of the tallest one, and both were using a single formula for every
+    family. A tier-six inn is nearly fifty units tall with its upper storey and
+    its roof; the emblem was hung at thirty-nine and landed on the front wall
+    like a sticker. Estimated rather than measured: the shapes are built out of
+    string concatenation, so there is nothing to measure without parsing the
+    SVG back, and being a couple of units generous costs nothing.
+    """
+    tier = max(1, min(6, int(tier)))
+    if family == "inn":
+        base = 8 + tier * 2.4
+        return base + (base * 1.12 if tier >= 4 else base * 0.45) + (9 if tier >= 6 else 0)
+    if family == "hall":
+        base = 9 + tier * 3.2
+        return base + base * 0.34 + (base * 0.4 if tier >= 5 else 0)
+    if family == "keep":
+        base = 10 + tier * 2.6
+        if tier >= 6:
+            return base * 1.85 + 14
+        return base + (base * 0.2 if tier >= 3 else 4)
+    if family == "chapel":
+        return (11 + tier * 3.4) + (9 + tier * 3.2) + (6 if tier >= 6 else 0)
+    if family == "pen":
+        return max(6 + tier * 1.5 + 6, 7 + tier * 0.6, 20 if tier >= 6 else 0)
+    if family == "works":
+        base = 8 + tier * 2.4
+        return base + 7 + tier * 1.7 + (3 if tier >= 4 else 0)
+    if family == "stage":
+        base = 11 + tier * 3.0
+        return base + 4 + (base * 0.31 if tier >= 6 else 0)
+    if family == "monument":
+        return 2.2 * (1 + min(3, tier)) + (9 + tier * 3.6) + 10
+    if family == "gate":
+        return (13 + tier * 3.2) + 4 + (3 if tier >= 3 else 0)
+    return 12 + tier * 4.0
+
+
 SHAPE_LABELS = {
     "inn": "Inn — wide, awning, hanging sign",
     "hall": "Hall — columns and a pediment",
@@ -1223,7 +1263,7 @@ def _houses(count: int, plate: float, uid: str = "t") -> list[tuple]:
         spin = (seed >> (index * 5 % 20)) & 0x3FF
         # Houses are smaller than landmarks at the same depth, or the landmarks
         # stop being landmarks.
-        out.append((y, WIDTH / 2 + sideways * half, scale * 0.52,
+        out.append((y, WIDTH / 2 + sideways * half, scale * HOUSE_SCALE,
                     _cottage(0.0, 0.0, 6.4 + (spin % 5) * 0.7,
                              HOUSE_COLOURS[spin % len(HOUSE_COLOURS)],
                              variant=spin % 6)))
@@ -1329,7 +1369,10 @@ def _tier_effects(tier: int, colour: str, uid: str) -> tuple[str, str]:
         # single clearest way to say "this is the top" without a label.
         behind += _fx(f'<ellipse class="bshadow" cx="0" cy="2" rx="14" ry="4" '
                       f'fill="#2a1c12" opacity=".45"/>')
-        behind += _fx(f'<rect class="bbeam" x="-5" y="-92" width="10" height="92" '
+        # Tall, but not taller than the town's own box: at ninety-two units in
+        # a seventy-eight unit box this ran up out of the frame, and on the map
+        # a town paints over whatever is above it.
+        behind += _fx(f'<rect class="bbeam" x="-5" y="-62" width="10" height="62" '
                       f'fill="url(#bm{uid})"/>')
         behind += _fx(f'<ellipse class="bring" cx="0" cy="{-16 - tier * 2:.0f}" '
                       f'rx="{20 + tier:.0f}" ry="7" fill="none" stroke="{colour}" '
@@ -1351,6 +1394,16 @@ def _tier_effects(tier: int, colour: str, uid: str) -> tuple[str, str]:
 # routes, so a crowd moved like a chorus line, and animals almost never
 # appeared because the six available spots filled up with people first.
 WALK_ROUTES = 12
+
+# How large an inhabitant is drawn, relative to the depth scale everything else
+# on the plate uses. Houses carry their own 0.52 and the walkers carried none,
+# so a townsperson came out two and a half times the height of the house they
+# were standing next to. A person should be roughly half the height of a
+# cottage door-to-eaves, which is what this lands on.
+WALKER_SCALE = 0.20
+# Cottages grew with it: at the old size a house was under three units tall and
+# nothing could be in proportion to it without vanishing.
+HOUSE_SCALE = 0.62
 
 
 def _life(rows: list[dict], shapes: dict, *, richness: float = 0.0,
@@ -1397,7 +1450,8 @@ def _life(rows: list[dict], shapes: dict, *, richness: float = 0.0,
                     **({"hat": spin % 3} if name == "person" else {}))
         out.append(
             f'<g class="walker r{route}" transform="translate({x:.1f},{y:.1f}) '
-            f'scale({scale:.2f})"><g class="gait">{body}</g></g>')
+            f'scale({scale * WALKER_SCALE:.3f})">'
+            f'<g class="gait">{body}</g></g>')
     return "".join(out)
 
 
@@ -1500,10 +1554,10 @@ def _flourish(level: int, colour: str, uid: str, plate: float) -> str:
     if level <= 0:
         return ""
     level = min(6, int(level))
-    cx, cy = WIDTH / 2, GROUND_Y + 6
-    rx = WIDTH * (plate + 0.06)
+    cx, cy = WIDTH / 2, GROUND_Y + 3
+    rx = WIDTH * (plate + 0.05)
     out = [f'<ellipse class="flwash" cx="{cx:.1f}" cy="{cy - 3:.1f}" '
-           f'rx="{rx * 1.02:.1f}" ry="{rx * 0.30:.1f}" '
+           f'rx="{rx * 1.00:.1f}" ry="{rx * 0.24:.1f}" '
            f'fill="url(#au{uid})" opacity="{0.22 + level * 0.06:.2f}"/>']
 
     if level >= 2:  # lanterns standing around the edge of the plate
@@ -1516,12 +1570,12 @@ def _flourish(level: int, colour: str, uid: str, plate: float) -> str:
             out.append(_lantern(lx, ly - 7, 1.5))
     if level >= 3:  # a low band of light along the shore
         out.append(f'<ellipse class="flring" cx="{cx:.1f}" cy="{cy + 1:.1f}" '
-                   f'rx="{rx:.1f}" ry="{rx * 0.24:.1f}" fill="none" '
+                   f'rx="{rx:.1f}" ry="{rx * 0.19:.1f}" fill="none" '
                    f'stroke="url(#rg{uid})" stroke-width="{1.2 + level * 0.45:.1f}" '
                    f'stroke-linecap="round"/>')
     if level >= 4:
         out.append(f'<ellipse class="flring2" cx="{cx:.1f}" cy="{cy + 2:.1f}" '
-                   f'rx="{rx * 1.09:.1f}" ry="{rx * 0.28:.1f}" fill="none" '
+                   f'rx="{rx * 1.06:.1f}" ry="{rx * 0.22:.1f}" fill="none" '
                    f'stroke="url(#rg{uid})" stroke-width="{level * 0.35:.1f}" '
                    f'opacity=".5"/>')
     if level >= 5:  # motes lifting off the ground, not orbiting overhead
@@ -1532,7 +1586,7 @@ def _flourish(level: int, colour: str, uid: str, plate: float) -> str:
                            f'fill="{colour}"/>'))
     if level >= 6:  # the plate itself lit from underneath
         out.insert(0, f'<ellipse class="flunder" cx="{cx:.1f}" cy="{cy + 3:.1f}" '
-                      f'rx="{rx * 1.16:.1f}" ry="{rx * 0.34:.1f}" '
+                      f'rx="{rx * 1.10:.1f}" ry="{rx * 0.26:.1f}" '
                       f'fill="url(#au{uid})" opacity=".7"/>')
     return "".join(out)
 
@@ -1611,11 +1665,11 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     parts = [
         _defs(uid, glow or "#ffd27f"),
         # The ground, which grows with the town.
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 6:.1f}" '
-        f'rx="{WIDTH * plate * 1.16:.1f}" ry="{10 + density * 3:.1f}" '
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 3:.1f}" '
+        f'rx="{WIDTH * plate * 1.16:.1f}" ry="{8 + density * 2:.1f}" '
         f'fill="#cdb894" stroke="#a68f6a" stroke-width="1.4"/>',
-        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 5:.1f}" '
-        f'rx="{WIDTH * plate * 1.06:.1f}" ry="{8 + density * 2.6:.1f}" '
+        f'<ellipse cx="{WIDTH / 2:.1f}" cy="{GROUND_Y + 2.2:.1f}" '
+        f'rx="{WIDTH * plate * 1.06:.1f}" ry="{6.4 + density * 1.7:.1f}" '
         f'fill="#ddcaa6"/>',
     ]
 
@@ -1625,10 +1679,18 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         parts.append(_tri(cx - 9, GROUND_Y + 2, cx, GROUND_Y - 13, cx + 9,
                           GROUND_Y + 2, "#b98b4e"))
     else:
+        # The plot table alternates left and right, so an *odd* number of
+        # buildings is balanced and an even one is not: four landed with their
+        # centre of mass a sixth of the plate to the left, which read as the
+        # town huddling in one corner while its housing spilled off the other
+        # side. Shifting the whole group back by its own centre of mass costs
+        # nothing and centres every count.
+        used = [_PLOTS[i % len(_PLOTS)] for i in range(len(rows))]
+        drift = sum(sideways for _depth, sideways in used) / len(used)
         for index, row in enumerate(rows):
-            depth, sideways = _PLOTS[index % len(_PLOTS)]
+            depth, sideways = used[index]
             y, half, scale = _stand(depth, plate)
-            standing.append((y, WIDTH / 2 + sideways * half, scale, row))
+            standing.append((y, WIDTH / 2 + (sideways - drift) * half, scale, row))
 
     # Ordinary houses, from reach. Placed with the landmarks and sorted into the
     # same painter's order, so a cottage in front of the keep is in front of the
@@ -1668,8 +1730,12 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
             # flies from. Sized to read and no larger: at eighteen percent of
             # the town's width it stopped being a sign on a building and became
             # a badge with a building behind it.
-            art += _emblem(0.0, -(13 + tier * 4.4), mark, 5.6 + tier * 0.85,
-                           tint, tier)
+            size = 5.6 + tier * 0.85
+            want = -(family_height(family, tier) + 5 + tier * 0.7)
+            # In the lot's own coordinates, so the clamp has to account for
+            # where the lot stands and how far back it is.
+            ceiling = (3.0 - y) / scale + size * 0.62
+            art += _emblem(0.0, max(want, ceiling), mark, size, tint, tier)
         drawn.append((y, x, scale, art))
 
     # Painter's algorithm: the far ones first, so the near ones cover them.
@@ -1688,7 +1754,8 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
         # centrepiece is whatever it has built highest.
         best = max(standing, key=lambda item: int(item[3].get("tier", 1)))
         fy, fx, fscale, _row = best
-        top = fy - (9 + int(_row.get("tier", 1)) * 4.2) * fscale
+        best_family = shapes.get(str(_row.get("key") or "")) or DEFAULT_SHAPE
+        top = fy - family_height(best_family, int(_row.get("tier", 1))) * fscale
         parts.append(f'<g transform="translate({fx + 7:.1f},{top:.1f})">'
                      f'{banner(flag, uid)}</g>')
     elif flag:
