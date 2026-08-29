@@ -1,6 +1,6 @@
 # DodoLand — handoff
 
-The socialite tribe's town map. State as of 29 Aug 2026, branch `refactor`.
+The socialite tribe's town map. State as of 29 Aug 2026, branch `refactor`, commit `b7e2ad0`.
 
 Trial ranks are the other half of this and have their own doc
 (`docs/TRIAL_RANKS_HANDOFF.md`). Read it: DodoLand hangs its visual prestige off
@@ -121,11 +121,19 @@ surface.
 
 **Towns are made of buildings.** Nine shape families — inn, hall, keep, chapel,
 enclosure, workshop, playhouse, monument, gate — each recognisable in outline
-alone. **Shape says what a building is, tier says how far it has come, and a
-Font Awesome emblem says what it is for.** A keep with a shield and a keep with
-a map are the barracks and the war room, and no amount of masonry would have
-said which. Colour alone was tried first: fifteen buildings in eight colours
-read as confetti.
+alone. **Shape says what a building is, tier says how far it has come, and an
+emblem says what it is for.** A keep with a shield and a keep with a map are the
+barracks and the war room, and no amount of masonry would have said which.
+Colour alone was tried first: fifteen buildings in eight colours read as
+confetti.
+
+**Everything is drawn, and nothing is typed.** The emblems and the inhabitants
+were Font Awesome glyphs set as SVG `<text>` and the font never applied — no
+building had an emblem and the wanderers came out as whatever the fallback had
+at those codepoints. `townart.py` now draws sixteen emblems and three kinds of
+inhabitant itself. **Do not reintroduce a webfont here**: it fails silently, at
+a distance, in exactly the part people are meant to look at. There is a test
+that fails on `font-family` or `<text>` appearing in a town.
 
 **The climb escalates.** This was the original PDF's best idea and was cut too
 hard when its arithmetic was rejected — the numbers were unreachable, the
@@ -137,7 +145,17 @@ ambition was not wrong:
   orbiting motes, a beam standing over the settlement
 
 **Life** wanders between the buildings, drawn from what actually stands there: a
-menagerie brings animals, an inn brings drinkers, a chapel brings birds.
+menagerie brings animals, an inn brings drinkers, a chapel brings birds. They
+walk somewhere, stand about, wander back and stop again, turning to face the way
+they are going — four routes over four durations and delays. **The waiting is in
+the keyframes on purpose**: continuous motion reads as a mechanism, pauses read
+as somebody deciding.
+
+**A town's picture flies as a flag** from whatever it has built highest, clipped
+to the cloth so any aspect ratio reads as a banner rather than a photograph
+nailed to a stick. The town card shows the same cloth with the same wave, so it
+is the town's banner in both places. Naming, describing and picturing a town are
+all authored and move no number; `standing.py` never learns about any of it.
 
 ### How a town relates to the map
 
@@ -217,6 +235,41 @@ gets no answer at all. Every upload this panel offers is larger than that.
 `create_app` sets `client_max_size`; the per-file limits live in the handlers,
 where a refusal can say what was wrong. This was blamed on DodoLand twice.
 
+**A patch that reports success can still have changed nothing.** Twice a CSS
+block vanished from an edit and nothing noticed: the markup was right, the
+classes were right, the page rendered perfectly, and no rule anywhere animated
+anything. The render test now collects every animation the page *references* and
+every `@keyframes` it *defines* and fails if either set has something the other
+does not. **After any patch to this page, check the thing you changed is
+actually in the file.**
+
+**`town_art` must pass everything the artwork takes.** It sat for several
+changes calling `town_svg` with an old argument list, so emblems, the rank
+colour, the per-town gradient id and the flag were all silently dropped while
+the drawing code supported every one. The towns looked plausible, so nothing
+pointed at it. A test names each argument and what is lost without it.
+
+**Never take pointer capture on `pointerdown`.** Capture routes every following
+event to the capturing element, so a click on a town landed on the frame and
+nothing opened. It is taken only once movement makes it a drag.
+
+**The detail threshold is in screen pixels; a town's width is a percentage of
+the base image.** Whether the two can ever meet depends on the uploaded image. A
+400px map, a 3% town and a maximum zoom of 8 reach 96px against a threshold of
+150 — unreachable at every zoom, with nothing to say so. The map section now
+states what size towns actually reach and warns when the threshold is above it.
+
+**A projection that excludes a whole field destroys the fact that it existed.**
+`TownStore.all()` excluded `image`, so "this town has a picture" was permanently
+false and an uploaded picture was invisible everywhere. It excludes `image.data`
+instead: withhold the megabytes, keep the fact. `tests/fake_mongo.py` did not
+model exclusion projections at all and so agreed with the bug; it does now,
+dotted paths included.
+
+**Errors must appear where the action was.** A refused save wrote to the hint bar
+in the far corner of the map, behind the card and usually off screen, so it
+looked exactly like a button with no handler.
+
 **The panel reads its collections once per page load.** It did eight full scans
 of a 32,000-row collection at one point, which was 5.6 seconds of database time.
 `guild_standings` takes pre-fetched rows for exactly this.
@@ -241,8 +294,6 @@ py tests/test_dnd_panel.py          # after touching web/routes.py, which this d
 ## 10. What is not built
 
 - **Any player-facing surface.** All of §6. This is the big one.
-- **Placing decor.** The library, the tier locks and the toolkit strip exist;
-  nothing lets anybody put an asset on their plot.
 - **Reactions** as a metric. Forward-only; would arrive as entries in `METRICS`
   and nothing else.
 - **Rank-granted social function** (hosting beacons, decor slots, naming
@@ -251,9 +302,9 @@ py tests/test_dnd_panel.py          # after touching web/routes.py, which this d
 - **`mapview.py`'s graph placement** is built, tested, and unused by the map
   page. It is the neighbours-from-the-social-graph idea, kept for whenever
   auto-placement is wanted again.
-- **Font Awesome is a CDN dependency**, on the map page only, for the emblems
-  and the wanderers. If it is blocked those glyphs do not draw and nothing else
-  is affected. Vendoring it locally is small and nobody has asked yet.
+- **Placing a decor asset on a plot.** The library, the tier locks and the
+  toolkit exist; nothing puts one on the ground yet. The town's own picture is
+  the only thing a person can currently add to their town.
 
 ## 11. Where to pick up
 
