@@ -316,7 +316,34 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    waits for close range. */
 .fx { display: none; }
 .dltown.close .fx { display: inline; }
-.walker { display: inline; }
+.walker { display: inline; opacity: .85; }
+/* People do not sway on the spot. They walk somewhere, stand about for a while,
+   wander back, and stop again, turning to face the way they are going. The
+   waiting is in the keyframes, because the pauses are what make it look like
+   somebody deciding rather than something oscillating. Four routes and four
+   durations, so a town does not look like a chorus line. */
+.gait { transform-box: fill-box; transform-origin: bottom center; }
+.dltown.close .w1 .gait { animation: dlwalkA 14s ease-in-out infinite; }
+.dltown.close .w2 .gait { animation: dlwalkB 19s ease-in-out infinite 3s; }
+.dltown.close .w3 .gait { animation: dlwalkA 23s ease-in-out infinite 8s; }
+.dltown.close .w4 .gait { animation: dlwalkB 17s ease-in-out infinite 5s; }
+@keyframes dlwalkA {
+  0%, 12%   { transform: translateX(0) scaleX(1); }
+  30%, 46%  { transform: translateX(13px) scaleX(1); }
+  50%       { transform: translateX(13px) scaleX(-1); }
+  68%, 88%  { transform: translateX(-4px) scaleX(-1); }
+  92%, 100% { transform: translateX(0) scaleX(1); }
+}
+@keyframes dlwalkB {
+  0%, 20%   { transform: translateX(0) scaleX(-1); }
+  38%       { transform: translateX(-11px) scaleX(-1); }
+  44%, 60%  { transform: translateX(-11px) scaleX(1); }
+  78%, 94%  { transform: translateX(6px) scaleX(1); }
+  100%      { transform: translateX(0) scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dltown.close .walker .gait { animation: none; }
+}
 .dltown.close .glow { animation: dlflicker 4s ease-in-out infinite; }
 .dltown.close .halo { opacity: .55; animation: dlflicker 3s ease-in-out infinite; }
 .dltown.close .pf1 { animation: dlrise 5s linear infinite; }

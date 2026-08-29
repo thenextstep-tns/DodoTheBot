@@ -460,7 +460,7 @@ print("clicks          a town opens on click, because capture waits for a drag")
 
 # The inhabitants are part of the town, not a reward for zooming. On a small
 # base image a town is never drawn wide enough for the close-up gate to open.
-assert ".walker { display: inline; }" in map_body,     "the wanderers are back behind the close-up gate and will never be seen"
+assert ".walker { display: inline;" in map_body,     "the wanderers are back behind the close-up gate and will never be seen"
 print("life            people and animals are drawn whenever the buildings are")
 
 
@@ -495,5 +495,27 @@ for arg, why in (("symbols=", "buildings draw without their emblems"),
                  ("flag=", "an uploaded picture never flies over the town")):
     assert arg in _art_src, f"town_art drops {arg}: {why}"
 print("art             the endpoint passes emblems, colour, id and flag")
+
+
+
+# --------------------------------------------------------------------------- #
+#  Every animation has to be attached to something, and defined
+# --------------------------------------------------------------------------- #
+# Twice now a CSS block went missing from a patch and nothing noticed: the
+# elements were emitted, the classes were right, and there was simply no rule
+# animating them. A page that renders is not a page that moves.
+_names = set(re.findall(r"animation:\s*([A-Za-z][\w-]*)", map_body)) - {"none"}
+_defined = set(re.findall(r"@keyframes\s+([A-Za-z][\w-]*)", map_body))
+assert not (_names - _defined),     f"animations with no keyframes: {sorted(_names - _defined)}"
+assert not (_defined - _names),     f"keyframes nothing uses: {sorted(_defined - _names)}"
+print(f"motion          all {len(_names)} animations are both defined and used")
+
+# The inhabitants specifically: the markup carries a gait, so something has to
+# animate it, or they stand still forever.
+assert 'class="gait"' in map_body or ".gait {" in map_body
+assert ".w1 .gait" in map_body, "nothing animates an inhabitant"
+for route in ("dlwalkA", "dlwalkB"):
+    assert f"@keyframes {route}" in map_body, f"{route} is referenced but undefined"
+print("motion          inhabitants have a walk, and it is defined")
 
 print("PASS")
