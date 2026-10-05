@@ -461,7 +461,12 @@ print("uploads         the panel accepts a body larger than aiohttp's 1MiB defau
 assert "moved > 4" in map_body, "pointer capture is taken before it is a drag"
 _down = map_body[map_body.index("frame.addEventListener('pointerdown'"):
                  map_body.index("frame.addEventListener('pointermove'")]
-assert "setPointerCapture" not in _down,     "capture on pointerdown steals the click from every town"
+# A brush stroke legitimately takes capture from its first event — it is a drag
+# by definition and nothing is clickable while a brush is armed. What must never
+# capture is the *panning* path, which is everything after that branch returns.
+_pan = _down[_down.index("down = true;"):] if "down = true;" in _down else _down
+assert "setPointerCapture" not in _pan,     "capture on a plain pointerdown steals the click from every town"
+assert _down.count("setPointerCapture") <= 1,     "something other than the brush captures on pointerdown"
 print("clicks          a town opens on click, because capture waits for a drag")
 
 # The inhabitants are part of the town, not a reward for zooming. On a small

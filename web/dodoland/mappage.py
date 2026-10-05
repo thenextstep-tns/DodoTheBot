@@ -52,7 +52,7 @@ from helpers.dodoland import standing
 from helpers.dodoland import townart
 from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
-from web.dodoland import theme
+from web.dodoland import terrain_ui, theme
 
 
 def _e(value) -> str:
@@ -227,6 +227,7 @@ async def map_page(request: web.Request):
     <b id="dlwaiting">{len(unplaced)}</b> waiting ·
     {len(data['people'])} with standing</span>
   <span class="dlspacer"></span>
+  <button id="dlterr" class="dlghost">🗺 Terrain</button>
   <button id="dlkit" class="dlghost">🧰 Toolkit</button>
   <button id="dltoggle" class="dlghost">Towns list</button>
 </div>
@@ -251,6 +252,7 @@ async def map_page(request: web.Request):
   <div class="dllist" id="dllist"></div>
 </aside>
 
+{terrain_ui.DRAWER}
 <aside class="dldrawer dlkitdrawer" id="dlkitdrawer">
   <div class="dldhead">
     <b>Toolkit</b>
@@ -492,6 +494,7 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlkitmsg.bad { color: #c0392b; font-weight: 600; }
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
+""" + terrain_ui.CSS + """
 @media (max-width: 720px) {
   .dldrawer { width: 100%; }
   .dlcard { left: 8px; right: 8px; width: auto; }
@@ -582,11 +585,20 @@ _SCRIPT = r"""
   // on a town never reaches the town and nothing opens. That is why towns and
   // dots were unclickable.
   var down = false, captured = false, moved = 0, last = null, pid = null;
+  var painting = false;
   frame.addEventListener('pointerdown', function (ev) {
+    // A brush stroke is a drag and so is a pan. Whichever is armed wins, and
+    // only one ever can be.
+    if (typeof terr !== 'undefined' && terr.armed !== null && strokeStart(ev)) {
+      painting = true;
+      try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
+      return;
+    }
     down = true; captured = false; moved = 0; pid = ev.pointerId;
     last = {x: ev.clientX, y: ev.clientY};
   });
   frame.addEventListener('pointermove', function (ev) {
+    if (painting) { strokeMove(ev); return; }
     if (!down) return;
     var dx = ev.clientX - last.x, dy = ev.clientY - last.y;
     moved += Math.abs(dx) + Math.abs(dy);
@@ -602,6 +614,7 @@ _SCRIPT = r"""
   });
   ['pointerup', 'pointercancel'].forEach(function (e) {
     frame.addEventListener(e, function () {
+      if (painting) { painting = false; strokeEnd(); }
       down = false; captured = false; frame.classList.remove('dragging');
     });
   });
@@ -715,6 +728,7 @@ _SCRIPT = r"""
     });
     // Decor is sized against the base image, which is 0 until it has loaded.
     if (typeof resizeDecor === 'function') resizeDecor();
+    if (typeof terrDetail === 'function') terrDetail();
   }
 
   function escapeHtml(s) {
@@ -1188,6 +1202,7 @@ _SCRIPT = r"""
   };
   renderKit();
 
+""" + terrain_ui.SCRIPT + r"""
   redraw();
   redrawDecor();
   renderList();

@@ -40,6 +40,9 @@ def dodoland_routes() -> list:
         api_town_decor, api_town_toolkit, api_world_decor,
         player_asset_image,
     )
+    from web.dodoland.terrain_api import (
+        api_terrain_paint, terrain_chunks, terrain_overview, terrain_world,
+    )
     from web.dodoland.mappage import map_page
     from web.dodoland.pages import dodoland_page
     from web.routes import require_scope
@@ -62,6 +65,13 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/asset", full(api_dodoland_asset)),
         web.post("/api/guild/{gid}/dodoland/suggest", full(api_dodoland_suggest)),
         web.post("/api/guild/{gid}/dodoland/shapes", full(api_dodoland_shapes)),
+        # The world itself. Read by anybody who can read the map; painted only
+        # with the scope that changes a server's configuration, because terrain
+        # is configuration — it decides where everybody's town may ever grow.
+        web.get("/guild/{gid}/dodoland/terrain/world", configure(terrain_world)),
+        web.get("/guild/{gid}/dodoland/terrain/overview", configure(terrain_overview)),
+        web.get("/guild/{gid}/dodoland/terrain/chunks", configure(terrain_chunks)),
+        web.post("/api/guild/{gid}/dodoland/terrain/paint", full(api_terrain_paint)),
         # Moving somebody's town is configuration while there is no player-facing
         # way for them to move it themselves.
         web.post("/api/guild/{gid}/dodoland/settle", full(api_dodoland_settle)),

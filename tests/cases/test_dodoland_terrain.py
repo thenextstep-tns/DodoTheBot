@@ -189,4 +189,98 @@ for bad in ("red", "#12345", "#gggggg", "rgb(1,2,3)", "url(#x)"):
         raise AssertionError(f"accepted {bad!r} as a colour")
 print("palette         the server may change any slot; nonsense is refused")
 
+# --------------------------------------------------------------------------- #
+#  The brush
+# --------------------------------------------------------------------------- #
+# The stroke is rasterised on the server so a radius means one thing. Two
+# clients that each decided for themselves would paint different shapes from
+# the same drag, and the map would quietly depend on which browser did it.
+import asyncio  # noqa: E402
+
+from web.dodoland import terrain_api  # noqa: E402
+
+
+class _Audit:
+    def record(self, *a, **k):
+        pass
+
+
+class _Bot:
+    def __init__(self, store):
+        self.dodoland_terrain = store
+        self.audit_log = _Audit()
+
+
+class _Guild:
+    id, name = GUILD, "Test"
+
+
+class _Req(dict):
+    def __init__(self, bot, payload):
+        super().__init__()
+        self.app = {"bot": bot}
+        self.match_info = {"gid": str(GUILD)}
+        self._payload = payload
+        self["guild"], self["scope"], self["uid"] = _Guild(), "owner", 1
+
+    async def json(self):
+        return self._payload
+
+
+brush = T.TerrainStore(FakeCollection(), FakeCollection())
+brush.set_world(GUILD, cells_w=512, cells_h=512)
+bot = _Bot(brush)
+forest = T.index_of(T.base_kinds(T.TERRAIN), "forest")
+
+
+def paint(payload):
+    import json as _json
+    response = asyncio.run(terrain_api.api_terrain_paint(_Req(bot, payload)))
+    return _json.loads(response.body.decode())
+
+
+# A round brush, not a square one: square corners read as deliberate when they
+# are not, and a coastline painted with them looks like tetris.
+result = paint({"kind": forest, "radius": 5, "points": [[100, 100]]})
+assert result["ok"], result
+area = result["cells"]
+assert 60 <= area <= 95, f"a radius-5 round brush painted {area} cells"
+assert brush.at(GUILD, 100, 100) == forest
+assert brush.at(GUILD, 104, 100) == forest, "the brush is narrower than its radius"
+assert brush.at(GUILD, 104, 104) == T.UNKNOWN, "the brush painted its corners"
+print(f"brush           radius 5 covers {area} cells, round rather than square")
+
+# A radius of zero is one cell, not nothing.
+assert paint({"kind": forest, "radius": 0, "points": [[7, 7]]})["cells"] == 1
+print("brush           a radius of zero is a single cell")
+
+# Painting off the edge clips rather than wrapping or erroring: a stroke that
+# runs off the coast is the commonest stroke there is.
+edge = paint({"kind": forest, "radius": 4, "points": [[0, 0]]})
+assert edge["ok"] and 0 < edge["cells"] < 60, edge
+assert brush.at(GUILD, 0, 0) == forest
+print("brush           a stroke over the edge is clipped, not refused")
+
+for payload, why in (
+    ({"kind": 99, "radius": 1, "points": [[1, 1]]}, "a terrain that does not exist"),
+    ({"kind": forest, "radius": 1, "points": []}, "a stroke with no points"),
+    ({"kind": None, "radius": 1, "points": [[1, 1]]}, "no terrain at all"),
+    ({"kind": forest, "radius": 1, "points": [[9999, 9999]]}, "a stroke off the world"),
+):
+    assert paint(payload)["ok"] is False, f"accepted {why}"
+print("brush           nonsense is refused with something a page can show")
+
+# A stroke longer than the cap is refused rather than silently truncated — the
+# client thins its own points and a stroke that long means something is wrong.
+assert paint({"kind": forest, "radius": 1,
+              "points": [[1, 1]] * 5000})["ok"] is False
+print("brush           an implausibly long stroke is refused, not truncated")
+
+# Every paint bumps the version every render cache is keyed on, so nothing
+# stale can outlive a stroke. This is what stands in for a rebuild.
+was = terrain_api.version(GUILD)
+paint({"kind": forest, "radius": 1, "points": [[200, 200]]})
+assert terrain_api.version(GUILD) > was, "a paint left the rendered map cached"
+print("brush           a stroke invalidates what it changed, with no job to run")
+
 print("PASS")
