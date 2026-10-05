@@ -34,20 +34,45 @@ from helpers.dodoland import palette as palette_rules
 from helpers.dodoland import terrain as T
 from helpers.dodoland import terrainart
 
-# (guild, layer, cx, cy, step, version) -> svg. Bounded so a big world browsed
-# end to end cannot grow it without limit.
+# (guild, layer, cx, cy, step) -> svg. Bounded so a big world browsed end to end
+# cannot grow it without limit.
 _CACHE: dict[tuple, str] = {}
 _VERSION: dict[int, int] = {}
 _CACHE_MAX = 3000
+
+# Undo, as the previous encoded state of whatever chunks a stroke touched. A
+# stroke covers tens of thousands of cells but only a handful of chunks, and a
+# chunk's whole state is a few hundred bytes — recording cells would be
+# megabytes for the same information. In memory on purpose: undo is a property
+# of the session somebody is painting in, not of the world.
+_UNDO: dict[int, list] = {}
+_REDO: dict[int, list] = {}
+_HISTORY_MAX = 40
 
 
 def version(guild_id: int) -> int:
     return _VERSION.get(int(guild_id), 0)
 
 
-def invalidate(guild_id: int) -> None:
-    """Called by anything that writes terrain. Cheap and always safe."""
-    _VERSION[int(guild_id)] = version(guild_id) + 1
+def invalidate(guild_id: int, chunks=None) -> None:
+    """Drop what a write changed, and **only** that.
+
+    Bumping a global version instead meant every brush stroke threw away the
+    whole rendered world: the overview was rebuilt from nine hundred chunks and
+    the viewport refetched, about a second of lag for a change that touched
+    four. The version still moves, because the *browser* needs a cache key, but
+    the server now forgets exactly what stopped being true.
+    """
+    guild_id = int(guild_id)
+    _VERSION[guild_id] = version(guild_id) + 1
+    if chunks is None:
+        for key in [k for k in _CACHE if k[0] == guild_id]:
+            _CACHE.pop(key, None)
+        return
+    touched = {(int(cx), int(cy)) for cx, cy in chunks}
+    for key in [k for k in _CACHE if k[0] == guild_id
+                and (k[2] == "overview" or (k[2], k[3]) in touched)]:
+        _CACHE.pop(key, None)
 
 
 def _bad(error: str):
@@ -93,6 +118,21 @@ async def terrain_world(request: web.Request):
     })
 
 
+async def terrain_defs(request: web.Request):
+    """The texture patterns, once for the whole map.
+
+    Separate from the chunks because a pattern is defined once and referenced by
+    every region that uses it; shipping them inside each of sixty chunks would
+    be sixty copies of every tile.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    world = bot.dodoland_terrain.world(guild.id)
+    return web.Response(
+        text=terrainart.pattern_defs(world["kinds"], _colours(bot, guild.id)),
+        content_type="image/svg+xml",
+        headers={"Cache-Control": "private, max-age=600"})
+
+
 async def terrain_overview(request: web.Request):
     """The whole continent in one coarse SVG."""
     import asyncio
@@ -103,7 +143,7 @@ async def terrain_overview(request: web.Request):
     if not world["cells_w"]:
         return web.Response(text="", content_type="image/svg+xml")
     step = _overview_step(world["cells_w"])
-    key = (guild.id, T.TERRAIN, "overview", step, version(guild.id))
+    key = (guild.id, T.TERRAIN, "overview", step)
     if key not in _CACHE:
         def draw():
             cxs, cys = store.chunk_counts(guild.id)
@@ -148,9 +188,8 @@ async def terrain_chunks(request: web.Request):
     if len(wanted) > 400:
         return _bad("Too many chunks at once; zoom in or ask for fewer.")
 
-    ver = version(guild.id)
     missing = [key for key in wanted
-               if (guild.id, T.TERRAIN, key[0], key[1], 1, ver) not in _CACHE]
+               if (guild.id, T.TERRAIN, key[0], key[1], 1) not in _CACHE]
 
     if missing:
         def draw():
@@ -159,7 +198,7 @@ async def terrain_chunks(request: web.Request):
             out = {}
             for key, chunk in cells.items():
                 out[key] = terrainart.chunk_svg(
-                    chunk, world["kinds"], colours=colours,
+                    chunk, world["kinds"], colours=colours, textured=True,
                     offset=(key[0] * T.CHUNK, key[1] * T.CHUNK))
             return out
 
@@ -167,9 +206,9 @@ async def terrain_chunks(request: web.Request):
         if len(_CACHE) > _CACHE_MAX:
             _CACHE.clear()
         for key, svg in drawn.items():
-            _CACHE[(guild.id, T.TERRAIN, key[0], key[1], 1, ver)] = svg
+            _CACHE[(guild.id, T.TERRAIN, key[0], key[1], 1)] = svg
 
-    body = "".join(_CACHE.get((guild.id, T.TERRAIN, cx, cy, 1, ver), "")
+    body = "".join(_CACHE.get((guild.id, T.TERRAIN, cx, cy, 1), "")
                    for cx, cy in wanted)
     return web.Response(text=body, content_type="image/svg+xml",
                         headers={"Cache-Control": "private, max-age=600"})
@@ -230,9 +269,58 @@ async def api_terrain_paint(request: web.Request):
     if not edits:
         return _bad("That stroke fell outside the world.")
 
-    touched = store.paint(guild.id, edits, layer=T.TERRAIN)
-    invalidate(guild.id)
+    keys = sorted({(x // T.CHUNK, y // T.CHUNK) for x, y in edits})
+    # Snapshot before and after, so undo and redo are both exact rather than a
+    # replay that has to get the arithmetic right a second time.
+    before = store.snapshot(guild.id, keys, layer=T.TERRAIN)
+    store.paint(guild.id, edits, layer=T.TERRAIN)
+    after = store.snapshot(guild.id, keys, layer=T.TERRAIN)
+
+    history = _UNDO.setdefault(guild.id, [])
+    history.append({"before": before, "after": after, "keys": keys})
+    del history[:-_HISTORY_MAX]
+    # A new stroke ends the future, the way it does in every editor ever made.
+    _REDO.pop(guild.id, None)
+
+    invalidate(guild.id, keys)
     await _record_change(request, "dodoland_terrain", world["kinds"][kind]["key"],
                          "", f"{len(edits)} cells", "DodoLand terrain painted")
-    return web.json_response({"ok": True, "cells": len(edits), "chunks": touched,
+    return web.json_response({"ok": True, "cells": len(edits), "chunks": len(keys),
+                              "touched": [[cx, cy] for cx, cy in keys],
+                              "undo": len(history), "redo": 0,
                               "version": version(guild.id)})
+
+
+async def api_terrain_undo(request: web.Request):
+    """Step one stroke back, or forward with ``{"redo": true}``.
+
+    Undo restores the chunks a stroke replaced; redo reapplies the ones it
+    wrote. Both are whole-chunk writes rather than a recomputation, so neither
+    can drift from what actually happened.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    store = bot.dodoland_terrain
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    forward = bool(body.get("redo"))
+
+    source = _REDO if forward else _UNDO
+    target = _UNDO if forward else _REDO
+    stack = source.get(guild.id) or []
+    if not stack:
+        return web.json_response({"ok": True, "moved": False,
+                                  "undo": len(_UNDO.get(guild.id) or []),
+                                  "redo": len(_REDO.get(guild.id) or []),
+                                  "version": version(guild.id)})
+    entry = stack.pop()
+    store.restore(guild.id, entry["after" if forward else "before"], layer=T.TERRAIN)
+    target.setdefault(guild.id, []).append(entry)
+    invalidate(guild.id, entry["keys"])
+    return web.json_response({
+        "ok": True, "moved": True,
+        "touched": [[cx, cy] for cx, cy in entry["keys"]],
+        "undo": len(_UNDO.get(guild.id) or []),
+        "redo": len(_REDO.get(guild.id) or []),
+        "version": version(guild.id)})

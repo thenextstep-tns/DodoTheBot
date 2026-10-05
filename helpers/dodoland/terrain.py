@@ -327,6 +327,33 @@ class TerrainStore:
             self.write_chunk(guild_id, cx, cy, current, layer)
         return len(by_chunk)
 
+    def snapshot(self, guild_id: int, keys: Iterable[tuple[int, int]],
+                 layer: str = TERRAIN) -> dict[tuple[int, int], str]:
+        """The raw RLE of some chunks, for undo.
+
+        Chunks rather than cells: a brush stroke covers tens of thousands of
+        cells but only a handful of chunks, and a chunk's whole encoded state is
+        a few hundred bytes. Recording what changed cell by cell would be
+        megabytes for the same information.
+        """
+        self._ensure_indexes()
+        out: dict[tuple[int, int], str] = {}
+        for cx, cy in keys:
+            row = self._chunks.find_one({"guild_id": int(guild_id), "layer": layer,
+                                         "cx": int(cx), "cy": int(cy)})
+            out[(int(cx), int(cy))] = str(row.get("rle", "")) if row else ""
+        return out
+
+    def restore(self, guild_id: int, snapshot: dict, layer: str = TERRAIN) -> int:
+        """Put chunks back exactly as they were. The other half of undo."""
+        self._ensure_indexes()
+        for (cx, cy), rle in snapshot.items():
+            self._chunks.update_one(
+                {"guild_id": int(guild_id), "layer": layer,
+                 "cx": int(cx), "cy": int(cy)},
+                {"$set": {"rle": str(rle)}}, upsert=True)
+        return len(snapshot)
+
     def wipe(self, guild_id: int, layer: Optional[str] = None) -> int:
         """Throw a layer away. The deliberate way to start an import again."""
         self._ensure_indexes()

@@ -132,22 +132,42 @@ def validate_overrides(values, *, town: bool = False) -> dict[str, str]:
     return out
 
 
+# Dark to light within a family. Both neighbours are read from this, so there is
+# one ordering rather than two that can disagree.
+_RAMPS: tuple[tuple[str, ...], ...] = (
+    ("ink", "shadow", "slate", "stone_dark", "stone", "stone_lt", "cream", "white"),
+    ("deep", "sea", "shallow", "river", "foam"),
+    ("mud", "dirt", "sand"),
+    ("grass_dark", "marsh", "grass", "grass_lt"),
+    ("wood_dark", "wood", "wood_lt"),
+)
+
+
+def lighten(slot: str) -> str:
+    """The slot one step lighter, or the slot itself at the top of its ramp.
+
+    Deliberately *not* "whatever shades to this one": ``shade`` returns the slot
+    itself at the bottom of a ramp, so that search found the slot before it
+    found its real neighbour and every texture built on `deep` or `grass_dark`
+    came out drawn in its own colour — flat, with no motif visible at all.
+    """
+    for ramp in _RAMPS:
+        if slot in ramp:
+            index = ramp.index(slot)
+            return ramp[index + 1] if index + 1 < len(ramp) else slot
+    return slot
+
+
 def shade(slot: str) -> str:
     """The slot one step darker, for the outline-and-shadow pass.
 
     Ramps are ordered dark to light within a family, so this is the previous
-    slot — unless that would cross into another family, in which case the
-    colour shades to ``ink`` like everything else.
+    slot. At the bottom of a ramp there is nothing darker in the family, so it
+    shades to ``shadow`` — returning the slot itself made it its own shadow,
+    which is the same bug as above wearing a different hat.
     """
-    families = (
-        ("ink", "shadow", "slate", "stone_dark", "stone", "stone_lt", "cream", "white"),
-        ("deep", "sea", "shallow", "river", "foam"),
-        ("mud", "dirt", "sand"),
-        ("grass_dark", "grass", "grass_lt"),
-        ("wood_dark", "wood", "wood_lt"),
-    )
-    for ramp in families:
+    for ramp in _RAMPS:
         if slot in ramp:
             index = ramp.index(slot)
-            return ramp[index - 1] if index else slot
+            return ramp[index - 1] if index else "shadow"
     return "shadow"

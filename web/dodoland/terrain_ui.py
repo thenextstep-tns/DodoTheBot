@@ -72,6 +72,11 @@ DRAWER = """
       <span id="dltradiusn" style="min-width:2.4em">6</span></label>
   </div>
   <div class="dltrow">
+    <button class="dlghost" id="dltundo" disabled>&#8630; Undo</button>
+    <button class="dlghost" id="dltredo" disabled>&#8631; Redo</button>
+    <span id="dltdepth" style="margin-left:auto;opacity:.7"></span>
+  </div>
+  <div class="dltrow">
     <label style="flex:1 1 auto;display:flex;align-items:center;gap:8px">Reference
       <input type="range" id="dltref" min="0" max="100" step="5" value="0"></label>
     <button class="dlghost" id="dltoggleterr">Hide terrain</button>
@@ -108,7 +113,8 @@ SCRIPT = r"""
     terrLayer.innerHTML =
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
-      world.cells_h + '"><g id="dltover"></g><g id="dltdetail"></g></svg>';
+      world.cells_h + '"><g id="dltdefs"></g>' +
+      '<g id="dltover"></g><g id="dltdetail"></g></svg>';
     world_el().appendChild(terrLayer);
     renderKinds();
   }
@@ -156,9 +162,11 @@ SCRIPT = r"""
     if (!terr.world || !nat.w) return null;
     var cw = terr.world.cells_w, ch = terr.world.cells_h;
     var perCellX = (nat.w * view.k) / cw;
-    // Below about a third of a pixel per cell the detail is invisible and the
-    // overview is already showing the same coastline.
-    if (perCellX < 0.34) return null;
+    // The detail tier is textured, and a motif is eight cells across — below
+    // about a pixel per cell it is sub-pixel noise that aliases into a shimmer
+    // rather than resolving into trees. The flat overview is showing the same
+    // coastline until then, and fetches nothing.
+    if (perCellX < 1.0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;
     var y0 = (-view.y) / perCellY, y1 = (-view.y + frame.clientHeight) / perCellY;
@@ -248,16 +256,65 @@ SCRIPT = r"""
     }).then(function (res) {
       if (!res.ok) { terrSay(res.error || 'That did not work.', true); return; }
       terrSay(res.cells.toLocaleString() + ' cells, ' + res.chunks + ' chunks.');
-      // A paint bumps the version, which is what every cache key is built on,
-      // so nothing stale can survive it.
-      terr.ver = res.version;
-      terr.have = {};
-      terrOverview();
-      terrDetail();
+      terrApplyChange(res);
+    }).catch(function (err) { terrSay(String(err), true); });
+  }
+
+  // Only what changed. Refetching the whole viewport and rebuilding the
+  // overview after every stroke was about a second of lag for a change that
+  // touched four chunks.
+  var overviewTimer = null;
+  function terrApplyChange(res) {
+    terr.ver = res.version;
+    (res.touched || []).forEach(function (k) {
+      delete terr.have[k[0] + ',' + k[1] + ',' + (res.version - 1)];
+      delete terr.have[k[0] + ',' + k[1] + ',' + res.version];
+    });
+    terrDetail();
+    setUndo(res.undo, res.redo);
+    // The coarse view is only on screen when nobody is zoomed in, so it can
+    // wait for a pause rather than being rebuilt mid-stroke.
+    if (overviewTimer) clearTimeout(overviewTimer);
+    overviewTimer = setTimeout(terrOverview, 2500);
+  }
+
+  function setUndo(undo, redo) {
+    var u = document.getElementById('dltundo'), r = document.getElementById('dltredo');
+    if (u) u.disabled = !undo;
+    if (r) r.disabled = !redo;
+    var d = document.getElementById('dltdepth');
+    if (d) d.textContent = undo ? undo + ' to undo' : '';
+  }
+
+  function terrStep(redo) {
+    fetch('/api/guild/' + D.gid + '/dodoland/terrain/undo', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({redo: !!redo})
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res.ok) { terrSay(res.error || 'That did not work.', true); return; }
+      if (!res.moved) { terrSay(redo ? 'Nothing to redo.' : 'Nothing to undo.'); 
+                        setUndo(res.undo, res.redo); return; }
+      terrSay(redo ? 'Redone.' : 'Undone.');
+      terrApplyChange(res);
     }).catch(function (err) { terrSay(String(err), true); });
   }
 
   // --- controls ---------------------------------------------------------- //
+  var undoBtn = document.getElementById('dltundo');
+  if (undoBtn) undoBtn.onclick = function () { terrStep(false); };
+  var redoBtn = document.getElementById('dltredo');
+  if (redoBtn) redoBtn.onclick = function () { terrStep(true); };
+  // The shortcuts everybody already has in their fingers. Only while the
+  // terrain drawer is open, so they cannot fire at somebody editing a town name.
+  window.addEventListener('keydown', function (ev) {
+    if (!terrDrawer.classList.contains('open')) return;
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    var key = (ev.key || '').toLowerCase();
+    if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); terrStep(false); }
+    else if (key === 'y' || (key === 'z' && ev.shiftKey)) {
+      ev.preventDefault(); terrStep(true);
+    }
+  });
   var radius = document.getElementById('dltradius');
   if (radius) radius.oninput = function () {
     terr.radius = parseInt(radius.value, 10) || 0;
@@ -295,6 +352,12 @@ SCRIPT = r"""
         return;
       }
       terrSetup(world);
+      // The texture patterns, once. Chunks reference them by id.
+      fetch(terrUrl('defs')).then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (defs) {
+          var g = document.getElementById('dltdefs');
+          if (g && defs) g.innerHTML = defs;
+        });
       terrOverview();
       terrDetail();
       // Start with the reference hidden: the terrain *is* the map now, and the
