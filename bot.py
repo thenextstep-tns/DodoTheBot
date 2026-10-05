@@ -37,6 +37,7 @@ from helpers.dodoland.assets import AssetStore
 from helpers.dodoland.buildings import BuildingStore
 from helpers.dodoland.store import ActivityStore
 from helpers.dodoland.decor import DecorStore
+from helpers.dodoland.terrain import TerrainStore
 from helpers.dodoland.towns import TownStore
 from helpers.events import EventRuleManager
 from helpers.chat.triggers import ChatTriggerManager
@@ -139,6 +140,10 @@ class DodoBot(commands.Bot):
         # What has been placed on the ground: the map's own dressing, and
         # whatever each person has put around their own town.
         self.dodoland_decor = DecorStore(config_py.dodoland_decor)
+        # What is actually where: the grid that makes water impassable, lets a
+        # town grow round a lake and keeps a road out of the sea.
+        self.dodoland_terrain = TerrainStore(config_py.dodoland_chunks,
+                                             config_py.dodoland_world)
         # "When X happens, post this" rules built on the panel's Events page;
         # executed by the event_actions cog.
         self.event_rules = EventRuleManager(config_py.event_rules)

@@ -152,3 +152,9 @@ dodoland_towns = db["DodoLandTowns"]    # {guild_id, user_id, name, blurb, image
 # `world` is the map's own dressing and belongs to the server, `town` belongs to
 # one person and travels with their settlement.
 dodoland_decor = db["DodoLandDecor"]    # {guild_id, piece_id, scope, owner_id, asset_id, x, y, scale}
+# The world itself, as a grid the bot can actually read. Chunked at 64x64 cells
+# and run-length encoded, because a world of two million cells is not a document
+# and an edit to one bay must not rewrite the continent. Two layers: `terrain`
+# is painted by an admin, `built` is derived from towns and roads.
+dodoland_chunks = db["DodoLandChunks"]  # {guild_id, layer, cx, cy, rle}
+dodoland_world = db["DodoLandWorld"]    # {_id: guild_id, cells_w, cells_h, kinds}

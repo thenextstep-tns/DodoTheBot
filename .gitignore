@@ -157,3 +157,7 @@ dodoland_map.html
 dodoland_art-shapes.html
 dodoland_art-emblems.html
 dodoland_bbox.html
+
+# Extracted copy of the uploaded map, for terrain work. Never committed.
+dodoland_source_map.svg
+dodoland_world.html
