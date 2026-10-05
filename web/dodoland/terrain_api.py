@@ -75,6 +75,31 @@ def invalidate(guild_id: int, chunks=None) -> None:
         _CACHE.pop(key, None)
 
 
+def _line(x0: int, y0: int, x1: int, y1: int):
+    """Every cell between two points, Bresenham.
+
+    A pointer reports about sixty times a second and a drag moves further than
+    that between samples — at a low zoom one pixel of mouse movement is several
+    cells. Stamping the brush only where the pointer happened to be sampled left
+    a trail of disconnected blobs, which is what a stroke looked like: random
+    tiles scattered through the area somebody dragged across.
+    """
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err = dx - dy
+    while True:
+        yield x0, y0
+        if x0 == x1 and y0 == y1:
+            return
+        err2 = err * 2
+        if err2 > -dy:
+            err -= dy
+            x0 += sx
+        if err2 < dx:
+            err += dx
+            y0 += sy
+
+
 def _bad(error: str):
     return web.json_response({"ok": False, "error": str(error)})
 
@@ -249,23 +274,35 @@ async def api_terrain_paint(request: web.Request):
     if len(points) > 4000:
         return _bad("That stroke is too long; it will arrive in pieces.")
 
-    edits: dict[tuple[int, int], int] = {}
-    span = range(-radius, radius + 1)
-    limit = radius * radius
+    # The brush, once: which offsets a disc of this radius covers. Round, not
+    # square — square corners read as deliberate when they are not.
+    disc = [(dx, dy) for dy in range(-radius, radius + 1)
+            for dx in range(-radius, radius + 1)
+            if not radius or dx * dx + dy * dy <= radius * radius]
+
+    clean: list[tuple[int, int]] = []
     for point in points:
         try:
-            px, py = int(point[0]), int(point[1])
+            clean.append((int(point[0]), int(point[1])))
         except (TypeError, ValueError, IndexError):
             continue
-        for dy in span:
-            for dx in span:
-                # Round, not square: a square brush leaves corners that read as
-                # deliberate when they are not.
-                if radius and dx * dx + dy * dy > limit:
-                    continue
-                x, y = px + dx, py + dy
-                if 0 <= x < world["cells_w"] and 0 <= y < world["cells_h"]:
+    if not clean:
+        return _bad("A stroke needs at least one point.")
+
+    width, height = world["cells_w"], world["cells_h"]
+    edits: dict[tuple[int, int], int] = {}
+    previous = clean[0]
+    for point in clean:
+        for cx, cy in _line(previous[0], previous[1], point[0], point[1]):
+            for dx, dy in disc:
+                x, y = cx + dx, cy + dy
+                if 0 <= x < width and 0 <= y < height:
                     edits[(x, y)] = kind
+        previous = point
+        # A ceiling, so a long drag with a wide brush cannot ask for the world.
+        if len(edits) > 400_000:
+            return _bad("That stroke covers too much at once. "
+                        "Use a smaller brush or shorter strokes.")
     if not edits:
         return _bad("That stroke fell outside the world.")
 

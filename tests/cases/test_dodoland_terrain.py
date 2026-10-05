@@ -283,4 +283,54 @@ paint({"kind": forest, "radius": 1, "points": [[200, 200]]})
 assert terrain_api.version(GUILD) > was, "a paint left the rendered map cached"
 print("brush           a stroke invalidates what it changed, with no job to run")
 
+# A drag is sampled about sixty times a second and moves further than that
+# between samples — at a low zoom one pixel of mouse movement is several cells.
+# Stamping only where the pointer happened to be sampled left a trail of
+# disconnected blobs, which is exactly what a stroke looked like.
+gap = paint({"kind": forest, "radius": 2, "points": [[300, 300], [340, 300]]})
+assert gap["ok"], gap
+missing = [x for x in range(300, 341) if brush.at(GUILD, x, 300) != forest]
+assert not missing, f"the stroke has {len(missing)} holes in it: {missing[:8]}"
+print("brush           two samples forty cells apart paint a line, not two blobs")
+
+# ...diagonally too. The property is continuity, not which exact cells a line
+# algorithm picks: every column the stroke crosses must be painted, and the
+# painted row must never jump by more than one between neighbouring columns.
+paint({"kind": forest, "radius": 0, "points": [[20, 400], [60, 430]]})
+rows = []
+for x in range(20, 61):
+    hit = [y for y in range(395, 436) if brush.at(GUILD, x, y) == forest]
+    assert hit, f"column {x} of the diagonal stroke was not painted at all"
+    rows.append(hit)
+jumps = [x for i, x in enumerate(range(21, 61))
+         if min(abs(a - b) for a in rows[i + 1] for b in rows[i]) > 1]
+assert not jumps, f"the diagonal stroke jumps a row at columns {jumps[:6]}"
+print("brush           a diagonal stroke is continuous, column by column")
+
+# Every texture has to be drawn from colours that differ, or the motif is
+# invisible. Two grounds shipped flat because a slot was its own neighbour.
+from helpers.dodoland import terrainart  # noqa: E402
+
+for kind in T.base_kinds(T.TERRAIN):
+    slot = kind.get("colour")
+    if kind.get("key") not in terrainart.MOTIFS:
+        continue
+    light = palette.lighten(slot)
+    dark = palette.shade(slot)
+    assert palette.PALETTE[light] != palette.PALETTE[slot],         f"{kind['key']} has no lighter colour, so its texture is invisible"
+    assert palette.PALETTE[dark] != palette.PALETTE[slot],         f"{kind['key']} has no darker colour, so its texture is invisible"
+print("texture         every motif is drawn from three colours that differ")
+
+# ...and the ramps have to actually run dark to light, or "darker" returns
+# something lighter and the shading inverts.
+def _lum(hex_colour):
+    r = int(hex_colour[1:3], 16); g = int(hex_colour[3:5], 16)
+    b = int(hex_colour[5:7], 16)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+for ramp in palette._RAMPS:
+    levels = [_lum(palette.PALETTE[slot]) for slot in ramp]
+    assert levels == sorted(levels), f"{ramp} is not ordered dark to light"
+print(f"texture         all {len(palette._RAMPS)} colour ramps run dark to light")
+
 print("PASS")

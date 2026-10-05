@@ -154,8 +154,14 @@ def lighten(slot: str) -> str:
     for ramp in _RAMPS:
         if slot in ramp:
             index = ramp.index(slot)
-            return ramp[index + 1] if index + 1 < len(ramp) else slot
-    return slot
+            if index + 1 < len(ramp):
+                return ramp[index + 1]
+            break
+    # At the top of a ramp there is nothing lighter in the family, so a highlight
+    # goes to a warm light the way it does in any limited palette. Returning the
+    # slot itself made it its own highlight, and every light mark in sand's and
+    # plains' textures was drawn in the colour it sat on — invisible.
+    return "white" if slot in ("cream", "white") else "cream"
 
 
 def shade(slot: str) -> str:

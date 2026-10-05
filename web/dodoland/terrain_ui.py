@@ -114,7 +114,15 @@ SCRIPT = r"""
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g></svg>';
+      '<g id="dltover"></g><g id="dltdetail"></g>' +
+      // Drawn in cell units inside the same viewBox, so it is the shape that
+      // will actually be painted rather than an approximation of it.
+      '<circle id="dltcursor" r="0" fill="none" stroke="#fff" ' +
+      'stroke-width="1" vector-effect="non-scaling-stroke" ' +
+      'style="display:none"/>' +
+      '<circle id="dltcursor2" r="0" fill="none" stroke="#000" ' +
+      'stroke-width="3" vector-effect="non-scaling-stroke" opacity=".45" ' +
+      'style="display:none"/></svg>';
     world_el().appendChild(terrLayer);
     renderKinds();
   }
@@ -139,6 +147,12 @@ SCRIPT = r"""
         terr.armed = (terr.armed === i) ? null : i;
         frame.classList.toggle('painting', terr.armed !== null);
         terrSay(terr.armed === null ? '' : 'Drag on the map to paint.');
+        if (terr.armed === null) {
+          ['dltcursor', 'dltcursor2'].forEach(function (id) {
+            var c = document.getElementById(id);
+            if (c) c.style.display = 'none';
+          });
+        }
         renderKinds();
       };
     });
@@ -162,11 +176,13 @@ SCRIPT = r"""
     if (!terr.world || !nat.w) return null;
     var cw = terr.world.cells_w, ch = terr.world.cells_h;
     var perCellX = (nat.w * view.k) / cw;
-    // The detail tier is textured, and a motif is eight cells across — below
-    // about a pixel per cell it is sub-pixel noise that aliases into a shimmer
-    // rather than resolving into trees. The flat overview is showing the same
-    // coastline until then, and fetches nothing.
-    if (perCellX < 1.0) return null;
+    // A small world is always drawn at full detail, whatever the zoom. The
+    // coarse tier sampled every other cell, so what you painted was a
+    // *different shape* zoomed out from zoomed in — which is unusable when the
+    // thing you are doing is drawing a coastline. Only a world too big to send
+    // at once still falls back to it.
+    var total = terr.world.chunks_x * terr.world.chunks_y;
+    if (total > 400 && perCellX < 1.0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;
     var y0 = (-view.y) / perCellY, y1 = (-view.y + frame.clientHeight) / perCellY;
@@ -222,6 +238,31 @@ SCRIPT = r"""
     var fy = (clientY - b.top - view.y) / (nat.h * view.k);
     return [Math.round(fx * terr.world.cells_w), Math.round(fy * terr.world.cells_h)];
   }
+
+  function moveCursor(ev) {
+    var a = document.getElementById('dltcursor');
+    var b = document.getElementById('dltcursor2');
+    if (!a || !b) return;
+    var cell = (terr.armed === null) ? null : cellAt(ev.clientX, ev.clientY);
+    if (!cell) {
+      a.style.display = b.style.display = 'none';
+      return;
+    }
+    // +0.5 so the ring sits on the cell boundary rather than through its
+    // middle, which is the difference between "these cells" and "about here".
+    var r = terr.radius + 0.5;
+    [a, b].forEach(function (c) {
+      c.setAttribute('cx', cell[0]); c.setAttribute('cy', cell[1]);
+      c.setAttribute('r', r); c.style.display = '';
+    });
+  }
+  frame.addEventListener('pointermove', moveCursor);
+  frame.addEventListener('pointerleave', function () {
+    var a = document.getElementById('dltcursor');
+    var b = document.getElementById('dltcursor2');
+    if (a) a.style.display = 'none';
+    if (b) b.style.display = 'none';
+  });
 
   var stroke = null;
   function strokeStart(ev) {
@@ -319,6 +360,11 @@ SCRIPT = r"""
   if (radius) radius.oninput = function () {
     terr.radius = parseInt(radius.value, 10) || 0;
     document.getElementById('dltradiusn').textContent = terr.radius;
+    var a = document.getElementById('dltcursor');
+    var b = document.getElementById('dltcursor2');
+    [a, b].forEach(function (c) {
+      if (c && c.style.display !== 'none') c.setAttribute('r', terr.radius + 0.5);
+    });
   };
   var ref = document.getElementById('dltref');
   if (ref) ref.oninput = function () {

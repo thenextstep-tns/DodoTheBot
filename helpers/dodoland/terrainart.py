@@ -82,25 +82,29 @@ def rects(cells: list[int], width: int = T.CHUNK,
 # Each motif is drawn on an 8x8 cell tile from three colours — the ground's own,
 # one step darker and one step lighter — so every texture sits in the same
 # thirty-two colour world and nothing has to be hand-picked per kind.
-TILE = 8
+# Sixteen cells, not eight. A tree is three cells wide and four tall, and five
+# of those on an eight-cell tile is sixty of its sixty-four cells — a mush with
+# no ground showing between the marks. Density is the motif's job, not the
+# tile's.
+TILE = 16
 
 # (shape, how many) per kind. The shape is what the ground *is*: a forest reads
 # as canopy, a marsh as reeds, a cliff as striations. Kinds not named here stay
 # flat, which is right for anything that should recede.
 MOTIFS: dict[str, tuple[str, int]] = {
-    "forest": ("trees", 5),
-    "grass": ("tufts", 6),
-    "plains": ("tufts", 3),
-    "marsh": ("reeds", 7),
-    "sand": ("grains", 9),
-    "hills": ("bumps", 4),
-    "mountain": ("peaks", 3),
-    "cliff": ("striations", 4),
-    "deep": ("swell", 3),
-    "sea": ("swell", 4),
-    "shallows": ("swell", 5),
-    "lake": ("swell", 4),
-    "river": ("swell", 5),
+    "forest": ("trees", 7),
+    "grass": ("tufts", 10),
+    "plains": ("tufts", 5),      # sparse on purpose: open ground should recede
+    "marsh": ("reeds", 9),
+    "sand": ("grains", 11),
+    "hills": ("bumps", 6),
+    "mountain": ("peaks", 5),
+    "cliff": ("striations", 6),
+    "deep": ("swell", 4),
+    "sea": ("swell", 6),
+    "shallows": ("swell", 7),
+    "lake": ("swell", 6),
+    "river": ("swell", 8),
 }
 
 
@@ -119,32 +123,50 @@ def _spots(count: int, seed: int) -> list[tuple[int, int]]:
     return out
 
 
-def _motif(shape: str, count: int, light: str, dark: str, seed: int) -> str:
-    """One tile's worth of marks, in cell units."""
+def _motif(shape: str, count: int, base: str, light: str, dark: str,
+           seed: int) -> str:
+    """One tile's worth of marks, in cell units.
+
+    Drawn as *things* rather than as marks: a tree with a canopy and a trunk, a
+    dune with a lit face and a shaded one, a peak with a snow side. An abstract
+    speckle tells you two grounds are different; a tree tells you which one is
+    the forest.
+    """
     out = []
     for i, (x, y) in enumerate(_spots(count, seed)):
-        tone = dark if i % 2 else light
         if shape == "trees":
-            # A canopy blob with a trunk pixel under it.
-            out.append(f'<rect x="{x}" y="{y}" width="2" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x}" y="{y - 1}" width="1" height="1" fill="{light}"/>')
+            # A three-row conifer: dark skirt, mid body, lit crown, trunk under.
+            out.append(f'<rect x="{x - 1}" y="{y + 1}" width="3" height="1" fill="{dark}"/>')
+            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{light}"/>')
+            out.append(f'<rect x="{x - 1}" y="{y + 2}" width="3" height="1" fill="{dark}"/>')
+            out.append(f'<rect x="{x}" y="{y + 3}" width="1" height="1" fill="{dark}"/>')
         elif shape == "tufts":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{tone}"/>')
+            # Two blades, not a square: a single pixel reads as dirt.
+            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{light}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="1" fill="{dark}"/>')
         elif shape == "reeds":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="2" fill="{dark}"/>')
+            out.append(f'<rect x="{x}" y="{y}" width="1" height="3" fill="{dark}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="2" fill="{light}"/>')
         elif shape == "grains":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{tone}"/>')
+            # A dune: a lit crest with its own shadow under it.
+            out.append(f'<rect x="{x}" y="{y}" width="2" height="1" fill="{light}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="2" height="1" fill="{dark}"/>')
         elif shape == "bumps":
-            out.append(f'<rect x="{x}" y="{y}" width="3" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y - 1}" width="1" height="1" fill="{light}"/>')
+            # A hillock in profile, lit on top.
+            out.append(f'<rect x="{x}" y="{y + 1}" width="4" height="1" fill="{dark}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y}" width="2" height="1" fill="{light}"/>')
         elif shape == "peaks":
-            out.append(f'<path d="M{x} {y + 3}L{x + 2} {y}L{x + 4} {y + 3}z" fill="{dark}"/>')
-            out.append(f'<path d="M{x + 1} {y + 2}L{x + 2} {y}L{x + 3} {y + 2}z" fill="{light}"/>')
+            # A mountain with a snow face, stepped so it reads as rock.
+            out.append(f'<rect x="{x}" y="{y + 2}" width="5" height="1" fill="{dark}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="3" height="1" fill="{dark}"/>')
+            out.append(f'<rect x="{x + 2}" y="{y}" width="1" height="1" fill="{light}"/>')
+            out.append(f'<rect x="{x + 2}" y="{y + 1}" width="1" height="1" fill="{light}"/>')
         elif shape == "striations":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="4" fill="{dark}"/>')
+            out.append(f'<rect x="{x}" y="{y}" width="1" height="5" fill="{dark}"/>')
+            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="3" fill="{light}"/>')
         elif shape == "swell":
-            # A dash and a shorter one below it: the universal shorthand for
-            # moving water, and it survives being two pixels tall.
+            # A crest and its trough: the universal shorthand for moving water,
+            # and it survives being two pixels tall.
             out.append(f'<rect x="{x}" y="{y}" width="3" height="1" fill="{light}"/>')
             out.append(f'<rect x="{x + 1}" y="{y + 1}" width="2" height="1" fill="{dark}"/>')
     return "".join(out)
@@ -175,12 +197,19 @@ def pattern_defs(kinds: list[dict], colours: Optional[dict] = None,
         light = colours.get(palette_rules.lighten(slot), base)
         shape, count = motif
         seed = sum(ord(c) * (i + 3) for i, c in enumerate(key))
+        # Repeated at the four edges as well as in place, so a tree that runs
+        # off the tile comes back on the other side instead of being sliced in
+        # half at every seam.
+        one = _motif(shape, count, base, light, dark, seed)
+        marks = "".join(
+            f'<g transform="translate({dx},{dy})">{one}</g>'
+            for dx in (-TILE, 0, TILE) for dy in (-TILE, 0, TILE))
         out.append(
             f'<pattern id="{pattern_id(key)}" patternUnits="userSpaceOnUse" '
             f'width="{TILE * cell:g}" height="{TILE * cell:g}">'
             f'<rect width="{TILE * cell:g}" height="{TILE * cell:g}" fill="{base}"/>'
             f'<g transform="scale({cell:g})" shape-rendering="crispEdges">'
-            f'{_motif(shape, count, light, dark, seed)}</g></pattern>')
+            f'{marks}</g></pattern>')
     return f"<defs>{''.join(out)}</defs>" if out else ""
 
 
