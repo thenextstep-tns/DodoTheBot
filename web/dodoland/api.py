@@ -155,6 +155,7 @@ async def api_dodoland_town(request: web.Request):
             guild.id, user_id,
             name=body.get("name"), blurb=body.get("blurb"),
             building_names=body.get("building_names"),
+            walls=body.get("walls"),
         )
         if body.get("clear_image"):
             bot.dodoland_towns.save_image(guild.id, user_id, None)

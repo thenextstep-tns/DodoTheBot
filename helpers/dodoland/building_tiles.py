@@ -74,6 +74,9 @@ def sync(library: tile_rules.TileLibrary, guild_id: int, buildings: Iterable[dic
                                  content_type="image/svg+xml", guild_id=guild_id,
                                  layer="buildings", access=["admin", "player"], requires=requires,
                                  passable=False, resizable=True, scale_min=0.5, scale_max=2.0,
+                                 # A road goes round a house; the town it
+                                 # belongs to does not stop at its own door.
+                                 spreads=True,
                                  cell_px=CELL_PX, pack=PACK, source=source)
                 added += 1
                 continue

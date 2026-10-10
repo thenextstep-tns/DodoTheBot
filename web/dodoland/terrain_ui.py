@@ -50,6 +50,8 @@ CSS = """
 .dltline { vector-effect: non-scaling-stroke; stroke-width: calc(1px * var(--inv, 1));
   stroke-linecap: square; }
 .dltline.wide { stroke-width: calc(3px * var(--inv, 1)); }
+.dlwall { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dlworld.hide-buildings #dltwalls { display: none; }
 .dltdash { stroke-width: calc(1.5px * var(--inv, 1));
   stroke-dasharray: calc(5px * var(--inv, 1)) calc(3px * var(--inv, 1)); }
 
@@ -159,7 +161,7 @@ SCRIPT = r"""
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g>' +
+      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g><g id="dltwalls"></g>' +
       '<rect id="dltsel" class="dltline dltdash" fill="rgba(240,166,79,.12)" stroke="#f0a64f" ' +
       'style="display:none"/>' +
       // The brush's exact footprint: the cells a stroke here will paint, traced
@@ -549,16 +551,72 @@ SCRIPT = r"""
         if (!g) return;
         D.influence = res.towns || [];
         g.innerHTML = D.influence.map(function (t) {
+          // The line is the smoothed border when there is one: the stepped
+          // cell edges read as a staircase from any distance.
           return '<g data-town="' + t.id + '"><path d="' + t.fill + '" fill="' + t.colour +
             '" fill-opacity=".16" shape-rendering="crispEdges"/>' +
-            '<path class="dltline dltdash" d="' + t.line + '" fill="none" stroke="' + t.colour +
+            '<path class="dltline dltdash" d="' + (t.ring || t.line) + '" fill="none" stroke="' + t.colour +
             '"/></g>';
         }).join('');
         if (typeof applyLayers === 'function') applyLayers();
         if (typeof markInfluence === 'function') markInfluence();
+        drawWalls();
         if (typeof loaded === 'function') loaded('reach');
       })
       .catch(function () { if (typeof loaded === 'function') loaded('reach'); });
+  }
+
+  // --- walls ------------------------------------------------------------ //
+  // A walled town's wall runs along its area's smoothed border, so it grows
+  // with the town instead of being laid stone by stone. Drawn in cell units:
+  // a wall is as thick on the map as it would be on the ground, and it zooms
+  // like everything else built. Towers stand at intervals along it.
+  var WALL = {
+    // Widths in cells. A town hall is about ten cells across, so a stone wall
+    // is a third of a hall thick and its towers about half a hall.
+    stone: {layers: [['#35302b', 3.4], ['#9a9186', 2.2], ['#c7bfb3', 0.9, '1.5 1.2']],
+            tower: function (x, y) {
+              return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="#8e867b" stroke="#35302b" stroke-width="0.7"/>' +
+                     '<circle cx="' + x + '" cy="' + y + '" r="1.4" fill="#5c554d"/>'; }, every: 42},
+    palisade: {layers: [['#2f1f12', 2.4], ['#86592f', 1.5, '0.75 0.3']],
+            tower: function (x, y) {
+              x = +x; y = +y;
+              return '<rect x="' + (x - 1.7) + '" y="' + (y - 1.7) + '" width="3.4" height="3.4" fill="#6b4425" stroke="#2f1f12" stroke-width="0.6"/>'; },
+            every: 54}
+  };
+  function drawWalls() {
+    var g = document.getElementById('dltwalls');
+    if (!g) return;
+    var byTown = {};
+    (D.influence || []).forEach(function (t) { byTown[t.id] = t; });
+    var out = [];
+    D.people.forEach(function (p) {
+      var style = WALL[p.walls], area = byTown[p.id];
+      if (!style || !p.plot || !area || !area.ring) return;
+      style.layers.forEach(function (layer) {
+        out.push('<path class="dlwall" data-town="' + p.id + '" d="' + area.ring + '" stroke="' + layer[0] +
+                 '" stroke-width="' + layer[1] + '"' + (layer[2] ? ' stroke-dasharray="' + layer[2] + '"' : '') + '/>');
+      });
+    });
+    g.innerHTML = out.join('');
+    // Towers, measured along the drawn path, one set per town.
+    var done = {};
+    g.querySelectorAll('.dlwall').forEach(function (path) {
+      var id = path.getAttribute('data-town');
+      if (done[id]) return;
+      done[id] = true;
+      var p = byId[id], style = WALL[p && p.walls];
+      if (!style) return;
+      var towers = [];
+      try {
+        var length = path.getTotalLength();
+        for (var at = style.every / 2; at < length; at += style.every) {
+          var pt = path.getPointAtLength(at);
+          towers.push(style.tower(pt.x.toFixed(1), pt.y.toFixed(1)));
+        }
+      } catch (e) {}
+      g.insertAdjacentHTML('beforeend', towers.join(''));
+    });
   }
 
   // --- selection actions ------------------------------------------------- //

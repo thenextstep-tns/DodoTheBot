@@ -53,6 +53,10 @@ def _text(value: Any, limit: int, field: str, *, required: bool = False) -> str:
     return text
 
 
+# How a town may be walled. Drawn along its area of influence.
+WALLS = ("", "palisade", "stone")
+
+
 class TownStore:
     """Per-person town details. ``bot.dodoland_towns``."""
 
@@ -92,10 +96,20 @@ class TownStore:
     def save(self, guild_id: int, user_id: int, *, name: Optional[str] = None,
              blurb: Optional[str] = None,
              building_names: Optional[dict] = None,
-             building_colours: Optional[dict] = None) -> dict:
-        """Set any of the authored fields. Absent ones are left alone."""
+             building_colours: Optional[dict] = None,
+             walls: Optional[str] = None) -> dict:
+        """Set any of the authored fields. Absent ones are left alone.
+
+        ``walls`` is how the town is walled — one of :data:`WALLS`, ``""`` for
+        none. Walls are drawn along the town's area of influence, so they grow
+        with it rather than being placed piece by piece.
+        """
         self._ensure_indexes()
         changes: dict = {}
+        if walls is not None:
+            if str(walls) not in WALLS:
+                raise TownError(f"Walls are one of: none, {', '.join(w for w in WALLS if w)}.")
+            changes["walls"] = str(walls)
         if name is not None:
             changes["name"] = _text(name, MAX_NAME, "A town name")
         if blurb is not None:

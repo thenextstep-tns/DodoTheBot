@@ -128,3 +128,71 @@ def _runs(values: list[int]) -> list[tuple[int, int]]:
         prev = v
     runs.append((start, prev - start + 1))
     return runs
+
+
+def loops(cells: set[tuple[int, int]]) -> list[list[tuple[float, float]]]:
+    """The area's border as closed loops of corner points, in cell units.
+
+    Every cell edge with outside beyond it is a directed segment, oriented so
+    the area is always on the same side; following them end to start walks each
+    border once, holes included. Only the corners are kept, where a loop turns.
+    """
+    nxt: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for x, y in cells:
+        if (x, y - 1) not in cells:
+            nxt.setdefault((x, y), []).append((x + 1, y))
+        if (x + 1, y) not in cells:
+            nxt.setdefault((x + 1, y), []).append((x + 1, y + 1))
+        if (x, y + 1) not in cells:
+            nxt.setdefault((x + 1, y + 1), []).append((x, y + 1))
+        if (x - 1, y) not in cells:
+            nxt.setdefault((x, y + 1), []).append((x, y))
+    out = []
+    while nxt:
+        start = next(iter(nxt))
+        loop, here = [start], start
+        while True:
+            ways = nxt.get(here)
+            if not ways:
+                break
+            step = ways.pop()
+            if not ways:
+                del nxt[here]
+            if step == start:
+                break
+            loop.append(step)
+            here = step
+        corners = [p for i, p in enumerate(loop)
+                   if (p[0] - loop[i - 1][0], p[1] - loop[i - 1][1])
+                   != (loop[(i + 1) % len(loop)][0] - p[0], loop[(i + 1) % len(loop)][1] - p[1])]
+        if len(corners) >= 3:
+            out.append(corners)
+    return out
+
+
+def _chaikin(points: list[tuple[float, float]], rounds: int) -> list[tuple[float, float]]:
+    for _ in range(rounds):
+        smooth = []
+        for i, (ax, ay) in enumerate(points):
+            bx, by = points[(i + 1) % len(points)]
+            smooth.append((ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25))
+            smooth.append((ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75))
+        points = smooth
+    return points
+
+
+def ring_path(cells: set[tuple[int, int]], *, rounds: int = 2, min_loop: int = 12) -> str:
+    """The border smoothed into curves, for walls and for the area's line.
+
+    The stair-step of cell edges, rounded by a few passes of Chaikin's corner
+    cutting: at map scale a stepped diagonal becomes a straight one and a
+    stepped curve a curve. Loops shorter than ``min_loop`` corners (a stray
+    cell, a pinhole) are left out — nobody builds a wall round one cell.
+    """
+    parts = []
+    for loop in loops(cells):
+        if len(loop) < min_loop:
+            continue
+        smooth = _chaikin(loop, rounds)
+        parts.append("M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in smooth) + "Z")
+    return "".join(parts)

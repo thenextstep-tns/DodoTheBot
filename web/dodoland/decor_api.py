@@ -143,6 +143,17 @@ async def api_world_decor(request: web.Request):
             return web.json_response({"ok": True, "changed": bool(changed)})
 
         tile = _admin_tile(bot, guild, request, body.get("asset_id"))
+        town = str(body.get("town") or "")
+        if town:
+            # Built for a town: it goes inside that town's area, which is the
+            # whole meaning of a town's reach.
+            import asyncio
+
+            from web.dodoland import influence_api
+            ok = await asyncio.get_running_loop().run_in_executor(
+                None, influence_api.inside, bot, guild, town, body.get("x") or 0, body.get("y") or 0)
+            if not ok:
+                return _bad("That is outside the town's area. Build inside its reach.")
         # An admin dressing the world is not spending an unlock, so no
         # ``allowed`` set is passed: the locks exist to pace what players may
         # place, and the person who wrote them is not the person they pace.
@@ -157,7 +168,7 @@ async def api_world_decor(request: web.Request):
             # own tile, and this keeps a stamp that gains a variant from
             # turning into a lucky dip again.
             variant=tile["variants"][0] if tile["variants"] else "",
-            layer=tile["layer"], placed_by=who, placed_by_name=who_name)
+            layer=tile["layer"], placed_by=who, placed_by_name=who_name, town=town)
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")
         return web.json_response({"ok": True, "piece": piece})

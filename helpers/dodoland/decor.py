@@ -141,7 +141,7 @@ class DecorStore:
               allowed: Optional[set] = None,
               scale_range: tuple = (MIN_SCALE, MAX_SCALE),
               variant: str = "", source: str = "", layer: str = "objects",
-              placed_by: int = 0, placed_by_name: str = "") -> dict:
+              placed_by: int = 0, placed_by_name: str = "", town: str = "") -> dict:
         """Put one thing down, and return the row that was written.
 
         ``scale_range`` is what the tile may be sized to — ``(1, 1)`` for a
@@ -174,6 +174,9 @@ class DecorStore:
                         owner_id=owner_id, scale=scale, flip=flip,
                         scale_range=scale_range, variant=variant, source=source,
                         layer=layer, placed_by=placed_by, placed_by_name=placed_by_name)
+        if town:
+            # Which town it was built for, if it was: the town's own buildings.
+            row["town"] = str(town)[:24]
         self._col.insert_one(dict(row))
         return row
 

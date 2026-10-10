@@ -382,3 +382,32 @@ ivy) are genuine small details of 16 px packs, not broken cuts, so they stay.
   copy (scratchpad `harness/serve.py`): pencil → 1 piece with `by`; a brush
   stroke → 25 pieces in one request; box select → 25; Delete → removed 25;
   hand click-select, drag-move persisted, Escape.
+
+### Backlog 2 — a town's buildings, and walls round its area
+
+* **Build in this town** (town card): the server's building tiles the town has
+  unlocked (its building at that tier or higher, from `p.built`), as cards.
+  Picking one switches the edit layer to Buildings, arms the pencil and builds
+  *for that town*: the place request carries `town`, and the server refuses a
+  point outside that town's area (`influence_api.inside`, from the cells kept
+  in `_CELLS` alongside the payload). The piece stores `town`.
+* **Town buildings no longer block their own town.** Blocked cells now follow
+  the tile's `spreads` flag, not `passable` (a road goes round a house; the
+  town does not stop at its own door). Building tiles get `spreads=True`
+  (existing 90 updated; `add_tile(spreads=)`), and the influence cache key only
+  counts pieces that actually block, so placing a building is ~120 ms instead of
+  a full recompute.
+* **Walls** are a town style, not pieces: `TownStore.save(walls=)` with
+  `WALLS = ("", "palisade", "stone")`, set from the card (None / Palisade /
+  Stone) via `POST /api/guild/{gid}/dodoland/town {walls}`. Drawn by
+  `drawWalls()` (terrain_ui) along the area's **smoothed border** in cell units,
+  with towers every 42 (stone) / 54 (palisade) cells; part of the Buildings
+  layer; they grow with the area.
+* **Smoothed borders.** `influence.loops` (cell-edge loops, holes included,
+  corners only) + `ring_path` (two Chaikin passes, loops under 12 corners
+  dropped) — ~40 KB per big town. Also used for the influence line instead of
+  the stair-step.
+
+All eleven backlog items are done. Still open from the original plan: roads
+(step 3), the player-facing building flow on the player page (players placing
+their own town's buildings inside their area from `/me`), walkers.

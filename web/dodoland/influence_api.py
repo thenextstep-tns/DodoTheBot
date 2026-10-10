@@ -22,16 +22,20 @@ from helpers.dodoland import townart
 
 # guild -> (key, built_at, payload)
 _CACHE: dict[int, tuple] = {}
+# guild -> {town id: set of cells}, made alongside the payload. What "is this
+# inside that town's area" is asked of when a building is placed.
+_CELLS: dict[int, dict[str, set]] = {}
 _TTL = 300
 
 
 def _blocked(bot, guild_id: int, cells_w: int, cells_h: int) -> set:
-    """Cells under placed features that do not let anything through: a
-    mountain range, a pond, a building. Their footprint is the lower part of the
-    drawing, where it stands on the ground."""
+    """Cells under placed features a town's area cannot spread over — a
+    mountain range, a pond: whatever its tile says (``spreads``). A town's own
+    buildings block roads but not the town. Their footprint is the lower part of
+    the drawing, where it stands on the ground."""
     tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
     pieces = [p for p in bot.dodoland_decor.world(guild_id)
-              if (tiles.get(p["asset_id"]) or {}).get("passable") is False]
+              if (tiles.get(p["asset_id"]) or {}).get("spreads") is False]
     sizes = bot.dodoland_tiles.art_sizes(
         p.get("variant") or tiles[p["asset_id"]]["variants"][0] for p in pieces
         if tiles[p["asset_id"]]["variants"])
@@ -93,6 +97,7 @@ def compute(bot, guild) -> dict:
         return grow_cost[value] if 0 <= value < len(grow_cost) else None
 
     towns = []
+    areas: dict[str, set] = {}
     for uid, plot in plots.items():
         person = result["people"].get(int(uid))
         power = person["power"] if person else 0
@@ -100,9 +105,13 @@ def compute(bot, guild) -> dict:
         origin = (int(float(plot.get("x", 50)) / 100 * cells_w),
                   int(float(plot.get("y", 50)) / 100 * cells_h))
         cells = influence.grow(origin, budget, cost, cells_w, cells_h)
+        areas[str(uid)] = cells
         towns.append({"id": str(uid), "colour": townart.colour_for(str(uid)),
                       "reach": round(budget, 1), "cells": len(cells),
-                      "fill": influence.fill_path(cells), "line": influence.outline_path(cells)})
+                      "fill": influence.fill_path(cells), "line": influence.outline_path(cells),
+                      # The border smoothed: the area's line, and where walls go.
+                      "ring": influence.ring_path(cells)})
+    _CELLS[guild.id] = areas
     return {"towns": towns, "cells_w": cells_w, "cells_h": cells_h}
 
 
@@ -110,32 +119,52 @@ def _key(bot, guild) -> tuple:
     from web.dodoland import terrain_api
 
     params = bot.dodoland_params
-    # Where every piece stands, not only how many there are: moving a mountain
-    # range changes who it blocks without changing the count.
-    spreading = tuple(sorted(t["tile_id"] for t in bot.dodoland_tiles.tiles(guild.id) if t["spreads"]))
+    tiles = bot.dodoland_tiles.tiles(guild.id)
+    spreading = tuple(sorted(t["tile_id"] for t in tiles if t["spreads"]))
+    # Where every *blocking* piece stands: moving a mountain range changes who
+    # it blocks without changing the count, and a passable flower bed changes
+    # nothing — so it must not throw a second of work away either.
+    blocking = {t["tile_id"] for t in tiles if not t["spreads"]}
     return (terrain_api.version(guild.id), spreading,
             tuple(sorted((str(p.get("piece_id")), p.get("x"), p.get("y"), p.get("scale"))
-                         for p in bot.dodoland_decor.world(guild.id))),
+                         for p in bot.dodoland_decor.world(guild.id)
+                         if p.get("asset_id") in blocking)),
             tuple(sorted((k, tuple(sorted(v.items()))) for k, v in bot.dodoland_buildings.plots(guild.id).items())),
             tuple(params.get(guild.id, k) for k in ("dodoland_influence_base", "dodoland_influence_top",
                                                     "dodoland_influence_clear_forest",
                                                     "dodoland_influence_water_cost")))
 
 
+def current(bot, guild) -> dict:
+    """The payload, from the cache when nothing it was made from has changed.
+    Blocking."""
+    key = _key(bot, guild)
+    cached = _CACHE.get(guild.id)
+    if not cached or cached[0] != key or time.time() - cached[1] > _TTL or guild.id not in _CELLS:
+        _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
+        cached = _CACHE[guild.id]
+    return cached[2]
+
+
 def warm(bot, guild) -> None:
     """Work the areas out ahead of the first visitor. Blocking."""
-    key = _key(bot, guild)
-    _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
+    current(bot, guild)
+
+
+def inside(bot, guild, town_id, x_pct: float, y_pct: float) -> bool:
+    """Whether a map position (percentages, as pieces are stored) lies in that
+    town's area. A town with no area — not placed — contains nothing."""
+    payload = current(bot, guild)
+    cells = _CELLS.get(guild.id, {}).get(str(town_id))
+    if not cells:
+        return False
+    x = int(float(x_pct) / 100 * payload["cells_w"])
+    y = int(float(y_pct) / 100 * payload["cells_h"])
+    return (x, y) in cells
 
 
 async def influence_layer(request: web.Request):
     """``GET /guild/{gid}/dodoland/influence`` — the Influence layer's data."""
     bot, guild = request.app["bot"], request["guild"]
-    loop = asyncio.get_running_loop()
-    key = await loop.run_in_executor(None, _key, bot, guild)
-    cached = _CACHE.get(guild.id)
-    if not cached or cached[0] != key or time.time() - cached[1] > _TTL:
-        payload = await loop.run_in_executor(None, compute, bot, guild)
-        _CACHE[guild.id] = (key, time.time(), payload)
-        cached = _CACHE[guild.id]
-    return web.json_response({"ok": True, **cached[2]})
+    payload = await asyncio.get_running_loop().run_in_executor(None, current, bot, guild)
+    return web.json_response({"ok": True, **payload})

@@ -567,7 +567,8 @@ class TileLibrary:
                  access: Any = ("admin",), requires: Any = None,
                  passable: bool = True, resizable: bool = False,
                  scale_min: Any = DEFAULT_SCALE_MIN, scale_max: Any = DEFAULT_SCALE_MAX,
-                 cell_px: Any = DEFAULT_CELL, pack: str = "", source: str = "") -> dict:
+                 cell_px: Any = DEFAULT_CELL, pack: str = "", source: str = "",
+                 spreads: Optional[bool] = None) -> dict:
         """A new tile with its first variant, at the end of its category.
 
         ``pack`` is where the art came from, kept for credits. ``source`` is a
@@ -590,6 +591,8 @@ class TileLibrary:
         row = {"tile_id": tile_id, "guild_id": int(guild_id or GLOBAL), "cat_id": cat_id,
                "order": len(self._in_category(cat_id)), "variants": [vid],
                "pack": str(pack or "")[:80], "source": str(source or "")[:200], **props}
+        if spreads is not None:
+            row["spreads"] = bool(spreads)
         self._tiles.insert_one(dict(row))
         return row
 

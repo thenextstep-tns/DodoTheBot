@@ -60,4 +60,31 @@ assert I.fill_path(block).count("M") == 1, "a solid block should be one rectangl
 assert I.outline_path(set()) == "" and I.fill_path(set()) == ""
 print("drawing         the outline is the area's exact border, the fill merged rectangles")
 
+# The smoothed border: one loop per edge, holes included, corners only.
+ring = {(x, y) for x in range(20) for y in range(20)} - {(x, y) for x in range(8, 12) for y in range(8, 12)}
+edges = I.loops(ring)
+assert len(edges) == 2, "an area with a hole has an outer and an inner border"
+assert sorted(len(e) for e in edges) == [4, 4], "a square border keeps only its four corners"
+strip = I.loops({(0, 0), (1, 0), (2, 0)})
+assert len(strip) == 1 and set(strip[0]) == {(0, 0), (3, 0), (3, 1), (0, 1)}
+path = I.ring_path({(x, y) for x in range(30) for y in range(30) if (x - 15) ** 2 + (y - 15) ** 2 < 150})
+assert path.startswith("M") and path.endswith("Z") and path.count("M") == 1
+assert I.ring_path({(5, 5)}) == "", "a stray cell gets no wall"
+print("ring            the border smoothed into closed loops; a stray cell gets none")
+
+# Walls are a town's style, not pieces: only the known styles are accepted.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from fake_mongo import FakeCollection  # noqa: E402
+from helpers.dodoland import towns as town_rules  # noqa: E402
+
+store = town_rules.TownStore(FakeCollection())
+assert store.save(1, 2, walls="stone")["walls"] == "stone"
+assert store.save(1, 2, walls="")["walls"] == ""
+try:
+    store.save(1, 2, walls="lava")
+    raise AssertionError("an unknown wall style was accepted")
+except town_rules.TownError:
+    pass
+print("walls           a town is walled in a known style or not at all")
+
 print("PASS")

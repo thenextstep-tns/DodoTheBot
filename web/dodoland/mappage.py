@@ -151,6 +151,7 @@ def _collect(bot, guild) -> dict:
             "owner": owner,
             "name": town_rules.display_name(mine, owner),
             "blurb": str(mine.get("blurb") or ""),
+            "walls": str(mine.get("walls") or ""),
             "has_image": bool(mine.get("image")),
             "power": person["power"],
             "place": person["place"],
@@ -192,6 +193,7 @@ def _collect(bot, guild) -> dict:
                        "f": bool(d.get("flip")),
                        # Who placed it, for the toolkit's Placed list.
                        "by": str(d.get("by") or ""), "bn": str(d.get("by_name") or ""),
+                       "t": str(d.get("town") or ""),
                        "at": int(d.get("at") or 0)} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
@@ -657,6 +659,16 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlkitfoot input[type=range] { flex: 1 1 auto; min-width: 60px; }
 .dlkitmsg { margin: 0; padding: 0 14px 12px; font-size: 12px; color: var(--soft); }
 .dlkitmsg.bad { color: #c0392b; font-weight: 600; }
+.dlbuild { margin-top: 12px; border-top: 1px solid var(--edge); padding-top: 10px; }
+.dlbuildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
+  margin: 8px 0; max-height: 210px; overflow-y: auto; }
+.dlbuildtile { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px;
+  border: 1px solid var(--edge); border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+.dlbuildtile:hover { border-color: var(--lantern); }
+.dlbuildtile img { width: 100%; height: 40px; object-fit: contain; }
+.dlbuildtile.px img { image-rendering: pixelated; }
+.dlbuildtile span { font-size: 10px; line-height: 1.15; text-align: center; }
+.dlwallrow { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .dlzsep { display: block; height: 1px; margin: 4px 6px; background: var(--edge); }
 .dlzoom button svg { display: block; margin: auto; }
 .dlkittabs { margin: 10px 14px 0; }
@@ -665,6 +677,7 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlbrushopts { padding: 4px 14px 8px; display: grid; gap: 6px; font-size: 12px; color: var(--soft); }
 .dlbrushopts label { display: grid; grid-template-columns: 76px 1fr 36px; align-items: center; gap: 6px; }
 .dlbrushopts label.dlcheck { display: flex; }
+.dlbrushopts[hidden] { display: none; }
 .dlbrushopts .dlseg { margin: 0 0 4px; }
 .dlplacedhead { display: flex; gap: 8px; align-items: center; padding: 8px 14px 6px; font-size: 12px; }
 .dlplacedhead .dlsel { margin: 0; flex: 1 1 auto; }
@@ -1028,6 +1041,7 @@ _SCRIPT = r"""
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
+      (p.plot ? buildSection(p) : '') +
       '<div class="acts">' +
         (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
@@ -1053,6 +1067,8 @@ _SCRIPT = r"""
     card.querySelectorAll('button').forEach(function (b) {
       b.onclick = function () {
         var act = b.dataset.act;
+        if (b.dataset.build) { buildFor(p, b.dataset.build); return; }
+        if (b.dataset.walls !== undefined) { setWalls(p, b.dataset.walls); return; }
         if (act === 'close') { closeCard(); }
         else if (act === 'move') { arm(id); closeCard(); }
         else if (act === 'remove') { place(id, null); closeCard(); }
@@ -1118,6 +1134,59 @@ _SCRIPT = r"""
       setTimeout(function () { window.location.reload(); }, 400);
     }).catch(function (err) { say(String(err), true); });
   }
+  // --- building a town ---------------------------------------------------- //
+  // A town's own buildings are the tiles its buildings have unlocked, at the
+  // tier each has reached; picking one arms the pencil for that town, and the
+  // server only takes it inside that town's area. Walls are not placed at all:
+  // they are a style the town has, drawn along its area's edge.
+  var building = null;   // town id the pencil is building for
+  function townTier(p, key) {
+    for (var i = 0; i < p.built.length; i++) if (p.built[i].key === key) return p.built[i].tier;
+    return 0;
+  }
+  function buildable(p) {
+    return D.assets.filter(function (a) {
+      return a.layer === 'buildings' && a.building && a.tier && townTier(p, a.building) >= a.tier;
+    });
+  }
+  function buildSection(p) {
+    var tiles = buildable(p);
+    var cards = tiles.slice(0, 60).map(function (a) {
+      return '<button class="dlbuildtile' + (a.px ? ' px' : '') + '" data-build="' + a.id + '" title="' +
+        escapeHtml(a.name) + '"><img alt="" loading="lazy" src="' + assetUrl(a.id) + '"><span>' +
+        escapeHtml(a.name.split(' · ').pop()) + '</span></button>';
+    }).join('');
+    var walls = [['', 'None'], ['palisade', 'Palisade'], ['stone', 'Stone']].map(function (w) {
+      return '<button data-walls="' + w[0] + '" class="' + ((p.walls || '') === w[0] ? 'own' : '') + '">' + w[1] + '</button>';
+    }).join('');
+    return '<div class="dlbuild"><b>Build in this town</b>' +
+      (cards ? '<div class="dlbuildgrid">' + cards + '</div>'
+             : '<p class="sub">Nothing built yet that can be placed: buildings unlock as the town earns them.</p>') +
+      '<div class="dlwallrow"><span class="sub">Walls round its area</span><div class="acts">' + walls + '</div></div></div>';
+  }
+  function buildFor(p, tileId) {
+    if (layerState.edit !== 'buildings') { layerState.edit = 'buildings'; applyLayers(); fillKitCats(); }
+    armedAsset = tileId; mix = [tileId];
+    setTool('pencil');
+    building = p.id;
+    frame.classList.add('placing');
+    renderKit();
+    kitSay('Building for ' + p.name + ': click inside its area.');
+  }
+  function setWalls(p, style) {
+    fetch('/api/guild/' + D.gid + '/dodoland/town', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user_id: p.id, walls: style})
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res.ok) { hint.textContent = res.error || 'That did not work.'; return; }
+      p.walls = style;
+      card.querySelectorAll('[data-walls]').forEach(function (b) {
+        b.classList.toggle('own', b.dataset.walls === style);
+      });
+      if (typeof drawWalls === 'function') drawWalls();
+    });
+  }
+
   // The open town's area of influence is the one drawn; closing the town, or
   // clicking away from it, takes its area with it.
   function markInfluence() {
@@ -1319,6 +1388,7 @@ _SCRIPT = r"""
     kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {
       el.onclick = function (ev) {
         var id = el.dataset.asset;
+        building = null;
         if (ev.shiftKey && armedAsset) {
           // A mix for the brush: every stroke picks among these at random.
           var at = mix.indexOf(id);
@@ -1552,13 +1622,14 @@ _SCRIPT = r"""
 
   function placeDecor(point) {
     decorPost({action: 'place', asset_id: armedAsset, x: point.x, y: point.y,
-               scale: parseFloat(kitScale.value) || 1},
+               scale: parseFloat(kitScale.value) || 1, town: building || ''},
       function (res) {
         D.world.push({id: res.piece.piece_id, a: res.piece.asset_id, v: res.piece.variant || '',
                       l: res.piece.layer || 'objects',
                       x: res.piece.x, y: res.piece.y, s: res.piece.scale,
                       f: !!res.piece.flip, by: String(res.piece.by || ''),
-                      bn: res.piece.by_name || '', at: res.piece.at || 0});
+                      bn: res.piece.by_name || '', at: res.piece.at || 0,
+                      t: res.piece.town || ''});
         redrawDecor();
         kitSay('Placed. Click again to place another.');
       });
@@ -1654,6 +1725,7 @@ _SCRIPT = r"""
     });
     frame.dataset.tool = t;
     var placing = t === 'pencil' || t === 'brush';
+    if (t !== 'pencil') building = null;
     if (placing && !kitDrawer.classList.contains('open')) openKit();
     document.getElementById('dlbrushopts').hidden = t !== 'brush';
     frame.classList.toggle('placing', placing && !!armedAsset);
@@ -1969,7 +2041,7 @@ _SCRIPT = r"""
     if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
     if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
     if (key === 'escape') {
-      armedAsset = null; mix = [];
+      armedAsset = null; mix = []; building = null;
       frame.classList.remove('placing');
       selectOnly([]); renderKit();
     }
