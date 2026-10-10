@@ -150,7 +150,7 @@ SCRIPT = r"""
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g>' +
+      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g>' +
       '<rect id="dltsel" fill="rgba(240,166,79,.12)" stroke="#f0a64f" stroke-width="1.5" ' +
       'stroke-dasharray="4 3" vector-effect="non-scaling-stroke" style="display:none"/>' +
       // Drawn in cell units inside the same viewBox, so it is the shape that
@@ -482,6 +482,27 @@ SCRIPT = r"""
     }).catch(function (err) { terrSay(String(err), true); });
   }
 
+  // --- influence -------------------------------------------------------- //
+  // Each placed town's area: a faint wash of its colour and a dashed border,
+  // drawn in cell units inside the terrain, above the ground and under every
+  // placed feature. Its own layer in the Layers panel.
+  function loadInfluence() {
+    fetch('/guild/' + D.gid + '/dodoland/influence')
+      .then(function (r) { return r.ok ? r.json() : {towns: []}; })
+      .then(function (res) {
+        var g = document.getElementById('dltinfl');
+        if (!g) return;
+        D.influence = res.towns || [];
+        g.innerHTML = D.influence.map(function (t) {
+          return '<g data-town="' + t.id + '"><path d="' + t.fill + '" fill="' + t.colour +
+            '" fill-opacity=".16" shape-rendering="crispEdges"/>' +
+            '<path d="' + t.line + '" fill="none" stroke="' + t.colour + '" stroke-width="1.6" ' +
+            'stroke-dasharray="5 3" vector-effect="non-scaling-stroke" stroke-linecap="round"/></g>';
+        }).join('');
+        if (typeof applyLayers === 'function') applyLayers();
+      });
+  }
+
   // --- selection actions ------------------------------------------------- //
   function selRect() {
     var s = terr.sel;
@@ -567,6 +588,7 @@ SCRIPT = r"""
       }
       terrSetup(world);
       rearm();
+      loadInfluence();
       terrDefs();
       terrOverview();
       terrDetail();

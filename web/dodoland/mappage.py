@@ -501,7 +501,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlpiece.L-objects { z-index: 4; }
 .dlpiece.L-buildings { z-index: 6; }
 .dlworld .dltown { z-index: 6; }
-.dlworld.hide-ground .dlterrain,
+.dlworld.hide-influence #dltinfl,
+.dlworld.hide-ground #dltover, .dlworld.hide-ground #dltdetail,
 .dlworld.hide-environment .dlpiece.L-environment,
 .dlworld.hide-objects .dlpiece.L-objects,
 .dlworld.hide-buildings .dlpiece.L-buildings,
@@ -1229,6 +1230,7 @@ _SCRIPT = r"""
   var LAYERS = [
     {key: 'ground', label: 'Ground', sub: 'layer 1 · painted', edit: false},
     {key: 'environment', label: 'Environment features', sub: 'layer 1 · placed', edit: true},
+    {key: 'influence', label: 'Influence', sub: 'each town’s area', edit: false},
     {key: 'roads', label: 'Roads', sub: 'layer 2 · drawn by the bot', edit: false},
     {key: 'objects', label: 'Map objects', sub: 'layer 3', edit: true},
     {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4', edit: true}
@@ -1245,7 +1247,8 @@ _SCRIPT = r"""
     if (rows) {
       rows.innerHTML = LAYERS.map(function (l) {
         var hidden = layerState.hidden.indexOf(l.key) >= 0;
-        var n = D.world.filter(function (p) { return (p.l || 'objects') === l.key; }).length;
+        var n = l.key === 'influence' ? (D.influence || []).length
+              : D.world.filter(function (p) { return (p.l || 'objects') === l.key; }).length;
         return '<div class="dllayer' + (layerState.edit === l.key ? ' editing' : '') + '">' +
           '<span>' + l.label + (n ? ' <span class="muted">· ' + n + '</span>' : '') +
           '<small>' + l.sub + '</small></span>' +

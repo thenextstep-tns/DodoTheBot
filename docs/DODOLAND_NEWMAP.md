@@ -33,9 +33,9 @@ Walkers wander inside the influence area. More influence unlocks more assets.
 Each step is one thing that can be clicked and checked, then stop.
 
 1. ✅ **Tile library (owner, global).** Upload, name, categorise, order, variants. `helpers/dodoland/tiles.py`, `web/dodoland/tiles_ui.py`, `/dodoland/tiles`.
-2. The base map draws library tiles instead of the procedural motifs; the brush paints a chosen tile. Old motifs remain the fallback.
-3. "Rebuild roads": A* over `move` cost, written to `BUILT`, drawn.
-4. Influence: per-town region grown from the town hall over `grow` cost, budget from town power; borders drawn.
+2. ✅ The base map draws library tiles (generated motifs **removed**); Brush / Select / Pattern tools.
+3. "Rebuild roads": A* over `move` cost, written to `BUILT`, drawn. **Not built yet.**
+4. ✅ Influence: per-town region grown from the town hall over `grow` cost, budget from town power; borders drawn (Influence layer).
 5. Town hall + flag at the dot (behind a per-server switch; old town art stays the default).
 6. Players place their buildings inside their region (layer 4).
 7. Global owner decor, unlocks by influence, walkers confined to the region.
@@ -151,3 +151,50 @@ Each tile now has:
 Next: step 2 — draw environment tiles on the map as SVG patterns (the same
 mechanism the motifs use), scaled by `cell_px`, the brush picking a tile from
 `usable("environment", role)`.
+
+**Step 2 + layers + buildings + influence (10 Oct 2026).**
+
+*Ground.* A kind of ground is drawn with the tile it is bound to
+(`kind["tile_id"]`): up close an SVG pattern of the tile's own images (4x4 block
+of variants, sized by px-per-cell), far away its average colour. Painting a tile
+appends a `tile_<id>` kind whose costs follow the tile's `passable` flag
+(`terrain.sync_tile_kinds`). The imported kinds are bound to six tiles made from
+the reference SVG's own colours (`tools/dodoland_terrain_bind.py`, category
+**Map art · Ground**), so the map reads like the original.
+
+*Tools* (terrain drawer): Brush with a random mix (shift-click), density and soft
+edge, fresh server-side seed per stroke; Select (fill / clear / keep as pattern);
+Pattern (tiled from the world origin). Endpoint: `api_terrain_paint` modes
+`brush` / `rect`, plus `GET terrain/cells` for copying. Drawers share one style.
+
+*Layers.* Tiles have `placement`: `paint` (environment ground only) or `place`.
+Decor rows carry `layer`, `variant` and an import `source`. The map draws, bottom
+to top: painted ground, influence, environment features, roads, map objects,
+buildings and towns. **Layers** panel: show/hide each, choose the edited layer —
+only its pieces are grabbable, the toolkit offers only its tiles. A piece is
+drawn at its own variant's natural width (`vw`) times its size.
+
+*The Miro map's terrain.* 2,443 features (forests, mountains, hills, fields,
+dunes, flowers, ponds, rocks, caves, swamp, waves) placed as layer-1 features,
+98 rivers painted as the `river` kind. Registration fitted from land/sea cues
+(96% agree; scale 0.017873 cells per board unit, origin (-16850, -18250));
+towns, creatures, ships, people and shrines deliberately left off.
+`tools/dodoland_place_plan.py` (re-runnable, backs up ground before strokes),
+`tools/dodoland_layers_migrate.py`. Each terrain tile's px-per-cell was re-read
+from its own placements; sizes may run 0.25-12x.
+
+*Town buildings.* `helpers/dodoland/building_tiles.py`: every (building, tier)
+is a server tile in **Town buildings** — layer 4, players + admins, blocks roads,
+requires that building at that tier. Re-synced on every buildings/shapes save.
+The town toolkit offers objects and buildings.
+
+*Influence.* `helpers/dodoland/influence.py` (pure Dijkstra over `grow` cost,
+8-neighbour, budget = base + (top - base) * sqrt(power / strongest));
+`web/dodoland/influence_api.py` adds blocking footprints of impassable placed
+features and caches per guild. Params `dodoland_influence_base` (6),
+`dodoland_influence_top` (40), `dodoland_influence_clear_forest` (off). Rivers
+and water stop growth. **No towns are placed yet**, so the layer is empty until
+one is.
+
+Next: town hall + flag at the dot (step 5), roads (step 3), players placing
+buildings inside their own area (step 6: enforce "inside your influence").
