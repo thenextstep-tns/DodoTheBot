@@ -4,8 +4,21 @@
     {
       "name": "dodoland-preview",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["-m", "http.server", "8777"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8777"
+      ],
       "port": 8777
+    },
+    {
+      "name": "dodoland-tiles",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "tools/dodoland_tiles_preview.py",
+        "8778"
+      ],
+      "port": 8778
     }
   ]
 }

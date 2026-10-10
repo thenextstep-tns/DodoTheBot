@@ -2,6 +2,10 @@
 
 The socialite tribe's town map. State as of 29 Aug 2026, branch `refactor`, commit `b7e2ad0`.
 
+**The map is being redesigned on branch `NewMap`** — layered base tiles, roads,
+decor and player-placed buildings inside an influence area. The plan, the
+decisions and progress are in `docs/DODOLAND_NEWMAP.md`.
+
 Trial ranks are the other half of this and have their own doc
 (`docs/TRIAL_RANKS_HANDOFF.md`). Read it: DodoLand hangs its visual prestige off
 that ladder and reads from it, one-directionally.
@@ -64,6 +68,7 @@ helpers/dodoland/
   backfill.py    rebuilding history from the message archive
   voice.py       voice session bookkeeping, clock-testable, no Discord types
   invites.py     who brought whom in, and when to refuse to say
+  tiles.py       the owner's global tile library (NewMap step 1)
 web/dodoland/
   __init__.py       the route table. Every route is gated; two kinds of gate
   pages.py          the DodoLand panel page (9 sections)
@@ -74,11 +79,13 @@ web/dodoland/
   api.py            the admin write endpoints
   decor_api.py      placing things: admin on the world, a member on their town
   assets_route.py   asset bytes, town pictures, town art on demand
+  tiles_ui.py       the tile library page, owner-only, /dodoland/tiles
 cogs/dodoland.py               the listeners
 tools/dodoland_backfill.py     the rebuild, from the shell
 tools/vendor_fa_icons.py       re-fetch the emblem paths
 tools/dodoland_art_preview.py  every shape, tier, emblem and flourish, offline
 tools/dodoland_map_preview.py  the real map page, clickable, with stub data
+tools/dodoland_tiles_preview.py  the tile library page served locally, in memory
 ```
 
 Collections: `DodoLandActivity`, `DodoLandPairs`, `DodoLandParams`,

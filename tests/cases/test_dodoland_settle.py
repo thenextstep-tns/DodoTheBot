@@ -54,7 +54,8 @@ assert full["basis"] == "all" and lean["basis"] == "live"
 print("previews        the scorer honours the basis end to end")
 
 # Nothing in DodoLand may be reachable without a gate, and there are exactly
-# two kinds: the panel's scopes, and the player gate in ``web/dodoland/player.py``
+# three kinds: the panel's scopes, the bot owner's (the tile library, which no
+# one server owns), and the player gate in ``web/dodoland/player.py``
 # (signed in, still a member, and the server has opened the surface). What must
 # never come back is a capability URL that is itself the credential — that is
 # what the public map link and the settle page were, and why they were removed.
@@ -67,8 +68,10 @@ _flat = " ".join(routes.split())
 _calls = re.findall(r"web\.(?:get|post|delete|put)\(.*?\)\),", _flat)
 assert len(_calls) >= 15, f"only found {len(_calls)} routes; the scan is broken"
 for call in _calls:
-    assert ("configure(" in call or "full(" in call
+    assert ("configure(" in call or "full(" in call or "owner(" in call
             or "player." in call), f"an unscoped DodoLand route: {call}"
+# ``owner`` must be the real owner gate and nothing softer.
+assert "owner = require_owner\n" in routes, "the owner gate is not require_owner"
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
 print(f"scoping         all {len(_calls)} DodoLand routes sit behind a scope or the player gate")
 

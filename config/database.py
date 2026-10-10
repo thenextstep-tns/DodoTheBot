@@ -158,3 +158,9 @@ dodoland_decor = db["DodoLandDecor"]    # {guild_id, piece_id, scope, owner_id, 
 # is painted by an admin, `built` is derived from towns and roads.
 dodoland_chunks = db["DodoLandChunks"]  # {guild_id, layer, cx, cy, rle}
 dodoland_world = db["DodoLandWorld"]    # {_id: guild_id, cells_w, cells_h, kinds}
+# The tile library the base map is painted with. Global, not per guild: the bot
+# owner curates it once and every server paints from it. The bytes live in their
+# own collection so listing the library never drags the images along.
+dodoland_tile_cats = db["DodoLandTileCats"]  # {cat_id, name, order}
+dodoland_tiles = db["DodoLandTiles"]         # {tile_id, name, cat_id, order, variants}
+dodoland_tile_art = db["DodoLandTileArt"]    # {vid, tile_id, data, content_type}

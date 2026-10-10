@@ -5,11 +5,14 @@ Mounted from ``web/routes.py:create_app`` with a function-level import, so this
 package can import the shared chrome from ``routes`` without closing an import
 cycle at module load.
 
-**Every route is gated, and there are exactly two kinds of gate.**
+**Every route is gated, and there are exactly three kinds of gate.**
 
 ``configure``/``full`` are the panel's scopes: an administrator acting on a whole
 server, which is why those handlers take a user id — they are legitimately
 working on other people's towns.
+
+``owner`` is the bot owner's gate, for the tile library, which is shared by
+every server and so belongs to none of them.
 
 ``player`` is ``web/dodoland/player.py``'s own gate: signed in with Discord,
 still a member of that guild right now, and the server has switched this surface
@@ -45,14 +48,21 @@ def dodoland_routes() -> list:
         terrain_defs, terrain_overview, terrain_world,
     )
     from web.dodoland.mappage import map_page
+    from web.dodoland.tiles_ui import api_tiles, tile_art, tiles_page
     from web.dodoland.pages import dodoland_page
-    from web.routes import require_scope
+    from web.routes import require_owner, require_scope
 
     # Reading the page means reading everybody's standing, so it takes the same
     # scope the settings page does rather than the softer stats scope.
     configure = require_scope(panel_access.SCOPE_CONFIG)
     full = require_scope(panel_access.SCOPE_FULL)
+    # The tile library belongs to no one server, so it is not under
+    # /guild/{gid} and takes the bot owner's gate rather than a panel scope.
+    owner = require_owner
     return [
+        web.get("/dodoland/tiles", owner(tiles_page)),
+        web.get("/dodoland/tiles/art/{vid}", owner(tile_art)),
+        web.post("/api/dodoland/tiles", owner(api_tiles)),
         web.get("/guild/{gid}/dodoland", configure(dodoland_page)),
         # The map deserves the whole window, so it is its own page.
         web.get("/guild/{gid}/dodoland/map", configure(map_page)),

@@ -346,10 +346,12 @@ flat = " ".join(routes.split())
 calls = re.findall(r"web\.(?:get|post|delete|put)\(.*?\)\),", flat)
 assert len(calls) >= 15, f"only found {len(calls)} routes; the scan is broken"
 for call in calls:
-    assert ("configure(" in call or "full(" in call
+    assert ("configure(" in call or "full(" in call or "owner(" in call
             or "player." in call), f"an unscoped DodoLand route: {call}"
+# ``owner(`` is the tile library's gate and must be the real owner check.
+assert "owner = require_owner\n" in routes, "the owner gate is not require_owner"
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
-print(f"routes          all {len(calls)} routes are behind a panel scope or the player gate")
+print(f"routes          all {len(calls)} routes are behind a panel scope, the owner gate or the player gate")
 
 # Every player handler in the table actually carries the gate. A handler exposed
 # without it would be a public page, which is the exact thing that was removed.
