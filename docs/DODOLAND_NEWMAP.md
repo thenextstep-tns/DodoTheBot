@@ -53,8 +53,9 @@ apart so listings never carry them). Owner page at `/dodoland/tiles`, linked as
 "🧱 Tiles" in the owner nav. Routes use a third gate, `owner = require_owner`;
 both route-gating tests accept it and check it is the real owner gate.
 `tests/cases/test_dodoland_tiles.py` covers ordering, refusals and cleanup.
-`py tools/dodoland_tiles_preview.py` (or the `dodoland-tiles` launch config)
-serves the real page on :8778 against an in-memory library.
+The same editor is embedded as a **Tile library** section of every server's
+DodoLand page, shown to the bot owner only (`test_dodoland_page` asserts a
+server admin never sees it).
 
 Next: step 2 — bind tiles to ground kinds and draw them on the map as SVG
 patterns (the same mechanism the motifs use), the brush picking a tile.

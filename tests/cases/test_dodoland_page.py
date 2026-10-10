@@ -142,6 +142,20 @@ body = response.text
 assert response.status == 200
 print(f"page            renders, {len(body):,} bytes")
 
+# The tile library is the bot's, not the server's: a server admin never sees it,
+# the bot owner gets it as a section with a menu entry (or it is unreachable).
+assert 'data-panel="dl-tiles"' not in body, "a server admin can see the bot's tile library"
+from helpers.dodoland.tiles import TileLibrary  # noqa: E402
+bot.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
+bot.dodoland_tiles.add_tile(name="Deep sea", cat_id="", data=b"x", content_type="image/png")
+owner_request = Request({"bot": bot})
+owner_request["guild"], owner_request["scope"] = guild, "owner"
+owner_body = asyncio.run(pages.dodoland_page(owner_request)).text
+assert '<section class="sidepanel" data-panel="dl-tiles"' in owner_body
+assert 'class="sidenavitem" href="#dl-tiles"' in owner_body
+assert "Deep sea" in owner_body and "/api/dodoland/tiles" in owner_body
+print("page            the tile library is a section for the bot owner only")
+
 for needle, why in (
     ("DodoLand", "the heading"),
     ("The Grand Library", "a building name"),

@@ -79,13 +79,12 @@ web/dodoland/
   api.py            the admin write endpoints
   decor_api.py      placing things: admin on the world, a member on their town
   assets_route.py   asset bytes, town pictures, town art on demand
-  tiles_ui.py       the tile library page, owner-only, /dodoland/tiles
+  tiles_ui.py       the tile library editor: /dodoland/tiles, and an owner-only section of the DodoLand page
 cogs/dodoland.py               the listeners
 tools/dodoland_backfill.py     the rebuild, from the shell
 tools/vendor_fa_icons.py       re-fetch the emblem paths
 tools/dodoland_art_preview.py  every shape, tier, emblem and flourish, offline
 tools/dodoland_map_preview.py  the real map page, clickable, with stub data
-tools/dodoland_tiles_preview.py  the tile library page served locally, in memory
 ```
 
 Collections: `DodoLandActivity`, `DodoLandPairs`, `DodoLandParams`,

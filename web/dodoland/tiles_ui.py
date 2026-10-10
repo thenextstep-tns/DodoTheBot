@@ -101,7 +101,10 @@ def _tile_card(tile: dict, categories: list[dict]) -> str:
 </div>"""
 
 
-def tiles_html(library: tile_rules.TileLibrary) -> str:
+def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True) -> str:
+    """The whole editor. ``heading=False`` drops the page title, for when it is
+    embedded as a section of a server's DodoLand page — the same editor, the
+    same library, reachable from where the owner already works."""
     categories = library.categories()
     groups = library.grouped()
     sections = []
@@ -127,7 +130,7 @@ def tiles_html(library: tile_rules.TileLibrary) -> str:
     body = "".join(sections) or '<p class="tlempty">The library is empty. Add a category, then a tile.</p>'
     return f"""{_STYLE}
 <div class="tlpage">
-  <div class="panelhead"><h1>🧱 Tile library</h1></div>
+  {'<div class="panelhead"><h1>🧱 Tile library</h1></div>' if heading else ''}
   <div class="explain"><p>The tiles every server paints its base map with. Shared by all
   servers; only the bot owner edits it. A tile can hold up to {tile_rules.MAX_VARIANTS}
   variants — the map picks one per cell so repeated ground does not read as wallpaper.

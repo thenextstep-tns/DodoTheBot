@@ -31,6 +31,8 @@ import html
 
 from aiohttp import web
 
+from helpers import panel_access
+
 from helpers.dodoland import buildings as building_rules
 from web.dodoland import buildings_ui
 from helpers.dodoland import flourish as flourish_rules
@@ -1150,6 +1152,19 @@ async def dodoland_page(request: web.Request):
     status = ("counting now" if tracking else
               "switched off, so nothing is being recorded")
 
+    # The tile library is the bot's, not this server's, so only the bot owner
+    # sees it here. Same editor as /dodoland/tiles, embedded where they work.
+    is_owner = scope == panel_access.SCOPE_OWNER
+    tile_entry = ((("dl-tiles", "\U0001F9F1", "Tile library",
+                    f"{len(bot.dodoland_tiles.tiles())} tiles · all servers"),)
+                  if is_owner else ())
+    tiles_panel = ""
+    if is_owner:
+        from web.dodoland.tiles_ui import tiles_html
+        tiles_panel = ('<section class="sidepanel" data-panel="dl-tiles" hidden>'
+                       '<div class="panelhead"><h2>\U0001F9F1 Tile library</h2></div>'
+                       f'{tiles_html(bot.dodoland_tiles, heading=False)}</section>')
+
     nav = ""
     # Every panel in the body needs an entry here. A section with no menu item
     # renders hidden with nothing able to reveal it, which is exactly how the
@@ -1167,7 +1182,7 @@ async def dodoland_page(request: web.Request):
          f"{len(bot.dodoland_assets.list(guild.id))} things"),
         ("dl-backfill", "\U000023EA", "Rebuild history", "from the archive"),
         ("dl-settings", "\U00002699", "Settings", "intake"),
-    ):
+    ) + tile_entry:
         active = " active" if key == "dl-preview" else ""
         nav += (f'<a class="sidenavitem{active}" href="#{key}" data-panel="{key}">'
                 f'<span class="navemoji">{emoji}</span>'
@@ -1193,6 +1208,7 @@ Nothing here is visible to anybody but this panel.</p>
     {_assets_html(bot, guild)}
     {_backfill_html(bot, guild)}
     {_settings_html(bot, guild)}
+    {tiles_panel}
   </div>
 </div>
 {buildings_ui.channel_options_template(guild)}
