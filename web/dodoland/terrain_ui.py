@@ -282,21 +282,26 @@ SCRIPT = r"""
   });
 
   // --- drawing the world ------------------------------------------------- //
+  // Zoomed out, the world is one shaded picture at a pixel per cell
+  // (terrain_raster), scaled smoothly by the browser; up close the tiles fade in
+  // over it. Loaded off-screen first and swapped in whole, so a repaint never
+  // flashes an empty map.
   function terrOverview() {
-    fetch(terrUrl('overview', '?v=' + terr.ver))
-      .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (svg) {
-        var g = document.getElementById('dltover');
-        if (!g || !terr.world) return;
-        // The overview is drawn at one cell per `overview_step`, so it has to be
-        // scaled back up into the full cell grid the <svg> is laid out in.
-        g.setAttribute('transform', 'scale(' + terr.world.overview_step + ')');
-        g.innerHTML = svg;
-        // The reference stays up until there is ground to replace it, so the
-        // seconds the first overview takes are the uploaded map, not a black
-        // screen. Hidden once: after that the slider owns it.
-        if (svg && !terr.refHidden) { terr.refHidden = true; world_el().style.setProperty('--refop', 0); }
-      });
+    var url = terrUrl('picture', '?v=' + encodeURIComponent(terr.ver));
+    var probe = new Image();
+    probe.onload = function () {
+      var g = document.getElementById('dltover');
+      if (!g || !terr.world) return;
+      g.removeAttribute('transform');
+      g.innerHTML = '<image href="' + url + '" x="0" y="0" width="' + terr.world.cells_w +
+        '" height="' + terr.world.cells_h + '" preserveAspectRatio="none"/>';
+      // The reference stays up until there is ground to replace it. Hidden
+      // once: after that the slider owns it.
+      if (!terr.refHidden) { terr.refHidden = true; world_el().style.setProperty('--refop', 0); }
+      if (typeof loaded === 'function') loaded('ground');
+    };
+    probe.onerror = function () { if (typeof loaded === 'function') loaded('ground'); };
+    probe.src = url;
   }
   function terrDefs() {
     fetch(terrUrl('defs', '?v=' + terr.ver)).then(function (r) { return r.ok ? r.text() : ''; })
@@ -313,7 +318,10 @@ SCRIPT = r"""
     var perCellX = (nat.w * view.k) / cw;
     var total = terr.world.chunks_x * terr.world.chunks_y;
     // Textures only once a cell is a few pixels across; below that a tile is
-    // noise, and the overview's average colours read better.
+    // noise, and the shaded picture reads better. They fade in over the next
+    // couple of pixels per cell instead of popping in at a line.
+    var detail = document.getElementById('dltdetail');
+    if (detail) detail.style.opacity = Math.max(0, Math.min(1, (perCellX - 2.5) / 2)).toFixed(2);
     if (perCellX < 2.5 && total > 0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;
@@ -526,9 +534,16 @@ SCRIPT = r"""
   // Each placed town's area: a faint wash of its colour and a dashed border,
   // drawn in cell units inside the terrain, above the ground and under every
   // placed feature. Its own layer in the Layers panel.
+  // The first answer is asked for as the script starts, alongside the world,
+  // rather than after it: they do not depend on each other.
+  var inflFirst = fetch('/guild/' + D.gid + '/dodoland/influence')
+    .then(function (r) { return r.ok ? r.json() : {towns: []}; })
+    .catch(function () { return {towns: []}; });
   function loadInfluence() {
-    fetch('/guild/' + D.gid + '/dodoland/influence')
-      .then(function (r) { return r.ok ? r.json() : {towns: []}; })
+    var ask = inflFirst || fetch('/guild/' + D.gid + '/dodoland/influence')
+      .then(function (r) { return r.ok ? r.json() : {towns: []}; });
+    inflFirst = null;
+    ask
       .then(function (res) {
         var g = document.getElementById('dltinfl');
         if (!g) return;
@@ -541,7 +556,9 @@ SCRIPT = r"""
         }).join('');
         if (typeof applyLayers === 'function') applyLayers();
         if (typeof markInfluence === 'function') markInfluence();
-      });
+        if (typeof loaded === 'function') loaded('reach');
+      })
+      .catch(function () { if (typeof loaded === 'function') loaded('reach'); });
   }
 
   // --- selection actions ------------------------------------------------- //
@@ -624,6 +641,7 @@ SCRIPT = r"""
     .then(function (world) {
       if (!world.ok || !world.cells_w) {
         terrSay('No world yet. Import the map first with tools/dodoland_terrain_import.py.', true);
+        if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); }
         return;
       }
       terrSetup(world);
@@ -635,5 +653,8 @@ SCRIPT = r"""
       // The reference is hidden when the overview arrives (terrOverview): the
       // terrain *is* the map now, and the upload is only there to trace against.
     })
-    .catch(function () { terrSay('The world could not be loaded.', true); });
+    .catch(function () {
+      terrSay('The world could not be loaded.', true);
+      if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); }
+    });
 """

@@ -98,11 +98,13 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
     since = store_module.days_back(window)
     lit_since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
-    rows = bot.dodoland.rows(guild.id, user_id=user_id, since=since)
+    # One person's rows out of the shared read: a page draws every town at
+    # once, and a query per town was a second per town.
+    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
+    rows = [row for row in every if int(row.get("user_id", 0)) == int(user_id)]
     result = standing.guild_standings(
         bot.dodoland, bot.dodoland_params, guild.id, buildings,
-        since=since, user_ids=[user_id], rows=rows,
-        pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
+        since=since, user_ids=[user_id], rows=rows, pair_rows=pairs,
     )
     person = result["people"].get(user_id) or {}
     built = [{"key": key, "tier": int(score["tier"]) + 1}

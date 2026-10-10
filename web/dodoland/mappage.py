@@ -96,8 +96,7 @@ def _collect(bot, guild) -> dict:
     lit_since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
-    rows = bot.dodoland.rows(guild.id, since=since)
-    pairs = bot.dodoland.pair_rows(guild.id, since=since)
+    rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
     result = standing.guild_standings(bot.dodoland, bot.dodoland_params, guild.id,
                                       buildings, since=since, rows=rows,
                                       pair_rows=pairs)
@@ -278,6 +277,17 @@ async def map_page(request: web.Request):
     <button type="button" id="dlnames" title="Show every name">A</button>
   </div>
   <div class="dlhint" id="dlhint">Drag to move, scroll to zoom</div>
+  <div class="dlloading" id="dlloading" role="status" aria-live="polite">
+    <div class="dlloadcard">
+      <div class="dlloadtitle">{_e(guild.name)}</div>
+      <div class="dlloadbar"><i id="dlloadfill"></i></div>
+      <ul class="dlloadsteps">
+        <li data-step="map">Unrolling the map</li>
+        <li data-step="ground">Painting the land and sea</li>
+        <li data-step="reach">Measuring every town's reach</li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 <aside class="dldrawer" id="dldrawer">
@@ -347,6 +357,22 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   cursor: grab; touch-action: none; background: var(--deep); }
 .dlframe.dragging { cursor: grabbing; }
 .dlframe.placing { cursor: crosshair; }
+/* Until the map, the ground and the towns' areas are in: a card over the frame
+   rather than a black screen that fills in piece by piece. */
+.dlloading { position: absolute; inset: 0; z-index: 40; display: flex;
+  align-items: center; justify-content: center; background: var(--night, #15110e);
+  transition: opacity .45s ease; }
+.dlloading.done { opacity: 0; pointer-events: none; }
+.dlloadcard { min-width: 260px; max-width: 80vw; text-align: center; }
+.dlloadtitle { font-size: 22px; font-weight: 700; margin-bottom: 14px; color: #f3e6cf; }
+.dlloadbar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
+.dlloadbar i { display: block; height: 100%; width: 8%; background: var(--lantern);
+  transition: width .35s ease; }
+.dlloadsteps { list-style: none; margin: 14px 0 0; padding: 0; font-size: 13px;
+  color: rgba(243,230,207,.55); text-align: left; display: inline-block; }
+.dlloadsteps li::before { content: "○"; display: inline-block; width: 1.4em; }
+.dlloadsteps li.ok { color: rgba(243,230,207,.95); }
+.dlloadsteps li.ok::before { content: "●"; color: var(--lantern); }
 /* Clicking fast to place things is a double-click to the browser, which then
    selects whatever is under it — the influence overlay lit up blue. */
 .dlframe { user-select: none; -webkit-user-select: none; }
@@ -620,6 +646,27 @@ _SCRIPT = r"""
   D.people.forEach(function (p) { byId[p.id] = p; });
 
   // --- the viewport ---------------------------------------------------- //
+  // --- loading ---------------------------------------------------------- //
+  // Three things make the first picture: the base image (the map's size), the
+  // ground, and the towns' areas. The card lifts when all three are in, or
+  // after a while regardless — a slow area must not hold the map hostage.
+  var waitingFor = {map: 1, ground: 1, reach: 1};
+  function loaded(step) {
+    if (!waitingFor[step]) return;
+    delete waitingFor[step];
+    var li = document.querySelector('.dlloadsteps [data-step="' + step + '"]');
+    if (li) li.classList.add('ok');
+    var left = Object.keys(waitingFor).length;
+    var fill = document.getElementById('dlloadfill');
+    if (fill) fill.style.width = Math.round((3 - left) / 3 * 100) + '%';
+    if (!left) liftLoading();
+  }
+  function liftLoading() {
+    var card = document.getElementById('dlloading');
+    if (card) setTimeout(function () { card.classList.add('done'); }, 150);
+  }
+  setTimeout(liftLoading, 20000);
+
   var view = {x: 0, y: 0, k: 1}, nat = {w: 0, h: 0};
   function apply() {
     world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')';
@@ -676,9 +723,12 @@ _SCRIPT = r"""
     // from the coastline drawn on it.
     world.style.width = nat.w + 'px';
     requestAnimationFrame(fit);
+    loaded('map');
   }
   if (base) { if (base.complete && base.naturalWidth) measure();
-              else base.addEventListener('load', measure); }
+              else base.addEventListener('load', measure);
+              base.addEventListener('error', function () { loaded('map'); }); }
+  else loaded('map');
   window.addEventListener('resize', function () { clamp(); apply(); });
 
   frame.addEventListener('wheel', function (ev) {

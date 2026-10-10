@@ -35,6 +35,8 @@ is about a dozen bytes.
 
 from __future__ import annotations
 
+import copy
+import time
 from typing import Iterable, Optional
 
 CHUNK = 64
@@ -246,13 +248,65 @@ def decode(rle: str, size: int = CELLS) -> list[int]:
 # --------------------------------------------------------------------------- #
 #  The store
 # --------------------------------------------------------------------------- #
+# How long a cached read trusts that nothing outside this process wrote. Every
+# write made here updates the cache at once; a tool in another process bumps the
+# world's ``rev`` (``touch``), and the cache notices within this long.
+TRUST_S = 5.0
+
+
 class TerrainStore:
-    """A guild's world, in chunks. ``bot.dodoland_terrain``."""
+    """A guild's world, in chunks. ``bot.dodoland_terrain``.
+
+    **Reads are served from memory.** The database is a network round trip
+    away (about 60 ms each), and one map load asked for the world row a dozen
+    times and for all 1,740 chunks twice. The world row is cached for
+    :data:`TRUST_S`; chunks are cached as their RLE strings (a few hundred
+    bytes each, decoded on demand) for as long as the world's ``rev`` stands.
+    """
 
     def __init__(self, chunks, config) -> None:
         self._chunks = chunks
         self._config = config
         self._indexed = False
+        self._rows: dict[int, tuple[float, dict]] = {}
+        self._rle: dict[tuple[int, str], dict] = {}
+
+    def _row(self, guild_id: int) -> dict:
+        g = int(guild_id)
+        hit = self._rows.get(g)
+        if hit and time.monotonic() - hit[0] < TRUST_S:
+            return hit[1]
+        row = self._config.find_one({"_id": g}) or {}
+        self._rows[g] = (time.monotonic(), row)
+        return row
+
+    def _forget(self, guild_id: int) -> None:
+        self._rows.pop(int(guild_id), None)
+
+    def _cached(self, guild_id: int, layer: str) -> dict:
+        """``{(cx, cy): rle}`` known for this layer, emptied when ``rev`` moves."""
+        rev = int(self._row(guild_id).get("rev") or 0)
+        key = (int(guild_id), layer)
+        entry = self._rle.get(key)
+        if entry is None or entry["rev"] != rev:
+            entry = self._rle[key] = {"rev": rev, "rows": {}}
+        return entry["rows"]
+
+    def _load(self, guild_id: int, layer: str, wanted: list[tuple[int, int]]) -> dict:
+        """Fill the cache for ``wanted`` and return it."""
+        cache = self._cached(guild_id, layer)
+        missing = [key for key in wanted if key not in cache]
+        if missing:
+            query: dict = {"guild_id": int(guild_id), "layer": layer}
+            # Most of the world at once is cheaper as the whole layer than as a
+            # thousand-clause $or.
+            if len(missing) <= 200:
+                query["$or"] = [{"cx": cx, "cy": cy} for cx, cy in missing]
+            for row in self._chunks.find(query, {"_id": 0, "cx": 1, "cy": 1, "rle": 1}):
+                cache[(int(row["cx"]), int(row["cy"]))] = str(row.get("rle", ""))
+            for key in missing:
+                cache.setdefault(key, "")
+        return cache
 
     def _ensure_indexes(self) -> None:
         if self._indexed:
@@ -276,12 +330,13 @@ class TerrainStore:
         silently change meaning.
         """
         self._ensure_indexes()
-        row = self._config.find_one({"_id": int(guild_id)}) or {}
+        row = self._row(guild_id)
         return {
             "cells_w": int(row.get("cells_w") or 0),
             "cells_h": int(row.get("cells_h") or 0),
-            "kinds": row.get("kinds") or base_kinds(TERRAIN),
-            "built_kinds": row.get("built_kinds") or base_kinds(BUILT),
+            # Copies: the cached row is shared, and callers edit the lists.
+            "kinds": copy.deepcopy(row.get("kinds")) or base_kinds(TERRAIN),
+            "built_kinds": copy.deepcopy(row.get("built_kinds")) or base_kinds(BUILT),
             "source_w": int(row.get("source_w") or 0),
             "source_h": int(row.get("source_h") or 0),
             # Bumped by anything that writes the world from outside the panel
@@ -302,6 +357,7 @@ class TerrainStore:
         if kinds is not None:
             changes["kinds"] = kinds
         self._config.update_one({"_id": int(guild_id)}, {"$set": changes}, upsert=True)
+        self._forget(guild_id)
         return self.world(guild_id)
 
     def touch(self, guild_id: int) -> None:
@@ -309,12 +365,14 @@ class TerrainStore:
         after writing; the panel's own strokes invalidate exactly what they
         touched instead, which is far cheaper."""
         self._config.update_one({"_id": int(guild_id)}, {"$inc": {"rev": 1}}, upsert=True)
+        self._forget(guild_id)
 
     def set_kinds(self, guild_id: int, kinds: list[dict]) -> None:
         """Store the vocabulary. Callers only ever append to it or edit an entry
         in place — the grid holds indices, so an entry may never move."""
         self._ensure_indexes()
         self._config.update_one({"_id": int(guild_id)}, {"$set": {"kinds": kinds}}, upsert=True)
+        self._forget(guild_id)
 
     def kind_for_tile(self, guild_id: int, tile: dict, hex_colour: str = "") -> int:
         """The index painting ``tile`` writes, adding a kind for it if needed."""
@@ -340,9 +398,8 @@ class TerrainStore:
               layer: str = TERRAIN) -> list[int]:
         """One chunk's cells, row-major. Unwritten chunks are all unknown."""
         self._ensure_indexes()
-        row = self._chunks.find_one({"guild_id": int(guild_id), "layer": layer,
-                                     "cx": int(cx), "cy": int(cy)})
-        return decode(row.get("rle", "") if row else "")
+        key = (int(cx), int(cy))
+        return decode(self._load(guild_id, layer, [key])[key])
 
     def chunks(self, guild_id: int, boxes: Iterable[tuple[int, int]],
                layer: str = TERRAIN) -> dict[tuple[int, int], list[int]]:
@@ -356,12 +413,8 @@ class TerrainStore:
         wanted = [(int(cx), int(cy)) for cx, cy in boxes]
         if not wanted:
             return {}
-        rows = self._chunks.find({
-            "guild_id": int(guild_id), "layer": layer,
-            "$or": [{"cx": cx, "cy": cy} for cx, cy in wanted],
-        })
-        found = {(int(r["cx"]), int(r["cy"])): decode(r.get("rle", "")) for r in rows}
-        return {key: found.get(key) or [UNKNOWN] * CELLS for key in wanted}
+        cache = self._load(guild_id, layer, wanted)
+        return {key: decode(cache[key]) if cache[key] else [UNKNOWN] * CELLS for key in wanted}
 
     def at(self, guild_id: int, x: int, y: int, layer: str = TERRAIN) -> int:
         """One cell. Convenience; never use it in a loop over a region."""
@@ -376,9 +429,11 @@ class TerrainStore:
         if len(cells) != CELLS:
             raise TerrainError(f"A chunk is {CELLS} cells, not {len(cells)}.")
         self._ensure_indexes()
+        rle = encode(cells)
         self._chunks.update_one(
             {"guild_id": int(guild_id), "layer": layer, "cx": int(cx), "cy": int(cy)},
-            {"$set": {"rle": encode(cells)}}, upsert=True)
+            {"$set": {"rle": rle}}, upsert=True)
+        self._cached(guild_id, layer)[(int(cx), int(cy))] = rle
 
     def paint(self, guild_id: int, edits: dict, layer: str = TERRAIN) -> int:
         """Apply ``{(x, y): kind_index}`` across however many chunks it touches.
@@ -409,12 +464,9 @@ class TerrainStore:
         megabytes for the same information.
         """
         self._ensure_indexes()
-        out: dict[tuple[int, int], str] = {}
-        for cx, cy in keys:
-            row = self._chunks.find_one({"guild_id": int(guild_id), "layer": layer,
-                                         "cx": int(cx), "cy": int(cy)})
-            out[(int(cx), int(cy))] = str(row.get("rle", "")) if row else ""
-        return out
+        wanted = [(int(cx), int(cy)) for cx, cy in keys]
+        cache = self._load(guild_id, layer, wanted)
+        return {key: cache[key] for key in wanted}
 
     def restore(self, guild_id: int, snapshot: dict, layer: str = TERRAIN) -> int:
         """Put chunks back exactly as they were. The other half of undo."""
@@ -424,6 +476,7 @@ class TerrainStore:
                 {"guild_id": int(guild_id), "layer": layer,
                  "cx": int(cx), "cy": int(cy)},
                 {"$set": {"rle": str(rle)}}, upsert=True)
+            self._cached(guild_id, layer)[(int(cx), int(cy))] = str(rle)
         return len(snapshot)
 
     def wipe(self, guild_id: int, layer: Optional[str] = None) -> int:
@@ -433,6 +486,8 @@ class TerrainStore:
         if layer is not None:
             query["layer"] = layer
         result = self._chunks.delete_many(query)
+        for key in [k for k in self._rle if k[0] == int(guild_id) and layer in (None, k[1])]:
+            self._rle.pop(key, None)
         return int(getattr(result, "deleted_count", 0))
 
     def painted(self, guild_id: int, layer: str = TERRAIN) -> int:

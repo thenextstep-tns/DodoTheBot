@@ -26,6 +26,7 @@ where), so it sits on the town rather than inside any one building.
 
 from __future__ import annotations
 
+import time
 from typing import Iterable, Optional
 
 from helpers.dodoland import metrics as metric_registry
@@ -157,6 +158,33 @@ def matches_basis(row: dict, basis: str) -> bool:
     if basis == "backfill":
         return source == "backfill"
     return True
+
+
+# (guild, since) -> (when, day rows, pair rows)
+_RECENT: dict[tuple[int, str], tuple[float, list, list]] = {}
+
+
+def recent_rows(store, params, guild_id: int, since: Optional[str]) -> tuple[list, list]:
+    """A guild's day rows and pair rows since a day, shared for a short while.
+
+    The map, its influence layer, every town's drawing and the toolkit's locks
+    each read the whole window — about 20,000 rows over a network link, over a
+    second each time, four times per page. They are the same rows, so they are
+    read once and kept for ``dodoland_rows_cache_s``. **Read-only**: the lists
+    are shared between callers. The settings page reads its own, uncached, so a
+    tuning change previews at once.
+    """
+    ttl = float(params.get(guild_id, "dodoland_rows_cache_s"))
+    key = (int(guild_id), str(since or ""))
+    hit = _RECENT.get(key)
+    if hit and ttl > 0 and time.monotonic() - hit[0] < ttl:
+        return hit[1], hit[2]
+    rows = store.rows(guild_id, since=since)
+    pairs = store.pair_rows(guild_id, since=since)
+    if len(_RECENT) > 32:
+        _RECENT.clear()
+    _RECENT[key] = (time.monotonic(), rows, pairs)
+    return rows, pairs
 
 
 def guild_standings(store, params, guild_id: int, buildings: list[dict], *,

@@ -243,6 +243,47 @@ async def terrain_defs(request: web.Request):
         headers={"Cache-Control": "private, max-age=600"})
 
 
+# guild -> (version, webp bytes). One picture per guild: a few hundred KB.
+_PICTURES: dict[int, tuple[str, bytes]] = {}
+
+
+def picture_bytes(bot, guild_id: int) -> bytes:
+    """The world drawn as one shaded picture (``terrain_raster``), made once per
+    terrain version. Blocking: a few seconds for a continent, so callers run it
+    in an executor, and the cog makes it at startup so nobody waits for it."""
+    from helpers.dodoland import terrain_raster
+
+    world = bot.dodoland_terrain.world(guild_id)
+    _fresh(guild_id, world)
+    if not world["cells_w"]:
+        return b""
+    ver = version(guild_id)
+    hit = _PICTURES.get(int(guild_id))
+    if hit and hit[0] == ver:
+        return hit[1]
+    params = bot.dodoland_params
+    tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
+    data = terrain_raster.picture(
+        bot.dodoland_terrain, guild_id, _colours(bot, guild_id),
+        kinds=T.sync_tile_kinds(world["kinds"], tiles),
+        shading=float(params.get(guild_id, "dodoland_overview_shading")),
+        grain=float(params.get(guild_id, "dodoland_overview_grain")))
+    _PICTURES[int(guild_id)] = (ver, data)
+    return data
+
+
+async def terrain_picture(request: web.Request):
+    """``GET …/terrain/picture?v=`` — the overview the map shows zoomed out."""
+    import asyncio
+
+    bot, guild = request.app["bot"], request["guild"]
+    data = await asyncio.get_running_loop().run_in_executor(None, picture_bytes, bot, guild.id)
+    if not data:
+        return web.Response(status=404, text="No world yet.", content_type="text/plain")
+    return web.Response(body=data, content_type="image/webp",
+                        headers={"Cache-Control": "private, max-age=600"})
+
+
 async def terrain_overview(request: web.Request):
     """The whole continent in one coarse SVG."""
     import asyncio

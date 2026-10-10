@@ -22,6 +22,7 @@ conversation.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 
 import discord
@@ -379,6 +380,24 @@ class DodoLand(commands.Cog, name="dodoland"):
         for guild in self.bot.guilds:
             if self._on(guild.id):
                 await self._refresh_invites(guild)
+        if not getattr(self, "_warmed", False):
+            self._warmed = True
+            asyncio.get_running_loop().run_in_executor(None, self._warm_maps)
+
+    def _warm_maps(self) -> None:
+        """Draw every world's overview and work out its towns' areas before
+        anybody opens the map, so the first visitor after a restart does not
+        wait for them. Blocking; runs in an executor; never raises."""
+        from web.dodoland import influence_api, terrain_api
+
+        for guild in list(self.bot.guilds):
+            try:
+                if not self.bot.dodoland_terrain.world(guild.id)["cells_w"]:
+                    continue
+                terrain_api.picture_bytes(self.bot, guild.id)
+                influence_api.warm(self.bot, guild)
+            except Exception as error:  # noqa: BLE001 - warming is a courtesy, not a duty
+                self.bot.logger.error(f"DodoLand could not warm the map of {guild.id}: {error}")
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite) -> None:

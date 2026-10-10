@@ -50,6 +50,7 @@ disagree about it.
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Any, Iterable, Optional
 
 # Storage ceilings, not behaviour: they keep one upload from filling the
@@ -318,14 +319,62 @@ def unlocked_for(tiles: Iterable[dict], person: Optional[dict],
     return out
 
 
+# Writes made through the library drop its cache at once; this is how long a
+# listing trusts that no other process (an import tool) wrote meanwhile.
+TRUST_S = 30.0
+_WRITES = frozenset({"insert_one", "insert_many", "update_one", "update_many",
+                     "replace_one", "delete_one", "delete_many", "find_one_and_update",
+                     "find_one_and_delete", "bulk_write"})
+
+
+class _Watched:
+    """A collection that calls ``changed`` after every write, so a cache in
+    front of it cannot miss one — whichever method the write came from."""
+
+    def __init__(self, collection, changed) -> None:
+        self._collection, self._changed = collection, changed
+
+    def __getattr__(self, name):
+        attr = getattr(self._collection, name)
+        if name not in _WRITES:
+            return attr
+
+        def write(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            finally:
+                self._changed()
+        return write
+
+
 class TileLibrary:
-    """Every tile, global and per server. ``bot.dodoland_tiles``."""
+    """Every tile, global and per server. ``bot.dodoland_tiles``.
+
+    The listing is read on almost every map request and is ~1,400 rows across a
+    network link, so it is held in memory and dropped on any write (see
+    :class:`_Watched`) or after :data:`TRUST_S`.
+    """
 
     def __init__(self, tiles, categories, art) -> None:
-        self._tiles = tiles
-        self._cats = categories
+        self._tiles = _Watched(tiles, self._changed)
+        self._cats = _Watched(categories, self._changed)
         self._art = art
         self._indexed = False
+        self._listing: Optional[tuple[float, list[dict], list[dict]]] = None
+
+    def _changed(self) -> None:
+        self._listing = None
+
+    def _rows(self) -> tuple[list[dict], list[dict]]:
+        """``(categories, completed tile rows)`` from the cache or the database."""
+        hit = self._listing
+        if hit and time.monotonic() - hit[0] < TRUST_S:
+            return hit[1], hit[2]
+        cats = list(self._cats.find({}, {"_id": 0}))
+        cats.sort(key=lambda row: (int(row.get("order", 0)), str(row.get("name", ""))))
+        rows = [_complete(row) for row in self._tiles.find({}, {"_id": 0})]
+        self._listing = (time.monotonic(), cats, rows)
+        return cats, rows
 
     def _ensure_indexes(self) -> None:
         if self._indexed:
@@ -345,9 +394,7 @@ class TileLibrary:
     # ------------------------------------------------------------------ #
     def categories(self) -> list[dict]:
         self._ensure_indexes()
-        rows = list(self._cats.find({}, {"_id": 0}))
-        rows.sort(key=lambda row: (int(row.get("order", 0)), str(row.get("name", ""))))
-        return rows
+        return [dict(row) for row in self._rows()[0]]
 
     def _category(self, cat_id: str) -> Optional[dict]:
         return self._cats.find_one({"cat_id": str(cat_id)})
@@ -405,7 +452,9 @@ class TileLibrary:
         # Filtered here rather than in the query: rows written before tiles had
         # a scope have no guild_id at all, a query cannot match a missing field
         # as 0, and the whole library is a few hundred small rows.
-        rows = [_complete(row) for row in self._tiles.find({}, {"_id": 0})]
+        # Copies with their lists copied: the cached rows are shared.
+        rows = [{**row, "variants": list(row["variants"]), "access": list(row["access"]),
+                 "requires": dict(row["requires"])} for row in self._rows()[1]]
         if guild_id is not None:
             rows = [row for row in rows if row["guild_id"] in (GLOBAL, int(guild_id))]
         rows.sort(key=lambda row: (rank.get(row.get("cat_id") or "", len(rank)),

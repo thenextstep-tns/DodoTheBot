@@ -324,3 +324,27 @@ Given as one list to work through after a break; take them one at a time.
 Left: 1 (LoD / first impression), 2 (place town buildings; walls round the
 area), 3 (loading screen + load times), 9 (owned pieces + pointer/hand/pencil/
 brush toolbox), 11 (low-res tiles).
+
+### Backlog 3 + 1 — loading and the first impression
+
+* **Loading screen** (`#dlloading` in mappage): a card over the frame with three
+  steps — map image, ground picture, towns' areas — and a bar; lifts when all
+  three are in, or after 20 s regardless. Influence is requested as the script
+  starts, in parallel with the world.
+* **Load times.** Every map request was dominated by Atlas round trips (~60 ms
+  each). Now: `TerrainStore` caches the world row (5 s trust) and every chunk's
+  RLE (until `rev` moves; own writes update it in place); `TileLibrary` caches the
+  listing (dropped on any write via `_Watched`, 30 s trust);
+  `standing.recent_rows` shares one read of the activity window for
+  `dodoland_rows_cache_s` (60) across the map, influence, town art and toolkit
+  locks. The cog warms the overview picture and influence for every world at
+  `on_ready`. Measured warm: page 0.5 s (was 2.6), picture 0 s, influence 0.06 s
+  (was 2.7).
+* **The zoomed-out map is a picture** (`helpers/dodoland/terrain_raster.py`,
+  `GET …/terrain/picture?v=`, WebP ~650 KB at one pixel per cell, ~3 s to make,
+  cached per terrain version in `terrain_api._PICTURES`): water darkens with
+  depth, surf along shores, a darker coastline, relief on impassable land, broad
+  variation and grain. Params `dodoland_overview_shading` (1) and
+  `dodoland_overview_grain` (1). The browser scales it smoothly, so no
+  staircase coast below tile zoom; the tile detail fades in from 2.5 to 4.5 px
+  per cell instead of popping. The old SVG overview endpoint is kept but unused.

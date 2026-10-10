@@ -133,11 +133,12 @@ def _unlocked(bot, guild, user_id: int) -> set:
     buildings = bot.dodoland_buildings.buildings(guild.id)
     since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
+    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
     result = standing.guild_standings(
         bot.dodoland, bot.dodoland_params, guild.id, buildings,
         since=since, user_ids=[user_id],
-        rows=bot.dodoland.rows(guild.id, user_id=user_id, since=since),
-        pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
+        rows=[row for row in every if int(row.get("user_id", 0)) == int(user_id)],
+        pair_rows=pairs,
     )
     return tile_rules.unlocked_for(_player_tiles(bot, guild),
                                    result["people"].get(int(user_id)), buildings)

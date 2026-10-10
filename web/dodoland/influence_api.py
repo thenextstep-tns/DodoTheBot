@@ -69,8 +69,10 @@ def compute(bot, guild) -> dict:
     water_cost = max(0.1, float(params.get(guild.id, "dodoland_influence_water_cost")))
 
     since = store_module.days_back(int(params.get(guild.id, "dodoland_window_days")))
+    rows, pairs = standing.recent_rows(bot.dodoland, params, guild.id, since)
     result = standing.guild_standings(bot.dodoland, params, guild.id,
-                                      bot.dodoland_buildings.buildings(guild.id), since=since)
+                                      bot.dodoland_buildings.buildings(guild.id), since=since,
+                                      rows=rows, pair_rows=pairs)
     strongest = max((p["power"] for p in result["order"]), default=0)
 
     cxs, cys = bot.dodoland_terrain.chunk_counts(guild.id)
@@ -118,6 +120,12 @@ def _key(bot, guild) -> tuple:
             tuple(params.get(guild.id, k) for k in ("dodoland_influence_base", "dodoland_influence_top",
                                                     "dodoland_influence_clear_forest",
                                                     "dodoland_influence_water_cost")))
+
+
+def warm(bot, guild) -> None:
+    """Work the areas out ahead of the first visitor. Blocking."""
+    key = _key(bot, guild)
+    _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
 
 
 async def influence_layer(request: web.Request):

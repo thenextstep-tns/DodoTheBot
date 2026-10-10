@@ -173,8 +173,7 @@ def snapshot(bot, guild) -> dict:
     lit_since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
-    rows = bot.dodoland.rows(guild.id, since=since)
-    pairs = bot.dodoland.pair_rows(guild.id, since=since)
+    rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
     result = standing.guild_standings(bot.dodoland, bot.dodoland_params, guild.id,
                                       buildings, since=since, rows=rows,
                                       pair_rows=pairs)
