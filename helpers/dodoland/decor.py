@@ -46,10 +46,10 @@ SCOPES = (SCOPE_WORLD, SCOPE_TOWN)
 # Per-scope ceilings. The world's is generous because one person curates it;
 # a town's is mean on purpose — a plot with forty things on it is a junk pile,
 # and scarcity is what makes any of them worth placing.
-MAX_WORLD = 400
+MAX_WORLD = 6000
 MAX_PER_TOWN = 24
 
-MIN_SCALE, MAX_SCALE = 0.25, 6.0
+MIN_SCALE, MAX_SCALE = 0.25, 12.0
 
 
 def _clamp_scale(size: float, scale_range: tuple) -> float:
@@ -138,7 +138,8 @@ class DecorStore:
     def place(self, guild_id: int, *, scope: str, asset_id: str, x: Any, y: Any,
               owner_id: int = 0, scale: Any = 1.0, flip: bool = False,
               allowed: Optional[set] = None,
-              scale_range: tuple = (MIN_SCALE, MAX_SCALE)) -> dict:
+              scale_range: tuple = (MIN_SCALE, MAX_SCALE),
+              variant: str = "", source: str = "", layer: str = "objects") -> dict:
         """Put one thing down, and return the row that was written.
 
         ``scale_range`` is what the tile may be sized to — ``(1, 1)`` for a
@@ -183,9 +184,26 @@ class DecorStore:
             "y": _coord(y, "A position"),
             "scale": _clamp_scale(size, scale_range),
             "flip": bool(flip),
+            # Which of the tile's images this piece shows. A scattered range
+            # of mountains is many drawings of one tile, and each piece keeps
+            # its own; empty means the tile's first.
+            "variant": str(variant or ""),
+            # The map layer it belongs to, from its tile, so the map can draw,
+            # show, hide and lock layers separately.
+            "layer": str(layer or "objects"),
         }
+        if source:
+            # Where an imported piece came from, so an import can be re-run.
+            row["source"] = str(source)[:120]
         self._col.insert_one(dict(row))
         return row
+
+    def sources(self, guild_id: int) -> set:
+        """The ``source`` keys already placed on this guild's map."""
+        self._ensure_indexes()
+        return {row["source"] for row in self._col.find(
+            {"guild_id": int(guild_id), "scope": SCOPE_WORLD}, {"source": 1})
+            if row.get("source")}
 
     def move(self, guild_id: int, piece_id: str, *, x: Any = None, y: Any = None,
              scale: Any = None, flip: Any = None,

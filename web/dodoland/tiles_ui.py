@@ -143,7 +143,8 @@ def _fields(tile: dict, ctx: _Ctx, dis: str) -> str:
         for role, label in tile_rules.ROLES)
     return f"""
   <div class="tlrow"><span class="tlk">Layer</span>
-    <select class="tlf grow" data-f="layer"{dis}>{_options(tile_rules.LAYERS, tile['layer'])}</select></div>
+    <select class="tlf grow" data-f="layer"{dis}>{_options(tile_rules.LAYERS, tile['layer'])}</select>
+    <select class="tlf" data-f="placement" title="Painted ground or a placed feature (only the environment is painted)"{dis}>{_options(tile_rules.PLACEMENTS, tile['placement'])}</select></div>
   <div class="tlrow"><span class="tlk">Access</span>{access}</div>
   <div class="tlrow" title="What a player must have reached first. Admins are never locked."><span class="tlk">Requires</span>
     <select class="tlreqb grow"{dis}>{ctx.building_options(req['building'])}</select>
@@ -510,7 +511,7 @@ def _fields_from(body: dict) -> dict:
     """Turn the editor's field names into the library's."""
     raw = dict(body.get("fields") or {})
     out = {}
-    for key in ("name", "cat_id", "cell_px", "layer", "scale_min", "scale_max", "requires"):
+    for key in ("name", "cat_id", "cell_px", "layer", "placement", "scale_min", "scale_max", "requires"):
         if key in raw:
             out[key] = raw[key]
     for key in ("passable", "resizable"):

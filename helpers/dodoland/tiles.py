@@ -83,6 +83,14 @@ ROLES: tuple[tuple[str, str], ...] = (
     ("player", "Players"),
 )
 ROLE_KEYS = tuple(key for key, _ in ROLES)
+# How a tile goes onto its layer. The environment has both: ground that is
+# *painted* cell by cell (grass, sea) and features that are *placed* whole on
+# top of it (a mountain range, a forest, a pond). Every other layer is placed.
+PLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("paint", "Painted (ground)"),
+    ("place", "Placed (feature)"),
+)
+PLACEMENT_KEYS = tuple(key for key, _ in PLACEMENTS)
 
 # How many of the art's own pixels make one cell of the map. Pixel art comes
 # on a 16px or a 32px grid; drawn art is whatever it was drawn at.
@@ -93,10 +101,10 @@ DEFAULT_CELL = 16
 # The size range a resizable tile may be drawn at, as a multiple of its natural
 # size. The bounds are the decor store's, so the two can never disagree about
 # what "as large as it goes" means.
-SCALE_FLOOR, SCALE_CEILING = 0.25, 6.0
+SCALE_FLOOR, SCALE_CEILING = 0.25, 12.0
 DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX = 0.5, 3.0
 # The fields an editor may change in place, and nothing else.
-EDITABLE = ("name", "cat_id", "cell_px", "layer", "access", "requires",
+EDITABLE = ("name", "cat_id", "cell_px", "layer", "placement", "access", "requires",
             "passable", "resizable", "scale_min", "scale_max")
 
 
@@ -118,6 +126,20 @@ def clean_layer(value: Any) -> str:
     if layer not in LAYER_KEYS:
         raise TileError(f"Unknown layer {layer!r}.")
     return layer
+
+
+def clean_placement(value: Any, layer: str) -> str:
+    """Only the environment may be painted; everything else is placed."""
+    placement = str(value or "")
+    if placement not in PLACEMENT_KEYS:
+        raise TileError(f"Unknown placement {placement!r}.")
+    if placement == "paint" and layer != "environment":
+        raise TileError("Only environment tiles are painted; other layers are placed.")
+    return placement
+
+
+def default_placement(layer: str) -> str:
+    return "paint" if layer == "environment" else "place"
 
 
 def clean_access(values: Any) -> list[str]:
@@ -210,6 +232,9 @@ def _complete(row: dict) -> dict:
     if "access" not in row:
         row["access"] = [r for r in ROLE_KEYS if f"{row['layer']}:{r}" in legacy]
     row["access"] = [r for r in ROLE_KEYS if r in (row.get("access") or [])]
+    if row.get("placement") not in PLACEMENT_KEYS or (
+            row.get("placement") == "paint" and row["layer"] != "environment"):
+        row["placement"] = default_placement(row["layer"])
     try:
         row["requires"] = clean_requires(row.get("requires"))
     except TileError:
@@ -395,13 +420,16 @@ class TileLibrary:
             return row
         return None
 
-    def usable(self, guild_id: int, layer: str, role: str) -> list[dict]:
-        """What ``role`` may use on ``layer`` on this server, locked or not."""
+    def usable(self, guild_id: int, layer: str, role: str,
+               placement: Optional[str] = None) -> list[dict]:
+        """What ``role`` may use on ``layer`` on this server, locked or not;
+        ``placement`` narrows it to painted ground or placed features."""
         layer, role = clean_layer(layer), str(role)
         if role not in ROLE_KEYS:
             raise TileError(f"Unknown role {role!r}.")
         return [row for row in self.tiles(guild_id)
-                if row["layer"] == layer and role in row["access"]]
+                if row["layer"] == layer and role in row["access"]
+                and (placement is None or row["placement"] == placement)]
 
     def by_source(self, source: str) -> Optional[dict]:
         """The tile an import added under this key, if it is still there."""
@@ -439,6 +467,12 @@ class TileLibrary:
             out["cell_px"] = clean_cell(given["cell_px"])
         if "layer" in given:
             out["layer"] = clean_layer(given["layer"])
+        layer = out.get("layer", (current or {}).get("layer", DEFAULT_LAYER))
+        if "placement" in given:
+            out["placement"] = clean_placement(given["placement"], layer)
+        elif "layer" in given and layer != "environment":
+            # Leaving the environment means being placed: nothing else is painted.
+            out["placement"] = "place"
         if "access" in given:
             out["access"] = clean_access(given["access"])
         if "requires" in given:
@@ -457,7 +491,7 @@ class TileLibrary:
         return out
 
     def add_tile(self, *, name: Any, cat_id: Any, data: bytes, content_type: str,
-                 guild_id: int = GLOBAL, layer: Any = DEFAULT_LAYER,
+                 guild_id: int = GLOBAL, layer: Any = DEFAULT_LAYER, placement: Any = None,
                  access: Any = ("admin",), requires: Any = None,
                  passable: bool = True, resizable: bool = False,
                  scale_min: Any = DEFAULT_SCALE_MIN, scale_max: Any = DEFAULT_SCALE_MAX,
@@ -471,7 +505,9 @@ class TileLibrary:
         self._ensure_indexes()
         if self._tiles.count_documents({}) >= MAX_TILES:
             raise TileError(f"The library holds at most {MAX_TILES} tiles.")
-        props = self._props({"name": name, "layer": layer, "access": list(access or []),
+        props = self._props({"name": name, "layer": layer,
+                             "placement": placement or default_placement(str(layer)),
+                             "access": list(access or []),
                              "requires": requires, "passable": passable,
                              "resizable": resizable, "scale_min": scale_min,
                              "scale_max": scale_max, "cell_px": cell_px})

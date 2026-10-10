@@ -186,4 +186,16 @@ assert old["layer"] == "environment" and old["access"] == ["admin"], old
 assert old["passable"] and not old["resizable"] and old["guild_id"] == 0 and "uses" not in old
 print("legacy          older rows read with defaults; uses become layer and access")
 
+# Painted or placed: the environment has both, every other layer is placed.
+g = lib.add_tile(name="Ground", cat_id="", data=b"g", content_type=PNG, layer="environment")
+assert lib.get(g["tile_id"])["placement"] == "paint", "environment ground defaults to painted"
+lib.update_tile(g["tile_id"], placement="place")
+assert lib.get(g["tile_id"])["placement"] == "place"
+assert "Only environment" in refused(lib.update_tile, own["tile_id"], placement="paint")
+lib.update_tile(g["tile_id"], placement="paint")
+lib.update_tile(g["tile_id"], layer="objects")
+assert lib.get(g["tile_id"])["placement"] == "place", "leaving the environment must mean placed"
+assert "Ground" not in [t["name"] for t in lib.usable(0, "environment", "admin", placement="paint")]
+print("placement       ground is painted, features and every other layer are placed")
+
 print("PASS")

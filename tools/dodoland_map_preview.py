@@ -126,6 +126,8 @@ class Bot:
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
         self.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
+        from helpers.dodoland.terrain import TerrainStore
+        self.dodoland_terrain = TerrainStore(FakeCollection(), FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
         self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()

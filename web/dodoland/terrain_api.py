@@ -152,7 +152,8 @@ def _env_tiles(bot, guild, request) -> list[dict]:
     the bot owner, those with admin access for a server admin."""
     from helpers import panel_access
 
-    tiles = [t for t in bot.dodoland_tiles.tiles(guild.id) if t["layer"] == "environment"]
+    tiles = [t for t in bot.dodoland_tiles.tiles(guild.id)
+             if t["layer"] == "environment" and t["placement"] == "paint"]
     if request.get("scope") != panel_access.SCOPE_OWNER:
         tiles = [t for t in tiles if "admin" in t["access"]]
     return tiles

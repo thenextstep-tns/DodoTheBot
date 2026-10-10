@@ -27,8 +27,13 @@ async def asset_image(request: web.Request):
     bot = request.app["bot"]
     guild = request["guild"]
     tile_id = request.match_info.get("aid") or ""
-    row = (bot.dodoland_tiles.first_art(tile_id)
-           if bot.dodoland_tiles.visible(tile_id, guild.id) else None)
+    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
+    want = request.query.get("v") or ""
+    # ``?v=`` asks for one of the tile's own variants, and only one of its own.
+    row = None
+    if tile is not None:
+        row = (bot.dodoland_tiles.art(want) if want in tile["variants"]
+               else bot.dodoland_tiles.first_art(tile_id))
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = row.get("data")

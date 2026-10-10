@@ -25,6 +25,7 @@ its bonfire with it.
 from __future__ import annotations
 
 import json
+import random
 
 from aiohttp import web
 
@@ -62,7 +63,7 @@ def _admin_tile(bot, guild, request, tile_id) -> dict:
     tile = bot.dodoland_tiles.visible(tile_id, guild.id)
     if tile is None:
         raise decor_rules.DecorError("That tile is not available on this server.")
-    if tile["layer"] == "environment":
+    if tile["placement"] == "paint":
         raise decor_rules.DecorError("Ground is painted with the terrain brush, not placed.")
     if request.get("scope") != panel_access.SCOPE_OWNER and "admin" not in tile["access"]:
         raise decor_rules.DecorError("Server admins do not have access to that tile.")
@@ -105,7 +106,11 @@ async def api_world_decor(request: web.Request):
             guild.id, scope=decor_rules.SCOPE_WORLD,
             asset_id=tile["tile_id"], x=body.get("x"), y=body.get("y"),
             scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
-            scale_range=tile_rules.scale_range(tile))
+            scale_range=tile_rules.scale_range(tile),
+            # A tile drawn several ways lands as one of them at random, so a
+            # row of trees placed one by one is not one tree repeated.
+            variant=random.choice(tile["variants"]) if tile["variants"] else "",
+            layer=tile["layer"])
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")
         return web.json_response({"ok": True, "piece": piece})
@@ -181,7 +186,7 @@ async def api_town_decor(request: web.Request):
             guild.id, scope=decor_rules.SCOPE_TOWN, owner_id=uid,
             asset_id=body.get("asset_id"), x=body.get("x"), y=body.get("y"),
             scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
-            allowed=allowed,
+            allowed=allowed, layer="objects",
             scale_range=tile_rules.scale_range(
                 bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)))
         # The map reads decor out of the shared snapshot, so a piece nobody can

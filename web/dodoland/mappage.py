@@ -169,19 +169,34 @@ def _collect(bot, guild) -> dict:
                       for d in town_decor.get(uid, ())],
         })
     cats = {c["cat_id"]: c["name"] for c in bot.dodoland_tiles.categories()}
+    # What admins may place: any tile that is placed rather than painted, on
+    # whatever layer it belongs to. Painted ground lives in the terrain drawer.
+    placeable = [t for t in bot.dodoland_tiles.tiles(guild.id)
+                 if t["placement"] == "place" and "admin" in t["access"]]
+    dims = bot.dodoland_tiles.art_sizes(v for t in placeable for v in t["variants"])
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
-            "world": [{"id": d["piece_id"], "a": d["asset_id"],
+            "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
+            "world": [{"id": d["piece_id"], "a": d["asset_id"], "v": d.get("variant") or "",
+                       "l": d.get("layer") or "objects",
                        "x": float(d.get("x", 50)), "y": float(d.get("y", 50)),
                        "s": float(d.get("scale", 1.0)),
                        "f": bool(d.get("flip"))} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
             "assets": [{"id": t["tile_id"], "name": t["name"], "cat": cats.get(t["cat_id"], ""),
+                        "layer": t["layer"],
+                        # Each variant's own width in map cells: drawings in one
+                        # tile are not all the same size.
+                        "vw": {v: round(dims.get(v, (0, 0))[0] / t["cell_px"], 3)
+                               for v in t["variants"]},
+                        # Natural width in map cells: the art's own width over
+                        # its px-per-cell. A piece is drawn at this times its size.
+                        "wc": round(dims.get(t["variants"][0], (0, 0))[0] / t["cell_px"], 3)
+                        if t["variants"] else 0,
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
-                       for t in bot.dodoland_tiles.tiles(guild.id)
-                       if t["layer"] != "environment" and "admin" in t["access"]]}
+                       for t in placeable]}
 
 
 async def map_page(request: web.Request):
@@ -232,9 +247,17 @@ async def map_page(request: web.Request):
     <b id="dlwaiting">{len(unplaced)}</b> waiting ·
     {len(data['people'])} with standing</span>
   <span class="dlspacer"></span>
+  <button id="dllayers" class="dlghost">▤ Layers</button>
   <button id="dlterr" class="dlghost">🗺 Terrain</button>
   <button id="dlkit" class="dlghost">🧰 Toolkit</button>
   <button id="dltoggle" class="dlghost">Towns list</button>
+</div>
+
+<div class="dllayerpanel" id="dllayerpanel" hidden>
+  <div class="dlhrow"><b>Layers</b><span class="muted">show · edit</span></div>
+  <div id="dllayerrows"></div>
+  <p class="dlkithint">Only the layer you edit can be picked up, and the toolkit
+  offers that layer's tiles. Ground is painted in the Terrain drawer.</p>
 </div>
 
 <div class="dlframe" id="dlframe">
@@ -282,6 +305,7 @@ async def map_page(request: web.Request):
                                  "gid": str(guild.id), "me": viewer,
                                  "world": data["world"],
                                  "assets": data["assets"],
+                                 "cells_w": data["cells_w"],
                                  "decorsize": decor_size})};</script>
 <script>{_SCRIPT}</script>
 </body></html>"""
@@ -471,6 +495,36 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Town decor belongs to a town and sits under its buildings, so a cart parked
    outside the tavern is outside the tavern rather than on its roof. */
 .dlpiece.town { z-index: 3; }
+/* The layers, bottom to top: painted ground (the terrain svg, z 1), the
+   environment's placed features, roads, map objects, buildings and towns. */
+.dlpiece.L-environment { z-index: 2; }
+.dlpiece.L-objects { z-index: 4; }
+.dlpiece.L-buildings { z-index: 6; }
+.dlworld .dltown { z-index: 6; }
+.dlworld.hide-ground .dlterrain,
+.dlworld.hide-environment .dlpiece.L-environment,
+.dlworld.hide-objects .dlpiece.L-objects,
+.dlworld.hide-buildings .dlpiece.L-buildings,
+.dlworld.hide-buildings .dltown { display: none; }
+/* Only the layer being edited can be picked up. */
+.dlworld[data-edit="environment"] .dlpiece:not(.L-environment),
+.dlworld[data-edit="objects"] .dlpiece:not(.L-objects),
+.dlworld[data-edit="buildings"] .dlpiece:not(.L-buildings) { pointer-events: none; }
+.dllayerpanel { position: fixed; top: 60px; right: 16px; width: 290px; z-index: 28;
+  background: var(--paper); border: 1px solid var(--edge); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.3); padding: 10px 0 2px; }
+.dllayerpanel[hidden] { display: none; }
+.dlhrow { display: flex; justify-content: space-between; align-items: center;
+  padding: 0 14px 8px; font-size: 13px; }
+.dllayer { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+  padding: 7px 14px; border-top: 1px solid var(--edge); font-size: 13px; }
+.dllayer.editing { background: var(--deep); box-shadow: inset 3px 0 0 var(--lantern); }
+.dllayer small { display: block; color: var(--soft); font-size: 11px; }
+.dllayer button { background: none; border: 1px solid var(--edge); border-radius: 6px;
+  color: inherit; font: inherit; font-size: 12px; padding: 2px 7px; cursor: pointer; }
+.dllayer button.off { opacity: .45; }
+.dllayer button.on { border-color: var(--lantern); color: var(--lantern); }
+.dllayer button:disabled { visibility: hidden; }
 
 .dlkitdrawer { left: 0; right: auto; border-left: 0;
   border-right: 1px solid var(--edge); transform: translateX(-100%);
@@ -1034,19 +1088,24 @@ _SCRIPT = r"""
   // Hundreds of tiles in one grid is a wall, so the kit shows one category at
   // a time; which one survives a reload as a per-viewer convenience.
   var kitCat = document.getElementById('dlkitcat');
-  var cats = [];
-  D.assets.forEach(function (a) { if (cats.indexOf(a.cat) < 0) cats.push(a.cat); });
-  if (kitCat) {
+  function editLayer() { return world.dataset.edit || 'objects'; }
+  function kitAssets() {
+    return D.assets.filter(function (a) { return a.layer === editLayer(); });
+  }
+  function fillKitCats() {
+    if (!kitCat) return;
+    var cats = [];
+    kitAssets().forEach(function (a) { if (cats.indexOf(a.cat) < 0) cats.push(a.cat); });
     kitCat.innerHTML = cats.map(function (c) {
       return '<option>' + escapeHtml(c || 'Uncategorised') + '</option>';
     }).join('');
-    try { var keptCat = window.localStorage.getItem('dl-kit-cat');
+    try { var keptCat = window.localStorage.getItem('dl-kit-cat-' + editLayer());
           if (keptCat && cats.indexOf(keptCat) >= 0) kitCat.value = keptCat; } catch (e) {}
-    kitCat.onchange = function () {
-      try { window.localStorage.setItem('dl-kit-cat', kitCat.value); } catch (e) {}
-      renderKit();
-    };
   }
+  if (kitCat) kitCat.onchange = function () {
+    try { window.localStorage.setItem('dl-kit-cat-' + editLayer(), kitCat.value); } catch (e) {}
+    renderKit();
+  };
   function assetById(id) {
     for (var i = 0; i < D.assets.length; i++) if (D.assets[i].id === id) return D.assets[i];
     return null;
@@ -1064,13 +1123,13 @@ _SCRIPT = r"""
   }
 
   function renderKit() {
-    if (!D.assets.length) {
-      kitGrid.innerHTML = '<p class="dlkitempty">Nothing in the tile library that admins ' +
+    if (!kitAssets().length) {
+      kitGrid.innerHTML = '<p class="dlkitempty">Nothing on this layer that admins ' +
         'can place yet.</p>';
       return;
     }
     var shown = kitCat ? kitCat.value : null;
-    kitGrid.innerHTML = D.assets.filter(function (a) {
+    kitGrid.innerHTML = kitAssets().filter(function (a) {
       return shown === null || (a.cat || 'Uncategorised') === shown;
     }).map(function (a) {
       return '<button class="dlkititem' +
@@ -1096,18 +1155,26 @@ _SCRIPT = r"""
     // dividing by 1 then made every piece twenty-eight times the width of the
     // world — so a piece drawn before the image arrives is redrawn after it.
     if (!nat.w) return null;
+    // A tile with a known natural size is drawn at it: its own width in map
+    // cells, times the piece's size. That is what px-per-cell is for — a 32px
+    // pack's tree and a 16px pack's tree come out the same size. Anything else
+    // falls back to the old fixed size.
+    var a = typeof assetById === 'function' ? assetById(piece.a) : null;
+    var wc = a ? ((a.vw && a.vw[piece.v]) || a.wc) : 0;
+    if (wc && D.cells_w) return (wc * piece.s / D.cells_w * 100) + '%';
     return (D.decorsize * piece.s / nat.w * 100) + '%';
   }
 
   function drawPiece(piece) {
     var el = document.createElement('div');
-    el.className = 'dlpiece' + (piece.f ? ' flip' : '');
+    el.className = 'dlpiece L-' + (piece.l || 'objects') + (piece.f ? ' flip' : '');
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
-    el.innerHTML = '<img alt="" src="' + assetUrl(piece.a) + '">';
+    el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
+      (piece.v ? '?v=' + piece.v : '') + '">';
 
     // Dragging, and clicking, from one gesture. The frame owns panning and
     // takes pointer capture as soon as a drag starts, so a piece that only
@@ -1157,6 +1224,56 @@ _SCRIPT = r"""
     pieces[piece.id] = el;
     return el;
   }
+
+  // --- layers ------------------------------------------------------------ //
+  var LAYERS = [
+    {key: 'ground', label: 'Ground', sub: 'layer 1 · painted', edit: false},
+    {key: 'environment', label: 'Environment features', sub: 'layer 1 · placed', edit: true},
+    {key: 'roads', label: 'Roads', sub: 'layer 2 · drawn by the bot', edit: false},
+    {key: 'objects', label: 'Map objects', sub: 'layer 3', edit: true},
+    {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4', edit: true}
+  ];
+  var layerState = {hidden: [], edit: 'objects'};
+  try { layerState = JSON.parse(window.localStorage.getItem('dl-layers')) || layerState; } catch (e) {}
+  function applyLayers() {
+    LAYERS.forEach(function (l) {
+      world.classList.toggle('hide-' + l.key, layerState.hidden.indexOf(l.key) >= 0);
+    });
+    world.dataset.edit = layerState.edit;
+    try { window.localStorage.setItem('dl-layers', JSON.stringify(layerState)); } catch (e) {}
+    var rows = document.getElementById('dllayerrows');
+    if (rows) {
+      rows.innerHTML = LAYERS.map(function (l) {
+        var hidden = layerState.hidden.indexOf(l.key) >= 0;
+        var n = D.world.filter(function (p) { return (p.l || 'objects') === l.key; }).length;
+        return '<div class="dllayer' + (layerState.edit === l.key ? ' editing' : '') + '">' +
+          '<span>' + l.label + (n ? ' <span class="muted">· ' + n + '</span>' : '') +
+          '<small>' + l.sub + '</small></span>' +
+          '<button data-eye="' + l.key + '" class="' + (hidden ? 'off' : '') + '" title="Show or hide">' +
+          (hidden ? 'hidden' : 'shown') + '</button>' +
+          '<button data-edit="' + l.key + '" class="' + (layerState.edit === l.key ? 'on' : '') + '"' +
+          (l.edit ? '' : ' disabled') + '>edit</button></div>';
+      }).join('');
+      rows.querySelectorAll('[data-eye]').forEach(function (b) {
+        b.onclick = function () {
+          var k = b.dataset.eye, at = layerState.hidden.indexOf(k);
+          if (at >= 0) layerState.hidden.splice(at, 1); else layerState.hidden.push(k);
+          applyLayers();
+        };
+      });
+      rows.querySelectorAll('[data-edit]').forEach(function (b) {
+        b.onclick = function () {
+          layerState.edit = b.dataset.edit;
+          armedAsset = null; heldPiece = null;
+          applyLayers(); fillKitCats(); renderKit();
+        };
+      });
+    }
+  }
+  document.getElementById('dllayers').onclick = function () {
+    var panel = document.getElementById('dllayerpanel');
+    panel.hidden = !panel.hidden;
+  };
 
   function redrawDecor() {
     world.querySelectorAll('.dlpiece').forEach(function (n) { n.remove(); });
@@ -1213,7 +1330,8 @@ _SCRIPT = r"""
     decorPost({action: 'place', asset_id: armedAsset, x: point.x, y: point.y,
                scale: parseFloat(kitScale.value) || 1},
       function (res) {
-        D.world.push({id: res.piece.piece_id, a: res.piece.asset_id,
+        D.world.push({id: res.piece.piece_id, a: res.piece.asset_id, v: res.piece.variant || '',
+                      l: res.piece.layer || 'objects',
                       x: res.piece.x, y: res.piece.y, s: res.piece.scale,
                       f: !!res.piece.flip});
         redrawDecor();
@@ -1264,6 +1382,8 @@ _SCRIPT = r"""
     frame.classList.remove('placing');
     renderKit();
   };
+  applyLayers();
+  fillKitCats();
   renderKit();
 
 """ + terrain_ui.SCRIPT + r"""
