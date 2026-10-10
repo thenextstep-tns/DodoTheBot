@@ -202,6 +202,10 @@ def _collect(bot, guild) -> dict:
                         # its px-per-cell. A piece is drawn at this times its size.
                         "wc": round(dims.get(t["variants"][0], (0, 0))[0] / t["cell_px"] / shrink, 3)
                         if t["variants"] else 0,
+                        # Pixel art (the fixed-size packs) is drawn with hard
+                        # pixels: a 6-pixel sprouts sprite smoothed up to a
+                        # thumbnail was a smudge, which read as "low resolution".
+                        "px": not t["resizable"],
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
                        for t in placeable]}
@@ -596,6 +600,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   color: inherit; min-width: 0; transition: border-color .12s, background .12s; }
 .dlkititem:hover { border-color: var(--edge); background: var(--paper); }
 .dlkititem img { width: 100%; height: 52px; object-fit: contain; }
+/* Pixel art keeps its pixels, in the kit and on the map. */
+.dlkititem.px img, .dlpiece.px img { image-rendering: pixelated; }
 .dlkititem span { font-size: 10px; text-align: center; line-height: 1.2; color: var(--soft);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 /* Selected: a thin ring, not a slab — the picture is the point. */
@@ -1239,7 +1245,7 @@ _SCRIPT = r"""
     kitGrid.innerHTML = kitAssets().filter(function (a) {
       return shown === null || (a.cat || 'Uncategorised') === shown;
     }).map(function (a) {
-      return '<button class="dlkititem' +
+      return '<button class="dlkititem' + (a.px ? ' px' : '') +
         (armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
         '<img alt="" loading="lazy" src="' + assetUrl(a.id) + '">' +
         '<span>' + escapeHtml(a.name) + '</span></button>';
@@ -1274,7 +1280,9 @@ _SCRIPT = r"""
 
   function drawPiece(piece) {
     var el = document.createElement('div');
-    el.className = 'dlpiece L-' + (piece.l || 'objects') + (piece.f ? ' flip' : '');
+    var meta = typeof assetById === 'function' ? assetById(piece.a) : null;
+    el.className = 'dlpiece L-' + (piece.l || 'objects') + (piece.f ? ' flip' : '') +
+      (meta && meta.px ? ' px' : '');
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
@@ -1368,6 +1376,8 @@ _SCRIPT = r"""
     var probe = {a: armedAsset, v: '', s: parseFloat(kitScale.value) || 1};
     var w = pieceWidth(probe);
     if (w) ghost.style.width = w;
+    var meta = assetById(armedAsset);
+    ghost.classList.toggle('px', !!(meta && meta.px));
     var src = assetUrl(armedAsset);
     var img = ghost.firstChild;
     if (img.getAttribute('src') !== src) img.setAttribute('src', src);

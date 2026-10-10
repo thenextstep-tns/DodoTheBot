@@ -348,3 +348,13 @@ brush toolbox), 11 (low-res tiles).
   `dodoland_overview_grain` (1). The browser scales it smoothly, so no
   staircase coast below tile zoom; the tile detail fades in from 2.5 to 4.5 px
   per cell instead of popping. The old SVG overview endpoint is kept but unused.
+
+### Backlog 11 — low-resolution tiles
+
+Nothing is upscaled on the map itself (at full zoom a 16 px/cell tile is drawn
+at ~0.6x its pixels, Miro art at ~0.2x). The smudge was the **toolkit
+thumbnail**: a 6x7 sprite smoothed up to 52 px. Pixel art (every
+non-resizable tile) now renders with `image-rendering: pixelated` in the admin
+kit, the player kit, the placement ghost and placed pieces (`px` flag in the
+toolkit entries). The 30 sprites of 10 px or less (flowers, pebbles, mushrooms,
+ivy) are genuine small details of 16 px packs, not broken cuts, so they stay.

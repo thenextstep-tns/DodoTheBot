@@ -787,6 +787,7 @@ textarea { min-height: 84px; resize: vertical; }
   flex-direction: column; align-items: center; gap: 4px; font: inherit;
   color: inherit; }
 .kititem img { width: 100%; height: 44px; object-fit: contain; }
+.kititem.px img { image-rendering: pixelated; }
 .kititem span { font-size: 10px; text-align: center; line-height: 1.2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 100%; }
@@ -912,7 +913,7 @@ _SCRIPT = r"""
     kitGrid.innerHTML = kit.assets.map(function (a) {
       // Locked things are shown rather than hidden: knowing a thing exists is
       // the reason to want the tier that unlocks it.
-      return '<button class="kititem' + (a.locked ? ' locked' : '') +
+      return '<button class="kititem' + (a.locked ? ' locked' : '') + (a.resizable ? '' : ' px') +
         (armed === a.asset_id ? ' armed' : '') + '" data-a="' + a.asset_id +
         '"' + (a.locked ? ' disabled' : '') + '>' +
         '<img alt="" loading="lazy" src="' + assetUrl(a.asset_id) + '">' +
