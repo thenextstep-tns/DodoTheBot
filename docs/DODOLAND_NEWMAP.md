@@ -260,3 +260,38 @@ arrives (about 5-7 s on a cold process: page 2.6 s, then world, overview and
 influence 1.5-2.7 s each) instead of being hidden as soon as the world loads,
 which left a black frame. Checked against real data through a read-only GET
 harness (scratchpad `harness/serve.py`, port 8790, stopped afterwards).
+
+## Backlog from Nik, 10 Oct 2026 (evening) — not started
+
+Given as one list to work through after a break; take them one at a time.
+
+1. **LoD / first impression.** Zoomed out, the blocky overview (average colours,
+   step 8) looks bad and is the first thing a player sees. It should look pretty
+   immediately — smoothing between levels of detail, nicer overview, optimise.
+2. **Town buildings can't be placed** from the town's toolkit (the generated
+   building tiles). Walls in particular should be built *around the town's
+   influence area* rather than stamped.
+3. **A loading screen** until everything is in (page ~2.6 s, then world/overview/
+   influence ~1.5-2.7 s each on a cold process), and cut those times where possible.
+4. **Click away from a town → its influence drawing goes.** Influence shows for
+   the selected town only.
+5. **Opening Toolkit or Terrain closes the other drawers** and deselects their
+   armed tools.
+6. **Some tiles flicker squished/normal on hover** over terrain (probably the
+   non-square ones — the placement ghost's width/height, likely `pieceWidth`
+   without the variant's own aspect, alternating with the real image).
+7. **Objects place as if they had variations.** Only terrain tiles have variants;
+   everything else is a stamp: one image, always the same (decor_api picks a
+   random variant on place — stop that for non-paint tiles).
+8. **Placing a tile in a fresh town sometimes selects the influence area**
+   instead of placing/selecting (the influence overlay is catching clicks).
+9. **Placed toolkit items must be selectable and owned**: stored with who placed
+   them and where; the user can see, select and delete their own. Needs a small
+   toolbox: **pointer** (select), **hand** (pan, or drag a selected piece),
+   **pencil** (single-tile placement), **brush** with patterns — each with its
+   own mechanic.
+10. **Shallow water counts as influence** (grow cost for the light coastal water
+    should let the area cover it; deep water still stops it).
+11. **Low-resolution tiles**: some tiles are badly blurry (e.g. Olive grass tuft,
+    Summer sprouts, Tiny flowers, Moss — upscaled tiny sprites). Fix (redraw at
+    proper size / nearest-neighbour at an integer scale) or remove.
