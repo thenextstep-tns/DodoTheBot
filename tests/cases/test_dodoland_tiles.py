@@ -117,4 +117,47 @@ assert [c["order"] for c in lib.categories()] == [0, 1]
 assert lib.get(loose["tile_id"]) is not None
 print("removal         a tile takes its images; only an empty category goes")
 
+# --------------------------------------------------------------------------- #
+#  Who may use a tile, and where
+# --------------------------------------------------------------------------- #
+# Six uses: three layers a person can place on, two user types. The owner is
+# not a role, and the roads layer is the bot's.
+assert len(T.USES) == 6 and "objects:player" in T.USES
+assert not any(u.startswith("roads") or u.endswith(":owner") for u in T.USES)
+
+tree = lib.add_tile(name="Oak", cat_id=water["cat_id"], data=b"t", content_type=PNG,
+                    uses=["objects:player", "objects:admin"], cell_px=32,
+                    pack="Summer Plains", source="sp:Oak")
+# Stored in canonical order whatever order it was given in.
+assert lib.get(tree["tile_id"])["uses"] == ["objects:admin", "objects:player"]
+assert lib.get(tree["tile_id"])["cell_px"] == 32
+assert lib.by_source("sp:Oak")["tile_id"] == tree["tile_id"]
+assert lib.by_source("sp:nothing") is None and lib.by_source("") is None
+assert [t["name"] for t in lib.usable("objects", "player")] == ["Oak"]
+assert lib.usable("environment", "admin") == []
+
+# A typo in a use is refused, never silently dropped: dropping it would remove
+# a permission without anybody noticing.
+assert "Unknown" in refused(lib.set_uses, tree["tile_id"], ["objects:owner"])
+assert lib.get(tree["tile_id"])["uses"] == ["objects:admin", "objects:player"]
+assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=24)
+lib.update_tile(tree["tile_id"], cell_px=16)
+assert lib.get(tree["tile_id"])["cell_px"] == 16
+
+# A whole category at once.
+assert lib.set_category_uses(water["cat_id"], ["environment:admin"]) == 2
+assert all(t["uses"] == ["environment:admin"] for c, ts in lib.grouped()
+           if c["cat_id"] == water["cat_id"] for t in ts)
+lib.set_uses(tree["tile_id"], [])
+assert lib.get(tree["tile_id"])["uses"] == []
+print("uses            per tile, per category, canonical, typos refused, grid 16/32")
+
+# A row stored before these fields existed reads with safe defaults rather
+# than as whatever None turns into.
+lib._tiles.insert_one({"tile_id": "old", "name": "Old", "cat_id": "", "order": 9,
+                       "variants": ["v"]})
+old = lib.get("old")
+assert old["uses"] == [] and old["cell_px"] == T.DEFAULT_CELL and old["pack"] == ""
+print("uses            older rows read with defaults")
+
 print("PASS")

@@ -57,5 +57,38 @@ The same editor is embedded as a **Tile library** section of every server's
 DodoLand page, shown to the bot owner only (`test_dodoland_page` asserts a
 server admin never sees it).
 
-Next: step 2 — bind tiles to ground kinds and draw them on the map as SVG
-patterns (the same mechanism the motifs use), the brush picking a tile.
+**Step 1b — the packs are in (10 Oct 2026).** `tools/dodoland_import_tiles.py`
+reads the zips in `item_imgs/tilesets` (gitignored) directly and imported
+**196 tiles / 567 images in 20 categories** into the live library. It is a
+hand-checked manifest, not a heuristic, and it is re-runnable: each tile has a
+`source` key and an existing one is left alone, so the owner's later edits
+survive. `--preview out.png` renders everything it would write and writes nothing.
+
+* **Ground** = cells that are one terrain on every side (Tiled wangsets for
+  Fan-tasy; for the rest, every border pixel must be a colour from the tile's
+  middle — a stray edge pixel repeats into a visible grid across a field).
+* **Objects** = islands of opaque pixels cut by their own pixels, not their
+  box: packed sheets overlap boxes and a box crop drags the neighbour in.
+* Near-identical pieces (tufts, pebbles, ivy) are **one tile with variants**.
+
+Each tile now carries:
+* `uses` — `layer:role` pairs, layers `environment` / `objects` / `buildings`,
+  roles `admin` / `player`. The owner is not a role (can use everything); roads
+  are the bot's and not a use. Typos are refused, not dropped. Defaults from the
+  import: ground → environment for admins; objects → map objects for admins and
+  players; house parts → admins only. Editable per tile and per category.
+* `cell_px` — 16 or 32, the grid the art was drawn on. **Pixel Art Top Down,
+  FL Houses and the dog items are 32px; Fan-tasy, Summer Plains and Valley Ruin
+  are 16px.** The renderer must scale by this or a 32px pack's tree is drawn
+  twice the size of a 16px one.
+* `pack` — for credits. **Summer Plains (schwarnhild) asks to be credited and
+  forbids redistributing the files**; FL Houses forbids reselling them. Using
+  them in the bot is fine; do not commit the art or publish the packs.
+
+Left out, deliberately: animated cats, dogs, slimes and characters (walkers,
+step 7), animation strips, shadows, house interiors, autotile edges, cliffs, the
+Fan-tasy building atlas (transitions are a later step).
+
+Next: step 2 — draw environment tiles on the map as SVG patterns (the same
+mechanism the motifs use), scaled by `cell_px`, the brush picking a tile from
+`usable("environment", role)`.

@@ -39,9 +39,36 @@ from typing import Any, Optional
 # Storage ceilings, not behaviour: they keep one upload from filling the
 # database. The same kind of limit ``assets.py`` keeps.
 MAX_CATEGORIES = 40
-MAX_TILES = 400
-MAX_VARIANTS = 8
+MAX_TILES = 1000
+# Sixteen, because a tuft of grass or a scatter of pebbles is one thing drawn
+# a dozen ways, and those are exactly what variants are for.
+MAX_VARIANTS = 16
 MAX_NAME = 48
+
+# --------------------------------------------------------------------------- #
+#  Who may use a tile, and where
+# --------------------------------------------------------------------------- #
+# The layers of the map a person can put a tile on. Layer 2, the roads, is not
+# here: the bot draws those, nobody places them.
+LAYERS: tuple[tuple[str, str], ...] = (
+    ("environment", "Environment (layer 1)"),
+    ("objects", "Map objects (layer 3)"),
+    ("buildings", "Buildings (layer 4)"),
+)
+# The bot owner is not a role here: they can use every tile everywhere.
+ROLES: tuple[tuple[str, str], ...] = (
+    ("admin", "Server admins"),
+    ("player", "Players"),
+)
+# A use is "layer:role", e.g. "objects:player". A flat list of these is simple
+# to query ("which tiles may a player put on layer 3?") and to store.
+USES: tuple[str, ...] = tuple(f"{layer}:{role}" for layer, _ in LAYERS for role, _ in ROLES)
+
+# Pixel art comes on a 16px or a 32px grid. A 32px tile covers the same ground
+# as a 16px one at twice the detail, so the map has to know which it is or one
+# pack's trees come out twice the size of another's.
+CELL_SIZES = (16, 32)
+DEFAULT_CELL = 16
 # A tile is small and repeated. This is generous for a 64px pixel tile and
 # mean for a photograph, which is the right way round.
 MAX_BYTES = 256 * 1024
@@ -64,6 +91,39 @@ def _clean_name(value: Any, what: str = "A tile") -> str:
     return name
 
 
+def clean_uses(values: Any) -> list[str]:
+    """Known uses only, in the canonical order. Unknown ones are refused, not
+    dropped: a typo that silently removed a permission would be invisible."""
+    given = [str(v) for v in (values or [])]
+    unknown = [v for v in given if v not in USES]
+    if unknown:
+        raise TileError(f"Unknown use(s): {', '.join(unknown)}.")
+    return [use for use in USES if use in given]
+
+
+def clean_cell(value: Any) -> int:
+    try:
+        cell = int(value)
+    except (TypeError, ValueError):
+        raise TileError("The grid size must be a number.") from None
+    if cell not in CELL_SIZES:
+        raise TileError(f"The grid size must be one of {', '.join(map(str, CELL_SIZES))}px.")
+    return cell
+
+
+def _size(data: bytes) -> tuple[int, int]:
+    """Pixel size of an upload, or (0, 0) when it cannot be read (an SVG)."""
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(data)) as image:
+            return int(image.width), int(image.height)
+    except Exception:  # noqa: BLE001 - size is informative, never a reason to refuse
+        return 0, 0
+
+
 def check_image(data: bytes, content_type: str) -> None:
     if content_type not in ALLOWED_TYPES:
         raise TileError("A tile must be a PNG, WebP, GIF or SVG.")
@@ -71,6 +131,19 @@ def check_image(data: bytes, content_type: str) -> None:
         raise TileError("That file is empty.")
     if len(data) > MAX_BYTES:
         raise TileError(f"A tile must be under {MAX_BYTES // 1024}KB.")
+
+
+def _complete(row: dict) -> dict:
+    """Fill fields a tile stored before they existed. Every new field goes here
+    too, or older rows silently read as whatever ``None`` turns into."""
+    row.setdefault("uses", [])
+    row["uses"] = [use for use in USES if use in (row.get("uses") or [])]
+    if row.get("cell_px") not in CELL_SIZES:
+        row["cell_px"] = DEFAULT_CELL
+    row.setdefault("pack", "")
+    row.setdefault("source", "")
+    row.setdefault("variants", [])
+    return row
 
 
 def _moved(ids: list[str], target: str, delta: int) -> list[str]:
@@ -163,7 +236,7 @@ class TileLibrary:
         position inside it, uncategorised last."""
         self._ensure_indexes()
         rank = {row["cat_id"]: index for index, row in enumerate(self.categories())}
-        rows = list(self._tiles.find({}, {"_id": 0}))
+        rows = [_complete(row) for row in self._tiles.find({}, {"_id": 0})]
         rows.sort(key=lambda row: (rank.get(row.get("cat_id") or "", len(rank)),
                                    int(row.get("order", 0)),
                                    str(row.get("name", ""))))
@@ -187,7 +260,16 @@ class TileLibrary:
         row = self._tiles.find_one({"tile_id": str(tile_id)})
         if row:
             row.pop("_id", None)
+            _complete(row)
         return row
+
+    def usable(self, layer: str, role: str) -> list[dict]:
+        """The tiles ``role`` may put on ``layer``, in palette order. The owner
+        is not a role: they get :meth:`tiles` whole."""
+        use = f"{layer}:{role}"
+        if use not in USES:
+            raise TileError(f"Unknown use {use!r}.")
+        return [row for row in self.tiles() if use in row["uses"]]
 
     def _need(self, tile_id: str) -> dict:
         row = self.get(tile_id)
@@ -206,28 +288,66 @@ class TileLibrary:
         return cat_id
 
     def add_tile(self, *, name: Any, cat_id: Any, data: bytes,
-                 content_type: str) -> dict:
-        """A new tile with its first variant, at the end of its category."""
+                 content_type: str, uses: Any = None, cell_px: Any = DEFAULT_CELL,
+                 pack: str = "", source: str = "") -> dict:
+        """A new tile with its first variant, at the end of its category.
+
+        ``pack`` is where the art came from, kept for credits. ``source`` is a
+        stable key for an imported tile, so re-running an import finds what it
+        already added instead of adding it twice.
+        """
         self._ensure_indexes()
         if self._tiles.count_documents({}) >= MAX_TILES:
             raise TileError(f"The library holds at most {MAX_TILES} tiles.")
         clean = _clean_name(name)
         cat_id = self._check_category(cat_id)
+        clean_use = clean_uses(uses)
+        cell = clean_cell(cell_px)
         check_image(data, content_type)
         tile_id = secrets.token_hex(8)
         vid = self._store_art(tile_id, data, content_type)
         row = {"tile_id": tile_id, "name": clean, "cat_id": cat_id,
-               "order": len(self._in_category(cat_id)), "variants": [vid]}
+               "order": len(self._in_category(cat_id)), "variants": [vid],
+               "uses": clean_use, "cell_px": cell,
+               "pack": str(pack or "")[:80], "source": str(source or "")[:200]}
         self._tiles.insert_one(dict(row))
         return row
 
+    def by_source(self, source: str) -> Optional[dict]:
+        """The tile an import added under this key, if it is still there."""
+        self._ensure_indexes()
+        row = self._tiles.find_one({"source": str(source)}) if source else None
+        if row:
+            row.pop("_id", None)
+            _complete(row)
+        return row
+
+    def set_uses(self, tile_id: str, uses: Any) -> list[str]:
+        """Exactly which layers this tile may be used on, and by whom."""
+        self._need(tile_id)
+        clean = clean_uses(uses)
+        self._tiles.update_one({"tile_id": str(tile_id)}, {"$set": {"uses": clean}})
+        return clean
+
+    def set_category_uses(self, cat_id: str, uses: Any) -> int:
+        """The same uses for every tile in a category. Returns how many."""
+        cat_id = self._check_category(cat_id)
+        clean = clean_uses(uses)
+        rows = self._in_category(cat_id)
+        for row in rows:
+            self._tiles.update_one({"tile_id": row["tile_id"]}, {"$set": {"uses": clean}})
+        return len(rows)
+
     def update_tile(self, tile_id: str, *, name: Any = None,
-                    cat_id: Any = None) -> None:
-        """Rename a tile or move it to another category (it goes to the end)."""
+                    cat_id: Any = None, cell_px: Any = None) -> None:
+        """Rename a tile, set its grid size, or move it to another category
+        (it goes to the end)."""
         row = self._need(tile_id)
         changes: dict = {}
         if name is not None:
             changes["name"] = _clean_name(name)
+        if cell_px is not None:
+            changes["cell_px"] = clean_cell(cell_px)
         if cat_id is not None:
             target = self._check_category(cat_id)
             if target != (row.get("cat_id") or ""):
@@ -262,8 +382,10 @@ class TileLibrary:
     # ------------------------------------------------------------------ #
     def _store_art(self, tile_id: str, data: bytes, content_type: str) -> str:
         vid = secrets.token_hex(8)
+        width, height = _size(data)
         self._art.insert_one({"vid": vid, "tile_id": str(tile_id),
-                              "data": data, "content_type": content_type})
+                              "data": data, "content_type": content_type,
+                              "w": width, "h": height})
         return vid
 
     def add_variant(self, tile_id: str, *, data: bytes, content_type: str) -> str:
