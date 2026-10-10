@@ -66,6 +66,7 @@ def compute(bot, guild) -> dict:
     base = float(params.get(guild.id, "dodoland_influence_base"))
     top = max(base, float(params.get(guild.id, "dodoland_influence_top")))
     clears = bool(params.get(guild.id, "dodoland_influence_clear_forest"))
+    water_cost = max(0.1, float(params.get(guild.id, "dodoland_influence_water_cost")))
 
     since = store_module.days_back(int(params.get(guild.id, "dodoland_window_days")))
     result = standing.guild_standings(bot.dodoland, params, guild.id,
@@ -74,8 +75,13 @@ def compute(bot, guild) -> dict:
 
     cxs, cys = bot.dodoland_terrain.chunk_counts(guild.id)
     chunks = bot.dodoland_terrain.chunks(guild.id, [(x, y) for y in range(cys) for x in range(cxs)])
-    kinds = world["kinds"]
+    # Re-read from the tiles as they are now, so ticking "influence spreads"
+    # on a tile changes every area at once, without a repaint.
+    kinds = T.sync_tile_kinds(world["kinds"], {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild.id)})
     grow_cost = [T.grow_cost(k, clears_forest=clears) for k in kinds]
+    # Water the tile lets a town spread over (shallows) costs more than land.
+    grow_cost = [c * water_cost if c is not None and k.get("water") else c
+                 for c, k in zip(grow_cost, kinds)]
     blocked = _blocked(bot, guild.id, cells_w, cells_h)
 
     def cost(x, y):
@@ -104,12 +110,14 @@ def _key(bot, guild) -> tuple:
     params = bot.dodoland_params
     # Where every piece stands, not only how many there are: moving a mountain
     # range changes who it blocks without changing the count.
-    return (terrain_api.version(guild.id),
+    spreading = tuple(sorted(t["tile_id"] for t in bot.dodoland_tiles.tiles(guild.id) if t["spreads"]))
+    return (terrain_api.version(guild.id), spreading,
             tuple(sorted((str(p.get("piece_id")), p.get("x"), p.get("y"), p.get("scale"))
                          for p in bot.dodoland_decor.world(guild.id))),
             tuple(sorted((k, tuple(sorted(v.items()))) for k, v in bot.dodoland_buildings.plots(guild.id).items())),
             tuple(params.get(guild.id, k) for k in ("dodoland_influence_base", "dodoland_influence_top",
-                                                    "dodoland_influence_clear_forest")))
+                                                    "dodoland_influence_clear_forest",
+                                                    "dodoland_influence_water_cost")))
 
 
 async def influence_layer(request: web.Request):

@@ -295,3 +295,32 @@ Given as one list to work through after a break; take them one at a time.
 11. **Low-resolution tiles**: some tiles are badly blurry (e.g. Olive grass tuft,
     Summer sprouts, Tiny flowers, Moss — upscaled tiny sprites). Fix (redraw at
     proper size / nearest-neighbour at an integer scale) or remove.
+
+### Backlog progress — quick fixes done (4, 5, 6, 7, 8, 10)
+
+* **5** One drawer at a time (`closeDrawers(keep)` in mappage): opening Towns,
+  Toolkit or Terrain closes the others and puts their tools down (armed piece,
+  held piece, brush, a town being moved). `terrClose()` is the terrain side.
+* **4** Influence draws for the **open town only**; clicking empty map closes
+  the town and its area. Layers → Influence cycles *selected → all → hidden*
+  (`layerState.inflAll`, class `infl-all`).
+* **8** While anything is armed, towns take no clicks (`.dlframe.placing
+  .dltown { pointer-events: none }`) so a click in a town places; the frame is
+  `user-select: none` (fast clicks were selecting the overlay).
+* **7 + 6** Placed tiles are stamps. `tools/dodoland_split_stamps.py` split all
+  127 multi-drawing placed tiles into one tile per drawing ("Olive bush 2"…,
+  next free number, same settings, art rows moved, placed pieces repointed;
+  867 -> 1407 tiles; `MAX_TILES` 1500 -> 3000). Placement now always uses
+  `variants[0]`. The squish on hover was the same cause: a piece sized from one
+  drawing while showing another of a different shape.
+* **10** New tile flag **`spreads`** ("Influence spreads" in the tile editor and
+  bulk bar), default = `passable`. Lake water: roads no, influence yes; deep
+  water neither. `tile_kind` grow follows `spreads`; influence re-syncs kinds
+  from the tiles on every compute and its cache key includes which tiles spread.
+  New param `dodoland_influence_water_cost` (2): water costs that many cells of
+  ground. Checked: the three placed towns now cover 1.9k-5.3k shallow cells and
+  no deep ones.
+
+Left: 1 (LoD / first impression), 2 (place town buildings; walls round the
+area), 3 (loading screen + load times), 9 (owned pieces + pointer/hand/pencil/
+brush toolbox), 11 (low-res tiles).

@@ -395,4 +395,18 @@ for ramp in palette._RAMPS:
     assert levels == sorted(levels), f"{ramp} is not ordered dark to light"
 print(f"texture         all {len(palette._RAMPS)} colour ramps run dark to light")
 
+# A town's reach and a road are separate questions: shallow water stops a road
+# and lets a town spread; deep sea stops both; unset, reach follows roads.
+from helpers.dodoland import tiles as tile_rules  # noqa: E402
+
+shallows = T.tile_kind({"tile_id": "s", "name": "Lake water", "passable": False, "spreads": True})
+deep = T.tile_kind({"tile_id": "d", "name": "Deep water", "passable": False})
+meadow = T.tile_kind({"tile_id": "m", "name": "Meadow", "passable": True})
+assert shallows["move"] is None and shallows["grow"] == 1 and shallows["water"]
+assert deep["move"] is None and deep["grow"] is None
+assert meadow["move"] == 1 and meadow["grow"] == 1
+assert tile_rules._complete({"tile_id": "x", "passable": False})["spreads"] is False
+assert tile_rules._complete({"tile_id": "x", "passable": True})["spreads"] is True
+print("influence       shallows stop a road but not a town; unset follows roads")
+
 print("PASS")

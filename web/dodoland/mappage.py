@@ -347,6 +347,15 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   cursor: grab; touch-action: none; background: var(--deep); }
 .dlframe.dragging { cursor: grabbing; }
 .dlframe.placing { cursor: crosshair; }
+/* Clicking fast to place things is a double-click to the browser, which then
+   selects whatever is under it — the influence overlay lit up blue. */
+.dlframe { user-select: none; -webkit-user-select: none; }
+/* While something is armed, a town is ground like any other: the click places
+   rather than opening the town. */
+.dlframe.placing .dltown, .dlframe.painting .dltown { pointer-events: none; }
+/* Only the open town's area, unless the Layers panel asks for every one. */
+#dltinfl > g { display: none; }
+#dltinfl > g.on, .dlworld.infl-all #dltinfl > g { display: inline; }
 /* No will-change here, and it must stay that way. Promoting this to its own
    composited layer makes the browser rasterise it once at whatever size it
    happened to be and then scale that bitmap, so an SVG map stops being vector
@@ -852,6 +861,7 @@ _SCRIPT = r"""
     world.querySelectorAll('.dltown').forEach(function (n) {
       n.classList.toggle('on', n.dataset.id === id);
     });
+    markInfluence();
     var rows = p.built.map(function (b) {
       // The rooms that build it, on the one that was clicked. Every building
       // at once is a wall of channel names; the question is only ever asked
@@ -988,8 +998,16 @@ _SCRIPT = r"""
       setTimeout(function () { window.location.reload(); }, 400);
     }).catch(function (err) { say(String(err), true); });
   }
+  // The open town's area of influence is the one drawn; closing the town, or
+  // clicking away from it, takes its area with it.
+  function markInfluence() {
+    world.querySelectorAll('#dltinfl > g').forEach(function (g) {
+      g.classList.toggle('on', !!openId && g.dataset.town === String(openId));
+    });
+  }
   function closeCard() {
     card.hidden = true; openId = null;
+    markInfluence();
     world.querySelectorAll('.dltown.on').forEach(function (n) {
       n.classList.remove('on');
     });
@@ -1032,9 +1050,14 @@ _SCRIPT = r"""
     // surface, so only one of them may ever be armed at a time.
     if (armed) { place(armed, at); return; }
     if (armedAsset) { placeDecor(at); return; }
-    // Nothing armed and nothing under the pointer: let go. Without this a
-    // selected piece stayed selected for ever and Remove kept pointing at it.
+    if (typeof terr !== 'undefined' && terr.armed) return;
+    // The map's own buttons sit inside the frame; pressing one is not
+    // clicking the map.
+    if (ev.target.closest && ev.target.closest('.dlzoom, .dlhint')) return;
+    // Nothing armed and nothing under the pointer: let go — of a held piece
+    // and of the open town, whose area goes with it.
     if (heldPiece) { hold(heldPiece); }
+    if (openId) { closeCard(); }
   });
 
   // --- the list ---------------------------------------------------------- //
@@ -1071,9 +1094,22 @@ _SCRIPT = r"""
   function placeZoom() {
     zoombar.classList.toggle('shifted', drawer.classList.contains('open'));
   }
+  // One drawer at a time. Closing a drawer puts its tools down too: a brush
+  // still armed under the toolkit painted wherever a piece was being placed.
+  function closeDrawers(keep) {
+    if (keep !== 'list') drawer.classList.remove('open');
+    if (keep !== 'kit' && kitDrawer.classList.contains('open')) closeKit();
+    if (keep !== 'terr' && typeof terrClose === 'function') terrClose();
+    if (keep !== 'list' && armed) {
+      armed = null; frame.classList.remove('placing');
+      hint.textContent = 'Drag to move, scroll to zoom'; renderList();
+    }
+    placeZoom();
+  }
   document.getElementById('dltoggle').onclick = function () {
-    drawer.classList.toggle('open');
-    kitDrawer.classList.remove('open');
+    var opening = !drawer.classList.contains('open');
+    if (opening) closeDrawers('list');
+    drawer.classList.toggle('open', opening);
     placeZoom();
   };
   document.getElementById('dlclose').onclick = function () {
@@ -1308,6 +1344,7 @@ _SCRIPT = r"""
       world.classList.toggle('hide-' + l.key, layerState.hidden.indexOf(l.key) >= 0);
     });
     world.dataset.edit = layerState.edit;
+    world.classList.toggle('infl-all', !!layerState.inflAll);
     try { window.localStorage.setItem('dl-layers', JSON.stringify(layerState)); } catch (e) {}
     var rows = document.getElementById('dllayerrows');
     if (rows) {
@@ -1315,18 +1352,26 @@ _SCRIPT = r"""
         var hidden = layerState.hidden.indexOf(l.key) >= 0;
         var n = l.key === 'influence' ? (D.influence || []).length
               : D.world.filter(function (p) { return (p.l || 'objects') === l.key; }).length;
+        var says = hidden ? 'hidden' : 'shown';
+        if (l.key === 'influence' && !hidden) says = layerState.inflAll ? 'all' : 'selected';
         return '<div class="dllayer' + (layerState.edit === l.key ? ' editing' : '') + '">' +
           '<span>' + l.label + (n ? ' <span class="muted">· ' + n + '</span>' : '') +
           '<small>' + l.sub + '</small></span>' +
-          '<button data-eye="' + l.key + '" class="' + (hidden ? 'off' : '') + '" title="Show or hide">' +
-          (hidden ? 'hidden' : 'shown') + '</button>' +
+          '<button data-eye="' + l.key + '" class="' + (hidden ? 'off' : '') + '" title="' +
+          (l.key === 'influence' ? 'The open town only, every town, or none' : 'Show or hide') + '">' +
+          says + '</button>' +
           '<button data-edit="' + l.key + '" class="' + (layerState.edit === l.key ? 'on' : '') + '"' +
           (l.edit ? '' : ' disabled') + '>edit</button></div>';
       }).join('');
       rows.querySelectorAll('[data-eye]').forEach(function (b) {
         b.onclick = function () {
           var k = b.dataset.eye, at = layerState.hidden.indexOf(k);
-          if (at >= 0) layerState.hidden.splice(at, 1); else layerState.hidden.push(k);
+          if (k === 'influence') {
+            // selected -> all -> hidden -> selected
+            if (at >= 0) { layerState.hidden.splice(at, 1); layerState.inflAll = false; }
+            else if (!layerState.inflAll) { layerState.inflAll = true; }
+            else { layerState.hidden.push(k); layerState.inflAll = false; }
+          } else if (at >= 0) layerState.hidden.splice(at, 1); else layerState.hidden.push(k);
           applyLayers();
         };
       });
@@ -1444,17 +1489,19 @@ _SCRIPT = r"""
       kitSay('Removed.');
     });
   };
-  document.getElementById('dlkit').onclick = function () {
-    kitDrawer.classList.toggle('open');
-    drawer.classList.remove('open');
-    if (typeof placeZoom === 'function') placeZoom();
-  };
-  document.getElementById('dlkitclose').onclick = function () {
+  function closeKit() {
     kitDrawer.classList.remove('open');
     armedAsset = null;
+    if (heldPiece) hold(heldPiece);
     frame.classList.remove('placing');
     renderKit();
+  }
+  document.getElementById('dlkit').onclick = function () {
+    if (kitDrawer.classList.contains('open')) { closeKit(); return; }
+    closeDrawers('kit');
+    kitDrawer.classList.add('open');
   };
+  document.getElementById('dlkitclose').onclick = closeKit;
   applyLayers();
   fillKitCats();
   renderKit();

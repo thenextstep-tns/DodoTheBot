@@ -150,7 +150,9 @@ def _fields(tile: dict, ctx: _Ctx, dis: str) -> str:
     <select class="tlreqb grow"{dis}>{ctx.building_options(req['building'])}</select>
     tier <input type="number" class="tlreqt" min="0" max="12" value="{req['tier']}"{dis}></div>
   <div class="tlrow"><label title="Whether a road may be drawn through it"><input type="checkbox" class="tlf"
-       data-f="passable"{dis}{" checked" if tile['passable'] else ""}> Roads can cross</label></div>
+       data-f="passable"{dis}{" checked" if tile['passable'] else ""}> Roads can cross</label>
+    <label title="Whether a town's area of influence can grow over it"><input type="checkbox" class="tlf"
+       data-f="spreads"{dis}{" checked" if tile['spreads'] else ""}> Influence spreads</label></div>
   <div class="tlrow"><label><input type="checkbox" class="tlf" data-f="resizable"{dis}
        {" checked" if tile['resizable'] else ""}> Resizable</label>
     <input type="number" class="tlf" data-f="scale_min" step="0.05" min="{tile_rules.SCALE_FLOOR}"
@@ -229,6 +231,7 @@ def _bulk(ctx: _Ctx, count: int) -> str:
     requires <select class="tlbk" data-f="req_building">{ctx.building_options('', keep=True)}</select>
     tier <input type="number" class="tlbk" data-f="req_tier" min="0" max="12" placeholder="—">
     roads cross <select class="tlbk" data-f="passable">{yesno}</select>
+    influence spreads <select class="tlbk" data-f="spreads">{yesno}</select>
     resizable <select class="tlbk" data-f="resizable">{yesno}</select>
     <button class="tlbulkapply">Apply to {count}</button>
     <span class="tlmsg small muted"></span></div>"""
@@ -514,7 +517,7 @@ def _fields_from(body: dict) -> dict:
     for key in ("name", "cat_id", "cell_px", "layer", "placement", "scale_min", "scale_max", "requires"):
         if key in raw:
             out[key] = raw[key]
-    for key in ("passable", "resizable"):
+    for key in ("passable", "spreads", "resizable"):
         if key in raw:
             value = raw[key]
             out[key] = value in (True, 1, "1", "true", "yes") if not isinstance(value, bool) else value

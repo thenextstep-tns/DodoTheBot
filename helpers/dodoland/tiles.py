@@ -23,6 +23,9 @@ for, and why replacing it did not take anything away from server admins.
   tile must not be unreachable on a server that named its buildings differently.
 * ``passable`` — whether a road may be drawn through it. Water and mountains are
   not; grass, paths and a scatter of flowers are; a bridge is.
+* ``spreads`` — whether a town's area of influence can grow over it. Follows
+  ``passable`` unless set: shallow water stops a road but not a town's reach,
+  deep sea and mountains stop both.
 * ``resizable`` with ``scale_min``/``scale_max`` — whether it can be drawn at
   other sizes. Drawn art resizes; pixel art is fixed, because pixel art scaled
   by 1.3 is smeared pixel art.
@@ -33,7 +36,7 @@ metadata only, with no projection to get wrong.
 
 * ``categories`` — ``{cat_id, name, order}``; owned by the bot owner
 * ``tiles``      — ``{tile_id, guild_id, name, cat_id, order, variants, layer,
-  access, requires, passable, resizable, scale_min, scale_max, cell_px, pack,
+  access, requires, passable, spreads, resizable, scale_min, scale_max, cell_px, pack,
   source}``
 * ``art``        — ``{vid, tile_id, data, content_type, w, h}``
 
@@ -52,7 +55,8 @@ from typing import Any, Iterable, Optional
 # Storage ceilings, not behaviour: they keep one upload from filling the
 # database.
 MAX_CATEGORIES = 100
-MAX_TILES = 1500
+# Every drawing of a placed thing is its own tile, so this is a few thousand.
+MAX_TILES = 3000
 # Sixteen, because a tuft of grass or a scatter of pebbles is one thing drawn
 # a dozen ways, and those are exactly what variants are for.
 MAX_VARIANTS = 16
@@ -105,7 +109,7 @@ SCALE_FLOOR, SCALE_CEILING = 0.25, 12.0
 DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX = 0.5, 3.0
 # The fields an editor may change in place, and nothing else.
 EDITABLE = ("name", "cat_id", "cell_px", "layer", "placement", "access", "requires",
-            "passable", "resizable", "scale_min", "scale_max")
+            "passable", "spreads", "resizable", "scale_min", "scale_max")
 
 
 class TileError(ValueError):
@@ -256,6 +260,7 @@ def _complete(row: dict) -> dict:
     except TileError:
         row["requires"] = {"building": "", "tier": 0}
     row["passable"] = bool(row.get("passable", True))
+    row["spreads"] = bool(row["passable"] if row.get("spreads") is None else row["spreads"])
     row["resizable"] = bool(row.get("resizable", False))
     for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
         try:
@@ -495,6 +500,8 @@ class TileLibrary:
             out["requires"] = clean_requires(given["requires"])
         if "passable" in given:
             out["passable"] = bool(given["passable"])
+        if "spreads" in given:
+            out["spreads"] = bool(given["spreads"])
         if "resizable" in given:
             out["resizable"] = bool(given["resizable"])
         for key, what in (("scale_min", "smallest"), ("scale_max", "largest")):

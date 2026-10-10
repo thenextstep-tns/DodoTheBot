@@ -171,10 +171,12 @@ TILE_PREFIX = "tile_"
 def tile_kind(tile: dict, hex_colour: str = "") -> dict:
     """A kind of ground that is exactly one library tile."""
     open_ground = bool(tile.get("passable", True))
+    # A town's reach is its own flag: shallow water stops a road, not a town.
+    spreads = open_ground if tile.get("spreads") is None else bool(tile["spreads"])
     name = str(tile.get("name") or "")
     return {"key": TILE_PREFIX + str(tile["tile_id"]), "label": name[:48],
             "colour": "shadow", "hex": hex_colour, "tile_id": str(tile["tile_id"]),
-            "move": 1 if open_ground else None, "grow": 1 if open_ground else None,
+            "move": 1 if open_ground else None, "grow": 1 if spreads else None,
             "build": open_ground, "water": (not open_ground) and "water" in name.lower()}
 
 

@@ -25,7 +25,6 @@ its bonfire with it.
 from __future__ import annotations
 
 import json
-import random
 
 from aiohttp import web
 
@@ -107,9 +106,12 @@ async def api_world_decor(request: web.Request):
             asset_id=tile["tile_id"], x=body.get("x"), y=body.get("y"),
             scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
             scale_range=tile_rules.scale_range(tile),
-            # A tile drawn several ways lands as one of them at random, so a
-            # row of trees placed one by one is not one tree repeated.
-            variant=random.choice(tile["variants"]) if tile["variants"] else "",
+            # A placed tile is a stamp: the thing you picked is the thing that
+            # lands. Variants are for painted ground, where a field must not
+            # repeat; tools/dodoland_split_stamps.py made every look-alike its
+            # own tile, and this keeps a stamp that gains a variant from
+            # turning into a lucky dip again.
+            variant=tile["variants"][0] if tile["variants"] else "",
             layer=tile["layer"])
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")

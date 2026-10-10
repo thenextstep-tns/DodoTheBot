@@ -540,6 +540,7 @@ SCRIPT = r"""
             '"/></g>';
         }).join('');
         if (typeof applyLayers === 'function') applyLayers();
+        if (typeof markInfluence === 'function') markInfluence();
       });
   }
 
@@ -603,18 +604,20 @@ SCRIPT = r"""
     terrLayer.classList.toggle('off', !terr.shown);
     terrToggle.textContent = terr.shown ? 'Hide terrain' : 'Show terrain';
   };
-  document.getElementById('dlterr').onclick = function () {
-    terrDrawer.classList.toggle('open');
-    drawer.classList.remove('open');
-    if (typeof kitDrawer !== 'undefined') kitDrawer.classList.remove('open');
-    if (typeof placeZoom === 'function') placeZoom();
-  };
-  document.getElementById('dltclose').onclick = function () {
+  // Closing the drawer puts the brush down, whoever closes it.
+  function terrClose() {
     terrDrawer.classList.remove('open');
     terr.armed = null;
     frame.classList.remove('painting');
     hideCursor();
+  }
+  document.getElementById('dlterr').onclick = function () {
+    if (terrDrawer.classList.contains('open')) { terrClose(); return; }
+    if (typeof closeDrawers === 'function') closeDrawers('terr');
+    terrDrawer.classList.add('open');
+    rearm();
   };
+  document.getElementById('dltclose').onclick = terrClose;
 
   fetch(terrUrl('world'))
     .then(function (r) { return r.json(); })
