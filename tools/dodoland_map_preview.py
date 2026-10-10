@@ -29,7 +29,7 @@ import discord  # noqa: E402
 from fake_mongo import FakeCollection  # noqa: E402
 
 from helpers.dodoland import parameters as dodo_params  # noqa: E402
-from helpers.dodoland.assets import AssetStore  # noqa: E402
+from helpers.dodoland.tiles import TileLibrary  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
 from helpers.dodoland.decor import DecorStore  # noqa: E402
@@ -125,7 +125,7 @@ class Bot:
         self.dodoland_params = ParamManager(FakeCollection(), dodo_params.DODOLAND_PARAMETERS)
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
-        self.dodoland_assets = AssetStore(FakeCollection())
+        self.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
         self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()
@@ -203,8 +203,8 @@ def build() -> str:
         ("Bonfire", '<polygon points="32,14 44,50 20,50" fill="#ff9a3c"/>'
                     '<ellipse cx="32" cy="52" rx="16" ry="5" fill="#6b4a30"/>'),
     ):
-        bot.dodoland_assets.add(
-            GUILD_ID, name=name,
+        bot.dodoland_tiles.add_tile(
+            name=name, cat_id="", guild_id=GUILD_ID, access=["admin", "player"], resizable=True,
             data=(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
                   f'{body}</svg>').encode("utf-8"),
             content_type="image/svg+xml")

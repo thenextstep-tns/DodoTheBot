@@ -109,65 +109,6 @@ async def api_dodoland_shapes(request: web.Request):
     return web.json_response({"ok": True, "changed": changed})
 
 
-async def api_dodoland_asset(request: web.Request):
-    """Add, edit or remove one asset in the library.
-
-    Assets are what people put on their own patch of the world once they have
-    earned the right to. A lock is a **tier of a building**, never a point
-    total: thresholds are derived from the server's live distribution and move
-    as the server does, so a number written here would quietly mean something
-    different every week.
-    """
-    from helpers.dodoland import assets as asset_rules
-    from web.routes import _record_change
-
-    bot, guild = request.app["bot"], request["guild"]
-    body = await request.json()
-    action = str(body.get("action") or "add")
-
-    try:
-        if action == "remove":
-            gone = bot.dodoland_assets.remove(guild.id, body.get("asset_id"))
-            if gone:
-                # Everything anybody had placed of it goes too. Left behind,
-                # the pieces render as a broken image on somebody's town, which
-                # reads as their town being broken rather than as an admin
-                # tidying the library.
-                dropped = bot.dodoland_decor.forget_asset(guild.id,
-                                                          body.get("asset_id"))
-                await _record_change(request, "dodoland_asset", "remove", "",
-                                     f"{dropped} placed", "DodoLand asset removed")
-                return web.json_response({"ok": True, "removed": True,
-                                          "unplaced": dropped})
-            return web.json_response({"ok": True, "removed": False})
-
-        if action == "update":
-            changed = bot.dodoland_assets.update(
-                guild.id, body.get("asset_id"),
-                name=body.get("name"), min_tier=body.get("min_tier"),
-                building=body.get("building"),
-                admin_only=body.get("admin_only"),
-            )
-            return web.json_response({"ok": True, "changed": bool(changed)})
-
-        content_type = str(body.get("content_type") or "").lower()
-        try:
-            blob = base64.b64decode(str(body.get("data") or "").split(",")[-1],
-                                    validate=True)
-        except Exception:
-            return _bad("That upload could not be read.")
-        row = bot.dodoland_assets.add(
-            guild.id, name=body.get("name"), data=blob, content_type=content_type,
-            min_tier=body.get("min_tier") or 0, building=body.get("building") or "",
-            admin_only=bool(body.get("admin_only")),
-        )
-        await _record_change(request, "dodoland_asset", str(row["name"]), "", "added",
-                             "DodoLand asset added")
-        return web.json_response({"ok": True, "asset": row})
-    except asset_rules.AssetError as error:
-        return _bad(error)
-
-
 async def api_dodoland_town(request: web.Request):
     """Name a town, describe it, picture it, and name its buildings.
 

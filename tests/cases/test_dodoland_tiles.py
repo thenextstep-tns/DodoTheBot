@@ -13,6 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from fake_mongo import FakeCollection  # noqa: E402
 
 from helpers.dodoland import tiles as T  # noqa: E402
+tile_rules = T
 
 PNG = "image/png"
 lib = T.TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
@@ -118,51 +119,71 @@ assert lib.get(loose["tile_id"]) is not None
 print("removal         a tile takes its images; only an empty category goes")
 
 # --------------------------------------------------------------------------- #
-#  Who may use a tile, and where
+#  Layer, access, requirements, roads, size
 # --------------------------------------------------------------------------- #
-# Six uses: three layers a person can place on, two user types. The owner is
-# not a role, and the roads layer is the bot's.
-assert len(T.USES) == 6 and "objects:player" in T.USES
-assert not any(u.startswith("roads") or u.endswith(":owner") for u in T.USES)
-
 tree = lib.add_tile(name="Oak", cat_id=water["cat_id"], data=b"t", content_type=PNG,
-                    uses=["objects:player", "objects:admin"], cell_px=32,
-                    pack="Summer Plains", source="sp:Oak")
-# Stored in canonical order whatever order it was given in.
-assert lib.get(tree["tile_id"])["uses"] == ["objects:admin", "objects:player"]
-assert lib.get(tree["tile_id"])["cell_px"] == 32
+                    access=["player", "admin"], cell_px=32, pack="Summer Plains", source="sp:Oak")
+got = lib.get(tree["tile_id"])
+# Defaults: a map object, canonical role order, no lock, roads cross, fixed size.
+assert got["layer"] == "objects" and got["access"] == ["admin", "player"], got
+assert got["requires"] == {"building": "", "tier": 0} and got["passable"] and not got["resizable"]
+assert tile_rules.scale_range(got) == (1.0, 1.0), "a fixed tile has one size"
 assert lib.by_source("sp:Oak")["tile_id"] == tree["tile_id"]
 assert lib.by_source("sp:nothing") is None and lib.by_source("") is None
-assert [t["name"] for t in lib.usable("objects", "player")] == ["Oak"]
-assert lib.usable("environment", "admin") == []
 
-# A typo in a use is refused, never silently dropped: dropping it would remove
-# a permission without anybody noticing.
-assert "Unknown" in refused(lib.set_uses, tree["tile_id"], ["objects:owner"])
-assert lib.get(tree["tile_id"])["uses"] == ["objects:admin", "objects:player"]
-# Any scale in range — drawn art is whatever it was drawn at — but not nonsense.
+lib.update_tile(tree["tile_id"], layer="buildings", passable=False, resizable=True,
+                scale_min=0.5, scale_max=2, requires={"building": "gallery", "tier": 2})
+got = lib.get(tree["tile_id"])
+assert got["layer"] == "buildings" and not got["passable"]
+assert tile_rules.scale_range(got) == (0.5, 2.0)
+assert got["requires"] == {"building": "gallery", "tier": 2}
+# A building with no tier, or a tier with no building, is no requirement.
+lib.update_tile(tree["tile_id"], requires={"building": "gallery", "tier": 0})
+assert lib.get(tree["tile_id"])["requires"] == {"building": "", "tier": 0}
+print("fields          layer, access, requirement, roads and size are stored and read back")
+
+# Refusals change nothing: a typo in a role must not silently drop a permission.
+before = lib.get(tree["tile_id"])
+assert "Unknown role" in refused(lib.update_tile, tree["tile_id"], access=["owner"])
+assert "Unknown layer" in refused(lib.update_tile, tree["tile_id"], layer="roads")
+assert "between" in refused(lib.update_tile, tree["tile_id"], requires={"building": "g", "tier": 99})
+assert "larger" in refused(lib.update_tile, tree["tile_id"], scale_min=3, scale_max=1)
+assert "Sizes go" in refused(lib.update_tile, tree["tile_id"], scale_max=50)
 assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=T.MIN_CELL - 1)
-assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=T.MAX_CELL + 1)
-assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px="big")
+assert "Not editable" in refused(lib.update_tile, tree["tile_id"], guild_id=5)
+assert lib.get(tree["tile_id"]) == before
 lib.update_tile(tree["tile_id"], cell_px=57)
 assert lib.get(tree["tile_id"])["cell_px"] == 57
-lib.update_tile(tree["tile_id"], cell_px=16)
-assert lib.get(tree["tile_id"])["cell_px"] == 16
+print("fields          bad values are refused and change nothing; any scale in range")
 
-# A whole category at once.
-assert lib.set_category_uses(water["cat_id"], ["environment:admin"]) == 2
-assert all(t["uses"] == ["environment:admin"] for c, ts in lib.grouped()
-           if c["cat_id"] == water["cat_id"] for t in ts)
-lib.set_uses(tree["tile_id"], [])
-assert lib.get(tree["tile_id"])["uses"] == []
-print("uses            per tile, per category, canonical, typos refused, any scale in range")
+# A whole category at once, optionally only one server's tiles in it.
+assert lib.update_category(water["cat_id"], layer="environment", passable=False) == 2
+assert all(t["layer"] == "environment" for c, ts in lib.grouped() if c["cat_id"] == water["cat_id"] for t in ts)
+print("fields          a category can be set at once")
 
-# A row stored before these fields existed reads with safe defaults rather
-# than as whatever None turns into.
+# --------------------------------------------------------------------------- #
+#  Scope: global tiles and a server's own
+# --------------------------------------------------------------------------- #
+own = lib.add_tile(name="Our banner", cat_id="", data=b"o", content_type=PNG, guild_id=42,
+                   access=["admin", "player"])
+assert own["guild_id"] == 42
+assert own["tile_id"] in {t["tile_id"] for t in lib.tiles(42)}
+assert own["tile_id"] not in {t["tile_id"] for t in lib.tiles(7)}, "a server's tile leaked"
+assert tree["tile_id"] in {t["tile_id"] for t in lib.tiles(7)}, "a global tile is everybody's"
+assert lib.visible(own["tile_id"], 7) is None and lib.visible(own["tile_id"], 42)
+# A category edit scoped to a server touches that server's tiles and nothing else.
+assert lib.update_category("", guild_id=42, passable=False) == 1
+assert lib.get(own["tile_id"])["passable"] is False
+assert [t["name"] for t in lib.usable(42, "objects", "player")] == ["Our banner"]
+print("scope           a server's own tiles are seen and edited by that server only")
+
+# Rows stored before these fields existed read with safe defaults, and the old
+# "layer:role" list becomes a layer and its roles.
 lib._tiles.insert_one({"tile_id": "old", "name": "Old", "cat_id": "", "order": 9,
-                       "variants": ["v"]})
+                       "variants": ["v"], "uses": ["environment:admin"]})
 old = lib.get("old")
-assert old["uses"] == [] and old["cell_px"] == T.DEFAULT_CELL and old["pack"] == ""
-print("uses            older rows read with defaults")
+assert old["layer"] == "environment" and old["access"] == ["admin"], old
+assert old["passable"] and not old["resizable"] and old["guild_id"] == 0 and "uses" not in old
+print("legacy          older rows read with defaults; uses become layer and access")
 
 print("PASS")

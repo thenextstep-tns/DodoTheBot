@@ -28,7 +28,7 @@ import json
 
 from aiohttp import web
 
-from helpers.dodoland import assets as asset_rules
+from helpers.dodoland import tiles as tile_rules
 from helpers.dodoland import decor as decor_rules
 from helpers.dodoland import standing
 from helpers.dodoland import store as store_module
@@ -43,6 +43,30 @@ async def _body(request: web.Request):
         return await request.json()
     except (ValueError, json.JSONDecodeError):
         return None
+
+
+def _piece_range(bot, guild, piece_id) -> tuple:
+    """What an existing piece may be resized to, from the tile it came from."""
+    piece = bot.dodoland_decor.piece(guild.id, piece_id) or {}
+    return tile_rules.scale_range(bot.dodoland_tiles.visible(piece.get("asset_id"), guild.id))
+
+
+def _admin_tile(bot, guild, request, tile_id) -> dict:
+    """The tile an admin asked to place, if admins may place it here.
+
+    The bot owner may place anything visible to the server; a server admin only
+    map objects and buildings whose access includes admins.
+    """
+    from helpers import panel_access
+
+    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
+    if tile is None:
+        raise decor_rules.DecorError("That tile is not available on this server.")
+    if tile["layer"] == "environment":
+        raise decor_rules.DecorError("Ground is painted with the terrain brush, not placed.")
+    if request.get("scope") != panel_access.SCOPE_OWNER and "admin" not in tile["access"]:
+        raise decor_rules.DecorError("Server admins do not have access to that tile.")
+    return tile
 
 
 # --------------------------------------------------------------------------- #
@@ -69,16 +93,19 @@ async def api_world_decor(request: web.Request):
         if action == "move":
             changed = bot.dodoland_decor.move(
                 guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
-                scale=body.get("scale"), flip=body.get("flip"))
+                scale=body.get("scale"), flip=body.get("flip"),
+                scale_range=_piece_range(bot, guild, body.get("piece_id")))
             return web.json_response({"ok": True, "changed": bool(changed)})
 
+        tile = _admin_tile(bot, guild, request, body.get("asset_id"))
         # An admin dressing the world is not spending an unlock, so no
         # ``allowed`` set is passed: the locks exist to pace what players may
         # place, and the person who wrote them is not the person they pace.
         piece = bot.dodoland_decor.place(
             guild.id, scope=decor_rules.SCOPE_WORLD,
-            asset_id=body.get("asset_id"), x=body.get("x"), y=body.get("y"),
-            scale=body.get("scale") or 1.0, flip=bool(body.get("flip")))
+            asset_id=tile["tile_id"], x=body.get("x"), y=body.get("y"),
+            scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
+            scale_range=tile_rules.scale_range(tile))
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")
         return web.json_response({"ok": True, "piece": piece})
@@ -105,8 +132,15 @@ def _unlocked(bot, guild, user_id: int) -> set:
         rows=bot.dodoland.rows(guild.id, user_id=user_id, since=since),
         pair_rows=bot.dodoland.pair_rows(guild.id, since=since),
     )
-    library = bot.dodoland_assets.list(guild.id)
-    return asset_rules.unlocked_for(library, result["people"].get(int(user_id)))
+    return tile_rules.unlocked_for(_player_tiles(bot, guild),
+                                   result["people"].get(int(user_id)), buildings)
+
+
+def _player_tiles(bot, guild) -> list[dict]:
+    """What players may place on their towns here: map objects with player
+    access. Tiles nobody but admins may use are not shown locked — a lock says
+    "you can earn this", and an admin-only mountain range is not earnable."""
+    return bot.dodoland_tiles.usable(guild.id, "objects", "player")
 
 
 async def api_town_decor(request: web.Request):
@@ -135,7 +169,8 @@ async def api_town_decor(request: web.Request):
         if action == "move":
             changed = bot.dodoland_decor.move(
                 guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
-                scale=body.get("scale"), flip=body.get("flip"), owner_id=uid)
+                scale=body.get("scale"), flip=body.get("flip"), owner_id=uid,
+                scale_range=_piece_range(bot, guild, body.get("piece_id")))
             return web.json_response({"ok": True, "changed": bool(changed)})
 
         # Reading the library and scoring one person is blocking pymongo, and
@@ -146,7 +181,9 @@ async def api_town_decor(request: web.Request):
             guild.id, scope=decor_rules.SCOPE_TOWN, owner_id=uid,
             asset_id=body.get("asset_id"), x=body.get("x"), y=body.get("y"),
             scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
-            allowed=allowed)
+            allowed=allowed,
+            scale_range=tile_rules.scale_range(
+                bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)))
         # The map reads decor out of the shared snapshot, so a piece nobody can
         # see for a minute looks exactly like a piece that did not save.
         player.invalidate(guild.id)
@@ -169,14 +206,17 @@ async def api_town_toolkit(request: web.Request):
         None, _unlocked, bot, guild, uid)
     # Scenery is filtered out rather than shown locked: a lock says "you can
     # earn this", and a mountain range is not a thing anybody earns.
-    library = asset_rules.placeable_by_players(bot.dodoland_assets.list(guild.id))
+    library = _player_tiles(bot, guild)
     placed = bot.dodoland_decor.town(guild.id, uid)
     return web.json_response({
         "ok": True,
-        "assets": [{"asset_id": row["asset_id"], "name": row.get("name") or "",
-                    "building": row.get("building") or "",
-                    "min_tier": int(row.get("min_tier") or 0),
-                    "locked": row["asset_id"] not in allowed}
+        "assets": [{"asset_id": row["tile_id"], "name": row["name"],
+                    "building": row["requires"]["building"],
+                    "min_tier": row["requires"]["tier"],
+                    "resizable": row["resizable"],
+                    "scale_min": tile_rules.scale_range(row)[0],
+                    "scale_max": tile_rules.scale_range(row)[1],
+                    "locked": row["tile_id"] not in allowed}
                    for row in library],
         "placed": [{"piece_id": row["piece_id"], "asset_id": row["asset_id"],
                     "x": row.get("x"), "y": row.get("y"),
@@ -187,16 +227,17 @@ async def api_town_toolkit(request: web.Request):
 
 
 async def player_asset_image(request: web.Request):
-    """One library asset's bytes, for a member's own toolkit.
+    """One tile's first image, for a member's own toolkit and town.
 
-    An **asset** id in the path, which is a server-owned library entry, not a
-    person. The rule ``player.py`` keeps — never read a *user* id from a
+    A **tile** id in the path, which is a library entry, not a person. The rule ``player.py`` keeps — never read a *user* id from a
     request — is about whose data is being touched, and this touches nobody's.
     It lives here rather than in ``player.py`` so that file's own guarantee
     stays checkable by grepping it for ``match_info``.
     """
     bot, guild = request.app["bot"], request["guild"]
-    row = bot.dodoland_assets.get(guild.id, request.match_info.get("aid") or "")
+    tile_id = request.match_info.get("aid") or ""
+    row = (bot.dodoland_tiles.first_art(tile_id)
+           if bot.dodoland_tiles.visible(tile_id, guild.id) else None)
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = row.get("data")

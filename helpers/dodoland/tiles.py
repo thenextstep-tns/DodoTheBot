@@ -1,85 +1,103 @@
 """
-The tile library — what the base map is painted with.
+The tile library — everything that can be put on the map.
 
-Until now the ground was drawn from generated motifs: a conifer here, a dune
-there, chosen by the code. This is the other half of that: real tiles, curated
-by the bot owner once and offered to **every server**, so a server's admins
-paint their map from a toolkit rather than from whatever the code thought a
-forest looks like.
+One library for the ground people paint and the things they place on it. It
+replaced the per-server asset library completely: a tile is an image (or a few
+variants of one) plus the rules for using it.
 
-**Global, not per guild.** The owner builds the toolkit; servers use it. A tile
-uploaded once is available everywhere, which is the whole reason it is not a
-column on ``DodoLandAssets`` (that library is per server and is decor).
+**Two scopes.** A tile is either **global** (``guild_id`` 0) — curated by the
+bot owner and offered to every server — or **one server's own**, uploaded by
+that server's admins and seen nowhere else. That is what the asset library was
+for, and why replacing it did not take anything away from server admins.
 
-**Three collections, because the bytes must never ride along.** The library is
-listed on every page that offers a palette, and the images are the only large
-thing in it. Keeping them in their own rows means a listing is metadata only,
-with no projection to get wrong — the trap where an exclusion projection threw
-away the fact that a picture existed is written up in ``docs/DODOLAND.md``.
+**What a tile says about itself**
 
-* ``categories`` — ``{cat_id, name, order}``
-* ``tiles``      — ``{tile_id, name, cat_id, order, variants: [vid, ...]}``
-* ``art``        — ``{vid, tile_id, data, content_type}``
+* ``layer`` — where it goes: the environment (layer 1, painted ground), map
+  objects (layer 3) or buildings (layer 4). Roads (layer 2) are the bot's.
+* ``access`` — who may use it: server admins, players, both or neither. The bot
+  owner is not a role; they can use everything.
+* ``requires`` — what a *player* must have reached first: a building and the
+  tier of it, the asset library's rule unchanged. **A lock is a tier index, not
+  a point total**, because thresholds are derived from the live distribution
+  and move. A server that has no building by that key has no such lock: a global
+  tile must not be unreachable on a server that named its buildings differently.
+* ``passable`` — whether a road may be drawn through it. Water and mountains are
+  not; grass, paths and a scatter of flowers are; a bridge is.
+* ``resizable`` with ``scale_min``/``scale_max`` — whether it can be drawn at
+  other sizes. Drawn art resizes; pixel art is fixed, because pixel art scaled
+  by 1.3 is smeared pixel art.
+* ``cell_px`` — how many of the art's own pixels make one map cell.
 
-**A tile is one or more variants.** Plain ground repeated cell after cell reads
-as wallpaper; two or three variants of the same grass picked per cell is what
-makes it read as a field. Every tile has at least one, and the last cannot be
-removed — remove the tile instead.
+**Three collections, because the bytes must never ride along.** A listing is
+metadata only, with no projection to get wrong.
 
-**Order is a list position, renumbered on every move.** Gaps and duplicates in
-an ``order`` field are how a list ends up in a different order on two pages, so
-a move rewrites the whole category as ``0..n-1``.
+* ``categories`` — ``{cat_id, name, order}``; owned by the bot owner
+* ``tiles``      — ``{tile_id, guild_id, name, cat_id, order, variants, layer,
+  access, requires, passable, resizable, scale_min, scale_max, cell_px, pack,
+  source}``
+* ``art``        — ``{vid, tile_id, data, content_type, w, h}``
+
+**A tile is one or more variants**, picked per cell or per placement, so ground
+does not read as wallpaper. The last one cannot be removed.
+
+**Order is a list position, renumbered on every move**, so two pages can never
+disagree about it.
 """
 
 from __future__ import annotations
 
 import secrets
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 # Storage ceilings, not behaviour: they keep one upload from filling the
-# database. The same kind of limit ``assets.py`` keeps.
+# database.
 MAX_CATEGORIES = 100
-MAX_TILES = 1000
+MAX_TILES = 1500
 # Sixteen, because a tuft of grass or a scatter of pebbles is one thing drawn
 # a dozen ways, and those are exactly what variants are for.
 MAX_VARIANTS = 16
 MAX_NAME = 48
-
-# --------------------------------------------------------------------------- #
-#  Who may use a tile, and where
-# --------------------------------------------------------------------------- #
-# The layers of the map a person can put a tile on. Layer 2, the roads, is not
-# here: the bot draws those, nobody places them.
-LAYERS: tuple[tuple[str, str], ...] = (
-    ("environment", "Environment (layer 1)"),
-    ("objects", "Map objects (layer 3)"),
-    ("buildings", "Buildings (layer 4)"),
-)
-# The bot owner is not a role here: they can use every tile everywhere.
-ROLES: tuple[tuple[str, str], ...] = (
-    ("admin", "Server admins"),
-    ("player", "Players"),
-)
-# A use is "layer:role", e.g. "objects:player". A flat list of these is simple
-# to query ("which tiles may a player put on layer 3?") and to store.
-USES: tuple[str, ...] = tuple(f"{layer}:{role}" for layer, _ in LAYERS for role, _ in ROLES)
-
-# How many of the art's own pixels make one cell of the map. Pixel art comes
-# on a 16px or a 32px grid — a 32px tile covers the same ground as a 16px one at
-# twice the detail — and drawn art is whatever it was drawn at, so this is a
-# number rather than a choice of two. The map scales by it, or one pack's trees
-# come out twice the size of another's.
-CELL_SIZES = (16, 32)          # the presets the editor offers
-MIN_CELL, MAX_CELL = 4, 1024
-DEFAULT_CELL = 16
 # Per image. Pixel tiles are a few KB; drawn map art at full resolution runs to
 # a megabyte or so, and every image is its own row, so this only has to stop a
 # photograph, not a drawing.
 MAX_BYTES = 2 * 1024 * 1024
 ALLOWED_TYPES = ("image/png", "image/webp", "image/svg+xml", "image/gif")
 
+GLOBAL = 0
 # Tiles whose category was removed, or that were never given one. Shown last.
 UNCATEGORISED = ""
+
+# --------------------------------------------------------------------------- #
+#  Layers, access, scale
+# --------------------------------------------------------------------------- #
+LAYERS: tuple[tuple[str, str], ...] = (
+    ("environment", "Environment (layer 1)"),
+    ("objects", "Map objects (layer 3)"),
+    ("buildings", "Buildings (layer 4)"),
+)
+LAYER_KEYS = tuple(key for key, _ in LAYERS)
+DEFAULT_LAYER = "objects"
+# The bot owner is not a role: they can use every tile everywhere.
+ROLES: tuple[tuple[str, str], ...] = (
+    ("admin", "Server admins"),
+    ("player", "Players"),
+)
+ROLE_KEYS = tuple(key for key, _ in ROLES)
+
+# How many of the art's own pixels make one cell of the map. Pixel art comes
+# on a 16px or a 32px grid; drawn art is whatever it was drawn at.
+CELL_SIZES = (16, 32)          # the presets the editor offers
+MIN_CELL, MAX_CELL = 4, 1024
+DEFAULT_CELL = 16
+
+# The size range a resizable tile may be drawn at, as a multiple of its natural
+# size. The bounds are the decor store's, so the two can never disagree about
+# what "as large as it goes" means.
+SCALE_FLOOR, SCALE_CEILING = 0.25, 6.0
+DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX = 0.5, 3.0
+# The fields an editor may change in place, and nothing else.
+EDITABLE = ("name", "cat_id", "cell_px", "layer", "access", "requires",
+            "passable", "resizable", "scale_min", "scale_max")
 
 
 class TileError(ValueError):
@@ -95,14 +113,38 @@ def _clean_name(value: Any, what: str = "A tile") -> str:
     return name
 
 
-def clean_uses(values: Any) -> list[str]:
-    """Known uses only, in the canonical order. Unknown ones are refused, not
-    dropped: a typo that silently removed a permission would be invisible."""
+def clean_layer(value: Any) -> str:
+    layer = str(value or "")
+    if layer not in LAYER_KEYS:
+        raise TileError(f"Unknown layer {layer!r}.")
+    return layer
+
+
+def clean_access(values: Any) -> list[str]:
+    """Known roles only, in canonical order. An unknown one is refused rather
+    than dropped: a typo that silently removed a permission would be invisible."""
     given = [str(v) for v in (values or [])]
-    unknown = [v for v in given if v not in USES]
+    unknown = [v for v in given if v not in ROLE_KEYS]
     if unknown:
-        raise TileError(f"Unknown use(s): {', '.join(unknown)}.")
-    return [use for use in USES if use in given]
+        raise TileError(f"Unknown role(s): {', '.join(unknown)}.")
+    return [role for role in ROLE_KEYS if role in given]
+
+
+def clean_requires(value: Any) -> dict:
+    """``{"building": key, "tier": n}``; tier 0 or no building means none."""
+    value = value or {}
+    if not isinstance(value, dict):
+        raise TileError("Requirements must be a building and a tier.")
+    building = str(value.get("building") or "").strip()[:40]
+    try:
+        tier = int(value.get("tier") or 0)
+    except (TypeError, ValueError):
+        raise TileError("The required tier must be a number.") from None
+    if not 0 <= tier <= 12:
+        raise TileError("The required tier must be between 0 and 12.")
+    if not building or not tier:
+        return {"building": "", "tier": 0}
+    return {"building": building, "tier": tier}
 
 
 def clean_cell(value: Any) -> int:
@@ -113,6 +155,23 @@ def clean_cell(value: Any) -> int:
     if not MIN_CELL <= cell <= MAX_CELL:
         raise TileError(f"The grid size must be between {MIN_CELL} and {MAX_CELL}px.")
     return cell
+
+
+def clean_scale(value: Any, what: str) -> float:
+    try:
+        scale = round(float(value), 2)
+    except (TypeError, ValueError):
+        raise TileError(f"The {what} size must be a number.") from None
+    if not SCALE_FLOOR <= scale <= SCALE_CEILING:
+        raise TileError(f"Sizes go from {SCALE_FLOOR}x to {SCALE_CEILING}x.")
+    return scale
+
+
+def scale_range(tile: Optional[dict]) -> tuple[float, float]:
+    """What a placement of this tile may be sized to. Fixed tiles are 1x only."""
+    if not tile or not tile.get("resizable"):
+        return 1.0, 1.0
+    return float(tile["scale_min"]), float(tile["scale_max"])
 
 
 def _size(data: bytes) -> tuple[int, int]:
@@ -139,17 +198,42 @@ def check_image(data: bytes, content_type: str) -> None:
 
 def _complete(row: dict) -> dict:
     """Fill fields a tile stored before they existed. Every new field goes here
-    too, or older rows silently read as whatever ``None`` turns into."""
-    row.setdefault("uses", [])
-    row["uses"] = [use for use in USES if use in (row.get("uses") or [])]
+    too, or older rows silently read as whatever ``None`` turns into.
+
+    Rows from before layer/access were split carry ``uses`` ("layer:role"
+    pairs); they read as their first layer and the union of its roles.
+    """
+    legacy = [u for u in (row.get("uses") or []) if ":" in str(u)]
+    if row.get("layer") not in LAYER_KEYS:
+        layers = [u.split(":")[0] for u in legacy if u.split(":")[0] in LAYER_KEYS]
+        row["layer"] = layers[0] if layers else DEFAULT_LAYER
+    if "access" not in row:
+        row["access"] = [r for r in ROLE_KEYS if f"{row['layer']}:{r}" in legacy]
+    row["access"] = [r for r in ROLE_KEYS if r in (row.get("access") or [])]
+    try:
+        row["requires"] = clean_requires(row.get("requires"))
+    except TileError:
+        row["requires"] = {"building": "", "tier": 0}
+    row["passable"] = bool(row.get("passable", True))
+    row["resizable"] = bool(row.get("resizable", False))
+    for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
+        try:
+            value = float(row.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        row[key] = min(max(value, SCALE_FLOOR), SCALE_CEILING)
+    if row["scale_min"] > row["scale_max"]:
+        row["scale_min"], row["scale_max"] = row["scale_max"], row["scale_min"]
     try:
         cell = int(row.get("cell_px"))
     except (TypeError, ValueError):
         cell = DEFAULT_CELL
     row["cell_px"] = cell if MIN_CELL <= cell <= MAX_CELL else DEFAULT_CELL
+    row["guild_id"] = int(row.get("guild_id") or GLOBAL)
     row.setdefault("pack", "")
     row.setdefault("source", "")
     row.setdefault("variants", [])
+    row.pop("uses", None)
     return row
 
 
@@ -163,8 +247,33 @@ def _moved(ids: list[str], target: str, delta: int) -> list[str]:
     return out
 
 
+def unlocked_for(tiles: Iterable[dict], person: Optional[dict],
+                 buildings: Iterable[dict]) -> set[str]:
+    """Which tiles a player has reached the requirements of.
+
+    ``buildings`` are this server's. A requirement naming a building the server
+    does not have is no requirement here — a global tile cannot be allowed to
+    be unreachable because a server named its buildings differently. A tile
+    with no requirement is unlocked for everybody: that is the starter set, and
+    a toolkit where nothing is available on day one gives nobody a reason to
+    open the map twice.
+    """
+    present = {str(b.get("key")) for b in buildings}
+    reached = {key: (score.get("tier") if score.get("tier") is not None else -1)
+               for key, score in ((person or {}).get("buildings") or {}).items()}
+    out = set()
+    for tile in tiles:
+        need = tile.get("requires") or {}
+        building, tier = need.get("building") or "", int(need.get("tier") or 0)
+        if not building or not tier or building not in present:
+            out.add(tile["tile_id"])
+        elif reached.get(building, -1) >= tier - 1:   # tier 1 is index 0
+            out.add(tile["tile_id"])
+    return out
+
+
 class TileLibrary:
-    """The owner's tile toolkit, shared by every server. ``bot.dodoland_tiles``."""
+    """Every tile, global and per server. ``bot.dodoland_tiles``."""
 
     def __init__(self, tiles, categories, art) -> None:
         self._tiles = tiles
@@ -178,6 +287,7 @@ class TileLibrary:
         self._indexed = True
         try:
             self._tiles.create_index([("tile_id", 1)], unique=True)
+            self._tiles.create_index([("guild_id", 1)])
             self._cats.create_index([("cat_id", 1)], unique=True)
             self._art.create_index([("vid", 1)], unique=True)
             self._art.create_index([("tile_id", 1)])
@@ -185,7 +295,7 @@ class TileLibrary:
             pass
 
     # ------------------------------------------------------------------ #
-    #  Categories
+    #  Categories (the bot owner's)
     # ------------------------------------------------------------------ #
     def categories(self) -> list[dict]:
         self._ensure_indexes()
@@ -215,8 +325,8 @@ class TileLibrary:
                               {"$set": {"name": _clean_name(name, "A category")}})
 
     def remove_category(self, cat_id: str) -> None:
-        """Only an empty category can go. Silently uncategorising forty tiles
-        is a decision nobody made."""
+        """Only an empty category can go — on every server. Silently
+        uncategorising forty tiles is a decision nobody made."""
         if self._category(cat_id) is None:
             raise TileError("That category no longer exists.")
         held = self._tiles.count_documents({"cat_id": str(cat_id)})
@@ -236,23 +346,31 @@ class TileLibrary:
             self._cats.update_one({"cat_id": cat_id}, {"$set": {"order": order}})
 
     # ------------------------------------------------------------------ #
-    #  Tiles
+    #  Reading tiles
     # ------------------------------------------------------------------ #
-    def tiles(self) -> list[dict]:
-        """Every tile, metadata only, in palette order: by category, then by
-        position inside it, uncategorised last."""
+    def tiles(self, guild_id: Optional[int] = None) -> list[dict]:
+        """Tiles in palette order, metadata only.
+
+        ``guild_id=None`` is every tile everywhere (the owner's view); a guild
+        id is what that server sees: the global ones and its own.
+        """
         self._ensure_indexes()
         rank = {row["cat_id"]: index for index, row in enumerate(self.categories())}
+        # Filtered here rather than in the query: rows written before tiles had
+        # a scope have no guild_id at all, a query cannot match a missing field
+        # as 0, and the whole library is a few hundred small rows.
         rows = [_complete(row) for row in self._tiles.find({}, {"_id": 0})]
+        if guild_id is not None:
+            rows = [row for row in rows if row["guild_id"] in (GLOBAL, int(guild_id))]
         rows.sort(key=lambda row: (rank.get(row.get("cat_id") or "", len(rank)),
                                    int(row.get("order", 0)),
                                    str(row.get("name", ""))))
         return rows
 
-    def grouped(self) -> list[tuple[dict, list[dict]]]:
-        """``(category, tiles)`` in palette order. The uncategorised group is
-        included only when something is in it."""
-        tiles = self.tiles()
+    def grouped(self, guild_id: Optional[int] = None) -> list[tuple[dict, list[dict]]]:
+        """``(category, tiles)`` in palette order; uncategorised last, and only
+        when something is in it."""
+        tiles = self.tiles(guild_id)
         out = []
         for cat in self.categories():
             out.append((cat, [t for t in tiles if t.get("cat_id") == cat["cat_id"]]))
@@ -270,55 +388,20 @@ class TileLibrary:
             _complete(row)
         return row
 
-    def usable(self, layer: str, role: str) -> list[dict]:
-        """The tiles ``role`` may put on ``layer``, in palette order. The owner
-        is not a role: they get :meth:`tiles` whole."""
-        use = f"{layer}:{role}"
-        if use not in USES:
-            raise TileError(f"Unknown use {use!r}.")
-        return [row for row in self.tiles() if use in row["uses"]]
-
-    def _need(self, tile_id: str) -> dict:
+    def visible(self, tile_id: str, guild_id: int) -> Optional[dict]:
+        """The tile, if this server may see it at all."""
         row = self.get(tile_id)
-        if row is None:
-            raise TileError("That tile no longer exists.")
-        return row
+        if row and row["guild_id"] in (GLOBAL, int(guild_id)):
+            return row
+        return None
 
-    def _in_category(self, cat_id: str) -> list[dict]:
-        rows = [row for row in self.tiles() if (row.get("cat_id") or "") == cat_id]
-        return rows
-
-    def _check_category(self, cat_id: Any) -> str:
-        cat_id = str(cat_id or "")
-        if cat_id and self._category(cat_id) is None:
-            raise TileError("That category no longer exists.")
-        return cat_id
-
-    def add_tile(self, *, name: Any, cat_id: Any, data: bytes,
-                 content_type: str, uses: Any = None, cell_px: Any = DEFAULT_CELL,
-                 pack: str = "", source: str = "") -> dict:
-        """A new tile with its first variant, at the end of its category.
-
-        ``pack`` is where the art came from, kept for credits. ``source`` is a
-        stable key for an imported tile, so re-running an import finds what it
-        already added instead of adding it twice.
-        """
-        self._ensure_indexes()
-        if self._tiles.count_documents({}) >= MAX_TILES:
-            raise TileError(f"The library holds at most {MAX_TILES} tiles.")
-        clean = _clean_name(name)
-        cat_id = self._check_category(cat_id)
-        clean_use = clean_uses(uses)
-        cell = clean_cell(cell_px)
-        check_image(data, content_type)
-        tile_id = secrets.token_hex(8)
-        vid = self._store_art(tile_id, data, content_type)
-        row = {"tile_id": tile_id, "name": clean, "cat_id": cat_id,
-               "order": len(self._in_category(cat_id)), "variants": [vid],
-               "uses": clean_use, "cell_px": cell,
-               "pack": str(pack or "")[:80], "source": str(source or "")[:200]}
-        self._tiles.insert_one(dict(row))
-        return row
+    def usable(self, guild_id: int, layer: str, role: str) -> list[dict]:
+        """What ``role`` may use on ``layer`` on this server, locked or not."""
+        layer, role = clean_layer(layer), str(role)
+        if role not in ROLE_KEYS:
+            raise TileError(f"Unknown role {role!r}.")
+        return [row for row in self.tiles(guild_id)
+                if row["layer"] == layer and role in row["access"]]
 
     def by_source(self, source: str) -> Optional[dict]:
         """The tile an import added under this key, if it is still there."""
@@ -329,46 +412,120 @@ class TileLibrary:
             _complete(row)
         return row
 
-    def set_uses(self, tile_id: str, uses: Any) -> list[str]:
-        """Exactly which layers this tile may be used on, and by whom."""
-        self._need(tile_id)
-        clean = clean_uses(uses)
-        self._tiles.update_one({"tile_id": str(tile_id)}, {"$set": {"uses": clean}})
-        return clean
+    def _need(self, tile_id: str) -> dict:
+        row = self.get(tile_id)
+        if row is None:
+            raise TileError("That tile no longer exists.")
+        return row
 
-    def set_category_uses(self, cat_id: str, uses: Any) -> int:
-        """The same uses for every tile in a category. Returns how many."""
+    def _in_category(self, cat_id: str) -> list[dict]:
+        return [row for row in self.tiles() if (row.get("cat_id") or "") == cat_id]
+
+    def _check_category(self, cat_id: Any) -> str:
+        cat_id = str(cat_id or "")
+        if cat_id and self._category(cat_id) is None:
+            raise TileError("That category no longer exists.")
+        return cat_id
+
+    # ------------------------------------------------------------------ #
+    #  Writing tiles
+    # ------------------------------------------------------------------ #
+    def _props(self, given: dict, current: Optional[dict] = None) -> dict:
+        """Validate the editable fields in ``given`` against what is stored."""
+        out: dict = {}
+        if "name" in given:
+            out["name"] = _clean_name(given["name"])
+        if "cell_px" in given:
+            out["cell_px"] = clean_cell(given["cell_px"])
+        if "layer" in given:
+            out["layer"] = clean_layer(given["layer"])
+        if "access" in given:
+            out["access"] = clean_access(given["access"])
+        if "requires" in given:
+            out["requires"] = clean_requires(given["requires"])
+        if "passable" in given:
+            out["passable"] = bool(given["passable"])
+        if "resizable" in given:
+            out["resizable"] = bool(given["resizable"])
+        for key, what in (("scale_min", "smallest"), ("scale_max", "largest")):
+            if key in given:
+                out[key] = clean_scale(given[key], what)
+        low = out.get("scale_min", (current or {}).get("scale_min", DEFAULT_SCALE_MIN))
+        high = out.get("scale_max", (current or {}).get("scale_max", DEFAULT_SCALE_MAX))
+        if low > high:
+            raise TileError("The smallest size cannot be larger than the largest.")
+        return out
+
+    def add_tile(self, *, name: Any, cat_id: Any, data: bytes, content_type: str,
+                 guild_id: int = GLOBAL, layer: Any = DEFAULT_LAYER,
+                 access: Any = ("admin",), requires: Any = None,
+                 passable: bool = True, resizable: bool = False,
+                 scale_min: Any = DEFAULT_SCALE_MIN, scale_max: Any = DEFAULT_SCALE_MAX,
+                 cell_px: Any = DEFAULT_CELL, pack: str = "", source: str = "") -> dict:
+        """A new tile with its first variant, at the end of its category.
+
+        ``pack`` is where the art came from, kept for credits. ``source`` is a
+        stable key for an imported tile, so re-running an import finds what it
+        already added instead of adding it twice.
+        """
+        self._ensure_indexes()
+        if self._tiles.count_documents({}) >= MAX_TILES:
+            raise TileError(f"The library holds at most {MAX_TILES} tiles.")
+        props = self._props({"name": name, "layer": layer, "access": list(access or []),
+                             "requires": requires, "passable": passable,
+                             "resizable": resizable, "scale_min": scale_min,
+                             "scale_max": scale_max, "cell_px": cell_px})
         cat_id = self._check_category(cat_id)
-        clean = clean_uses(uses)
-        rows = self._in_category(cat_id)
-        for row in rows:
-            self._tiles.update_one({"tile_id": row["tile_id"]}, {"$set": {"uses": clean}})
-        return len(rows)
+        check_image(data, content_type)
+        tile_id = secrets.token_hex(8)
+        vid = self._store_art(tile_id, data, content_type)
+        row = {"tile_id": tile_id, "guild_id": int(guild_id or GLOBAL), "cat_id": cat_id,
+               "order": len(self._in_category(cat_id)), "variants": [vid],
+               "pack": str(pack or "")[:80], "source": str(source or "")[:200], **props}
+        self._tiles.insert_one(dict(row))
+        return row
 
-    def update_tile(self, tile_id: str, *, name: Any = None,
-                    cat_id: Any = None, cell_px: Any = None) -> None:
-        """Rename a tile, set its grid size, or move it to another category
-        (it goes to the end)."""
+    def update_tile(self, tile_id: str, **given: Any) -> dict:
+        """Change any of :data:`EDITABLE`. Moving category puts it at the end
+        there. Returns the tile as stored."""
+        unknown = set(given) - set(EDITABLE)
+        if unknown:
+            raise TileError(f"Not editable: {', '.join(sorted(unknown))}.")
         row = self._need(tile_id)
-        changes: dict = {}
-        if name is not None:
-            changes["name"] = _clean_name(name)
-        if cell_px is not None:
-            changes["cell_px"] = clean_cell(cell_px)
-        if cat_id is not None:
-            target = self._check_category(cat_id)
-            if target != (row.get("cat_id") or ""):
+        given = {k: v for k, v in given.items() if v is not None}
+        changes = self._props(given, row)
+        old_cat = row.get("cat_id") or ""
+        if "cat_id" in given:
+            target = self._check_category(given["cat_id"])
+            if target != old_cat:
                 changes["cat_id"] = target
                 changes["order"] = len(self._in_category(target))
         if changes:
-            self._tiles.update_one({"tile_id": str(tile_id)}, {"$set": changes})
+            self._tiles.update_one({"tile_id": str(tile_id)},
+                                   {"$set": changes})
             if "cat_id" in changes:
-                self._renumber_tiles(row.get("cat_id") or "")
+                self._renumber_tiles(old_cat)
+        return self._need(tile_id)
+
+    def update_category(self, cat_id: str, guild_id: Optional[int] = None,
+                        **given: Any) -> int:
+        """The same settings for every tile in a category that ``guild_id`` may
+        edit (``None``: all of them). Returns how many changed."""
+        cat_id = self._check_category(cat_id)
+        given = {k: v for k, v in given.items() if k != "name" and k != "cat_id" and v is not None}
+        if not given:
+            return 0
+        rows = [r for r in self._in_category(cat_id)
+                if guild_id is None or r["guild_id"] == int(guild_id)]
+        for row in rows:
+            changes = self._props(given, row)
+            self._tiles.update_one({"tile_id": row["tile_id"]},
+                                   {"$set": changes})
+        return len(rows)
 
     def move_tile(self, tile_id: str, delta: int) -> None:
         row = self._need(tile_id)
-        cat_id = row.get("cat_id") or ""
-        ids = [t["tile_id"] for t in self._in_category(cat_id)]
+        ids = [t["tile_id"] for t in self._in_category(row.get("cat_id") or "")]
         self._write_tile_order(_moved(ids, str(tile_id), delta))
 
     def _renumber_tiles(self, cat_id: str) -> None:
@@ -421,3 +578,10 @@ class TileLibrary:
         """One variant's bytes. The only read that carries them."""
         self._ensure_indexes()
         return self._art.find_one({"vid": str(vid)})
+
+    def first_art(self, tile_id: str) -> Optional[dict]:
+        """A tile's first variant's bytes — what a toolkit button shows."""
+        row = self.get(tile_id)
+        if not row or not row["variants"]:
+            return None
+        return self.art(row["variants"][0])

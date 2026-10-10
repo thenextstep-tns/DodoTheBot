@@ -19,35 +19,44 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from fake_mongo import FakeCollection  # noqa: E402
 
-from helpers.dodoland import assets as asset_rules  # noqa: E402
 from helpers.dodoland import decor as decor_rules  # noqa: E402
-from helpers.dodoland.assets import AssetStore  # noqa: E402
+from helpers.dodoland import tiles as tile_rules  # noqa: E402
 from helpers.dodoland.decor import DecorStore  # noqa: E402
 
 GUILD, NIK, FOX = 42, 1, 2
 
-assets = AssetStore(FakeCollection())
+# The tile library replaced the asset library: what is placed is a tile, and
+# the decor row's ``asset_id`` holds its id.
+library = tile_rules.TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
 store = DecorStore(FakeCollection())
+BUILDINGS = [{"key": "gallery"}]
 
-free = assets.add(GUILD, name="Campfire", data=b"x", content_type="image/png")
-locked = assets.add(GUILD, name="Gilded banner", data=b"x",
-                    content_type="image/png", building="gallery", min_tier=3)
+free = library.add_tile(name="Campfire", cat_id="", data=b"x", content_type="image/png",
+                        guild_id=GUILD, access=["admin", "player"])
+free["asset_id"] = free["tile_id"]
+locked = library.add_tile(name="Gilded banner", cat_id="", data=b"x", content_type="image/png",
+                          access=["admin", "player"], requires={"building": "gallery", "tier": 3},
+                          resizable=True, scale_min=0.5, scale_max=2)
+locked["asset_id"] = locked["tile_id"]
 
 
 # --------------------------------------------------------------------------- #
 #  What is unlocked
 # --------------------------------------------------------------------------- #
-library = assets.list(GUILD)
-# Somebody with nothing built still has the starter decor. A library where
+tiles = library.usable(GUILD, "objects", "player")
+# Somebody with nothing built still has the starter set. A toolkit where
 # nothing is available on day one gives nobody a reason to open the map twice.
-nobody = asset_rules.unlocked_for(library, None)
+nobody = tile_rules.unlocked_for(tiles, None, BUILDINGS)
 assert free["asset_id"] in nobody and locked["asset_id"] not in nobody, nobody
 
-# min_tier 3 means the third tier, which is index 2.
+# Tier 3 means the third tier, which is index 2.
 almost = {"buildings": {"gallery": {"tier": 1}}}
 enough = {"buildings": {"gallery": {"tier": 2}}}
-assert locked["asset_id"] not in asset_rules.unlocked_for(library, almost)
-assert locked["asset_id"] in asset_rules.unlocked_for(library, enough)
+assert locked["asset_id"] not in tile_rules.unlocked_for(tiles, almost, BUILDINGS)
+assert locked["asset_id"] in tile_rules.unlocked_for(tiles, enough, BUILDINGS)
+# A global tile locked behind a building this server does not have is not
+# locked here: it cannot be unreachable because buildings were named otherwise.
+assert locked["asset_id"] in tile_rules.unlocked_for(tiles, None, [{"key": "library"}])
 print("locks           a lock is a tier of a building, and it is off by one on purpose")
 
 
@@ -57,7 +66,7 @@ print("locks           a lock is a tier of a building, and it is off by one on p
 # The toolkit dims what is locked as a courtesy. This is what actually refuses
 # it, because a dimmed button is a suggestion and a request is whatever
 # somebody types.
-allowed = asset_rules.unlocked_for(library, None)
+allowed = tile_rules.unlocked_for(tiles, None, BUILDINGS)
 try:
     store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
                 asset_id=locked["asset_id"], x=50, y=50, allowed=allowed)
@@ -128,9 +137,27 @@ for bad in (-900, 900, "over there", None):
         raise AssertionError(f"{bad!r} was accepted as a position")
 print("limits          a position that is not a position is refused")
 
+# Size is the tile's to decide: a fixed tile is 1x whatever is asked, a
+# resizable one is clamped to its own range — on the server, not the slider.
+fixed = store.place(GUILD, scope=decor_rules.SCOPE_WORLD, asset_id=free["asset_id"], x=5, y=5,
+                    scale=4, scale_range=tile_rules.scale_range(library.get(free["asset_id"])))
+assert fixed["scale"] == 1.0, fixed
+big = store.place(GUILD, scope=decor_rules.SCOPE_WORLD, asset_id=locked["asset_id"], x=5, y=5,
+                  scale=5, scale_range=tile_rules.scale_range(library.get(locked["asset_id"])))
+assert big["scale"] == 2.0, big
+store.move(GUILD, big["piece_id"], scale=0.1, scale_range=(0.5, 2.0))
+assert store.piece(GUILD, big["piece_id"])["scale"] == 0.5
+store.remove(GUILD, fixed["piece_id"]); store.remove(GUILD, big["piece_id"])
+print("sizes           a placement is clamped to its tile's range; fixed tiles stay 1x")
+
+# A server's own tile is invisible to every other server.
+assert library.visible(free["asset_id"], GUILD) and not library.visible(free["asset_id"], 99)
+assert library.visible(locked["asset_id"], 99), "a global tile is everybody's"
+print("scoping         a server's own tile is seen by that server only")
+
 # Deleting an asset takes every placement of it. Left behind, they render as a
 # broken image on somebody's town, which reads as their town being broken.
-dropped = store.forget_asset(GUILD, free["asset_id"])
+dropped = store.forget_tile(free["asset_id"])
 assert dropped >= 2, dropped
 assert all(row["asset_id"] != free["asset_id"] for row in store.town(GUILD, NIK))
 assert all(row["asset_id"] != free["asset_id"] for row in store.town(GUILD, FOX))

@@ -489,14 +489,22 @@ def write(tiles: list[dict]) -> None:
             kept += 1
             continue
         first, *rest = tile["images"]
+        layer, access = split_uses(tile["uses"])
         row = library.add_tile(name=tile["name"], cat_id=have[tile["category"]],
                                data=png(first), content_type="image/png",
-                               uses=tile["uses"], cell_px=tile["cell_px"],
+                               layer=layer, access=access, cell_px=tile["cell_px"],
                                pack=tile["pack"], source=tile["source"])
         for image in rest:
             library.add_variant(row["tile_id"], data=png(image), content_type="image/png")
         added += 1
     print(f"added {added} tiles, {kept} were already there")
+
+
+def split_uses(uses: list) -> tuple:
+    """A manifest's "layer:role" list as the library's one layer and its roles."""
+    layers = [u.split(":")[0] for u in uses if ":" in u]
+    layer = layers[0] if layers else "objects"
+    return layer, [u.split(":")[1] for u in uses if u.startswith(layer + ":")]
 
 
 def main() -> None:

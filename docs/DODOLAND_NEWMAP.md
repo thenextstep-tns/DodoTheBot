@@ -119,6 +119,35 @@ How it was got, for next time (the board is locked — owner subscription lapsed
 `tools/dodoland_import_tile_bundle.py bundle.json [--dry-run]` is the generic
 writer any future import can use: a curated JSON list in, re-runnable by `source`.
 
+**Step 1d — the tile library replaces the asset library (10 Oct 2026).**
+Each tile now has:
+
+| Field | Meaning |
+|---|---|
+| `layer` | one of environment / objects / buildings (the old layer×role grid is gone) |
+| `access` | `admin`, `player` — the bot owner can always use everything |
+| `requires` | `{building, tier}`: a player's lock, the asset library's rule. A server without that building key has no such lock |
+| `passable` | whether a road may be drawn through it |
+| `resizable`, `scale_min`, `scale_max` | placement size range; fixed tiles are 1x, clamped **server-side** in `decor.py` |
+| `guild_id` | 0 = global (owner's); otherwise that server's own tile |
+
+* **Server admins (full scope)** get the Tile library section on their DodoLand
+  page: global tiles read-only, their own server's tiles editable, uploads go to
+  their server. Categories are the owner's. `/api/guild/{gid}/dodoland/tiles`
+  enforces this; `test_dodoland_page` asserts the refusals.
+* The **map toolkit** lists map objects/buildings admins have access to, one
+  category at a time; the **town toolkit** lists map objects with player access,
+  locked by `tiles.unlocked_for`. Decor rows keep the field name `asset_id`, which
+  now holds a **tile id**; the image routes serve the tile's first variant.
+* `helpers/dodoland/assets.py` and the Asset library section are **deleted**.
+  `DodoLandAssets` is untouched (production on `refactor` still reads it); its 2
+  rows were copied in as this server's tiles.
+* `tools/dodoland_tiles_migrate.py` set layer/access from the old `uses`, judged
+  `passable` (water, mountains, buildings, walls, monuments, solid props, rocks
+  block roads; ground, plants, creatures, items, docks and planks do not — 386
+  of 774 block) and made all 578 map-art tiles resizable 0.25–4x. It only fills
+  unset fields, so re-running never overwrites panel edits.
+
 Next: step 2 — draw environment tiles on the map as SVG patterns (the same
 mechanism the motifs use), scaled by `cell_px`, the brush picking a tile from
 `usable("environment", role)`.

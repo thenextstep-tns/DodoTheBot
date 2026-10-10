@@ -893,10 +893,21 @@ _SCRIPT = r"""
     return '/guild/' + GID + '/dodoland/me/asset/' + id;
   }
 
+  // The slider offers what the tile allows; fixed-size tiles get none. The
+  // server clamps whatever arrives, so this is a courtesy, not the rule.
+  function fitScale(id) {
+    if (!kitScale) return;
+    var a = null;
+    kit.assets.forEach(function (x) { if (x.asset_id === id) a = x; });
+    var lo = a ? a.scale_min : 1, hi = a ? a.scale_max : 1;
+    kitScale.min = lo; kitScale.max = hi; kitScale.disabled = lo === hi;
+    kitScale.value = Math.min(hi, Math.max(lo, parseFloat(kitScale.value) || 1));
+  }
+
   function renderKit() {
     if (!kit.assets.length) {
-      kitGrid.innerHTML = '<p class="muted small">Nothing in the library yet. ' +
-        'An admin uploads the things people can put on their towns.</p>';
+      kitGrid.innerHTML = '<p class="muted small">Nothing in the library for towns yet. ' +
+        'Admins choose which tiles players have access to.</p>';
       return;
     }
     kitGrid.innerHTML = kit.assets.map(function (a) {
@@ -905,7 +916,7 @@ _SCRIPT = r"""
       return '<button class="kititem' + (a.locked ? ' locked' : '') +
         (armed === a.asset_id ? ' armed' : '') + '" data-a="' + a.asset_id +
         '"' + (a.locked ? ' disabled' : '') + '>' +
-        '<img alt="" src="' + assetUrl(a.asset_id) + '">' +
+        '<img alt="" loading="lazy" src="' + assetUrl(a.asset_id) + '">' +
         '<span>' + esc(a.name) + '</span></button>';
     }).join('');
     kitGrid.querySelectorAll('.kititem').forEach(function (el) {
@@ -913,6 +924,7 @@ _SCRIPT = r"""
         if (el.classList.contains('locked')) return;
         armed = (armed === el.dataset.a) ? null : el.dataset.a;
         held = null;
+        fitScale(armed);
         townArt.classList.toggle('placing', !!armed);
         kitSay(armed ? 'Now click your town to put it down.' : '');
         renderKit();
@@ -965,7 +977,7 @@ _SCRIPT = r"""
             held = (held === p.piece_id) ? null : p.piece_id;
             armed = null;
             townArt.classList.remove('placing');
-            if (held) { kitScale.value = p.scale; kitSay('Held.'); }
+            if (held) { fitScale(p.asset_id); kitScale.value = p.scale; kitSay('Held.'); }
             else { kitSay(''); }
             renderPlaced();
             renderKit();

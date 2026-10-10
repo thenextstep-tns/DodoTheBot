@@ -18,10 +18,17 @@ from aiohttp import web
 
 
 async def asset_image(request: web.Request):
-    """One asset's bytes, for the library and the toolkit strip."""
+    """One tile's first image, for the map toolkit and the decor placed from it.
+
+    The path still says ``asset``: decor rows carry the id in ``asset_id`` and
+    the toolkit builds these URLs. It is a tile id since the tile library
+    replaced the asset library, and only a tile this server can see is served.
+    """
     bot = request.app["bot"]
     guild = request["guild"]
-    row = bot.dodoland_assets.get(guild.id, request.match_info.get("aid") or "")
+    tile_id = request.match_info.get("aid") or ""
+    row = (bot.dodoland_tiles.first_art(tile_id)
+           if bot.dodoland_tiles.visible(tile_id, guild.id) else None)
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = row.get("data")

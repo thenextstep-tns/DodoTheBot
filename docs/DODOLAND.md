@@ -61,14 +61,13 @@ helpers/dodoland/
   townart.py     drawing a town (9 shape families, 9 kinds of inhabitant)
   faicons.py     GENERATED. 72 Font Awesome paths; see tools/vendor_fa_icons.py
   towns.py       authored names, blurbs, pictures, building colours. Never scored
-  assets.py      the decor library an admin uploads
   decor.py       what has been placed on the ground, in two scopes
   flourish.py    trial rank -> visual level. READ-ONLY; the only outside read
   mapview.py     graph-driven placement. Built, and NOT used by the map page
   backfill.py    rebuilding history from the message archive
   voice.py       voice session bookkeeping, clock-testable, no Discord types
   invites.py     who brought whom in, and when to refuse to say
-  tiles.py       the owner's global tile library (NewMap step 1)
+  tiles.py       the tile library: global + per-server tiles; REPLACED assets.py (NewMap)
 web/dodoland/
   __init__.py       the route table. Every route is gated; two kinds of gate
   pages.py          the DodoLand panel page (9 sections)

@@ -49,6 +49,7 @@ from aiohttp import web
 
 from helpers.dodoland import flourish as flourish_rules
 from helpers.dodoland import standing
+from helpers.dodoland import tiles as tile_rules
 from helpers.dodoland import townart
 from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
@@ -167,16 +168,20 @@ def _collect(bot, guild) -> dict:
                        "f": bool(d.get("flip"))}
                       for d in town_decor.get(uid, ())],
         })
+    cats = {c["cat_id"]: c["name"] for c in bot.dodoland_tiles.categories()}
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
             "world": [{"id": d["piece_id"], "a": d["asset_id"],
                        "x": float(d.get("x", 50)), "y": float(d.get("y", 50)),
                        "s": float(d.get("scale", 1.0)),
                        "f": bool(d.get("flip"))} for d in world_decor],
-            "assets": [{"id": a["asset_id"], "name": a.get("name") or "",
-                        "building": a.get("building") or "",
-                        "tier": int(a.get("min_tier") or 0)}
-                       for a in bot.dodoland_assets.list(guild.id)]}
+            # The toolkit is the tile library's map objects and buildings that
+            # admins have access to here. Ground is painted, not placed.
+            "assets": [{"id": t["tile_id"], "name": t["name"], "cat": cats.get(t["cat_id"], ""),
+                        "building": t["requires"]["building"], "tier": t["requires"]["tier"],
+                        "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
+                       for t in bot.dodoland_tiles.tiles(guild.id)
+                       if t["layer"] != "environment" and "admin" in t["access"]]}
 
 
 async def map_page(request: web.Request):
@@ -260,6 +265,7 @@ async def map_page(request: web.Request):
   </div>
   <p class="dlkithint">Pick something, then click the map to put it down.
   Click a placed piece to pick it up again.</p>
+  <select id="dlkitcat" class="dlkitcat"></select>
   <div class="dlkitgrid" id="dlkitgrid"></div>
   <div class="dlkitfoot">
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
@@ -477,6 +483,7 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   background: var(--deep); cursor: pointer; display: flex; flex-direction: column;
   align-items: center; gap: 4px; font: inherit; color: inherit; }
 .dlkititem img { width: 100%; height: 42px; object-fit: contain; }
+.dlkitcat { margin: 0 0 8px; width: 100%; }
 .dlkititem span { font-size: 10px; text-align: center; line-height: 1.2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .dlkititem.armed { border-color: var(--lantern); background: var(--paper);
@@ -1005,22 +1012,58 @@ _SCRIPT = r"""
     return '/guild/' + D.gid + '/dodoland/asset/' + id;
   }
 
+  // Hundreds of tiles in one grid is a wall, so the kit shows one category at
+  // a time; which one survives a reload as a per-viewer convenience.
+  var kitCat = document.getElementById('dlkitcat');
+  var cats = [];
+  D.assets.forEach(function (a) { if (cats.indexOf(a.cat) < 0) cats.push(a.cat); });
+  if (kitCat) {
+    kitCat.innerHTML = cats.map(function (c) {
+      return '<option>' + escapeHtml(c || 'Uncategorised') + '</option>';
+    }).join('');
+    try { var keptCat = window.localStorage.getItem('dl-kit-cat');
+          if (keptCat && cats.indexOf(keptCat) >= 0) kitCat.value = keptCat; } catch (e) {}
+    kitCat.onchange = function () {
+      try { window.localStorage.setItem('dl-kit-cat', kitCat.value); } catch (e) {}
+      renderKit();
+    };
+  }
+  function assetById(id) {
+    for (var i = 0; i < D.assets.length; i++) if (D.assets[i].id === id) return D.assets[i];
+    return null;
+  }
+  // The slider offers what the tile allows; a fixed-size tile gets no slider.
+  // The server clamps whatever arrives, so this is a courtesy, not the rule.
+  function fitSlider(assetId) {
+    var a = assetById(assetId);
+    if (!kitScale) return;
+    var lo = a ? a.lo : 1, hi = a ? a.hi : 1;
+    kitScale.min = lo; kitScale.max = hi;
+    kitScale.disabled = lo === hi;
+    var v = parseFloat(kitScale.value) || 1;
+    kitScale.value = Math.min(hi, Math.max(lo, v));
+  }
+
   function renderKit() {
     if (!D.assets.length) {
-      kitGrid.innerHTML = '<p class="dlkitempty">The asset library is empty. ' +
-        'Upload something on the DodoLand page first.</p>';
+      kitGrid.innerHTML = '<p class="dlkitempty">Nothing in the tile library that admins ' +
+        'can place yet.</p>';
       return;
     }
-    kitGrid.innerHTML = D.assets.map(function (a) {
+    var shown = kitCat ? kitCat.value : null;
+    kitGrid.innerHTML = D.assets.filter(function (a) {
+      return shown === null || (a.cat || 'Uncategorised') === shown;
+    }).map(function (a) {
       return '<button class="dlkititem' +
         (armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
-        '<img alt="" src="' + assetUrl(a.id) + '">' +
+        '<img alt="" loading="lazy" src="' + assetUrl(a.id) + '">' +
         '<span>' + escapeHtml(a.name) + '</span></button>';
     }).join('');
     kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {
       el.onclick = function () {
         armedAsset = (armedAsset === el.dataset.asset) ? null : el.dataset.asset;
         heldPiece = null;
+        fitSlider(armedAsset);
         frame.classList.toggle('placing', !!armedAsset);
         kitSay(armedAsset ? 'Click the map to place it.' : '');
         renderKit();
@@ -1127,7 +1170,9 @@ _SCRIPT = r"""
       n.classList.toggle('on', n.dataset.id === heldPiece);
     });
     var p = heldPiece && pieceById(heldPiece);
-    if (p) { kitScale.value = p.s; kitSay('Held. Drag the size, mirror it, or remove it.'); }
+    if (p) { fitSlider(p.a); kitScale.value = p.s;
+             kitSay(kitScale.disabled ? 'Held. This one has a fixed size; mirror it or remove it.'
+                                      : 'Held. Drag the size, mirror it, or remove it.'); }
     else { kitSay(''); }
   }
 

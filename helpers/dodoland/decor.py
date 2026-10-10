@@ -22,9 +22,11 @@ collection with a ``scope`` because they are the same shape and the same
 toolkit places both, and separated by an ``owner_id`` that is ``0`` for the
 world and a user id for a town.
 
-**What may be placed is decided here, not in the browser.** ``assets.unlocked_for``
-already says which assets somebody has earned; this refuses a placement that
-does not pass it. A toolkit that dims the locked ones is a courtesy — the
+**What may be placed is decided here, not in the browser.** ``tiles.unlocked_for``
+says which tiles somebody has reached the requirements of; this refuses a
+placement that does not pass it, and clamps its size to what the tile allows.
+``asset_id`` on a row holds a **tile id** since the tile library replaced the
+asset library. A toolkit that dims the locked ones is a courtesy — the
 refusal is the rule.
 
 Nothing here scores anything. Decor is authored, like a town's name and its
@@ -48,6 +50,11 @@ MAX_WORLD = 400
 MAX_PER_TOWN = 24
 
 MIN_SCALE, MAX_SCALE = 0.25, 6.0
+
+
+def _clamp_scale(size: float, scale_range: tuple) -> float:
+    low, high = (max(MIN_SCALE, float(scale_range[0])), min(MAX_SCALE, float(scale_range[1])))
+    return round(max(low, min(high, size)), 3)
 
 
 class DecorError(ValueError):
@@ -130,10 +137,15 @@ class DecorStore:
     # ------------------------------------------------------------------ #
     def place(self, guild_id: int, *, scope: str, asset_id: str, x: Any, y: Any,
               owner_id: int = 0, scale: Any = 1.0, flip: bool = False,
-              allowed: Optional[set] = None) -> dict:
+              allowed: Optional[set] = None,
+              scale_range: tuple = (MIN_SCALE, MAX_SCALE)) -> dict:
         """Put one thing down, and return the row that was written.
 
-        ``allowed`` is the set of asset ids this person may place. Passing
+        ``scale_range`` is what the tile may be sized to — ``(1, 1)`` for a
+        tile that is not resizable — and a size outside it is clamped, here,
+        not in the browser.
+
+        ``allowed`` is the set of tile ids this person may place. Passing
         ``None`` means the caller is an administrator acting on the world and
         the locks do not apply to them; passing a set means they do, and this
         is the only place that check is enforced.
@@ -169,7 +181,7 @@ class DecorStore:
             "asset_id": asset_id,
             "x": _coord(x, "A position"),
             "y": _coord(y, "A position"),
-            "scale": round(max(MIN_SCALE, min(MAX_SCALE, size)), 3),
+            "scale": _clamp_scale(size, scale_range),
             "flip": bool(flip),
         }
         self._col.insert_one(dict(row))
@@ -177,7 +189,8 @@ class DecorStore:
 
     def move(self, guild_id: int, piece_id: str, *, x: Any = None, y: Any = None,
              scale: Any = None, flip: Any = None,
-             owner_id: Optional[int] = None) -> bool:
+             owner_id: Optional[int] = None,
+             scale_range: tuple = (MIN_SCALE, MAX_SCALE)) -> bool:
         """Move, resize or mirror one piece.
 
         ``owner_id`` narrows the query rather than being checked afterwards, so
@@ -192,8 +205,7 @@ class DecorStore:
             changes["y"] = _coord(y, "A position")
         if scale is not None:
             try:
-                changes["scale"] = round(
-                    max(MIN_SCALE, min(MAX_SCALE, float(scale))), 3)
+                changes["scale"] = _clamp_scale(float(scale), scale_range)
             except (TypeError, ValueError):
                 raise DecorError("That size is not a number.") from None
         if flip is not None:
@@ -221,6 +233,18 @@ class DecorStore:
         result = self._col.delete_many({"guild_id": int(guild_id),
                                         "scope": SCOPE_TOWN,
                                         "owner_id": int(owner_id)})
+        return int(getattr(result, "deleted_count", 0))
+
+    def piece(self, guild_id: int, piece_id: str) -> Optional[dict]:
+        self._ensure_indexes()
+        return self._col.find_one({"guild_id": int(guild_id), "piece_id": str(piece_id)})
+
+    def forget_tile(self, tile_id: str) -> int:
+        """Every placement of a tile that no longer exists, on every server —
+        a global tile can be placed anywhere. ``asset_id`` holds the tile id
+        since the tile library replaced the asset library."""
+        self._ensure_indexes()
+        result = self._col.delete_many({"asset_id": str(tile_id)})
         return int(getattr(result, "deleted_count", 0))
 
     def forget_asset(self, guild_id: int, asset_id: str) -> int:

@@ -31,7 +31,7 @@ def dodoland_routes() -> list:
     """Route table for the DodoLand pages."""
     from helpers import panel_access
     from web.dodoland.api import (
-        api_dodoland_asset, api_dodoland_backfill, api_dodoland_buildings,
+        api_dodoland_backfill, api_dodoland_buildings,
         api_dodoland_map, api_dodoland_param, api_dodoland_settle,
         api_dodoland_shapes, api_dodoland_suggest, api_dodoland_town,
     )
@@ -48,7 +48,9 @@ def dodoland_routes() -> list:
         terrain_defs, terrain_overview, terrain_world,
     )
     from web.dodoland.mappage import map_page
-    from web.dodoland.tiles_ui import api_tiles, tile_art, tiles_page
+    from web.dodoland.tiles_ui import (
+        api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
+    )
     from web.dodoland.pages import dodoland_page
     from web.routes import require_owner, require_scope
 
@@ -73,7 +75,10 @@ def dodoland_routes() -> list:
         web.post("/api/guild/{gid}/dodoland/param", full(api_dodoland_param)),
         web.post("/api/guild/{gid}/dodoland/buildings", full(api_dodoland_buildings)),
         web.post("/api/guild/{gid}/dodoland/map", full(api_dodoland_map)),
-        web.post("/api/guild/{gid}/dodoland/asset", full(api_dodoland_asset)),
+        # The tile library, as one server sees it: the global tiles and its
+        # own, which its admins manage. It replaced the asset library.
+        web.post("/api/guild/{gid}/dodoland/tiles", full(api_guild_tiles)),
+        web.get("/guild/{gid}/dodoland/tiles/art/{vid}", configure(guild_tile_art)),
         web.post("/api/guild/{gid}/dodoland/suggest", full(api_dodoland_suggest)),
         web.post("/api/guild/{gid}/dodoland/shapes", full(api_dodoland_shapes)),
         # The world itself. Read by anybody who can read the map; painted only

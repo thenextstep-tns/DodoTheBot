@@ -9,6 +9,8 @@ must not import anything from the tabletop engine, and it must only ever *read*
 from trial ranks.
 """
 import asyncio
+import base64
+import json
 import pathlib
 import re
 import sys
@@ -20,7 +22,7 @@ import discord  # noqa: E402
 from fake_mongo import FakeCollection  # noqa: E402
 
 from helpers.dodoland import flourish, parameters as dodo_params  # noqa: E402
-from helpers.dodoland.assets import AssetStore  # noqa: E402
+from helpers.dodoland.tiles import TileLibrary  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.decor import DecorStore  # noqa: E402
 from helpers.dodoland.decor import DecorStore  # noqa: E402
@@ -97,7 +99,7 @@ class Bot:
         self.dodoland_params = ParamManager(FakeCollection(), dodo_params.DODOLAND_PARAMETERS)
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
-        self.dodoland_assets = AssetStore(FakeCollection())
+        self.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
         self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()
@@ -142,19 +144,82 @@ body = response.text
 assert response.status == 200
 print(f"page            renders, {len(body):,} bytes")
 
-# The tile library is the bot's, not the server's: a server admin never sees it,
-# the bot owner gets it as a section with a menu entry (or it is unreachable).
-assert 'data-panel="dl-tiles"' not in body, "a server admin can see the bot's tile library"
+# The tile library replaced the asset library, so a server admin with full scope
+# gets it — this server's view — with a menu entry (or it is unreachable). The
+# global tiles are read-only for them and editable for the bot owner.
+assert "dl-assets" not in body and "dlasset" not in body, "the asset library came back"
 from helpers.dodoland.tiles import TileLibrary  # noqa: E402
 bot.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
 bot.dodoland_tiles.add_tile(name="Deep sea", cat_id="", data=b"x", content_type="image/png")
-owner_request = Request({"bot": bot})
-owner_request["guild"], owner_request["scope"] = guild, "owner"
-owner_body = asyncio.run(pages.dodoland_page(owner_request)).text
-assert '<section class="sidepanel" data-panel="dl-tiles"' in owner_body
-assert 'class="sidenavitem" href="#dl-tiles"' in owner_body
-assert "Deep sea" in owner_body and "/api/dodoland/tiles" in owner_body
-print("page            the tile library is a section for the bot owner only")
+bot.dodoland_tiles.add_tile(name="Our flag", cat_id="", data=b"x", content_type="image/png",
+                            guild_id=GUILD_ID)
+bot.dodoland_tiles.add_tile(name="Their flag", cat_id="", data=b"x", content_type="image/png",
+                            guild_id=GUILD_ID + 1)
+
+
+def _render(scope):
+    req = Request({"bot": bot})
+    req["guild"], req["scope"] = guild, scope
+    return asyncio.run(pages.dodoland_page(req)).text
+
+
+admin_body = _render("full")
+assert '<section class="sidepanel" data-panel="dl-tiles"' in admin_body
+assert 'class="sidenavitem" href="#dl-tiles"' in admin_body
+assert "Deep sea" in admin_body and "Our flag" in admin_body
+assert "Their flag" not in admin_body, "another server's own tile is visible here"
+assert f"/api/guild/{GUILD_ID}/dodoland/tiles" in admin_body
+# The admin's copy of a global tile is read-only; their own is not; the bot
+# owner may edit both.
+def _card_classes(page: str, name: str) -> str:
+    at = page.index(f'value="{name}"')
+    start = page.rindex('<div class="tltile', 0, at)
+    return page[start:page.index(">", start)]
+
+
+assert " ro" in _card_classes(admin_body, "Deep sea")
+assert " ro" not in _card_classes(admin_body, "Our flag")
+assert 'data-panel="dl-tiles"' not in _render("config"), "a settings-only scope can edit tiles"
+assert " ro" not in _card_classes(_render("owner"), "Deep sea")
+print("page            the tile library is this server's view; global tiles read-only for admins")
+
+# The read-only card is a courtesy; the endpoint is the rule.
+from web.dodoland import tiles_ui  # noqa: E402
+
+
+class _JsonRequest(Request):
+    def __init__(self, app, body, scope):
+        super().__init__(app)
+        self["guild"], self["scope"], self._body = guild, scope, body
+
+    async def json(self):
+        return self._body
+
+
+def _call(body, scope="full"):
+    return json.loads(asyncio.run(tiles_ui.api_guild_tiles(_JsonRequest({"bot": bot}, body, scope))).text)
+
+
+bot.dodoland_decor = getattr(bot, "dodoland_decor", None) or DecorStore(FakeCollection())
+by_name = {t["name"]: t for t in bot.dodoland_tiles.tiles()}
+refusal = _call({"action": "update_tile", "tile_id": by_name["Deep sea"]["tile_id"],
+                 "fields": {"name": "Mine now"}})
+assert not refusal["ok"] and "read-only" in refusal["error"], refusal
+assert bot.dodoland_tiles.get(by_name["Deep sea"]["tile_id"])["name"] == "Deep sea"
+assert not _call({"action": "remove_tile", "tile_id": by_name["Their flag"]["tile_id"]})["ok"]
+assert not _call({"action": "add_category", "name": "Mine"})["ok"]
+assert _call({"action": "update_tile", "tile_id": by_name["Our flag"]["tile_id"],
+              "fields": {"passable": False, "access": "player"}})["ok"]
+assert bot.dodoland_tiles.get(by_name["Our flag"]["tile_id"])["access"] == ["player"]
+# An admin asking for a global upload still gets one for their own server.
+pixel = "data:image/png;base64," + base64.b64encode(b"x").decode()
+made = _call({"action": "add_tile", "name": "Sneaky", "cat_id": "", "scope": "global",
+              "images": [{"data": pixel, "content_type": "image/png"}]})
+assert made["ok"] and made["tile"]["guild_id"] == GUILD_ID, made
+# The bot owner arriving through the server's endpoint keeps their rights.
+assert _call({"action": "update_tile", "tile_id": by_name["Deep sea"]["tile_id"],
+              "fields": {"name": "Deep sea"}}, scope="owner")["ok"]
+print("page            the tile endpoint refuses what a server admin may not edit")
 
 for needle, why in (
     ("DodoLand", "the heading"),

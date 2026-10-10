@@ -18,7 +18,7 @@ import discord  # noqa: E402
 from fake_mongo import FakeCollection  # noqa: E402
 
 from helpers.dodoland import parameters as dodo_params  # noqa: E402
-from helpers.dodoland.assets import AssetStore  # noqa: E402
+from helpers.dodoland.tiles import TileLibrary  # noqa: E402
 from helpers.dodoland.buildings import BuildingStore  # noqa: E402
 from helpers.dodoland.store import ActivityStore  # noqa: E402
 from helpers.dodoland.decor import DecorStore  # noqa: E402
@@ -95,7 +95,7 @@ class Bot:
         self.dodoland_params = ParamManager(FakeCollection(), dodo_params.DODOLAND_PARAMETERS)
         self.dodoland = ActivityStore(FakeCollection(), FakeCollection(), self.dodoland_params)
         self.dodoland_buildings = BuildingStore(FakeCollection())
-        self.dodoland_assets = AssetStore(FakeCollection())
+        self.dodoland_tiles = TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
         self.dodoland_towns = TownStore(FakeCollection())
         self.dodoland_decor = DecorStore(FakeCollection())
         self.visibility = Visibility()

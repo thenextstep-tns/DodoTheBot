@@ -33,7 +33,6 @@ from helpers.command_sync import CommandSyncer
 from helpers.lang_manager import LangManager
 from helpers.parameters import ParamManager
 from helpers.dodoland import parameters as dodoland_parameters
-from helpers.dodoland.assets import AssetStore
 from helpers.dodoland.buildings import BuildingStore
 from helpers.dodoland.store import ActivityStore
 from helpers.dodoland.decor import DecorStore
@@ -133,8 +132,6 @@ class DodoBot(commands.Bot):
         # The towns themselves: which buildings a server has, what feeds them,
         # and what a tier costs. Per-guild data, edited on the DodoLand page.
         self.dodoland_buildings = BuildingStore(config_py.dodoland_config)
-        # Decor an admin uploads for people to place once they have earned it.
-        self.dodoland_assets = AssetStore(config_py.dodoland_assets)
         # Names, descriptions and pictures. Authored by their owner,
         # and deliberately unable to move a single number.
         self.dodoland_towns = TownStore(config_py.dodoland_towns)
@@ -145,8 +142,8 @@ class DodoBot(commands.Bot):
         # town grow round a lake and keeps a road out of the sea.
         self.dodoland_terrain = TerrainStore(config_py.dodoland_chunks,
                                              config_py.dodoland_world)
-        # The tiles every server paints its base map with. One library for the
-        # whole bot, curated by its owner.
+        # Everything that can be put on the map: global tiles from the bot
+        # owner and each server's own. It replaced the asset library.
         self.dodoland_tiles = TileLibrary(config_py.dodoland_tiles,
                                           config_py.dodoland_tile_cats,
                                           config_py.dodoland_tile_art)
