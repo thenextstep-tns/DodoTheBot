@@ -48,6 +48,8 @@ _CACHE_MAX = 3000
 _UNDO: dict[int, list] = {}
 _REDO: dict[int, list] = {}
 _HISTORY_MAX = 40
+# vid -> average colour of that tile image.
+_HEX: dict[str, str] = {}
 
 
 def version(guild_id: int) -> int:
@@ -121,10 +123,54 @@ def _overview_step(cells_w: int) -> int:
 # --------------------------------------------------------------------------- #
 #  Reads
 # --------------------------------------------------------------------------- #
+def _hex(bot, tile: dict) -> str:
+    """A tile's average colour, for the zoomed-out view. Cached per variant id,
+    which is never reused, so the cache can never be stale."""
+    vids = tile.get("variants") or []
+    if not vids:
+        return "#777777"
+    vid = vids[0]
+    if vid not in _HEX:
+        colour = "#777777"
+        row = bot.dodoland_tiles.art(vid)
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+
+            with Image.open(BytesIO(bytes(row["data"]))) as image:
+                rgba = image.convert("RGBA").resize((1, 1), Image.BOX).getpixel((0, 0))
+            colour = "#%02x%02x%02x" % rgba[:3]
+        except Exception:  # noqa: BLE001 - a colour is cosmetic
+            pass
+        _HEX[vid] = colour
+    return _HEX[vid]
+
+
+def _env_tiles(bot, guild, request) -> list[dict]:
+    """Ground tiles the person painting may use: every environment tile for
+    the bot owner, those with admin access for a server admin."""
+    from helpers import panel_access
+
+    tiles = [t for t in bot.dodoland_tiles.tiles(guild.id) if t["layer"] == "environment"]
+    if request.get("scope") != panel_access.SCOPE_OWNER:
+        tiles = [t for t in tiles if "admin" in t["access"]]
+    return tiles
+
+
+def _tile_index(bot, guild) -> dict:
+    return {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild.id)}
+
+
 async def terrain_world(request: web.Request):
-    """The shape of the world and the vocabulary of its ground."""
+    """The shape of the world, the vocabulary of its ground, and the palette
+    of tiles the brush paints with."""
     bot, guild = request.app["bot"], request["guild"]
     world = bot.dodoland_terrain.world(guild.id)
+    tiles = _tile_index(bot, guild)
+    world["kinds"] = T.sync_tile_kinds(world["kinds"], tiles)
+    cats = {c["cat_id"]: c["name"] for c in bot.dodoland_tiles.categories()}
+    art = f"/guild/{guild.id}/dodoland/tiles/art/"
     cxs, cys = bot.dodoland_terrain.chunk_counts(guild.id)
     return web.json_response({
         "ok": True,
@@ -134,8 +180,13 @@ async def terrain_world(request: web.Request):
         "overview_step": _overview_step(world["cells_w"]),
         "version": version(guild.id),
         "painted": bot.dodoland_terrain.painted(guild.id),
+        "palette": [{"id": t["tile_id"], "name": t["name"], "cat": cats.get(t["cat_id"], ""),
+                     "thumb": art + t["variants"][0] if t["variants"] else "",
+                     "hex": _hex(bot, t), "passable": t["passable"]}
+                    for t in _env_tiles(bot, guild, request)],
         "kinds": [{"key": k.get("key"), "label": k.get("label"),
-                   "colour": _colours(bot, guild.id).get(k.get("colour"), "#000"),
+                   "tile_id": k.get("tile_id") or "",
+                   "colour": terrainart.kind_fill(k, _colours(bot, guild.id)),
                    "build": bool(k.get("build")), "water": bool(k.get("water")),
                    "move": k.get("move"), "grow": k.get("grow"),
                    "clearable": bool(k.get("clearable"))}
@@ -152,8 +203,12 @@ async def terrain_defs(request: web.Request):
     """
     bot, guild = request.app["bot"], request["guild"]
     world = bot.dodoland_terrain.world(guild.id)
+    tiles = _tile_index(bot, guild)
+    used = [tiles[k["tile_id"]] for k in world["kinds"] if k.get("tile_id") in tiles]
+    dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
     return web.Response(
-        text=terrainart.pattern_defs(world["kinds"], _colours(bot, guild.id)),
+        text=terrainart.pattern_defs(world["kinds"], tiles,
+                                     f"/guild/{guild.id}/dodoland/tiles/art/", dims),
         content_type="image/svg+xml",
         headers={"Cache-Control": "private, max-age=600"})
 
@@ -242,12 +297,60 @@ async def terrain_chunks(request: web.Request):
 # --------------------------------------------------------------------------- #
 #  The brush
 # --------------------------------------------------------------------------- #
-async def api_terrain_paint(request: web.Request):
-    """One brush stroke: ``{kind, radius, points: [[x, y], ...]}`` in cells.
+def _noise(x: int, y: int, seed: int, salt: int = 0) -> float:
+    """A fixed pseudo-random number in [0, 1) for one cell of one stroke.
 
-    Points rather than one cell per request: a drag is hundreds of cells and a
-    request each would be unusable. The stroke is rasterised here so the server
-    decides what a radius means and two clients cannot disagree about it.
+    Seeded per stroke rather than drawn from a generator, so the server decides
+    which cells a scattered brush hits and the same stroke can never come out
+    two different ways.
+    """
+    value = (x * 374761393 + y * 668265263 + seed * 2246822519 + salt * 3266489917) & 0xFFFFFFFF
+    value = ((value ^ (value >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((value ^ (value >> 16)) & 0xFFFFFF) / float(0x1000000)
+
+
+def _choices(store, bot, guild, request, world, body) -> list[int]:
+    """What the stroke paints, as kind indices: a mix of tiles (each becomes a
+    kind the first time it is painted), or raw kinds (the eraser)."""
+    allowed = ({t["tile_id"]: t for t in _env_tiles(bot, guild, request)}
+               if body.get("tiles") else {})
+    out = []
+    for tile_id in body.get("tiles") or []:
+        tile = allowed.get(str(tile_id))
+        if tile is None:
+            raise T.TerrainError("That tile is not available to paint with here.")
+        out.append(store.kind_for_tile(guild.id, tile, _hex(bot, tile)))
+    for kind in body.get("kinds") or []:
+        kind = int(kind)
+        if not 0 <= kind < len(world["kinds"]):
+            raise T.TerrainError("There is no such terrain.")
+        out.append(kind)
+    if not out and body.get("kind") is not None:          # the old single-kind form
+        kind = int(body.get("kind"))
+        if not 0 <= kind < len(world["kinds"]):
+            raise T.TerrainError("There is no such terrain.")
+        out.append(kind)
+    if len(out) > 16:
+        raise T.TerrainError("A brush mixes at most sixteen tiles.")
+    return out
+
+
+async def api_terrain_paint(request: web.Request):
+    """One stroke. Two shapes and two ways of choosing what lands:
+
+    * ``mode: "brush"`` — ``points`` in cells and a ``radius``: a disc dragged
+      along the line between the points.
+    * ``mode: "rect"`` — ``rect: [x0, y0, x1, y1]``: a selection filled at once.
+
+    A cell receives from the ``pattern`` (``{w, h, cells}`` of kind indices,
+    tiled across the world from its origin) if one is given, otherwise one of
+    the ``tiles`` in the mix, picked per cell. ``density`` (0-1) scatters the
+    stroke so only that share of cells is painted, and ``soft`` (0-1) thins it
+    towards the edge of the brush, which is what makes a wide brush read as a
+    coastline instead of a stamp.
+
+    Everything is rasterised here, so the server decides what a radius means
+    and two clients cannot disagree about it.
     """
     from web.routes import _record_change
 
@@ -261,50 +364,96 @@ async def api_terrain_paint(request: web.Request):
     world = store.world(guild.id)
     if not world["cells_w"]:
         return _bad("This server has no world yet. Import the map first.")
-    try:
-        kind = int(body.get("kind"))
-    except (TypeError, ValueError):
-        return _bad("Which terrain?")
-    if not 0 <= kind < len(world["kinds"]):
-        return _bad("There is no such terrain.")
-    radius = max(0, min(64, int(body.get("radius") or 0)))
-    points = body.get("points") or []
-    if not isinstance(points, list) or not points:
-        return _bad("A stroke needs at least one point.")
-    if len(points) > 4000:
-        return _bad("That stroke is too long; it will arrive in pieces.")
-
-    # The brush, once: which offsets a disc of this radius covers. Round, not
-    # square — square corners read as deliberate when they are not.
-    disc = [(dx, dy) for dy in range(-radius, radius + 1)
-            for dx in range(-radius, radius + 1)
-            if not radius or dx * dx + dy * dy <= radius * radius]
-
-    clean: list[tuple[int, int]] = []
-    for point in points:
-        try:
-            clean.append((int(point[0]), int(point[1])))
-        except (TypeError, ValueError, IndexError):
-            continue
-    if not clean:
-        return _bad("A stroke needs at least one point.")
-
     width, height = world["cells_w"], world["cells_h"]
+    try:
+        density = max(0.0, min(1.0, float(body.get("density", 1.0))))
+        soft = max(0.0, min(1.0, float(body.get("soft", 0.0))))
+        seed = int(body.get("seed") or 1) & 0x7FFFFFFF
+        pattern = body.get("pattern")
+        pw = ph = 0
+        pcells: list[int] = []
+        choices: list[int] = []
+        if pattern:
+            pw, ph = int(pattern["w"]), int(pattern["h"])
+            pcells = [int(v) for v in pattern["cells"]]
+            if not (1 <= pw <= 128 and 1 <= ph <= 128 and len(pcells) == pw * ph):
+                return _bad("A pattern is at most 128 by 128 cells.")
+            if any(not 0 <= v < len(world["kinds"]) for v in pcells):
+                return _bad("That pattern names ground this world does not have.")
+        else:
+            choices = _choices(store, bot, guild, request, world, body)
+            if not choices:
+                return _bad("Pick something to paint with.")
+            world = store.world(guild.id)   # a new tile may have added a kind
+    except T.TerrainError as error:
+        return _bad(error)
+    except (TypeError, ValueError, KeyError):
+        return _bad("That stroke could not be read.")
+
+    # cell -> how far into the brush it is: 0 at the centre, 1 at the rim.
+    reach: dict[tuple[int, int], float] = {}
+    mode = str(body.get("mode") or "brush")
+    if mode == "rect":
+        try:
+            x0, y0, x1, y1 = (int(v) for v in body.get("rect"))
+        except (TypeError, ValueError):
+            return _bad("A selection is four numbers.")
+        x0, x1 = sorted((max(0, min(x0, x1)), min(width - 1, max(x0, x1))))
+        y0, y1 = sorted((max(0, min(y0, y1)), min(height - 1, max(y0, y1))))
+        if (x1 - x0 + 1) * (y1 - y0 + 1) > 400_000:
+            return _bad("That selection is too big to fill at once.")
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                reach[(x, y)] = 0.0
+    else:
+        radius = max(0, min(64, int(body.get("radius") or 0)))
+        points = body.get("points") or []
+        if not isinstance(points, list) or not points:
+            return _bad("A stroke needs at least one point.")
+        if len(points) > 4000:
+            return _bad("That stroke is too long; it will arrive in pieces.")
+        # The brush, once: which offsets a disc of this radius covers, and how
+        # far out each one is. Round, not square — square corners read as
+        # deliberate when they are not.
+        disc = [(dx, dy, ((dx * dx + dy * dy) ** 0.5) / radius if radius else 0.0)
+                for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)
+                if not radius or dx * dx + dy * dy <= radius * radius]
+        clean = []
+        for point in points:
+            try:
+                clean.append((int(point[0]), int(point[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if not clean:
+            return _bad("A stroke needs at least one point.")
+        previous = clean[0]
+        for point in clean:
+            for cx, cy in _line(previous[0], previous[1], point[0], point[1]):
+                for dx, dy, far in disc:
+                    x, y = cx + dx, cy + dy
+                    if 0 <= x < width and 0 <= y < height:
+                        key = (x, y)
+                        if far < reach.get(key, 2.0):
+                            reach[key] = far
+            previous = point
+            if len(reach) > 400_000:
+                return _bad("That stroke covers too much at once. "
+                            "Use a smaller brush or shorter strokes.")
+
     edits: dict[tuple[int, int], int] = {}
-    previous = clean[0]
-    for point in clean:
-        for cx, cy in _line(previous[0], previous[1], point[0], point[1]):
-            for dx, dy in disc:
-                x, y = cx + dx, cy + dy
-                if 0 <= x < width and 0 <= y < height:
-                    edits[(x, y)] = kind
-        previous = point
-        # A ceiling, so a long drag with a wide brush cannot ask for the world.
-        if len(edits) > 400_000:
-            return _bad("That stroke covers too much at once. "
-                        "Use a smaller brush or shorter strokes.")
+    inner = 1.0 - soft
+    for (x, y), far in reach.items():
+        chance = density
+        if soft and far > inner:
+            chance *= max(0.0, 1.0 - (far - inner) / soft)
+        if chance < 1.0 and _noise(x, y, seed) >= chance:
+            continue
+        if pcells:
+            edits[(x, y)] = pcells[(y % ph) * pw + (x % pw)]
+        else:
+            edits[(x, y)] = choices[int(_noise(x, y, seed, 1) * len(choices))]
     if not edits:
-        return _bad("That stroke fell outside the world.")
+        return _bad("That stroke painted nothing; raise the density.")
 
     keys = sorted({(x // T.CHUNK, y // T.CHUNK) for x, y in edits})
     # Snapshot before and after, so undo and redo are both exact rather than a
@@ -320,12 +469,36 @@ async def api_terrain_paint(request: web.Request):
     _REDO.pop(guild.id, None)
 
     invalidate(guild.id, keys)
-    await _record_change(request, "dodoland_terrain", world["kinds"][kind]["key"],
-                         "", f"{len(edits)} cells", "DodoLand terrain painted")
+    await _record_change(request, "dodoland_terrain", mode, "",
+                         f"{len(edits)} cells", "DodoLand terrain painted")
     return web.json_response({"ok": True, "cells": len(edits), "chunks": len(keys),
                               "touched": [[cx, cy] for cx, cy in keys],
+                              "kinds": len(world["kinds"]),
                               "undo": len(history), "redo": 0,
                               "version": version(guild.id)})
+
+
+async def terrain_cells(request: web.Request):
+    """The kinds in a rectangle, ``?r=x0,y0,x1,y1`` in cells: what the pattern
+    tool copies. Capped, because it is a stamp, not an export."""
+    bot, guild = request.app["bot"], request["guild"]
+    store = bot.dodoland_terrain
+    world = store.world(guild.id)
+    try:
+        x0, y0, x1, y1 = (int(v) for v in (request.query.get("r") or "").split(","))
+    except (TypeError, ValueError):
+        return _bad("A rectangle is four numbers.")
+    x0, x1 = sorted((max(0, min(x0, x1)), min(world["cells_w"] - 1, max(x0, x1))))
+    y0, y1 = sorted((max(0, min(y0, y1)), min(world["cells_h"] - 1, max(y0, y1))))
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    if w > 128 or h > 128:
+        return _bad("A pattern is at most 128 by 128 cells; select less.")
+    keys = sorted({(cx, cy) for cx in range(x0 // T.CHUNK, x1 // T.CHUNK + 1)
+                   for cy in range(y0 // T.CHUNK, y1 // T.CHUNK + 1)})
+    chunks = store.chunks(guild.id, keys)
+    cells = [chunks[(x // T.CHUNK, y // T.CHUNK)][(y % T.CHUNK) * T.CHUNK + (x % T.CHUNK)]
+             for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+    return web.json_response({"ok": True, "x": x0, "y": y0, "w": w, "h": h, "cells": cells})
 
 
 async def api_terrain_undo(request: web.Request):

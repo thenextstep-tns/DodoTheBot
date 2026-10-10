@@ -1,23 +1,34 @@
 """
-The terrain layer on the map page, and the brush that edits it.
+The terrain layer on the map page, and the tools that edit it.
 
 Deliberately *on the map page* rather than a page of its own. The map already
 owns panning, zooming, viewport culling and the coordinate maths, and the one
 time this project drew its own second view of the same world the two
-disagreed — the panel used to draw its own markers and consequently showed
-something different from every other surface. A second pan-and-zoom would be
-that mistake again, one layer down.
+disagreed. A second pan-and-zoom would be that mistake again, one layer down.
 
-**Three layers inside the world, in this order.** The uploaded map is kept as an
-admin *reference* and can be faded to nothing; the terrain is drawn over it; the
-towns and decor sit on top of both. The reference is what you trace while
-correcting the import, which is the only reason it still exists.
+**The ground is painted with library tiles.** The palette is the environment
+tiles the person may use, one category at a time. Click a tile to paint with
+it; Shift- or Ctrl-click more to paint a **random mix** of them.
+
+**Three tools**
+
+* **Brush** — drag to paint a disc along the drag. *Density* scatters the stroke
+  (only that share of cells is painted) and *Soft edge* thins it towards the rim,
+  so a wide brush lays down a ragged coastline or a sprinkling of flowers rather
+  than a stamped circle. Every stroke gets a fresh random seed.
+* **Select** — drag a rectangle, then fill it with the brush's tiles (density
+  applies), clear it, or keep it as a pattern.
+* **Pattern** — paint with the cells copied from a selection, tiled across the
+  world, so a hand-made bit of ground can be repeated without repeating work.
+
+Rasterising, randomness and limits all live on the server
+(``web/dodoland/terrain_api.py``), so two clients can never paint the same
+stroke two ways.
 
 **Detail arrives with the zoom, the same bargain the towns make.** One coarse
-request draws the whole continent; full-resolution chunks are fetched only for
-what is on screen and only once anybody is close enough for a cell to be worth a
-pixel. Asking for four million cells to look at a continent would be the same
-mistake as shipping three hundred pre-rendered settlements to look at a map.
+request draws the whole continent in each tile's average colour; full-detail
+chunks, textured with the tiles themselves, are fetched only for what is on
+screen.
 """
 
 from __future__ import annotations
@@ -33,28 +44,30 @@ CSS = """
 .dlworld .dltown, .dlworld .dlpiece { z-index: 5; }
 .dlframe.painting { cursor: crosshair; }
 
-/* The brush's own drawer, on the left like the toolkit and never open with it. */
+/* The terrain drawer, on the left like the toolkit and never open with it. */
 .dlterrdrawer { left: 0; right: auto; border-left: 0;
   border-right: 1px solid var(--edge); transform: translateX(-100%);
   box-shadow: 6px 0 24px rgba(0,0,0,.28); }
 .dlterrdrawer.open { transform: translateX(0); }
-.dltkinds { flex: 1 1 auto; overflow-y: auto; padding: 0 14px 12px; }
-.dltkind { display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 7px 9px; margin-bottom: 5px; border: 1px solid var(--edge);
-  border-radius: 9px; background: var(--deep); color: inherit; font: inherit;
-  font-size: 13px; cursor: pointer; text-align: left; }
-.dltkind:hover { border-color: var(--lantern); }
-.dltkind.on { border-color: var(--lantern); background: var(--paper);
-  box-shadow: 0 0 0 2px var(--lantern) inset; }
-.dltswatch { width: 20px; height: 20px; border-radius: 5px; flex: 0 0 auto;
-  border: 1px solid rgba(0,0,0,.45); }
-.dltrule { margin-left: auto; font-size: 10px; opacity: .72; white-space: nowrap; }
-.dltrow { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-  border-top: 1px solid var(--edge); font-size: 12px; color: var(--soft); }
-.dltrow input[type=range] { flex: 1 1 auto; min-width: 50px; }
-.dltmsg { margin: 0; padding: 0 14px 12px; font-size: 12px; color: var(--soft); }
-.dltmsg.bad { color: #c0392b; font-weight: 600; }
-.dlthint { margin: 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft); }
+.dltmix { margin: 0 14px 8px; font-size: 12px; color: var(--soft); display: flex;
+  gap: 6px; align-items: center; flex-wrap: wrap; min-height: 22px; }
+.dltmix .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 2px;
+  border: 1px solid var(--edge); border-radius: 999px; background: var(--deep); }
+.dltmix .chip img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover;
+  image-rendering: pixelated; }
+.dltmix button { background: none; border: 0; color: var(--lantern); cursor: pointer;
+  font: inherit; font-size: 12px; padding: 0; }
+.dltsliders { padding: 8px 14px; border-top: 1px solid var(--edge); display: grid;
+  grid-template-columns: auto 1fr 3.2em; gap: 6px 10px; align-items: center;
+  font-size: 12px; color: var(--soft); }
+.dltsliders input[type=range] { width: 100%; }
+.dltsliders output { text-align: right; font-variant-numeric: tabular-nums; }
+.dltpanel { padding: 8px 14px; border-top: 1px solid var(--edge); font-size: 12px;
+  color: var(--soft); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dltpanel[hidden] { display: none; }
+.dltmsg { margin: 0; padding: 4px 14px 12px; font-size: 12px; color: var(--soft); }
+.dltmsg.bad { color: #e0735f; font-weight: 600; }
+.dltswatch { width: 100%; height: 48px; border-radius: 6px; }
 """
 
 DRAWER = """
@@ -63,22 +76,37 @@ DRAWER = """
     <b>Terrain</b>
     <button class="dlghost" id="dltclose">&times;</button>
   </div>
-  <p class="dlthint">Pick a ground, then drag on the map to paint it. The
-  uploaded map is underneath as a reference &mdash; fade it with the slider.</p>
-  <div class="dltkinds" id="dltkinds"></div>
-  <div class="dltrow">
-    <label style="flex:1 1 auto;display:flex;align-items:center;gap:8px">Brush
-      <input type="range" id="dltradius" min="0" max="40" step="1" value="6">
-      <span id="dltradiusn" style="min-width:2.4em">6</span></label>
+  <div class="dlseg" id="dlttools">
+    <button data-tool="brush" class="on">Brush</button>
+    <button data-tool="select">Select</button>
+    <button data-tool="pattern">Pattern</button>
   </div>
-  <div class="dltrow">
+  <p class="dlkithint" id="dlthint"></p>
+  <select class="dlsel" id="dltcat"></select>
+  <div class="dlkitgrid" id="dltkinds"></div>
+  <div class="dltmix" id="dltmix"></div>
+  <div class="dltsliders" id="dltbrush">
+    <label for="dltradius">Size</label><input type="range" id="dltradius" min="0" max="40" value="6"><output id="dltradiusn">6</output>
+    <label for="dltdensity">Density</label><input type="range" id="dltdensity" min="5" max="100" step="5" value="100"><output id="dltdensityn">100%</output>
+    <label for="dltsoft">Soft edge</label><input type="range" id="dltsoft" min="0" max="100" step="5" value="0"><output id="dltsoftn">0%</output>
+  </div>
+  <div class="dltpanel" id="dltselect" hidden>
+    <span id="dltselinfo">Drag a rectangle on the map.</span>
+    <button class="dlghost" id="dltfill" disabled>Fill</button>
+    <button class="dlghost" id="dltclear" disabled>Clear</button>
+    <button class="dlghost" id="dltkeep" disabled>Use as pattern</button>
+  </div>
+  <div class="dltpanel" id="dltpattern" hidden>
+    <span id="dltpatinfo">No pattern yet: select an area and press “Use as pattern”.</span>
+  </div>
+  <div class="dltpanel">
     <button class="dlghost" id="dltundo" disabled>&#8630; Undo</button>
     <button class="dlghost" id="dltredo" disabled>&#8631; Redo</button>
     <span id="dltdepth" style="margin-left:auto;opacity:.7"></span>
   </div>
-  <div class="dltrow">
+  <div class="dltpanel">
     <label style="flex:1 1 auto;display:flex;align-items:center;gap:8px">Reference
-      <input type="range" id="dltref" min="0" max="100" step="5" value="0"></label>
+      <input type="range" id="dltref" min="0" max="100" step="5" value="0" style="flex:1"></label>
     <button class="dlghost" id="dltoggleterr">Hide terrain</button>
   </div>
   <p class="dltmsg" id="dltmsg"></p>
@@ -87,22 +115,30 @@ DRAWER = """
 
 SCRIPT = r"""
   // --- the terrain layer ------------------------------------------------- //
-  var terr = {world: null, armed: null, radius: 6, have: {}, shown: true,
-              busy: false, ver: 0};
+  // `armed` is what the map page checks before handing a drag to us: null when
+  // no tool is ready, otherwise the tool's name.
+  var terr = {world: null, armed: null, tool: 'brush', mix: [], erase: false,
+              radius: 6, density: 1, soft: 0, sel: null, pattern: null,
+              have: {}, shown: true, busy: false, ver: 0};
   var terrLayer = document.createElement('div');
   terrLayer.className = 'dlterrain';
   var terrDrawer = document.getElementById('dlterrdrawer');
   var terrMsg = document.getElementById('dltmsg');
+  var HINTS = {
+    brush: 'Click a tile to paint with it. Shift- or Ctrl-click more to paint a random mix.',
+    select: 'Drag a rectangle on the map, then fill it, clear it, or keep it as a pattern.',
+    pattern: 'Drag on the map to paint with the pattern, tiled across the world.'
+  };
 
   function terrSay(text, bad) {
     if (!terrMsg) return;
     terrMsg.textContent = text || '';
     terrMsg.classList.toggle('bad', !!bad);
   }
-
   function terrUrl(path, query) {
     return '/guild/' + D.gid + '/dodoland/terrain/' + path + (query || '');
   }
+  function world_el() { return document.getElementById('dlworld'); }
 
   // One <svg> for the whole world in cell coordinates. `preserveAspectRatio
   // none` pins it to the base image exactly, so a cell and a pixel of the
@@ -115,49 +151,128 @@ SCRIPT = r"""
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
       '<g id="dltover"></g><g id="dltdetail"></g>' +
+      '<rect id="dltsel" fill="rgba(240,166,79,.12)" stroke="#f0a64f" stroke-width="1.5" ' +
+      'stroke-dasharray="4 3" vector-effect="non-scaling-stroke" style="display:none"/>' +
       // Drawn in cell units inside the same viewBox, so it is the shape that
       // will actually be painted rather than an approximation of it.
-      '<circle id="dltcursor" r="0" fill="none" stroke="#fff" ' +
-      'stroke-width="1" vector-effect="non-scaling-stroke" ' +
-      'style="display:none"/>' +
-      '<circle id="dltcursor2" r="0" fill="none" stroke="#000" ' +
-      'stroke-width="3" vector-effect="non-scaling-stroke" opacity=".45" ' +
-      'style="display:none"/></svg>';
+      '<circle id="dltcursor" r="0" fill="none" stroke="#fff" stroke-width="1" ' +
+      'vector-effect="non-scaling-stroke" style="display:none"/>' +
+      '<circle id="dltcursor2" r="0" fill="none" stroke="#000" stroke-width="3" ' +
+      'vector-effect="non-scaling-stroke" opacity=".45" style="display:none"/></svg>';
     world_el().appendChild(terrLayer);
-    renderKinds();
+    renderCats();
+    renderPalette();
   }
-  function world_el() { return document.getElementById('dlworld'); }
 
-  function renderKinds() {
+  // --- the palette ------------------------------------------------------- //
+  var catSel = document.getElementById('dltcat');
+  function cats() {
+    var out = [];
+    (terr.world.palette || []).forEach(function (t) {
+      if (out.indexOf(t.cat) < 0) out.push(t.cat);
+    });
+    return out;
+  }
+  function renderCats() {
+    var list = cats();
+    catSel.innerHTML = list.map(function (c) {
+      return '<option>' + escapeHtml(c || 'Uncategorised') + '</option>';
+    }).join('');
+    try { var kept = window.localStorage.getItem('dl-terr-cat');
+          if (kept && list.indexOf(kept) >= 0) catSel.value = kept; } catch (e) {}
+  }
+  catSel.onchange = function () {
+    try { window.localStorage.setItem('dl-terr-cat', catSel.value); } catch (e) {}
+    renderPalette();
+  };
+  function tileById(id) {
+    var list = terr.world.palette || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function renderPalette() {
     var box = document.getElementById('dltkinds');
     if (!box || !terr.world) return;
-    box.innerHTML = terr.world.kinds.map(function (k, i) {
-      // What a ground *does* is the thing an admin is choosing between, so it
-      // is on the button rather than two clicks away.
-      var rule = k.build ? 'buildable'
-               : (k.clearable ? 'clearable' : (k.grow !== null ? 'open' : 'blocked'));
-      return '<button class="dltkind' + (terr.armed === i ? ' on' : '') +
-        '" data-k="' + i + '">' +
-        '<span class="dltswatch" style="background:' + k.colour + '"></span>' +
-        escapeHtml(k.label) + '<span class="dltrule">' + rule + '</span></button>';
-    }).join('');
-    box.querySelectorAll('.dltkind').forEach(function (el) {
-      el.onclick = function () {
-        var i = parseInt(el.dataset.k, 10);
-        terr.armed = (terr.armed === i) ? null : i;
-        frame.classList.toggle('painting', terr.armed !== null);
-        terrSay(terr.armed === null ? '' : 'Drag on the map to paint.');
-        if (terr.armed === null) {
-          ['dltcursor', 'dltcursor2'].forEach(function (id) {
-            var c = document.getElementById(id);
-            if (c) c.style.display = 'none';
-          });
+    var shown = catSel.value;
+    var cards = (terr.world.palette || []).filter(function (t) {
+      return (t.cat || 'Uncategorised') === shown;
+    }).map(function (t) {
+      var on = terr.mix.indexOf(t.id) >= 0 && !terr.erase;
+      return '<button class="dlkititem' + (on ? ' armed' : '') + '" data-t="' + t.id +
+        '" title="' + escapeHtml(t.name) + (t.passable ? '' : ' — blocks roads') + '">' +
+        '<img alt="" loading="lazy" style="image-rendering:pixelated" src="' + t.thumb + '">' +
+        '<span>' + escapeHtml(t.name) + (t.passable ? '' : ' ⛔') + '</span></button>';
+    });
+    // The eraser: back to "nothing said about this cell".
+    cards.unshift('<button class="dlkititem' + (terr.erase ? ' armed' : '') +
+      '" data-erase="1" title="Erase back to unset ground">' +
+      '<div class="dltswatch" style="background:repeating-conic-gradient(#8884 0 25%,transparent 0 50%) 0 0/12px 12px"></div>' +
+      '<span>Eraser</span></button>');
+    box.innerHTML = cards.join('');
+    box.querySelectorAll('.dlkititem').forEach(function (el) {
+      el.onclick = function (ev) {
+        if (el.dataset.erase) {
+          terr.erase = !terr.erase;
+          if (terr.erase) terr.mix = [];
+        } else {
+          var id = el.dataset.t, at = terr.mix.indexOf(id);
+          terr.erase = false;
+          if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+            if (at >= 0) terr.mix.splice(at, 1); else if (terr.mix.length < 16) terr.mix.push(id);
+          } else {
+            terr.mix = (at >= 0 && terr.mix.length === 1) ? [] : [id];
+          }
         }
-        renderKinds();
+        rearm();
+        renderPalette();
       };
     });
+    renderMix();
+  }
+  function renderMix() {
+    var box = document.getElementById('dltmix');
+    if (!box) return;
+    if (terr.erase) { box.innerHTML = 'Erasing.'; return; }
+    if (!terr.mix.length) { box.innerHTML = 'Nothing picked.'; return; }
+    box.innerHTML = (terr.mix.length > 1 ? 'Random mix of:' : 'Painting:') +
+      terr.mix.map(function (id) {
+        var t = tileById(id);
+        return t ? '<span class="chip"><img alt="" src="' + t.thumb + '">' +
+                   escapeHtml(t.name) + '</span>' : '';
+      }).join('') + ' <button id="dltmixclear">clear</button>';
+    var clear = document.getElementById('dltmixclear');
+    if (clear) clear.onclick = function () { terr.mix = []; rearm(); renderPalette(); };
   }
 
+  // What a tool needs before a drag means anything.
+  function rearm() {
+    var ready = terr.tool === 'select' ||
+                (terr.tool === 'pattern' && !!terr.pattern) ||
+                (terr.tool === 'brush' && (terr.erase || terr.mix.length > 0));
+    terr.armed = ready ? terr.tool : null;
+    frame.classList.toggle('painting', !!terr.armed);
+    if (!terr.armed) hideCursor();
+    document.getElementById('dlthint').textContent = HINTS[terr.tool];
+    var canFill = !!terr.sel && (terr.erase || terr.mix.length > 0);
+    document.getElementById('dltfill').disabled = !canFill;
+    document.getElementById('dltclear').disabled = !terr.sel;
+    document.getElementById('dltkeep').disabled = !terr.sel;
+  }
+
+  document.querySelectorAll('#dlttools button').forEach(function (b) {
+    b.onclick = function () {
+      terr.tool = b.dataset.tool;
+      document.querySelectorAll('#dlttools button').forEach(function (o) {
+        o.classList.toggle('on', o === b);
+      });
+      document.getElementById('dltselect').hidden = terr.tool !== 'select';
+      document.getElementById('dltpattern').hidden = terr.tool !== 'pattern';
+      document.getElementById('dltbrush').style.display = terr.tool === 'select' ? 'none' : '';
+      rearm();
+    };
+  });
+
+  // --- drawing the world ------------------------------------------------- //
   function terrOverview() {
     fetch(terrUrl('overview', '?v=' + terr.ver))
       .then(function (r) { return r.ok ? r.text() : ''; })
@@ -170,19 +285,23 @@ SCRIPT = r"""
         g.innerHTML = svg;
       });
   }
+  function terrDefs() {
+    fetch(terrUrl('defs', '?v=' + terr.ver)).then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (defs) {
+        var g = document.getElementById('dltdefs');
+        if (g) g.innerHTML = defs || '';
+      });
+  }
 
   // Which chunks the viewport covers, in chunk coordinates.
   function visibleChunks() {
     if (!terr.world || !nat.w) return null;
     var cw = terr.world.cells_w, ch = terr.world.cells_h;
     var perCellX = (nat.w * view.k) / cw;
-    // A small world is always drawn at full detail, whatever the zoom. The
-    // coarse tier sampled every other cell, so what you painted was a
-    // *different shape* zoomed out from zoomed in — which is unusable when the
-    // thing you are doing is drawing a coastline. Only a world too big to send
-    // at once still falls back to it.
     var total = terr.world.chunks_x * terr.world.chunks_y;
-    if (total > 400 && perCellX < 1.0) return null;
+    // Textures only once a cell is a few pixels across; below that a tile is
+    // noise, and the overview's average colours read better.
+    if (perCellX < 2.5 && total > 0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;
     var y0 = (-view.y) / perCellY, y1 = (-view.y + frame.clientHeight) / perCellY;
@@ -210,9 +329,8 @@ SCRIPT = r"""
     if (!need.length) return;
     if ((box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) > 400) return;
     terr.busy = true;
-    // One request for the whole rectangle. Per chunk would be sixty requests
-    // on every pan.
-    fetch(terrUrl('chunks', '?r=' + box.x0 + ',' + box.y0 + ',' + box.x1 + ',' + box.y1))
+    fetch(terrUrl('chunks', '?r=' + box.x0 + ',' + box.y0 + ',' + box.x1 + ',' + box.y1 +
+                  '&v=' + terr.ver))
       .then(function (r) { return r.ok ? r.text() : ''; })
       .then(function (svg) {
         terr.busy = false;
@@ -228,7 +346,7 @@ SCRIPT = r"""
       .catch(function () { terr.busy = false; });
   }
 
-  // --- painting ---------------------------------------------------------- //
+  // --- pointer ----------------------------------------------------------- //
   // Screen -> cell. The world element is the base image's natural size, and the
   // grid is laid over it, so one conversion serves both.
   function cellAt(clientX, clientY) {
@@ -238,16 +356,17 @@ SCRIPT = r"""
     var fy = (clientY - b.top - view.y) / (nat.h * view.k);
     return [Math.round(fx * terr.world.cells_w), Math.round(fy * terr.world.cells_h)];
   }
-
+  function hideCursor() {
+    ['dltcursor', 'dltcursor2'].forEach(function (id) {
+      var c = document.getElementById(id);
+      if (c) c.style.display = 'none';
+    });
+  }
   function moveCursor(ev) {
-    var a = document.getElementById('dltcursor');
-    var b = document.getElementById('dltcursor2');
+    var a = document.getElementById('dltcursor'), b = document.getElementById('dltcursor2');
     if (!a || !b) return;
-    var cell = (terr.armed === null) ? null : cellAt(ev.clientX, ev.clientY);
-    if (!cell) {
-      a.style.display = b.style.display = 'none';
-      return;
-    }
+    var cell = (terr.armed && terr.armed !== 'select') ? cellAt(ev.clientX, ev.clientY) : null;
+    if (!cell) { hideCursor(); return; }
     // +0.5 so the ring sits on the cell boundary rather than through its
     // middle, which is the difference between "these cells" and "about here".
     var r = terr.radius + 0.5;
@@ -257,17 +376,26 @@ SCRIPT = r"""
     });
   }
   frame.addEventListener('pointermove', moveCursor);
-  frame.addEventListener('pointerleave', function () {
-    var a = document.getElementById('dltcursor');
-    var b = document.getElementById('dltcursor2');
-    if (a) a.style.display = 'none';
-    if (b) b.style.display = 'none';
-  });
+  frame.addEventListener('pointerleave', hideCursor);
+
+  function drawSel() {
+    var r = document.getElementById('dltsel');
+    if (!r) return;
+    if (!terr.sel) { r.style.display = 'none'; return; }
+    var s = terr.sel;
+    r.setAttribute('x', Math.min(s[0], s[2])); r.setAttribute('y', Math.min(s[1], s[3]));
+    r.setAttribute('width', Math.abs(s[2] - s[0]) + 1);
+    r.setAttribute('height', Math.abs(s[3] - s[1]) + 1);
+    r.style.display = '';
+    document.getElementById('dltselinfo').textContent =
+      (Math.abs(s[2] - s[0]) + 1) + ' × ' + (Math.abs(s[3] - s[1]) + 1) + ' cells';
+  }
 
   var stroke = null;
   function strokeStart(ev) {
     var cell = cellAt(ev.clientX, ev.clientY);
     if (!cell) return false;
+    if (terr.armed === 'select') { terr.sel = [cell[0], cell[1], cell[0], cell[1]]; drawSel(); }
     stroke = [cell];
     return true;
   }
@@ -275,28 +403,49 @@ SCRIPT = r"""
     if (!stroke) return;
     var cell = cellAt(ev.clientX, ev.clientY);
     if (!cell) return;
+    if (terr.armed === 'select') { terr.sel[2] = cell[0]; terr.sel[3] = cell[1]; drawSel(); return; }
     var last = stroke[stroke.length - 1];
-    // Thin the stroke: a pointer reports far more often than a cell changes,
-    // and sending every sample is thousands of duplicate points.
-    if (Math.abs(cell[0] - last[0]) + Math.abs(cell[1] - last[1]) >= 1) {
-      stroke.push(cell);
-    }
+    // Thin the stroke: a pointer reports far more often than a cell changes.
+    if (Math.abs(cell[0] - last[0]) + Math.abs(cell[1] - last[1]) >= 1) stroke.push(cell);
   }
   function strokeEnd() {
-    if (!stroke || terr.armed === null) { stroke = null; return; }
-    var points = stroke.slice(0, 4000);
+    var points = stroke;
     stroke = null;
-    terrSay('Painting ' + points.length + ' points…');
+    if (!points || !terr.armed) return;
+    if (terr.armed === 'select') { rearm(); return; }
+    var body = {mode: 'brush', radius: terr.radius, points: points.slice(0, 4000)};
+    if (terr.armed === 'pattern') body.pattern = terr.pattern;
+    paint(body, 'Painting…');
+  }
+
+  function what() {
+    return terr.erase ? {kinds: [0]} : {tiles: terr.mix.slice()};
+  }
+  function paint(body, saying) {
+    // The sliders first and the call's own settings over them, so "Clear"
+    // clears every cell whatever the density is set to.
+    var payload = Object.assign(body.pattern ? {} : what(), {
+      density: terr.density, soft: terr.soft,
+      // The randomiser: a fresh seed per stroke, so no two scattered strokes
+      // land the same way — and the server, not the browser, rolls the dice.
+      seed: Math.floor(Math.random() * 2147483647)
+    }, body);
+    terrSay(saying);
     fetch('/api/guild/' + D.gid + '/dodoland/terrain/paint', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({kind: terr.armed, radius: terr.radius, points: points})
+      body: JSON.stringify(payload)
     }).then(function (r) {
       return r.json().catch(function () {
         return {ok: false, error: 'The server answered with ' + r.status + '.'};
       });
     }).then(function (res) {
       if (!res.ok) { terrSay(res.error || 'That did not work.', true); return; }
-      terrSay(res.cells.toLocaleString() + ' cells, ' + res.chunks + ' chunks.');
+      terrSay(res.cells.toLocaleString() + ' cells painted.');
+      // A tile painted for the first time adds a ground, and its pattern.
+      if (res.kinds && terr.world.kinds && res.kinds !== terr.world.kinds.length) {
+        terr.world.kinds.length = res.kinds;
+        terrDefs();
+      }
       terrApplyChange(res);
     }).catch(function (err) { terrSay(String(err), true); });
   }
@@ -307,18 +456,12 @@ SCRIPT = r"""
   var overviewTimer = null;
   function terrApplyChange(res) {
     terr.ver = res.version;
-    (res.touched || []).forEach(function (k) {
-      delete terr.have[k[0] + ',' + k[1] + ',' + (res.version - 1)];
-      delete terr.have[k[0] + ',' + k[1] + ',' + res.version];
-    });
+    terr.have = {};
     terrDetail();
     setUndo(res.undo, res.redo);
-    // The coarse view is only on screen when nobody is zoomed in, so it can
-    // wait for a pause rather than being rebuilt mid-stroke.
     if (overviewTimer) clearTimeout(overviewTimer);
     overviewTimer = setTimeout(terrOverview, 2500);
   }
-
   function setUndo(undo, redo) {
     var u = document.getElementById('dltundo'), r = document.getElementById('dltredo');
     if (u) u.disabled = !undo;
@@ -326,25 +469,51 @@ SCRIPT = r"""
     var d = document.getElementById('dltdepth');
     if (d) d.textContent = undo ? undo + ' to undo' : '';
   }
-
   function terrStep(redo) {
     fetch('/api/guild/' + D.gid + '/dodoland/terrain/undo', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({redo: !!redo})
     }).then(function (r) { return r.json(); }).then(function (res) {
       if (!res.ok) { terrSay(res.error || 'That did not work.', true); return; }
-      if (!res.moved) { terrSay(redo ? 'Nothing to redo.' : 'Nothing to undo.'); 
+      if (!res.moved) { terrSay(redo ? 'Nothing to redo.' : 'Nothing to undo.');
                         setUndo(res.undo, res.redo); return; }
       terrSay(redo ? 'Redone.' : 'Undone.');
       terrApplyChange(res);
     }).catch(function (err) { terrSay(String(err), true); });
   }
 
+  // --- selection actions ------------------------------------------------- //
+  function selRect() {
+    var s = terr.sel;
+    return [Math.min(s[0], s[2]), Math.min(s[1], s[3]), Math.max(s[0], s[2]), Math.max(s[1], s[3])];
+  }
+  document.getElementById('dltfill').onclick = function () {
+    if (terr.sel) paint({mode: 'rect', rect: selRect()}, 'Filling…');
+  };
+  document.getElementById('dltclear').onclick = function () {
+    if (!terr.sel) return;
+    var keep = {erase: terr.erase, mix: terr.mix};
+    terr.erase = true;
+    paint({mode: 'rect', rect: selRect(), density: 1}, 'Clearing…');
+    terr.erase = keep.erase; terr.mix = keep.mix;
+  };
+  document.getElementById('dltkeep').onclick = function () {
+    if (!terr.sel) return;
+    var r = selRect();
+    fetch(terrUrl('cells', '?r=' + r.join(','))).then(function (x) { return x.json(); })
+      .then(function (res) {
+        if (!res.ok) { terrSay(res.error, true); return; }
+        terr.pattern = {w: res.w, h: res.h, cells: res.cells};
+        document.getElementById('dltpatinfo').textContent =
+          'Pattern: ' + res.w + ' × ' + res.h + ' cells. Drag on the map to paint with it.';
+        terrSay('Pattern kept. Switch to Pattern to paint with it.');
+        rearm();
+      });
+  };
+
   // --- controls ---------------------------------------------------------- //
-  var undoBtn = document.getElementById('dltundo');
-  if (undoBtn) undoBtn.onclick = function () { terrStep(false); };
-  var redoBtn = document.getElementById('dltredo');
-  if (redoBtn) redoBtn.onclick = function () { terrStep(true); };
+  document.getElementById('dltundo').onclick = function () { terrStep(false); };
+  document.getElementById('dltredo').onclick = function () { terrStep(true); };
   // The shortcuts everybody already has in their fingers. Only while the
   // terrain drawer is open, so they cannot fire at somebody editing a town name.
   window.addEventListener('keydown', function (ev) {
@@ -352,26 +521,26 @@ SCRIPT = r"""
     if (!(ev.ctrlKey || ev.metaKey)) return;
     var key = (ev.key || '').toLowerCase();
     if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); terrStep(false); }
-    else if (key === 'y' || (key === 'z' && ev.shiftKey)) {
-      ev.preventDefault(); terrStep(true);
-    }
+    else if (key === 'y' || (key === 'z' && ev.shiftKey)) { ev.preventDefault(); terrStep(true); }
   });
-  var radius = document.getElementById('dltradius');
-  if (radius) radius.oninput = function () {
-    terr.radius = parseInt(radius.value, 10) || 0;
-    document.getElementById('dltradiusn').textContent = terr.radius;
-    var a = document.getElementById('dltcursor');
-    var b = document.getElementById('dltcursor2');
-    [a, b].forEach(function (c) {
-      if (c && c.style.display !== 'none') c.setAttribute('r', terr.radius + 0.5);
+  function slider(id, show, apply) {
+    var el = document.getElementById(id), out = document.getElementById(id + 'n');
+    el.oninput = function () { var v = parseInt(el.value, 10) || 0; apply(v); out.textContent = show(v); };
+  }
+  slider('dltradius', String, function (v) {
+    terr.radius = v;
+    ['dltcursor', 'dltcursor2'].forEach(function (id) {
+      var c = document.getElementById(id);
+      if (c && c.style.display !== 'none') c.setAttribute('r', v + 0.5);
     });
-  };
-  var ref = document.getElementById('dltref');
-  if (ref) ref.oninput = function () {
-    world_el().style.setProperty('--refop', (parseInt(ref.value, 10) || 0) / 100);
+  });
+  slider('dltdensity', function (v) { return v + '%'; }, function (v) { terr.density = v / 100; });
+  slider('dltsoft', function (v) { return v + '%'; }, function (v) { terr.soft = v / 100; });
+  document.getElementById('dltref').oninput = function () {
+    world_el().style.setProperty('--refop', (parseInt(this.value, 10) || 0) / 100);
   };
   var terrToggle = document.getElementById('dltoggleterr');
-  if (terrToggle) terrToggle.onclick = function () {
+  terrToggle.onclick = function () {
     terr.shown = !terr.shown;
     terrLayer.classList.toggle('off', !terr.shown);
     terrToggle.textContent = terr.shown ? 'Hide terrain' : 'Show terrain';
@@ -386,24 +555,19 @@ SCRIPT = r"""
     terrDrawer.classList.remove('open');
     terr.armed = null;
     frame.classList.remove('painting');
-    renderKinds();
+    hideCursor();
   };
 
   fetch(terrUrl('world'))
     .then(function (r) { return r.json(); })
     .then(function (world) {
       if (!world.ok || !world.cells_w) {
-        terrSay('No world yet. Import the map first with ' +
-                'tools/dodoland_terrain_import.py.', true);
+        terrSay('No world yet. Import the map first with tools/dodoland_terrain_import.py.', true);
         return;
       }
       terrSetup(world);
-      // The texture patterns, once. Chunks reference them by id.
-      fetch(terrUrl('defs')).then(function (r) { return r.ok ? r.text() : ''; })
-        .then(function (defs) {
-          var g = document.getElementById('dltdefs');
-          if (g && defs) g.innerHTML = defs;
-        });
+      rearm();
+      terrDefs();
       terrOverview();
       terrDetail();
       // Start with the reference hidden: the terrain *is* the map now, and the

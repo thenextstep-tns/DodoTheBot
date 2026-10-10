@@ -154,6 +154,46 @@ def grow_cost(kind: dict, *, clears_forest: bool = False) -> Optional[int]:
 
 
 # --------------------------------------------------------------------------- #
+#  Ground drawn with a library tile
+# --------------------------------------------------------------------------- #
+# The brush paints *tiles* from the library. The grid still holds indices into
+# the guild's kind list, so a tile painted for the first time becomes a kind of
+# its own, appended — never inserted, because every painted cell holds an index
+# and reordering the list would change what every cell means.
+#
+# A tile kind's costs follow the tile's ``passable`` flag: passable ground is
+# open, buildable and growable; impassable ground stops roads and towns alike.
+# The imported base kinds keep their own, finer costs and only borrow a tile's
+# look (``kind["tile_id"]``).
+TILE_PREFIX = "tile_"
+
+
+def tile_kind(tile: dict, hex_colour: str = "") -> dict:
+    """A kind of ground that is exactly one library tile."""
+    open_ground = bool(tile.get("passable", True))
+    name = str(tile.get("name") or "")
+    return {"key": TILE_PREFIX + str(tile["tile_id"]), "label": name[:48],
+            "colour": "shadow", "hex": hex_colour, "tile_id": str(tile["tile_id"]),
+            "move": 1 if open_ground else None, "grow": 1 if open_ground else None,
+            "build": open_ground, "water": (not open_ground) and "water" in name.lower()}
+
+
+def sync_tile_kinds(kinds: list[dict], tiles: dict) -> list[dict]:
+    """Tile kinds with costs re-read from the tile as it is *now*, so a tile
+    later marked impassable in the library blocks roads without a repaint.
+    ``tiles`` maps tile id -> tile."""
+    out = []
+    for kind in kinds:
+        key = str(kind.get("key") or "")
+        tile = tiles.get(kind.get("tile_id"))
+        if key.startswith(TILE_PREFIX) and tile:
+            kind = {**kind, **{k: v for k, v in tile_kind(tile, kind.get("hex", "")).items()
+                               if k in ("move", "grow", "build", "water", "label")}}
+        out.append(kind)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 #  Run-length coding
 # --------------------------------------------------------------------------- #
 def encode(cells: Iterable[int]) -> str:
@@ -256,6 +296,25 @@ class TerrainStore:
             changes["kinds"] = kinds
         self._config.update_one({"_id": int(guild_id)}, {"$set": changes}, upsert=True)
         return self.world(guild_id)
+
+    def set_kinds(self, guild_id: int, kinds: list[dict]) -> None:
+        """Store the vocabulary. Callers only ever append to it or edit an entry
+        in place — the grid holds indices, so an entry may never move."""
+        self._ensure_indexes()
+        self._config.update_one({"_id": int(guild_id)}, {"$set": {"kinds": kinds}}, upsert=True)
+
+    def kind_for_tile(self, guild_id: int, tile: dict, hex_colour: str = "") -> int:
+        """The index painting ``tile`` writes, adding a kind for it if needed."""
+        kinds = list(self.world(guild_id)["kinds"])
+        key = TILE_PREFIX + str(tile["tile_id"])
+        for index, kind in enumerate(kinds):
+            if kind.get("key") == key:
+                return index
+        if len(kinds) >= 4000:
+            raise TerrainError("This world has too many kinds of ground.")
+        kinds.append(tile_kind(tile, hex_colour))
+        self.set_kinds(guild_id, kinds)
+        return len(kinds) - 1
 
     def chunk_counts(self, guild_id: int) -> tuple[int, int]:
         world = self.world(guild_id)

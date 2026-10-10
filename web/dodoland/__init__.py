@@ -44,7 +44,7 @@ def dodoland_routes() -> list:
         player_asset_image,
     )
     from web.dodoland.terrain_api import (
-        api_terrain_paint, api_terrain_undo, terrain_chunks,
+        api_terrain_paint, api_terrain_undo, terrain_cells, terrain_chunks,
         terrain_defs, terrain_overview, terrain_world,
     )
     from web.dodoland.mappage import map_page
@@ -88,6 +88,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/terrain/defs", configure(terrain_defs)),
         web.get("/guild/{gid}/dodoland/terrain/overview", configure(terrain_overview)),
         web.get("/guild/{gid}/dodoland/terrain/chunks", configure(terrain_chunks)),
+        web.get("/guild/{gid}/dodoland/terrain/cells", configure(terrain_cells)),
         web.post("/api/guild/{gid}/dodoland/terrain/paint", full(api_terrain_paint)),
         web.post("/api/guild/{gid}/dodoland/terrain/undo", full(api_terrain_undo)),
         # Moving somebody's town is configuration while there is no player-facing

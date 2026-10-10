@@ -265,7 +265,7 @@ async def map_page(request: web.Request):
   </div>
   <p class="dlkithint">Pick something, then click the map to put it down.
   Click a placed piece to pick it up again.</p>
-  <select id="dlkitcat" class="dlkitcat"></select>
+  <select id="dlkitcat" class="dlsel"></select>
   <div class="dlkitgrid" id="dlkitgrid"></div>
   <div class="dlkitfoot">
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
@@ -476,18 +476,37 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border-right: 1px solid var(--edge); transform: translateX(-100%);
   box-shadow: 6px 0 24px rgba(0,0,0,.28); }
 .dlkitdrawer.open { transform: translateX(0); }
-.dlkithint { margin: 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft); }
-.dlkitgrid { flex: 1 1 auto; overflow-y: auto; display: grid; gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); padding: 0 14px 14px; }
-.dlkititem { border: 1px solid var(--edge); border-radius: 9px; padding: 6px;
+.dlkithint { margin: 10px 0 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft);
+  line-height: 1.45; }
+/* One look for every palette in a drawer — the toolkit's and the terrain's —
+   so the two cannot drift apart. Cards are a fixed size: a grid that stretches
+   its rows to fill the drawer turned two mushrooms into two pillars. */
+.dlkitgrid { flex: 1 1 auto; overflow-y: auto; display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); grid-auto-rows: 84px;
+  align-content: start; padding: 2px 14px 12px; }
+.dlkititem { border: 1px solid transparent; border-radius: 8px; padding: 5px 4px 4px;
   background: var(--deep); cursor: pointer; display: flex; flex-direction: column;
-  align-items: center; gap: 4px; font: inherit; color: inherit; }
-.dlkititem img { width: 100%; height: 42px; object-fit: contain; }
-.dlkitcat { margin: 0 0 8px; width: 100%; }
-.dlkititem span { font-size: 10px; text-align: center; line-height: 1.2;
+  align-items: center; justify-content: space-between; gap: 3px; font: inherit;
+  color: inherit; min-width: 0; transition: border-color .12s, background .12s; }
+.dlkititem:hover { border-color: var(--edge); background: var(--paper); }
+.dlkititem img { width: 100%; height: 52px; object-fit: contain; }
+.dlkititem span { font-size: 10px; text-align: center; line-height: 1.2; color: var(--soft);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.dlkititem.armed { border-color: var(--lantern); background: var(--paper);
-  box-shadow: 0 0 0 2px var(--lantern) inset; }
+/* Selected: a thin ring, not a slab — the picture is the point. */
+.dlkititem.armed { border-color: var(--lantern); background: var(--paper); }
+.dlkititem.armed span { color: var(--ink); }
+.dlsel, .dlkitcat { display: block; margin: 0 14px 10px; width: calc(100% - 28px);
+  padding: 7px 10px; font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--deep); border: 1px solid var(--edge); border-radius: 8px;
+  color-scheme: dark light; }
+.dlsel:focus, .dlkitcat:focus { outline: 1px solid var(--lantern); outline-offset: 1px; }
+.dlseg { display: flex; margin: 10px 14px 0; border: 1px solid var(--edge); border-radius: 8px;
+  overflow: hidden; }
+.dlseg button { flex: 1; background: var(--deep); color: var(--soft); border: 0;
+  border-right: 1px solid var(--edge); padding: 7px 0; font: inherit; font-size: 13px;
+  cursor: pointer; }
+.dlseg button:last-child { border-right: 0; }
+.dlseg button.on { background: var(--paper); color: var(--ink); box-shadow: inset 0 -2px 0 var(--lantern); }
 /* A locked thing is shown, not hidden. Knowing the gilded banner exists at the
    third tier of the Gallery is the reason to want the third tier. */
 .dlkititem.locked { opacity: .42; cursor: not-allowed; }

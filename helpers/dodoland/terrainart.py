@@ -69,148 +69,76 @@ def rects(cells: list[int], width: int = T.CHUNK,
 
 
 # --------------------------------------------------------------------------- #
-#  Texture
+#  Texture: the ground is drawn with tiles from the library
 # --------------------------------------------------------------------------- #
-# Flat colour is not terrain. Forest should have trees in it, sand should have
-# grains, water should have a swell — but a motif *per cell* would be millions
-# of nodes, which is the whole thing the rectangle merge exists to avoid.
+# A kind of ground bound to a library tile (``kind["tile_id"]``) is filled with
+# an SVG ``<pattern>`` made of that tile's own images. A pattern costs nothing
+# per region — it is defined once and a merged rectangle of any size is filled
+# with it — so a forest the size of a county is still one path.
 #
-# An SVG ``<pattern>`` costs nothing per region: it is defined once and a
-# merged rectangle of any size is filled with it. So a forest the size of a
-# county is still one path, and it has trees in it.
+# The pattern is a block of PATTERN_CELLS x PATTERN_CELLS tiles with a variant
+# picked per position, so a field of one grass reads as a field rather than as
+# wallpaper. Its size comes from the tile's ``cell_px``: a 16px tile and a 32px
+# tile both cover one map cell, at different detail.
 #
-# Each motif is drawn on an 8x8 cell tile from three colours — the ground's own,
-# one step darker and one step lighter — so every texture sits in the same
-# thirty-two colour world and nothing has to be hand-picked per kind.
-# Sixteen cells, not eight. A tree is three cells wide and four tall, and five
-# of those on an eight-cell tile is sixty of its sixty-four cells — a mush with
-# no ground showing between the marks. Density is the motif's job, not the
-# tile's.
-TILE = 16
-
-# (shape, how many) per kind. The shape is what the ground *is*: a forest reads
-# as canopy, a marsh as reeds, a cliff as striations. Kinds not named here stay
-# flat, which is right for anything that should recede.
-MOTIFS: dict[str, tuple[str, int]] = {
-    "forest": ("trees", 7),
-    "grass": ("tufts", 10),
-    "plains": ("tufts", 5),      # sparse on purpose: open ground should recede
-    "marsh": ("reeds", 9),
-    "sand": ("grains", 11),
-    "hills": ("bumps", 6),
-    "mountain": ("peaks", 5),
-    "cliff": ("striations", 6),
-    "deep": ("swell", 4),
-    "sea": ("swell", 6),
-    "shallows": ("swell", 7),
-    "lake": ("swell", 6),
-    "river": ("swell", 8),
-}
-
-
-def _spots(count: int, seed: int) -> list[tuple[int, int]]:
-    """Scattered but fixed positions on the tile.
-
-    Deterministic from the kind's name: a texture that moved between page loads
-    would shimmer, and one that was truly regular would read as wallpaper.
-    """
-    out, value = [], seed or 1
-    while len(out) < count:
-        value = (value * 1103515245 + 12345) & 0x7FFFFFFF
-        spot = ((value >> 7) % TILE, (value >> 17) % TILE)
-        if spot not in out:
-            out.append(spot)
-    return out
-
-
-def _motif(shape: str, count: int, base: str, light: str, dark: str,
-           seed: int) -> str:
-    """One tile's worth of marks, in cell units.
-
-    Drawn as *things* rather than as marks: a tree with a canopy and a trunk, a
-    dune with a lit face and a shaded one, a peak with a snow side. An abstract
-    speckle tells you two grounds are different; a tree tells you which one is
-    the forest.
-    """
-    out = []
-    for i, (x, y) in enumerate(_spots(count, seed)):
-        if shape == "trees":
-            # A three-row conifer: dark skirt, mid body, lit crown, trunk under.
-            out.append(f'<rect x="{x - 1}" y="{y + 1}" width="3" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{light}"/>')
-            out.append(f'<rect x="{x - 1}" y="{y + 2}" width="3" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x}" y="{y + 3}" width="1" height="1" fill="{dark}"/>')
-        elif shape == "tufts":
-            # Two blades, not a square: a single pixel reads as dirt.
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{light}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="1" fill="{dark}"/>')
-        elif shape == "reeds":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="3" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="2" fill="{light}"/>')
-        elif shape == "grains":
-            # A dune: a lit crest with its own shadow under it.
-            out.append(f'<rect x="{x}" y="{y}" width="2" height="1" fill="{light}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="2" height="1" fill="{dark}"/>')
-        elif shape == "bumps":
-            # A hillock in profile, lit on top.
-            out.append(f'<rect x="{x}" y="{y + 1}" width="4" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y}" width="2" height="1" fill="{light}"/>')
-        elif shape == "peaks":
-            # A mountain with a snow face, stepped so it reads as rock.
-            out.append(f'<rect x="{x}" y="{y + 2}" width="5" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="3" height="1" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 2}" y="{y}" width="1" height="1" fill="{light}"/>')
-            out.append(f'<rect x="{x + 2}" y="{y + 1}" width="1" height="1" fill="{light}"/>')
-        elif shape == "striations":
-            out.append(f'<rect x="{x}" y="{y}" width="1" height="5" fill="{dark}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="1" height="3" fill="{light}"/>')
-        elif shape == "swell":
-            # A crest and its trough: the universal shorthand for moving water,
-            # and it survives being two pixels tall.
-            out.append(f'<rect x="{x}" y="{y}" width="3" height="1" fill="{light}"/>')
-            out.append(f'<rect x="{x + 1}" y="{y + 1}" width="2" height="1" fill="{dark}"/>')
-    return "".join(out)
+# These replaced generated motifs that drew trees and dunes out of rectangles;
+# the library is now the only source of ground art.
+PATTERN_CELLS = 4
 
 
 def pattern_id(key: str) -> str:
     return "tp_" + "".join(c for c in str(key) if c.isalnum())
 
 
-def pattern_defs(kinds: list[dict], colours: Optional[dict] = None,
-                 cell: float = 1.0) -> str:
-    """``<defs>`` with one pattern per textured ground.
+def _pick(i: int, j: int, salt: int, count: int) -> int:
+    value = (i * 73856093) ^ (j * 19349663) ^ salt
+    value = (value * 1103515245 + 12345) & 0x7FFFFFFF
+    return (value >> 8) % count
+
+
+def tile_pattern(key: str, tile: dict, art_url: str, dims: Optional[dict] = None) -> str:
+    """One ``<pattern>`` for a kind drawn with ``tile``.
+
+    ``dims`` maps a variant id to its pixel ``(w, h)``; without it a variant is
+    taken to be exactly one cell. ``art_url`` is prefixed to a variant id.
+    """
+    variants = list(tile.get("variants") or [])
+    if not variants:
+        return ""
+    cell_px = float(tile.get("cell_px") or 16)
+    w, h = (dims or {}).get(variants[0], (cell_px, cell_px))
+    size_w, size_h = max(w / cell_px, 0.25), max(h / cell_px, 0.25)
+    salt = sum(ord(c) * (n + 7) for n, c in enumerate(str(key)))
+    images = []
+    for j in range(PATTERN_CELLS):
+        for i in range(PATTERN_CELLS):
+            vid = variants[_pick(i, j, salt, len(variants))]
+            images.append(
+                f'<image href="{art_url}{vid}" x="{i * size_w:g}" y="{j * size_h:g}" '
+                f'width="{size_w:g}" height="{size_h:g}" preserveAspectRatio="none"/>')
+    return (f'<pattern id="{pattern_id(key)}" patternUnits="userSpaceOnUse" '
+            f'width="{PATTERN_CELLS * size_w:g}" height="{PATTERN_CELLS * size_h:g}" '
+            f'style="image-rendering:pixelated">{"".join(images)}</pattern>')
+
+
+def pattern_defs(kinds: list[dict], tiles: dict, art_url: str,
+                 dims: Optional[dict] = None) -> str:
+    """``<defs>`` with one pattern per ground bound to a tile.
 
     Emitted **once** for the whole map rather than per chunk: a chunk is a
     fragment injected into one document, and repeating these in each of sixty
-    would be sixty copies of every tile.
+    would be sixty copies of every tile. ``tiles`` maps tile id -> tile.
     """
-    colours = colours or palette_rules.PALETTE
-    out = []
-    for kind in kinds:
-        key = str(kind.get("key") or "")
-        motif = MOTIFS.get(key)
-        if not motif:
-            continue
-        slot = kind.get("colour") or "shadow"
-        base = colours.get(slot, "#000")
-        dark = colours.get(palette_rules.shade(slot), base)
-        light = colours.get(palette_rules.lighten(slot), base)
-        shape, count = motif
-        seed = sum(ord(c) * (i + 3) for i, c in enumerate(key))
-        # Repeated at the four edges as well as in place, so a tree that runs
-        # off the tile comes back on the other side instead of being sliced in
-        # half at every seam.
-        one = _motif(shape, count, base, light, dark, seed)
-        marks = "".join(
-            f'<g transform="translate({dx},{dy})">{one}</g>'
-            for dx in (-TILE, 0, TILE) for dy in (-TILE, 0, TILE))
-        out.append(
-            f'<pattern id="{pattern_id(key)}" patternUnits="userSpaceOnUse" '
-            f'width="{TILE * cell:g}" height="{TILE * cell:g}">'
-            f'<rect width="{TILE * cell:g}" height="{TILE * cell:g}" fill="{base}"/>'
-            f'<g transform="scale({cell:g})" shape-rendering="crispEdges">'
-            f'{marks}</g></pattern>')
+    out = [tile_pattern(str(kind.get("key")), tiles[kind["tile_id"]], art_url, dims)
+           for kind in kinds if kind.get("tile_id") in tiles]
+    out = [part for part in out if part]
     return f"<defs>{''.join(out)}</defs>" if out else ""
+
+
+def kind_fill(kind: dict, colours: dict) -> str:
+    """The flat colour a kind is drawn in when it is not textured: its tile's
+    average colour if it has one, else its palette slot."""
+    return kind.get("hex") or colours.get(kind.get("colour") or "shadow", "#000")
 
 
 def _subpath(x: int, y: int, w: int, h: int, cell: float) -> str:
@@ -239,13 +167,12 @@ def chunk_svg(cells: list[int], kinds: list[dict], *,
         if value >= len(kinds):
             continue
         kind = kinds[value]
-        slot = kind.get("colour") or "shadow"
         key = str(kind.get("key") or "")
-        # Texture only up close. At map scale a motif is noise on a coastline,
-        # and the overview is drawn at one pixel per several cells, where the
-        # pattern would alias into a shimmer rather than resolve into trees.
-        fill = (f"url(#{pattern_id(key)})" if textured and key in MOTIFS
-                else colours.get(slot, "#000"))
+        # Texture only up close. The overview is drawn at one pixel per several
+        # cells, where a tile pattern would alias into a shimmer, so far away a
+        # ground is its tile's average colour.
+        fill = (f"url(#{pattern_id(key)})" if textured and kind.get("tile_id")
+                else kind_fill(kind, colours))
         out.append(f'<path fill="{fill}" '
                    f'shape-rendering="crispEdges" d="{"".join(parts)}"/>')
     body = "".join(out)

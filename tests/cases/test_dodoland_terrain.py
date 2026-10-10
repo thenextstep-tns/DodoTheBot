@@ -307,19 +307,74 @@ jumps = [x for i, x in enumerate(range(21, 61))
 assert not jumps, f"the diagonal stroke jumps a row at columns {jumps[:6]}"
 print("brush           a diagonal stroke is continuous, column by column")
 
-# Every texture has to be drawn from colours that differ, or the motif is
-# invisible. Two grounds shipped flat because a slot was its own neighbour.
+# --------------------------------------------------------------------------- #
+#  The brush's randomisers, the selection and the pattern
+# --------------------------------------------------------------------------- #
+lake = T.index_of(T.base_kinds(T.TERRAIN), "lake")
+# Density scatters: about that share of the disc, and the same stroke with the
+# same seed lands on exactly the same cells — the server rolls the dice.
+full = paint({"kind": lake, "radius": 12, "points": [[300, 300]]})["cells"]
+half = paint({"kind": forest, "radius": 12, "points": [[300, 300]], "density": 0.5, "seed": 7})["cells"]
+assert 0.35 * full < half < 0.65 * full, (half, full)
+again = paint({"kind": forest, "radius": 12, "points": [[300, 300]], "density": 0.5, "seed": 7})["cells"]
+assert again == half, "the same seeded stroke painted different cells"
+print(f"randomiser      density 0.5 paints {half} of {full} cells, and a seed repeats exactly")
+
+# A soft edge thins the rim and leaves the middle alone.
+paint({"kind": lake, "radius": 12, "points": [[300, 300]]})
+paint({"kind": forest, "radius": 12, "points": [[300, 300]], "soft": 1.0, "seed": 3})
+assert brush.at(GUILD, 300, 300) == forest, "a soft brush missed its own centre"
+rim = sum(1 for dx in range(-12, 13) for dy in range(-12, 13)
+          if 10 * 10 <= dx * dx + dy * dy <= 12 * 12 and brush.at(GUILD, 300 + dx, 300 + dy) == forest)
+assert rim < 30, f"a soft edge still painted {rim} rim cells"
+print("randomiser      a soft edge thins the rim and keeps the centre")
+
+# A selection fills exactly its rectangle, in either drag direction.
+filled = paint({"mode": "rect", "kind": lake, "rect": [210, 220, 200, 215]})
+assert filled["cells"] == 11 * 6, filled
+assert brush.at(GUILD, 200, 215) == lake and brush.at(GUILD, 210, 220) == lake
+assert brush.at(GUILD, 211, 220) != lake
+print("select          a selection fills exactly its rectangle")
+
+# A pattern is tiled from the world's own origin, so two strokes line up.
+stamp = {"w": 2, "h": 1, "cells": [lake, forest]}
+paint({"pattern": stamp, "radius": 3, "points": [[400, 400]]})
+assert brush.at(GUILD, 400, 400) == lake and brush.at(GUILD, 401, 400) == forest
+assert brush.at(GUILD, 402, 401) == lake
+assert not paint({"pattern": {"w": 2, "h": 1, "cells": [lake, 999]}, "points": [[1, 1]]})["ok"]
+print("pattern         a pattern tiles from the world origin and names only real ground")
+
+# --------------------------------------------------------------------------- #
+#  Ground drawn with library tiles
+# --------------------------------------------------------------------------- #
 from helpers.dodoland import terrainart  # noqa: E402
 
-for kind in T.base_kinds(T.TERRAIN):
-    slot = kind.get("colour")
-    if kind.get("key") not in terrainart.MOTIFS:
-        continue
-    light = palette.lighten(slot)
-    dark = palette.shade(slot)
-    assert palette.PALETTE[light] != palette.PALETTE[slot],         f"{kind['key']} has no lighter colour, so its texture is invisible"
-    assert palette.PALETTE[dark] != palette.PALETTE[slot],         f"{kind['key']} has no darker colour, so its texture is invisible"
-print("texture         every motif is drawn from three colours that differ")
+grass = {"tile_id": "g1", "name": "Meadow grass", "passable": True, "variants": ["a", "b"],
+         "cell_px": 16}
+water = {"tile_id": "w1", "name": "Deep water", "passable": False, "variants": ["c"],
+         "cell_px": 32}
+i = brush.kind_for_tile(GUILD, grass, "#46934f")
+assert brush.kind_for_tile(GUILD, grass) == i, "a tile became two kinds"
+j = brush.kind_for_tile(GUILD, water)
+kinds = brush.world(GUILD)["kinds"]
+assert j == i + 1 == len(kinds) - 1, "a tile kind must be appended, never inserted"
+assert kinds[i]["move"] == 1 and kinds[i]["build"], kinds[i]
+assert kinds[j]["move"] is None and kinds[j]["water"], "impassable water must block roads"
+# A tile later marked impassable blocks roads without a repaint.
+synced = T.sync_tile_kinds(kinds, {"g1": {**grass, "passable": False}, "w1": water})
+assert synced[i]["move"] is None
+print("tiles           painting a tile appends one kind, with costs that follow the tile")
+
+defs = terrainart.pattern_defs(kinds, {"g1": grass, "w1": water}, "/art/",
+                               {"a": (16, 16), "b": (16, 16), "c": (32, 32)})
+assert defs.count("<pattern") == 2 and "/art/a" in defs and "/art/b" in defs
+# A 32px tile still covers one cell: scale is the tile's own px per cell.
+assert 'width="1" height="1"' in terrainart.tile_pattern("x", water, "/art/", {"c": (32, 32)})
+grid = [i] * T.CELLS
+assert f"url(#{terrainart.pattern_id(kinds[i]['key'])})" in terrainart.chunk_svg(grid, kinds, textured=True)
+assert "#46934f" in terrainart.chunk_svg(grid, kinds), "far away a tile is its average colour"
+assert not hasattr(terrainart, "MOTIFS"), "the generated motifs came back"
+print("tiles           ground is a tile pattern up close and the tile's colour far away")
 
 # ...and the ramps have to actually run dark to light, or "darker" returns
 # something lighter and the shading inverts.

@@ -579,6 +579,13 @@ class TileLibrary:
         self._ensure_indexes()
         return self._art.find_one({"vid": str(vid)})
 
+    def art_sizes(self, vids: Iterable[str]) -> dict:
+        """``{vid: (w, h)}`` for some variants, without their bytes."""
+        self._ensure_indexes()
+        wanted = [str(v) for v in vids]
+        rows = self._art.find({"vid": {"$in": wanted}}, {"data": 0}) if wanted else []
+        return {row["vid"]: (int(row.get("w") or 0), int(row.get("h") or 0)) for row in rows}
+
     def first_art(self, tile_id: str) -> Optional[dict]:
         """A tile's first variant's bytes — what a toolkit button shows."""
         row = self.get(tile_id)
