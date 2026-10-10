@@ -196,4 +196,20 @@ for forbidden in ('body.get("user_id")', "body.get('user_id')",
 assert player_half.count("owner_id=uid") >= 3,     "a player decor write does not scope itself to the session's own town"
 print("safety          the session decides whose town is being decorated")
 
+# --------------------------------------------------------------------------- #
+#  Owned pieces, and a brush stroke as one write
+# --------------------------------------------------------------------------- #
+owned = DecorStore(FakeCollection())
+one = owned.place(9, scope="world", asset_id="tree", x=10, y=10, placed_by=77, placed_by_name="Nik")
+assert one["by"] == 77 and one["by_name"] == "Nik" and one["at"] > 0
+stroke = owned.place_many(9, [{"asset_id": "tree", "x": 11 + i, "y": 12, "scale": 9,
+                               "scale_range": (0.5, 2)} for i in range(5)], placed_by=77)
+assert len(stroke) == 5 and len(owned.world(9)) == 6
+assert all(p["by"] == 77 and p["scale"] == 2 for p in stroke), "a stroke's sizes were not clamped"
+owned.place(9, scope="town", owner_id=5, asset_id="cart", x=1, y=1)
+gone = owned.remove_many(9, [p["piece_id"] for p in stroke[:3]] + [owned.town(9, 5)[0]["piece_id"]])
+assert gone == 3, "remove_many reached past the world into a town"
+assert len(owned.world(9)) == 3 and len(owned.town(9, 5)) == 1
+print("owned           pieces remember who placed them; a stroke is one write; removal stays in the world")
+
 print("PASS")

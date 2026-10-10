@@ -189,7 +189,10 @@ def _collect(bot, guild) -> dict:
                        "l": d.get("layer") or "objects",
                        "x": float(d.get("x", 50)), "y": float(d.get("y", 50)),
                        "s": float(d.get("scale", 1.0)),
-                       "f": bool(d.get("flip"))} for d in world_decor],
+                       "f": bool(d.get("flip")),
+                       # Who placed it, for the toolkit's Placed list.
+                       "by": str(d.get("by") or ""), "bn": str(d.get("by_name") or ""),
+                       "at": int(d.get("at") or 0)} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
             "assets": [{"id": t["tile_id"], "name": t["name"], "cat": cats.get(t["cat_id"], ""),
@@ -279,7 +282,14 @@ async def map_page(request: web.Request):
     <button type="button" id="dlout" title="Zoom out">&minus;</button>
     <button type="button" id="dlfit" title="Fit the whole map">&#9634;</button>
     <button type="button" id="dlnames" title="Show every name">A</button>
+    <span class="dlzsep"></span>
+    <button type="button" data-tool="pointer" title="Select (V): click a piece, shift-click to add, drag a box"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3l14 8-6 1.5L10 19z" fill="currentColor"/></svg></button>
+    <button type="button" data-tool="hand" title="Hand (H): drag to move around; drag a selected piece to move it"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 11V5.5a1.5 1.5 0 013 0V10m0-5.5a1.5 1.5 0 013 0V10m0-4a1.5 1.5 0 013 0v7c0 4-2.5 7-6.5 7S5 17 4 14l-1.5-3.5a1.4 1.4 0 012.4-1.4L8 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button type="button" data-tool="pencil" title="Pencil (P): click to place the picked tile, one per click"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20l1-5L16 4l4 4L9 19zM14 6l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+    <button type="button" data-tool="brush" title="Brush (B): drag to scatter the picked tiles"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M20 3c-4 2-8 6-10 10l2 2c4-2 8-6 10-10zM9 14c-3 0-4 2-4 4s-1 2-2 3c3 0 7 0 7-4z" fill="currentColor"/></svg></button>
   </div>
+  <div class="dlbox" id="dlbox"></div>
+  <div class="dlbrushcur" id="dlbrushcur"></div>
   <div class="dlhint" id="dlhint">Drag to move, scroll to zoom</div>
   <div class="dlloading" id="dlloading" role="status" aria-live="polite">
     <div class="dlloadcard">
@@ -309,10 +319,27 @@ async def map_page(request: web.Request):
     <b>Toolkit</b>
     <button class="dlghost" id="dlkitclose">&times;</button>
   </div>
-  <p class="dlkithint">Pick something, then click the map to put it down.
-  Click a placed piece to pick it up again.</p>
-  <select id="dlkitcat" class="dlsel"></select>
-  <div class="dlkitgrid" id="dlkitgrid"></div>
+  <div class="dlseg dlkittabs"><button data-tab="lib" class="on">Library</button><button data-tab="placed">Placed</button></div>
+  <div class="dlkitpane" id="dlkitlib">
+    <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
+    down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
+    <div class="dlbrushopts" id="dlbrushopts" hidden>
+      <div class="dlseg" id="dlbrushpat"><button data-pat="scatter" class="on">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>
+      <label>Radius <input type="range" id="dlbrad" min="1" max="60" value="8"><output id="dlbradn">8</output></label>
+      <label>Spacing <input type="range" id="dlbsp" min="1" max="40" value="6"><output id="dlbspn">6</output></label>
+      <label>Size jitter <input type="range" id="dlbjit" min="0" max="60" step="5" value="15"><output id="dlbjitn">15%</output></label>
+      <label class="dlcheck"><input type="checkbox" id="dlbflip" checked> Random mirror</label>
+    </div>
+    <select id="dlkitcat" class="dlsel"></select>
+    <div class="dlkitgrid" id="dlkitgrid"></div>
+  </div>
+  <div class="dlkitpane" id="dlkitplaced" hidden>
+    <div class="dlplacedhead">
+      <select id="dlplacedwho" class="dlsel"><option value="me">Placed by me</option><option value="all">Everyone's</option></select>
+      <span id="dlplacedn" class="muted"></span>
+    </div>
+    <div class="dlplacedlist" id="dlplacedlist"></div>
+  </div>
   <div class="dlkitfoot">
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
       step="0.05" value="1"></label>
@@ -630,6 +657,39 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlkitfoot input[type=range] { flex: 1 1 auto; min-width: 60px; }
 .dlkitmsg { margin: 0; padding: 0 14px 12px; font-size: 12px; color: var(--soft); }
 .dlkitmsg.bad { color: #c0392b; font-weight: 600; }
+.dlzsep { display: block; height: 1px; margin: 4px 6px; background: var(--edge); }
+.dlzoom button svg { display: block; margin: auto; }
+.dlkittabs { margin: 10px 14px 0; }
+.dlkitpane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.dlkitpane[hidden] { display: none; }
+.dlbrushopts { padding: 4px 14px 8px; display: grid; gap: 6px; font-size: 12px; color: var(--soft); }
+.dlbrushopts label { display: grid; grid-template-columns: 76px 1fr 36px; align-items: center; gap: 6px; }
+.dlbrushopts label.dlcheck { display: flex; }
+.dlbrushopts .dlseg { margin: 0 0 4px; }
+.dlplacedhead { display: flex; gap: 8px; align-items: center; padding: 8px 14px 6px; font-size: 12px; }
+.dlplacedhead .dlsel { margin: 0; flex: 1 1 auto; }
+.dlplacedlist { flex: 1 1 auto; overflow-y: auto; padding: 0 8px 10px; }
+.dlplaced { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.dlplaced:hover { background: var(--deep); }
+.dlplaced.on { background: var(--deep); box-shadow: inset 3px 0 0 var(--lantern); }
+.dlplaced img { width: 34px; height: 30px; object-fit: contain; }
+.dlplaced.px img { image-rendering: pixelated; }
+.dlplaced small { display: block; color: var(--soft); }
+.dlplaced button { background: none; border: 1px solid var(--edge); border-radius: 6px; color: inherit;
+  cursor: pointer; font-size: 12px; padding: 2px 7px; }
+/* The pointer's selection box and the brush's reach, on screen. */
+.dlbox { position: absolute; display: none; pointer-events: none; z-index: 21;
+  border: 1px dashed var(--lantern); background: rgba(240, 166, 79, .1); }
+.dlbrushcur { position: absolute; display: none; pointer-events: none; z-index: 21;
+  border: 1px solid rgba(255, 255, 255, .9); border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); transform: translate(-50%, -50%); }
+.dlframe[data-tool="pointer"] { cursor: default; }
+.dlframe[data-tool="hand"] { cursor: grab; }
+.dlframe.placing[data-tool="brush"] { cursor: none; }
+/* Armed, everything placed is ground to stamp on rather than something to grab. */
+.dlframe.placing .dlpiece { pointer-events: none; }
+.dlpiece.preview { opacity: .55; pointer-events: none; }
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
 """ + terrain_ui.CSS + """
@@ -757,11 +817,14 @@ _SCRIPT = r"""
       try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
       return;
     }
+    if (ev.target.closest && ev.target.closest('.dlzoom')) return;
+    if (typeof toolDown === 'function' && toolDown(ev)) return;
     down = true; captured = false; moved = 0; pid = ev.pointerId;
     last = {x: ev.clientX, y: ev.clientY};
   });
   frame.addEventListener('pointermove', function (ev) {
     if (painting) { strokeMove(ev); return; }
+    if (gesture) { toolMove(ev); return; }
     if (!down) return;
     var dx = ev.clientX - last.x, dy = ev.clientY - last.y;
     moved += Math.abs(dx) + Math.abs(dy);
@@ -776,8 +839,9 @@ _SCRIPT = r"""
     clamp(); apply();
   });
   ['pointerup', 'pointercancel'].forEach(function (e) {
-    frame.addEventListener(e, function () {
+    frame.addEventListener(e, function (ev) {
       if (painting) { painting = false; strokeEnd(); }
+      if (gesture) toolUp(ev);
       down = false; captured = false; frame.classList.remove('dragging');
     });
   });
@@ -1096,6 +1160,7 @@ _SCRIPT = r"""
     });
   }
   frame.addEventListener('click', function (ev) {
+    if (swallowClick) { swallowClick = false; return; }
     if (moved > 6 || !nat.w) return;
     var b = frame.getBoundingClientRect();
     var at = {
@@ -1105,14 +1170,15 @@ _SCRIPT = r"""
     // Settling a town and placing decor are the same gesture on the same
     // surface, so only one of them may ever be armed at a time.
     if (armed) { place(armed, at); return; }
-    if (armedAsset) { placeDecor(at); return; }
+    if (armedAsset && tool === 'pencil') { placeDecor(at); return; }
+    if (armedAsset && tool === 'brush') return;
     if (typeof terr !== 'undefined' && terr.armed) return;
     // The map's own buttons sit inside the frame; pressing one is not
     // clicking the map.
     if (ev.target.closest && ev.target.closest('.dlzoom, .dlhint')) return;
     // Nothing armed and nothing under the pointer: let go — of a held piece
     // and of the open town, whose area goes with it.
-    if (heldPiece) { hold(heldPiece); }
+    if (selIds().length) selectOnly([]);
     if (openId) { closeCard(); }
   });
 
@@ -1246,17 +1312,31 @@ _SCRIPT = r"""
       return shown === null || (a.cat || 'Uncategorised') === shown;
     }).map(function (a) {
       return '<button class="dlkititem' + (a.px ? ' px' : '') +
-        (armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
+        (mix.indexOf(a.id) >= 0 || armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
         '<img alt="" loading="lazy" src="' + assetUrl(a.id) + '">' +
         '<span>' + escapeHtml(a.name) + '</span></button>';
     }).join('');
     kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {
-      el.onclick = function () {
-        armedAsset = (armedAsset === el.dataset.asset) ? null : el.dataset.asset;
-        heldPiece = null;
+      el.onclick = function (ev) {
+        var id = el.dataset.asset;
+        if (ev.shiftKey && armedAsset) {
+          // A mix for the brush: every stroke picks among these at random.
+          var at = mix.indexOf(id);
+          if (at >= 0 && mix.length > 1) mix.splice(at, 1); else if (at < 0) mix.push(id);
+          if (tool !== 'brush') setTool('brush');
+        } else if (armedAsset === id && mix.length <= 1) {
+          armedAsset = null; mix = [];
+        } else {
+          armedAsset = id; mix = [id];
+          if (tool !== 'pencil' && tool !== 'brush') setTool('pencil');
+        }
+        if (armedAsset && mix.indexOf(armedAsset) < 0) armedAsset = mix[0] || null;
+        sel = {}; selChanged();
         fitSlider(armedAsset);
-        frame.classList.toggle('placing', !!armedAsset);
-        kitSay(armedAsset ? 'Click the map to place it.' : '');
+        frame.classList.toggle('placing', !!armedAsset && (tool === 'pencil' || tool === 'brush'));
+        kitSay(!armedAsset ? '' : tool === 'brush'
+          ? (mix.length > 1 ? 'Brushing a mix of ' + mix.length + '. Drag on the map.' : 'Drag on the map to brush it.')
+          : 'Click the map to place it.');
         renderKit();
       };
     });
@@ -1296,46 +1376,8 @@ _SCRIPT = r"""
     // listened for `click` could be selected and never moved: every attempt to
     // drag one panned the map underneath it instead. Stopping the event here
     // is what keeps the map still while a piece is being moved.
-    el.addEventListener('pointerdown', function (ev) {
-      ev.stopPropagation();
-      ev.preventDefault();
-      var start = {x: ev.clientX, y: ev.clientY};
-      var from = {x: piece.x, y: piece.y};
-      var travelled = 0;
-      try { el.setPointerCapture(ev.pointerId); } catch (e) {}
-      el.classList.add('dragging');
-
-      function onMove(move) {
-        var dx = move.clientX - start.x, dy = move.clientY - start.y;
-        travelled = Math.abs(dx) + Math.abs(dy);
-        if (travelled <= 3 || !nat.w) return;
-        // Screen pixels back into the map's own percentages: undo the zoom,
-        // then divide by the base image's size.
-        piece.x = from.x + (dx / view.k / nat.w) * 100;
-        piece.y = from.y + (dy / view.k / nat.h) * 100;
-        el.style.left = piece.x + '%';
-        el.style.top = piece.y + '%';
-        placeMarks();
-      }
-
-      function onUp() {
-        el.removeEventListener('pointermove', onMove);
-        el.removeEventListener('pointerup', onUp);
-        el.removeEventListener('pointercancel', onUp);
-        el.classList.remove('dragging');
-        try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
-        if (travelled <= 3) { hold(piece.id); return; }
-        hold(piece.id, true);
-        decorPost({action: 'move', piece_id: piece.id,
-                   x: Math.round(piece.x * 1000) / 1000,
-                   y: Math.round(piece.y * 1000) / 1000},
-                  function () { kitSay('Moved.'); });
-      }
-
-      el.addEventListener('pointermove', onMove);
-      el.addEventListener('pointerup', onUp);
-      el.addEventListener('pointercancel', onUp);
-    });
+    el.addEventListener('pointerdown', function (ev) { pieceDown(ev, piece, el); });
+    el.addEventListener('click', function (ev) { pieceClick(ev, piece); });
     el.addEventListener('pointerenter', function () { hovered = piece.id; placeMarks(); });
     el.addEventListener('pointerleave', function () {
       if (hovered === piece.id) { hovered = null; placeMarks(); }
@@ -1346,10 +1388,10 @@ _SCRIPT = r"""
   }
 
   // --- marks: what is held, what is under the pointer ------------------- //
-  var hovered = null;
-  var holdMark = document.createElement('div'), hoverMark = document.createElement('div');
-  holdMark.className = 'dlmark'; hoverMark.className = 'dlmark hover';
-  frame.appendChild(holdMark); frame.appendChild(hoverMark);
+  var hovered = null, markPool = [];
+  var hoverMark = document.createElement('div');
+  hoverMark.className = 'dlmark hover';
+  frame.appendChild(hoverMark);
   function markAt(mark, el) {
     if (!el) { mark.style.display = 'none'; return; }
     var r = el.getBoundingClientRect(), f = frame.getBoundingClientRect(), pad = 2;
@@ -1360,8 +1402,17 @@ _SCRIPT = r"""
     mark.style.display = 'block';
   }
   function placeMarks() {
-    markAt(holdMark, heldPiece && pieces[heldPiece]);
-    markAt(hoverMark, hovered && hovered !== heldPiece && !armedAsset && pieces[hovered]);
+    // A box per selected piece, on screen; a few hundred at most, because a
+    // box selection over a forest is a lot of boxes to move on every pan.
+    var ids = selIds().filter(function (id) { return pieces[id]; }).slice(0, 400);
+    while (markPool.length < ids.length) {
+      var m = document.createElement('div');
+      m.className = 'dlmark';
+      frame.appendChild(m);
+      markPool.push(m);
+    }
+    markPool.forEach(function (m, i) { markAt(m, i < ids.length ? pieces[ids[i]] : null); });
+    markAt(hoverMark, hovered && !sel[hovered] && !frame.classList.contains('placing') && pieces[hovered]);
   }
 
   // The armed piece, following the pointer at the size it will be placed at,
@@ -1371,7 +1422,7 @@ _SCRIPT = r"""
   ghost.innerHTML = '<img alt="">';
   world.appendChild(ghost);
   function aimGhost(ev) {
-    if (!armedAsset || !nat.w) { ghost.classList.remove('live'); return; }
+    if (!armedAsset || !nat.w || tool !== 'pencil') { ghost.classList.remove('live'); return; }
     var b = frame.getBoundingClientRect();
     var probe = {a: armedAsset, v: '', s: parseFloat(kitScale.value) || 1};
     var w = pieceWidth(probe);
@@ -1438,8 +1489,9 @@ _SCRIPT = r"""
       rows.querySelectorAll('[data-edit]').forEach(function (b) {
         b.onclick = function () {
           layerState.edit = b.dataset.edit;
-          armedAsset = null; heldPiece = null;
-          applyLayers(); fillKitCats(); renderKit();
+          armedAsset = null; mix = []; sel = {}; heldPiece = null;
+          frame.classList.remove('placing');
+          applyLayers(); fillKitCats(); renderKit(); selChanged();
         };
       });
     }
@@ -1453,8 +1505,11 @@ _SCRIPT = r"""
     world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) { n.remove(); });
     pieces = {};
     D.world.forEach(drawPiece);
-    if (heldPiece && pieces[heldPiece]) pieces[heldPiece].classList.add('on');
+    Object.keys(sel).forEach(function (id) {
+      if (pieces[id]) pieces[id].classList.add('on'); else delete sel[id];
+    });
     placeMarks();
+    if (typeof renderPlaced === 'function') renderPlaced();
   }
 
   function resizeDecor() {
@@ -1473,19 +1528,10 @@ _SCRIPT = r"""
     return null;
   }
 
+  // Selecting one piece, kept for the callers that think in one held piece.
   function hold(id, keep) {
-    heldPiece = (!keep && heldPiece === id) ? null : id;
-    armedAsset = null;
-    frame.classList.remove('placing');
-    world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) {
-      n.classList.toggle('on', n.dataset.id === heldPiece);
-    });
-    placeMarks();
-    var p = heldPiece && pieceById(heldPiece);
-    if (p) { fitSlider(p.a); kitScale.value = p.s;
-             kitSay(kitScale.disabled ? 'Held. This one has a fixed size; mirror it or remove it.'
-                                      : 'Held. Drag the size, mirror it, or remove it.'); }
-    else { kitSay(''); }
+    if (keep) { if (!sel[id]) selectOnly([id]); return; }
+    if (sel[id] && selIds().length === 1) selectOnly([]); else selectOnly([id]);
   }
 
   function decorPost(payload, then) {
@@ -1511,57 +1557,426 @@ _SCRIPT = r"""
         D.world.push({id: res.piece.piece_id, a: res.piece.asset_id, v: res.piece.variant || '',
                       l: res.piece.layer || 'objects',
                       x: res.piece.x, y: res.piece.y, s: res.piece.scale,
-                      f: !!res.piece.flip});
+                      f: !!res.piece.flip, by: String(res.piece.by || ''),
+                      bn: res.piece.by_name || '', at: res.piece.at || 0});
         redrawDecor();
         kitSay('Placed. Click again to place another.');
       });
   }
 
+  function selectedPieces() {
+    return selIds().map(pieceById).filter(function (p) { return p; });
+  }
   if (kitScale) kitScale.oninput = function () {
-    var p = heldPiece && pieceById(heldPiece);
-    if (!p) { kitSay('Click a placed piece first.', true); return; }
-    p.s = parseFloat(kitScale.value) || 1;
-    // Just the width. Rebuilding every node on each step of a slider threw the
-    // element out from under the pointer.
-    resizeDecor();
+    var chosen = selectedPieces();
+    // With nothing selected the slider is the size the pencil and brush use.
+    if (!chosen.length) return;
+    var v = parseFloat(kitScale.value) || 1;
+    chosen.forEach(function (p) {
+      var a = assetById(p.a);
+      p.s = a ? Math.min(a.hi, Math.max(a.lo, v)) : v;
+    });
+    // Just the widths. Rebuilding every node on each step of a slider threw
+    // the element out from under the pointer.
+    resizeDecor(); placeMarks();
   };
   if (kitScale) kitScale.onchange = function () {
-    var p = heldPiece && pieceById(heldPiece);
-    if (!p) return;
-    decorPost({action: 'move', piece_id: p.id, scale: p.s},
-              function () { kitSay('Resized.'); });
+    var chosen = selectedPieces();
+    if (!chosen.length) return;
+    decorPost({action: 'move_many', moves: chosen.map(function (p) {
+      return {piece_id: p.id, scale: p.s}; })}, function () { kitSay('Resized.'); });
   };
   document.getElementById('dlkitflip').onclick = function () {
-    var p = heldPiece && pieceById(heldPiece);
-    if (!p) { kitSay('Click a placed piece first.', true); return; }
-    p.f = !p.f;
+    var chosen = selectedPieces();
+    if (!chosen.length) { kitSay('Select a placed piece first.', true); return; }
+    chosen.forEach(function (p) { p.f = !p.f; });
     redrawDecor();
-    decorPost({action: 'move', piece_id: p.id, flip: p.f},
-              function () { kitSay('Mirrored.'); });
+    decorPost({action: 'move_many', moves: chosen.map(function (p) {
+      return {piece_id: p.id, flip: p.f}; })}, function () { kitSay('Mirrored.'); });
   };
-  document.getElementById('dlkitdel').onclick = function () {
-    var p = heldPiece && pieceById(heldPiece);
-    if (!p) { kitSay('Click a placed piece first.', true); return; }
-    decorPost({action: 'remove', piece_id: p.id}, function () {
-      D.world = D.world.filter(function (q) { return q.id !== p.id; });
-      heldPiece = null;
-      redrawDecor();
-      kitSay('Removed.');
+  function removeSelection() {
+    var ids = selIds();
+    if (!ids.length) { kitSay('Select a placed piece first.', true); return; }
+    decorPost({action: 'remove_many', piece_ids: ids}, function (res) {
+      D.world = D.world.filter(function (q) { return !sel[q.id]; });
+      sel = {};
+      redrawDecor(); selChanged();
+      kitSay(res.removed === 1 ? 'Removed.' : 'Removed ' + res.removed + '.');
     });
-  };
+  }
+  document.getElementById('dlkitdel').onclick = removeSelection;
   function closeKit() {
     kitDrawer.classList.remove('open');
-    armedAsset = null;
-    if (heldPiece) hold(heldPiece);
+    armedAsset = null; mix = [];
+    if (selIds().length) selectOnly([]);
     frame.classList.remove('placing');
+    // The pencil and the brush need the kit; without it the hand is back.
+    if (tool === 'pencil' || tool === 'brush') setTool('hand');
     renderKit();
+  }
+  function openKit() {
+    closeDrawers('kit');
+    kitDrawer.classList.add('open');
+    renderPlaced();
   }
   document.getElementById('dlkit').onclick = function () {
     if (kitDrawer.classList.contains('open')) { closeKit(); return; }
-    closeDrawers('kit');
-    kitDrawer.classList.add('open');
+    openKit();
   };
   document.getElementById('dlkitclose').onclick = closeKit;
+
+  // --- the toolbox ------------------------------------------------------- //
+  // Four tools, one mechanic each:
+  //   pointer (V)  click a piece to select it, shift-click to add or drop one,
+  //                drag the empty map to select everything in a box; drag a
+  //                selected piece to move the whole selection
+  //   hand    (H)  drag the map to move around; click a piece to select it;
+  //                drag a selected piece to move the selection
+  //   pencil  (P)  click to put the picked tile down, once per click
+  //   brush   (B)  drag to scatter the picked tiles (shift-click several in the
+  //                library for a mix) as a scatter, a line or clusters
+  // Delete removes the selection; Escape lets go of everything.
+  var tool = 'hand', sel = {}, mix = [], gesture = null, swallowClick = false;
+  try { tool = window.localStorage.getItem('dl-tool') || 'hand'; } catch (e) {}
+  if (['pointer', 'hand', 'pencil', 'brush'].indexOf(tool) < 0 || !D.assets.length) tool = 'hand';
+  if (tool === 'pencil' || tool === 'brush') tool = 'hand';   // nothing is picked on a fresh page
+  var HINT = {
+    pointer: 'Select: click a piece, shift-click to add, drag a box over the map.',
+    hand: 'Hand: drag to move around; click a piece to select it, drag it to move it.',
+    pencil: 'Pencil: pick a tile, then click the map to put it down.',
+    brush: 'Brush: pick tiles (shift-click for a mix), then drag on the map.'
+  };
+  function setTool(t) {
+    tool = t;
+    try { window.localStorage.setItem('dl-tool', t); } catch (e) {}
+    document.querySelectorAll('.dlzoom [data-tool]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.tool === t);
+    });
+    frame.dataset.tool = t;
+    var placing = t === 'pencil' || t === 'brush';
+    if (placing && !kitDrawer.classList.contains('open')) openKit();
+    document.getElementById('dlbrushopts').hidden = t !== 'brush';
+    frame.classList.toggle('placing', placing && !!armedAsset);
+    if (!placing) { ghost.classList.remove('live'); }
+    brushCursor(null);
+    kitSay(HINT[t]);
+  }
+  document.querySelectorAll('.dlzoom [data-tool]').forEach(function (b) {
+    b.onclick = function (ev) { ev.stopPropagation(); setTool(b.dataset.tool); };
+  });
+
+  function selIds() { return Object.keys(sel); }
+  function selectOnly(ids) { sel = {}; ids.forEach(function (id) { sel[id] = true; }); selChanged(); }
+  function selChanged() {
+    var ids = selIds();
+    heldPiece = ids.length ? ids[ids.length - 1] : null;
+    world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) {
+      n.classList.toggle('on', !!sel[n.dataset.id]);
+    });
+    var p = heldPiece && pieceById(heldPiece);
+    if (p) { fitSlider(p.a); kitScale.value = p.s; }
+    if (ids.length) kitSay(ids.length === 1
+      ? 'Selected. Drag it to move it; size, mirror or remove it below.'
+      : ids.length + ' selected. Drag one to move them all; Delete removes them.');
+    placeMarks();
+    renderPlaced();
+  }
+
+  function toMap(clientX, clientY) {
+    var b = frame.getBoundingClientRect();
+    return {x: ((clientX - b.left - view.x) / (nat.w * view.k)) * 100,
+            y: ((clientY - b.top - view.y) / (nat.h * view.k)) * 100};
+  }
+
+  // A press on a placed piece. Armed, pieces take no pointer at all (CSS), so
+  // this is only ever the pointer or the hand.
+  function pieceDown(ev, piece, el) {
+    if (ev.button !== 0) return;
+    var selected = !!sel[piece.id];
+    // The hand on a piece that is not selected is still the hand: the map pans,
+    // and a click without a drag selects it (pieceClick).
+    if (tool === 'hand' && !selected) return;
+    ev.stopPropagation(); ev.preventDefault();
+    if (tool === 'pointer') {
+      if (ev.shiftKey) {
+        if (selected) { delete sel[piece.id]; selChanged(); return; }
+        sel[piece.id] = true; selChanged();
+      } else if (!selected) {
+        selectOnly([piece.id]);
+      }
+    }
+    dragSelection(ev, el);
+  }
+  function pieceClick(ev, piece) {
+    ev.stopPropagation();
+    if (tool === 'hand' && moved <= 6 && !sel[piece.id]) selectOnly([piece.id]);
+  }
+  // Everything selected moves together, by the pointer's travel in map units.
+  function dragSelection(ev, el) {
+    var start = {x: ev.clientX, y: ev.clientY}, travelled = 0;
+    var group = selectedPieces().map(function (p) { return {p: p, x: p.x, y: p.y}; });
+    try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+    el.classList.add('dragging');
+    function onMove(move) {
+      var dx = move.clientX - start.x, dy = move.clientY - start.y;
+      travelled = Math.abs(dx) + Math.abs(dy);
+      if (travelled <= 3 || !nat.w) return;
+      group.forEach(function (g) {
+        g.p.x = g.x + (dx / view.k / nat.w) * 100;
+        g.p.y = g.y + (dy / view.k / nat.h) * 100;
+        var node = pieces[g.p.id];
+        if (node) { node.style.left = g.p.x + '%'; node.style.top = g.p.y + '%'; }
+      });
+      placeMarks();
+    }
+    function onUp() {
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      el.classList.remove('dragging');
+      try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
+      if (travelled <= 3) return;
+      decorPost({action: 'move_many', moves: group.map(function (g) {
+        return {piece_id: g.p.id, x: Math.round(g.p.x * 1000) / 1000,
+                y: Math.round(g.p.y * 1000) / 1000};
+      })}, function () { kitSay(group.length === 1 ? 'Moved.' : 'Moved ' + group.length + '.'); renderPlaced(); });
+    }
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+  }
+
+  // The frame asks the tool first. True means the tool took the gesture.
+  var g0 = null, boxEl = document.getElementById('dlbox');
+  function toolDown(ev) {
+    if (ev.button !== 0 || !nat.w) return false;
+    // A town being moved is placed by a plain click; a town is opened by one.
+    if (armed || (ev.target.closest && ev.target.closest('.dltown'))) return false;
+    if (tool === 'brush' && armedAsset) { brushStart(ev); return true; }
+    if (tool === 'pointer') {
+      // The pointer is only captured once this is a drag: captured at once,
+      // the click that follows lands on the frame and nothing under it opens.
+      gesture = 'box';
+      g0 = {x: ev.clientX, y: ev.clientY, add: ev.shiftKey, id: ev.pointerId, held: false};
+      return true;
+    }
+    return false;
+  }
+  function toolMove(ev) {
+    if (gesture === 'brush') { brushMove(ev); return; }
+    if (gesture === 'box') {
+      if (!g0.held && Math.abs(ev.clientX - g0.x) + Math.abs(ev.clientY - g0.y) > 4) {
+        g0.held = true;
+        try { frame.setPointerCapture(g0.id); } catch (e) {}
+      }
+      var f = frame.getBoundingClientRect();
+      boxEl.style.left = (Math.min(g0.x, ev.clientX) - f.left) + 'px';
+      boxEl.style.top = (Math.min(g0.y, ev.clientY) - f.top) + 'px';
+      boxEl.style.width = Math.abs(ev.clientX - g0.x) + 'px';
+      boxEl.style.height = Math.abs(ev.clientY - g0.y) + 'px';
+      boxEl.style.display = 'block';
+    }
+  }
+  function toolUp(ev) {
+    var was = gesture;
+    gesture = null;
+    swallowClick = true;
+    setTimeout(function () { swallowClick = false; }, 0);
+    if (was === 'brush') { brushEnd(); return; }
+    if (was === 'box') {
+      boxEl.style.display = 'none';
+      var travel = Math.abs(ev.clientX - g0.x) + Math.abs(ev.clientY - g0.y);
+      if (travel < 4) {
+        // A click with the pointer on empty ground: let go, and close a town.
+        if (!g0.add) selectOnly([]);
+        if (openId) closeCard();
+        return;
+      }
+      var a = toMap(Math.min(g0.x, ev.clientX), Math.min(g0.y, ev.clientY));
+      var b = toMap(Math.max(g0.x, ev.clientX), Math.max(g0.y, ev.clientY));
+      var layer = editLayer();
+      var hit = D.world.filter(function (p) {
+        return (p.l || 'objects') === layer && p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
+      }).map(function (p) { return p.id; });
+      if (!g0.add) sel = {};
+      hit.forEach(function (id) { sel[id] = true; });
+      selChanged();
+      if (!hit.length) kitSay('Nothing on the ' + layer + ' layer in that box.');
+    }
+  }
+
+  // --- the brush ---------------------------------------------------------- //
+  var brush = {pat: 'scatter', r: 8, sp: 6, jit: 0.15, flip: true};
+  var stroke2 = null;   // {items, last, carry, previews}
+  function cellsH() {
+    return (typeof terr !== 'undefined' && terr.world) ? terr.world.cells_h
+      : D.cells_w * (nat.h / nat.w);
+  }
+  function pxPerCell() { return nat.w * view.k / Math.max(1, D.cells_w); }
+  function brushCursor(ev) {
+    var cur = document.getElementById('dlbrushcur');
+    if (!ev || tool !== 'brush' || !armedAsset) { cur.style.display = 'none'; return; }
+    var f = frame.getBoundingClientRect(), d = Math.max(6, brush.r * 2 * pxPerCell());
+    cur.style.left = (ev.clientX - f.left) + 'px';
+    cur.style.top = (ev.clientY - f.top) + 'px';
+    cur.style.width = cur.style.height = d + 'px';
+    cur.style.display = 'block';
+  }
+  frame.addEventListener('pointermove', brushCursor);
+  frame.addEventListener('pointerleave', function () { brushCursor(null); });
+  function toCell(ev) {
+    var m = toMap(ev.clientX, ev.clientY);
+    return {x: m.x / 100 * D.cells_w, y: m.y / 100 * cellsH()};
+  }
+  function dab(cx, cy) {
+    var out = [], n = brush.pat === 'cluster' ? 3 + Math.floor(Math.random() * 3) : 1;
+    var reach = brush.pat === 'line' ? brush.r * 0.15 : brush.pat === 'cluster' ? brush.r * 0.5 : brush.r;
+    for (var i = 0; i < n; i++) {
+      // Uniform over the disc, not bunched at its centre.
+      var t = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * reach;
+      out.push({x: cx + Math.cos(t) * d, y: cy + Math.sin(t) * d});
+    }
+    out.forEach(function (c) {
+      if (stroke2.items.length >= 400) return;
+      var id = mix[Math.floor(Math.random() * mix.length)] || armedAsset;
+      var a = assetById(id);
+      var base = parseFloat(kitScale.value) || 1;
+      var s = base * (1 + (Math.random() * 2 - 1) * brush.jit);
+      s = a ? Math.min(a.hi, Math.max(a.lo, s)) : s;
+      var item = {asset_id: id, x: c.x / D.cells_w * 100, y: c.y / cellsH() * 100,
+                  scale: Math.round(s * 100) / 100, flip: brush.flip && Math.random() < 0.5};
+      stroke2.items.push(item);
+      // A preview where it will land, until the server has it.
+      var el = drawPiece({id: 'preview' + stroke2.items.length, a: id, v: '', l: a ? a.layer : 'objects',
+                          x: item.x, y: item.y, s: item.scale, f: item.flip});
+      el.classList.add('preview');
+      delete pieces['preview' + stroke2.items.length];
+      stroke2.previews.push(el);
+    });
+  }
+  function brushStart(ev) {
+    gesture = 'brush';
+    try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
+    var c = toCell(ev);
+    stroke2 = {items: [], last: c, carry: 0, previews: []};
+    dab(c.x, c.y);
+  }
+  function brushMove(ev) {
+    brushCursor(ev);
+    var c = toCell(ev), from = stroke2.last;
+    var dx = c.x - from.x, dy = c.y - from.y, len = Math.sqrt(dx * dx + dy * dy);
+    if (!len) return;
+    // One dab every `spacing` cells of travel, carried across moves so a slow
+    // drag and a fast one leave the same trail.
+    var step = Math.max(0.5, brush.sp), t = step - stroke2.carry;
+    while (t <= len) {
+      dab(from.x + dx * t / len, from.y + dy * t / len);
+      t += step;
+    }
+    stroke2.carry = len - (t - step);
+    stroke2.last = c;
+  }
+  function brushEnd() {
+    var s = stroke2;
+    stroke2 = null;
+    if (!s || !s.items.length) return;
+    kitSay('Placing ' + s.items.length + '…');
+    decorPost({action: 'place_many', items: s.items}, function (res) {
+      s.previews.forEach(function (el) { el.remove(); });
+      res.pieces.forEach(function (row) {
+        D.world.push({id: row.piece_id, a: row.asset_id, v: row.variant || '', l: row.layer || 'objects',
+                      x: row.x, y: row.y, s: row.scale, f: !!row.flip,
+                      by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0});
+      });
+      redrawDecor();
+      kitSay('Placed ' + res.pieces.length + '.');
+    });
+    // A refused stroke must not leave its previews behind.
+    setTimeout(function () { s.previews.forEach(function (el) { if (el.parentNode) el.remove(); }); }, 15000);
+  }
+  document.querySelectorAll('#dlbrushpat button').forEach(function (b) {
+    b.onclick = function () {
+      brush.pat = b.dataset.pat;
+      document.querySelectorAll('#dlbrushpat button').forEach(function (o) { o.classList.toggle('on', o === b); });
+    };
+  });
+  function brushSlider(id, show, set) {
+    var el = document.getElementById(id), out = document.getElementById(id + 'n');
+    el.oninput = function () { var v = parseFloat(el.value) || 0; set(v); out.textContent = show(v); };
+  }
+  brushSlider('dlbrad', String, function (v) { brush.r = v; });
+  brushSlider('dlbsp', String, function (v) { brush.sp = v; });
+  brushSlider('dlbjit', function (v) { return v + '%'; }, function (v) { brush.jit = v / 100; });
+  document.getElementById('dlbflip').onchange = function () { brush.flip = this.checked; };
+
+  // --- what you placed ---------------------------------------------------- //
+  var placedWho = document.getElementById('dlplacedwho');
+  function renderPlaced() {
+    var pane = document.getElementById('dlkitplaced');
+    if (!pane || pane.hidden) return;
+    var mine = placedWho.value === 'me';
+    var rows = D.world.filter(function (p) { return !mine || (p.by && p.by === D.me); });
+    rows.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+    document.getElementById('dlplacedn').textContent = rows.length + (rows.length === 1 ? ' piece' : ' pieces');
+    var shown = rows.slice(0, 300);
+    var list = document.getElementById('dlplacedlist');
+    list.innerHTML = shown.map(function (p) {
+      var a = assetById(p.a);
+      var who = mine ? '' : ' · ' + escapeHtml(p.bn || (p.by ? 'someone' : 'from before names were kept'));
+      return '<div class="dlplaced' + (sel[p.id] ? ' on' : '') + (a && a.px ? ' px' : '') + '" data-id="' + p.id + '">' +
+        '<img alt="" loading="lazy" src="' + assetUrl(p.a) + '">' +
+        '<div>' + escapeHtml(a ? a.name : 'A removed tile') +
+        '<small>' + Math.round(p.x / 100 * D.cells_w) + ', ' + Math.round(p.y / 100 * cellsH()) +
+        ' · ' + escapeHtml(p.l || 'objects') + who + '</small></div>' +
+        '<button data-del="' + p.id + '" title="Remove it">×</button></div>';
+    }).join('') + (rows.length > shown.length
+      ? '<p class="dlkithint">And ' + (rows.length - shown.length) + ' more.</p>' : '') +
+      (!rows.length ? '<p class="dlkithint">' + (mine ? 'Nothing placed by you yet.' : 'Nothing placed yet.') + '</p>' : '');
+    list.querySelectorAll('.dlplaced').forEach(function (row) {
+      row.onclick = function (ev) {
+        var id = row.dataset.id, p = pieceById(id);
+        if (ev.target.dataset.del) {
+          sel = {}; sel[id] = true; removeSelection(); return;
+        }
+        if (!p) return;
+        // Off its layer it cannot be grabbed, so editing moves to its layer.
+        if ((p.l || 'objects') !== editLayer()) { layerState.edit = p.l || 'objects'; applyLayers(); fillKitCats(); renderKit(); }
+        selectOnly([id]);
+        // Centred on it, at a zoom where it can be seen.
+        if (view.k < 8) view.k = Math.min(D.sizes.max_zoom, 8);
+        view.x = frame.clientWidth / 2 - p.x / 100 * nat.w * view.k;
+        view.y = frame.clientHeight / 2 - p.y / 100 * nat.h * view.k;
+        clamp(); apply();
+      };
+    });
+  }
+  placedWho.onchange = renderPlaced;
+  document.querySelectorAll('.dlkittabs button').forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll('.dlkittabs button').forEach(function (o) { o.classList.toggle('on', o === b); });
+      document.getElementById('dlkitlib').hidden = b.dataset.tab !== 'lib';
+      document.getElementById('dlkitplaced').hidden = b.dataset.tab !== 'placed';
+      renderPlaced();
+    };
+  });
+
+  window.addEventListener('keydown', function (ev) {
+    var t = ev.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    var key = (ev.key || '').toLowerCase();
+    var pick = {v: 'pointer', h: 'hand', p: 'pencil', b: 'brush'}[key];
+    if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
+    if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
+    if (key === 'escape') {
+      armedAsset = null; mix = [];
+      frame.classList.remove('placing');
+      selectOnly([]); renderKit();
+    }
+  });
+
+  setTool(tool);
+  kitSay('');
   applyLayers();
   fillKitCats();
   renderKit();

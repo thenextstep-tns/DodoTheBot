@@ -358,3 +358,27 @@ non-resizable tile) now renders with `image-rendering: pixelated` in the admin
 kit, the player kit, the placement ghost and placed pieces (`px` flag in the
 toolkit entries). The 30 sprites of 10 px or less (flowers, pebbles, mushrooms,
 ivy) are genuine small details of 16 px packs, not broken cuts, so they stay.
+
+### Backlog 9 — owned pieces and the toolbox
+
+* **Ownership.** Every placed world piece now stores `by` (Discord id of the
+  session), `by_name` and `at`; pieces from before read as unknown. The map
+  payload carries them (`by`, `bn`, `at`).
+* **Batch actions** on `POST /api/guild/{gid}/dodoland/decor`: `place_many`
+  (≤400 items, each tile checked once, one `insert_many`), `move_many`,
+  `remove_many` (world scope only). `DecorStore.place_many/remove_many`.
+* **Toolbox** under the zoom buttons: **pointer** (V: click/shift-click select,
+  drag a box on empty map — the edited layer only), **hand** (H: pan; click a
+  piece to select; drag a selection to move it), **pencil** (P: click to stamp
+  the picked tile), **brush** (B: drag to scatter; shift-click several tiles in
+  the library for a mix; patterns Scatter / Line / Cluster, radius, spacing,
+  size jitter, random mirror; previews while dragging, one request on release).
+  Delete removes the selection, Escape lets go. Size / Mirror / Remove act on
+  the whole selection. Selection boxes are screen-space, one per piece (≤400).
+* **Placed tab** in the toolkit: *Placed by me* / *Everyone's*, newest first,
+  name, cell coordinates, layer and placer; click a row to select it and fly to
+  it (switching the edit layer if needed); × removes it.
+* Verified end to end against a harness whose decor POST writes to an in-memory
+  copy (scratchpad `harness/serve.py`): pencil → 1 piece with `by`; a brush
+  stroke → 25 pieces in one request; box select → 25; Delete → removed 25;
+  hand click-select, drag-move persisted, Escape.

@@ -37,6 +37,7 @@ and cannot be decorated into existence.
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Any, Optional
 
 SCOPE_WORLD = "world"
@@ -139,7 +140,8 @@ class DecorStore:
               owner_id: int = 0, scale: Any = 1.0, flip: bool = False,
               allowed: Optional[set] = None,
               scale_range: tuple = (MIN_SCALE, MAX_SCALE),
-              variant: str = "", source: str = "", layer: str = "objects") -> dict:
+              variant: str = "", source: str = "", layer: str = "objects",
+              placed_by: int = 0, placed_by_name: str = "") -> dict:
         """Put one thing down, and return the row that was written.
 
         ``scale_range`` is what the tile may be sized to — ``(1, 1)`` for a
@@ -168,6 +170,43 @@ class DecorStore:
                 "something first." if scope == SCOPE_TOWN else
                 f"The map already holds {limit} pieces of decor.")
 
+        row = self._row(guild_id, scope=scope, asset_id=asset_id, x=x, y=y,
+                        owner_id=owner_id, scale=scale, flip=flip,
+                        scale_range=scale_range, variant=variant, source=source,
+                        layer=layer, placed_by=placed_by, placed_by_name=placed_by_name)
+        self._col.insert_one(dict(row))
+        return row
+
+    def place_many(self, guild_id: int, items: list[dict], *, placed_by: int = 0,
+                   placed_by_name: str = "") -> list[dict]:
+        """Many world pieces in one write — a brush stroke.
+
+        Each item is ``{asset_id, x, y, scale, flip, variant, layer,
+        scale_range}``, already checked by the caller. One ``insert_many``
+        rather than one round trip per piece: a stroke of a hundred trees was a
+        hundred requests to the database.
+        """
+        self._ensure_indexes()
+        guild_id = int(guild_id)
+        if not items:
+            return []
+        if self.count(guild_id, SCOPE_WORLD) + len(items) > MAX_WORLD:
+            raise DecorError(f"The map holds at most {MAX_WORLD} pieces of decor.")
+        rows = [self._row(guild_id, scope=SCOPE_WORLD, asset_id=item["asset_id"],
+                          x=item.get("x"), y=item.get("y"), scale=item.get("scale", 1.0),
+                          flip=bool(item.get("flip")),
+                          scale_range=item.get("scale_range") or (MIN_SCALE, MAX_SCALE),
+                          variant=item.get("variant") or "", layer=item.get("layer") or "objects",
+                          placed_by=placed_by, placed_by_name=placed_by_name)
+                for item in items]
+        self._col.insert_many([dict(row) for row in rows])
+        return rows
+
+    def _row(self, guild_id: int, *, scope: str, asset_id: str, x: Any, y: Any,
+             owner_id: int = 0, scale: Any = 1.0, flip: bool = False,
+             scale_range: tuple = (MIN_SCALE, MAX_SCALE), variant: str = "",
+             source: str = "", layer: str = "objects", placed_by: int = 0,
+             placed_by_name: str = "") -> dict:
         try:
             size = float(scale)
         except (TypeError, ValueError):
@@ -191,11 +230,16 @@ class DecorStore:
             # The map layer it belongs to, from its tile, so the map can draw,
             # show, hide and lock layers separately.
             "layer": str(layer or "objects"),
+            # Who put it there and when, so a person can find and take back
+            # what they placed. 0 for pieces from before this was recorded, and
+            # for imports.
+            "by": int(placed_by or 0),
+            "by_name": str(placed_by_name or "")[:64],
+            "at": int(time.time()),
         }
         if source:
             # Where an imported piece came from, so an import can be re-run.
             row["source"] = str(source)[:120]
-        self._col.insert_one(dict(row))
         return row
 
     def sources(self, guild_id: int) -> set:
@@ -235,6 +279,16 @@ class DecorStore:
             query.update({"scope": SCOPE_TOWN, "owner_id": int(owner_id)})
         result = self._col.update_one(query, {"$set": changes})
         return bool(getattr(result, "modified_count", 0))
+
+    def remove_many(self, guild_id: int, piece_ids: list) -> int:
+        """World pieces by id, in one write. Town pieces are never touched."""
+        self._ensure_indexes()
+        ids = [str(p) for p in piece_ids or []][:2000]
+        if not ids:
+            return 0
+        result = self._col.delete_many({"guild_id": int(guild_id), "scope": SCOPE_WORLD,
+                                        "piece_id": {"$in": ids}})
+        return int(getattr(result, "deleted_count", 0))
 
     def remove(self, guild_id: int, piece_id: str,
                owner_id: Optional[int] = None) -> bool:

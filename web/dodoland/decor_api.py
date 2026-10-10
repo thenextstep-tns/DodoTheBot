@@ -82,7 +82,52 @@ async def api_world_decor(request: web.Request):
         return _bad("That request could not be read.")
     action = str(body.get("action") or "place")
 
+    who = int(request.get("uid") or 0)
+    member = guild.get_member(who) if who and hasattr(guild, "get_member") else None
+    who_name = (getattr(member, "display_name", "") or "") if member else ""
     try:
+        if action == "place_many":
+            # A brush stroke: many pieces of a few tiles, checked once per tile
+            # and written in one go.
+            raw = body.get("items") or []
+            if not isinstance(raw, list) or not raw:
+                return _bad("A stroke needs at least one piece.")
+            if len(raw) > 400:
+                return _bad("That stroke places too much at once; it will arrive in pieces.")
+            checked: dict = {}
+            items = []
+            for item in raw:
+                tid = str((item or {}).get("asset_id") or "")
+                if tid not in checked:
+                    checked[tid] = _admin_tile(bot, guild, request, tid)
+                tile = checked[tid]
+                items.append({"asset_id": tile["tile_id"], "x": item.get("x"), "y": item.get("y"),
+                              "scale": item.get("scale") or 1.0, "flip": bool(item.get("flip")),
+                              "scale_range": tile_rules.scale_range(tile),
+                              "variant": tile["variants"][0] if tile["variants"] else "",
+                              "layer": tile["layer"]})
+            rows = bot.dodoland_decor.place_many(guild.id, items, placed_by=who,
+                                                 placed_by_name=who_name)
+            await _record_change(request, "dodoland_decor", "world", "", "placed",
+                                 f"DodoLand map decor placed ({len(rows)})")
+            return web.json_response({"ok": True, "pieces": rows})
+
+        if action == "remove_many":
+            gone = bot.dodoland_decor.remove_many(guild.id, body.get("piece_ids") or [])
+            if gone:
+                await _record_change(request, "dodoland_decor", "world", "", "removed",
+                                     f"DodoLand map decor removed ({gone})")
+            return web.json_response({"ok": True, "removed": gone})
+
+        if action == "move_many":
+            moved = 0
+            for item in (body.get("moves") or [])[:2000]:
+                moved += bool(bot.dodoland_decor.move(
+                    guild.id, (item or {}).get("piece_id"), x=item.get("x"), y=item.get("y"),
+                    scale=item.get("scale"), flip=item.get("flip"),
+                    scale_range=_piece_range(bot, guild, item.get("piece_id"))))
+            return web.json_response({"ok": True, "changed": moved})
+
         if action == "remove":
             gone = bot.dodoland_decor.remove(guild.id, body.get("piece_id"))
             if gone:
@@ -112,7 +157,7 @@ async def api_world_decor(request: web.Request):
             # own tile, and this keeps a stamp that gains a variant from
             # turning into a lucky dip again.
             variant=tile["variants"][0] if tile["variants"] else "",
-            layer=tile["layer"])
+            layer=tile["layer"], placed_by=who, placed_by_name=who_name)
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")
         return web.json_response({"ok": True, "piece": piece})
