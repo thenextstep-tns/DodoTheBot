@@ -198,3 +198,23 @@ one is.
 
 Next: town hall + flag at the dot (step 5), roads (step 3), players placing
 buildings inside their own area (step 6: enforce "inside your influence").
+
+**Correction, same day: the map is terrain tiles only.** Nik rejected the Miro
+art on the map (sizes were wrong under the old renderer, and it is not what the
+base map is for). Done:
+
+* all 2,443 placed map-art pieces **removed** (world decor is empty);
+* the six generated "parchment / ink" tiles and their category **deleted**;
+* the grid **repainted** by `tools/dodoland_terrain_rebuild.py`: water from the
+  imported coastline (deep sea -> Summer Plains *Deep water*, everything else
+  -> Fan-tasy *Lake water*), land -> *Meadow grass*, then regions read from where
+  the Miro terrain drawings stand (`miro_regions`): fields *Summer grass*, dunes
+  *Summer sand*, forest *Olive grass* (gaps closed so lines of trees become
+  woods), swamp *Valley grass*, hills *Valley dirt*, mountains *Stone paving* as
+  a **fixed blocking kind** (`kind["fixed"]`, so the tile stays a road surface
+  elsewhere), ponds *Lake water*. The world's kinds are now only tiles.
+* The tool refuses to run twice (it reads the imported water kinds); a backup of
+  decor, chunks and kinds from before the clean-up is in the session scratchpad.
+
+The built-in kind list (`terrain._BASE_KINDS`) still exists in code for the map
+importer and as a new world's default; it is no longer in this world or any UI.

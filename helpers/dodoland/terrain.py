@@ -186,7 +186,9 @@ def sync_tile_kinds(kinds: list[dict], tiles: dict) -> list[dict]:
     for kind in kinds:
         key = str(kind.get("key") or "")
         tile = tiles.get(kind.get("tile_id"))
-        if key.startswith(TILE_PREFIX) and tile:
+        # ``fixed`` costs belong to this world, not the tile: the same stone
+        # paving is a road surface in one place and a mountain range in another.
+        if key.startswith(TILE_PREFIX) and tile and not kind.get("fixed"):
             kind = {**kind, **{k: v for k, v in tile_kind(tile, kind.get("hex", "")).items()
                                if k in ("move", "grow", "build", "water", "label")}}
         out.append(kind)

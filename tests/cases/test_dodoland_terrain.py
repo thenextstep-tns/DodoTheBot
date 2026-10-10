@@ -365,6 +365,13 @@ synced = T.sync_tile_kinds(kinds, {"g1": {**grass, "passable": False}, "w1": wat
 assert synced[i]["move"] is None
 print("tiles           painting a tile appends one kind, with costs that follow the tile")
 
+# A world may fix a kind's costs: the same stone paving is a road in one place
+# and a mountain range in another, and the mountain must stay blocked.
+mountain = {**kinds[i], "key": kinds[i]["key"] + "_mountains", "move": None, "grow": None,
+            "build": False, "fixed": True}
+assert T.sync_tile_kinds([mountain], {"g1": grass})[0]["move"] is None
+print("tiles           a kind with fixed costs keeps them whatever its tile says")
+
 defs = terrainart.pattern_defs(kinds, {"g1": grass, "w1": water}, "/art/",
                                {"a": (16, 16), "b": (16, 16), "c": (32, 32)})
 assert defs.count("<pattern") == 2 and "/art/a" in defs and "/art/b" in defs
