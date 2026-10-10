@@ -102,9 +102,19 @@ def _category_options(categories: list[dict], selected: str) -> str:
     return "".join(out)
 
 
-def _cell_options(selected: int) -> str:
-    return "".join(f'<option value="{size}"{" selected" if size == selected else ""}>{size}px grid</option>'
-                   for size in tile_rules.CELL_SIZES)
+def _cell_input(value: int, cls: str = "tlcell", el_id: str = "") -> str:
+    """Pixels per map cell: any number in range, with the pixel-art grids as
+    suggestions. Drawn art is whatever it was drawn at."""
+    ident = f' id="{el_id}"' if el_id else ""
+    return (f'<label class="tlpack" title="How many of this art\'s pixels make one map cell">'
+            f'<input type="number" class="{cls}"{ident} list="tlcellsizes" min="{tile_rules.MIN_CELL}"'
+            f' max="{tile_rules.MAX_CELL}" step="1" value="{int(value)}" style="width:5.5em"> px/cell</label>')
+
+
+def _cell_presets() -> str:
+    return ('<datalist id="tlcellsizes">'
+            + "".join(f'<option value="{size}"></option>' for size in tile_rules.CELL_SIZES)
+            + "</datalist>")
 
 
 def _uses_matrix(uses: list[str], cls: str = "tluse") -> str:
@@ -133,7 +143,7 @@ def _tile_card(tile: dict, categories: list[dict]) -> str:
   <div class="tlrow"><input type="text" class="tlname" maxlength="{tile_rules.MAX_NAME}"
        value="{_e(tile.get('name'))}"><button class="tlrename">Save</button></div>
   <div class="tlrow"><select class="tlcatsel">{_category_options(categories, tile.get('cat_id') or '')}</select>
-    <select class="tlcell" title="The pixel grid this art was drawn on">{_cell_options(tile.get('cell_px') or 16)}</select></div>
+    {_cell_input(tile.get('cell_px') or tile_rules.DEFAULT_CELL)}</div>
   {_uses_matrix(tile.get('uses') or [])}
   <div class="tlrow">
     <button class="tlmove" data-delta="-1" title="Move earlier">◀</button>
@@ -208,7 +218,8 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True) -> str:
   {legend}. The bot owner can use every tile everywhere; road tiles are the bot's
   (layer 2) and are not ticked here. A tile can hold up to {tile_rules.MAX_VARIANTS}
   variants; the map picks one per cell so repeated ground does not read as wallpaper.
-  Set the grid size to the one the art was drawn on, so a 32px pack's tree is not
+  <b>px/cell</b> is how many of the art's own pixels make one map cell — 16 or 32 for
+  pixel art, whatever it was drawn at for drawn art — so a 32px pack's tree is not
   drawn twice the size of a 16px pack's.
   {total} tile(s) in {len(categories)} categor{'y' if len(categories) == 1 else 'ies'}.</p></div>
 
@@ -224,7 +235,7 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True) -> str:
     <div class="tladd">
       <label>Tile name<input type="text" id="tlnewname" maxlength="{tile_rules.MAX_NAME}" placeholder="Deep sea"></label>
       <label>Category<select id="tlnewcatsel">{_category_options(categories, categories[0]['cat_id'] if categories else '')}</select></label>
-      <label>Grid<select id="tlnewcell">{_cell_options(tile_rules.DEFAULT_CELL)}</select></label>
+      <label>Scale{_cell_input(tile_rules.DEFAULT_CELL, cls="tlnewcellbox", el_id="tlnewcell")}</label>
       <label>Image(s) — several files make several variants
         <input type="file" id="tlnewfile" multiple accept="image/png,image/webp,image/gif,image/svg+xml"></label>
       <button id="tladdtile">Add tile</button>
@@ -234,6 +245,7 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True) -> str:
 
   {body}
 </div>
+{_cell_presets()}
 <script>
 (function () {{
   function say(el, text, good) {{

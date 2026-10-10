@@ -140,7 +140,12 @@ assert lib.usable("environment", "admin") == []
 # a permission without anybody noticing.
 assert "Unknown" in refused(lib.set_uses, tree["tile_id"], ["objects:owner"])
 assert lib.get(tree["tile_id"])["uses"] == ["objects:admin", "objects:player"]
-assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=24)
+# Any scale in range — drawn art is whatever it was drawn at — but not nonsense.
+assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=T.MIN_CELL - 1)
+assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px=T.MAX_CELL + 1)
+assert "grid" in refused(lib.update_tile, tree["tile_id"], cell_px="big")
+lib.update_tile(tree["tile_id"], cell_px=57)
+assert lib.get(tree["tile_id"])["cell_px"] == 57
 lib.update_tile(tree["tile_id"], cell_px=16)
 assert lib.get(tree["tile_id"])["cell_px"] == 16
 
@@ -150,7 +155,7 @@ assert all(t["uses"] == ["environment:admin"] for c, ts in lib.grouped()
            if c["cat_id"] == water["cat_id"] for t in ts)
 lib.set_uses(tree["tile_id"], [])
 assert lib.get(tree["tile_id"])["uses"] == []
-print("uses            per tile, per category, canonical, typos refused, grid 16/32")
+print("uses            per tile, per category, canonical, typos refused, any scale in range")
 
 # A row stored before these fields existed reads with safe defaults rather
 # than as whatever None turns into.

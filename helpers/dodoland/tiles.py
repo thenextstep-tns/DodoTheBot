@@ -38,7 +38,7 @@ from typing import Any, Optional
 
 # Storage ceilings, not behaviour: they keep one upload from filling the
 # database. The same kind of limit ``assets.py`` keeps.
-MAX_CATEGORIES = 40
+MAX_CATEGORIES = 100
 MAX_TILES = 1000
 # Sixteen, because a tuft of grass or a scatter of pebbles is one thing drawn
 # a dozen ways, and those are exactly what variants are for.
@@ -64,14 +64,18 @@ ROLES: tuple[tuple[str, str], ...] = (
 # to query ("which tiles may a player put on layer 3?") and to store.
 USES: tuple[str, ...] = tuple(f"{layer}:{role}" for layer, _ in LAYERS for role, _ in ROLES)
 
-# Pixel art comes on a 16px or a 32px grid. A 32px tile covers the same ground
-# as a 16px one at twice the detail, so the map has to know which it is or one
-# pack's trees come out twice the size of another's.
-CELL_SIZES = (16, 32)
+# How many of the art's own pixels make one cell of the map. Pixel art comes
+# on a 16px or a 32px grid — a 32px tile covers the same ground as a 16px one at
+# twice the detail — and drawn art is whatever it was drawn at, so this is a
+# number rather than a choice of two. The map scales by it, or one pack's trees
+# come out twice the size of another's.
+CELL_SIZES = (16, 32)          # the presets the editor offers
+MIN_CELL, MAX_CELL = 4, 1024
 DEFAULT_CELL = 16
-# A tile is small and repeated. This is generous for a 64px pixel tile and
-# mean for a photograph, which is the right way round.
-MAX_BYTES = 256 * 1024
+# Per image. Pixel tiles are a few KB; drawn map art at full resolution runs to
+# a megabyte or so, and every image is its own row, so this only has to stop a
+# photograph, not a drawing.
+MAX_BYTES = 2 * 1024 * 1024
 ALLOWED_TYPES = ("image/png", "image/webp", "image/svg+xml", "image/gif")
 
 # Tiles whose category was removed, or that were never given one. Shown last.
@@ -106,8 +110,8 @@ def clean_cell(value: Any) -> int:
         cell = int(value)
     except (TypeError, ValueError):
         raise TileError("The grid size must be a number.") from None
-    if cell not in CELL_SIZES:
-        raise TileError(f"The grid size must be one of {', '.join(map(str, CELL_SIZES))}px.")
+    if not MIN_CELL <= cell <= MAX_CELL:
+        raise TileError(f"The grid size must be between {MIN_CELL} and {MAX_CELL}px.")
     return cell
 
 
@@ -138,8 +142,11 @@ def _complete(row: dict) -> dict:
     too, or older rows silently read as whatever ``None`` turns into."""
     row.setdefault("uses", [])
     row["uses"] = [use for use in USES if use in (row.get("uses") or [])]
-    if row.get("cell_px") not in CELL_SIZES:
-        row["cell_px"] = DEFAULT_CELL
+    try:
+        cell = int(row.get("cell_px"))
+    except (TypeError, ValueError):
+        cell = DEFAULT_CELL
+    row["cell_px"] = cell if MIN_CELL <= cell <= MAX_CELL else DEFAULT_CELL
     row.setdefault("pack", "")
     row.setdefault("source", "")
     row.setdefault("variants", [])

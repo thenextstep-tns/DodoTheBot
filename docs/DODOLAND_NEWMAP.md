@@ -89,6 +89,36 @@ Left out, deliberately: animated cats, dogs, slimes and characters (walkers,
 step 7), animation strips, shadows, house interiors, autotile edges, cliffs, the
 Fan-tasy building atlas (transitions are a later step).
 
+**Step 1c — the Miro board's art is in (10 Oct 2026).** Everything on the
+DodoLand Miro board (`uXjVJYoeUCE=`) that is *not* on the map: **578 tiles / 803
+images in 35 categories**, each named `Map art · <the board's section label>`,
+pack `DodoLand Miro board`. Library total: 774 tiles, 55 categories.
+
+How it was got, for next time (the board is locked — owner subscription lapsed
+— and was read anonymously, comment-only):
+* **Select all → Copy** puts `miro-data-v1` on the clipboard: base64, every byte
+  shifted by +59, decoding to JSON with every item's resource id, **crop**
+  rectangle (in source pixels), position, and grid cell. Many board images are
+  crops of one shared sheet.
+* `GET /api/v1/boards/{board}/resources/{id}/files/original?redirect=false`
+  returns a signed `r.miro.com` URL for the original file. The page fetched each
+  original once, cut the crops in a canvas and saved one JSON bundle.
+* Off-map = outside the map rectangle (x −17.5k…36.8k, y −18.5k…7.3k board
+  units; it matches the 958×453 terrain grid's aspect). Categories are the
+  section label above each grid; 75 loose images were assigned by name.
+* **Scale**: 353 of the images also appear on the map, and how big they were
+  drawn there is their real scale — ~57 source px per terrain cell (56.7 board
+  units per cell). Others take their section's median, clamped to 4× of it.
+  So `cell_px` is now **any number 4–1024** (16/32 kept as presets).
+* Scenery sections (hills, mountains, dunes, fields, flowers, rocks, waves,
+  bushes, trees) are grouped into tiles with variants; everything else
+  (monsters, crowds, castles, ships, weapons…) is one tile per drawing.
+* Defaults: map objects for admins and players; Frames, Icons and Banners admins
+  only. `MAX_BYTES` is 2 MB per image (drawn art is big), `MAX_CATEGORIES` 100.
+
+`tools/dodoland_import_tile_bundle.py bundle.json [--dry-run]` is the generic
+writer any future import can use: a curated JSON list in, re-runnable by `source`.
+
 Next: step 2 — draw environment tiles on the map as SVG patterns (the same
 mechanism the motifs use), scaled by `cell_px`, the brush picking a tile from
 `usable("environment", role)`.
