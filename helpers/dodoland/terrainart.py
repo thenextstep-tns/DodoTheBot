@@ -96,7 +96,8 @@ def _pick(i: int, j: int, salt: int, count: int) -> int:
     return (value >> 8) % count
 
 
-def tile_pattern(key: str, tile: dict, art_url: str, dims: Optional[dict] = None) -> str:
+def tile_pattern(key: str, tile: dict, art_url: str, dims: Optional[dict] = None,
+                 shrink: float = 1.0) -> str:
     """One ``<pattern>`` for a kind drawn with ``tile``.
 
     ``dims`` maps a variant id to its pixel ``(w, h)``; without it a variant is
@@ -105,9 +106,10 @@ def tile_pattern(key: str, tile: dict, art_url: str, dims: Optional[dict] = None
     variants = list(tile.get("variants") or [])
     if not variants:
         return ""
-    cell_px = float(tile.get("cell_px") or 16)
+    # ``shrink`` is the server's tile scale: art drawn that many times smaller.
+    cell_px = float(tile.get("cell_px") or 16) * max(0.1, float(shrink))
     w, h = (dims or {}).get(variants[0], (cell_px, cell_px))
-    size_w, size_h = max(w / cell_px, 0.25), max(h / cell_px, 0.25)
+    size_w, size_h = max(w / cell_px, 0.02), max(h / cell_px, 0.02)
     salt = sum(ord(c) * (n + 7) for n, c in enumerate(str(key)))
     images = []
     for j in range(PATTERN_CELLS):
@@ -122,14 +124,14 @@ def tile_pattern(key: str, tile: dict, art_url: str, dims: Optional[dict] = None
 
 
 def pattern_defs(kinds: list[dict], tiles: dict, art_url: str,
-                 dims: Optional[dict] = None) -> str:
+                 dims: Optional[dict] = None, shrink: float = 1.0) -> str:
     """``<defs>`` with one pattern per ground bound to a tile.
 
     Emitted **once** for the whole map rather than per chunk: a chunk is a
     fragment injected into one document, and repeating these in each of sixty
     would be sixty copies of every tile. ``tiles`` maps tile id -> tile.
     """
-    out = [tile_pattern(str(kind.get("key")), tiles[kind["tile_id"]], art_url, dims)
+    out = [tile_pattern(str(kind.get("key")), tiles[kind["tile_id"]], art_url, dims, shrink)
            for kind in kinds if kind.get("tile_id") in tiles]
     out = [part for part in out if part]
     return f"<defs>{''.join(out)}</defs>" if out else ""

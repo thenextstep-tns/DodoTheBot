@@ -174,6 +174,7 @@ def _collect(bot, guild) -> dict:
     placeable = [t for t in bot.dodoland_tiles.tiles(guild.id)
                  if t["placement"] == "place" and "admin" in t["access"]]
     dims = bot.dodoland_tiles.art_sizes(v for t in placeable for v in t["variants"])
+    shrink = max(0.1, float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale")))
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
@@ -188,11 +189,11 @@ def _collect(bot, guild) -> dict:
                         "layer": t["layer"],
                         # Each variant's own width in map cells: drawings in one
                         # tile are not all the same size.
-                        "vw": {v: round(dims.get(v, (0, 0))[0] / t["cell_px"], 3)
+                        "vw": {v: round(dims.get(v, (0, 0))[0] / t["cell_px"] / shrink, 3)
                                for v in t["variants"]},
                         # Natural width in map cells: the art's own width over
                         # its px-per-cell. A piece is drawn at this times its size.
-                        "wc": round(dims.get(t["variants"][0], (0, 0))[0] / t["cell_px"], 3)
+                        "wc": round(dims.get(t["variants"][0], (0, 0))[0] / t["cell_px"] / shrink, 3)
                         if t["variants"] else 0,
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
@@ -486,8 +487,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlpiece.flip img { transform: scaleX(-1); }
 /* An outline rather than a filter: a filter inside the scaled world rasterises
    whatever it touches, which is the same rule the towns live under. */
-.dlpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px;
-  border-radius: 3px; }
+/* Selected: a thin line on screen, not in the world. The world is scaled by
+   the zoom, so a 2px outline became a fat band zoomed in; --inv is one screen
+   pixel in world units. */
+.dlpiece.on { outline: calc(1.5px * var(--inv, 1)) solid var(--lantern);
+  outline-offset: calc(3px * var(--inv, 1)); border-radius: calc(4px * var(--inv, 1));
+  box-shadow: 0 0 0 calc(1px * var(--inv, 1)) rgba(0, 0, 0, .35); }
+.dlpiece:hover:not(.on) { outline: calc(1px * var(--inv, 1)) dashed rgba(240, 166, 79, .7);
+  outline-offset: calc(3px * var(--inv, 1)); }
 /* Grabbable, and grabbed. touch-action stops the browser treating a drag on a
    piece as a scroll of the page underneath it. */
 .dlpiece { touch-action: none; cursor: grab; }

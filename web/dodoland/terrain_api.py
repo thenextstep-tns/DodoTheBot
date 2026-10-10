@@ -222,8 +222,9 @@ async def terrain_defs(request: web.Request):
     used = [tiles[k["tile_id"]] for k in world["kinds"] if k.get("tile_id") in tiles]
     dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
     return web.Response(
-        text=terrainart.pattern_defs(world["kinds"], tiles,
-                                     f"/guild/{guild.id}/dodoland/tiles/art/", dims),
+        text=terrainart.pattern_defs(
+            world["kinds"], tiles, f"/guild/{guild.id}/dodoland/tiles/art/", dims,
+            shrink=float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale"))),
         content_type="image/svg+xml",
         headers={"Cache-Control": "private, max-age=600"})
 

@@ -35,6 +35,7 @@ def _blocked(bot, guild_id: int, cells_w: int, cells_h: int) -> set:
     sizes = bot.dodoland_tiles.art_sizes(
         p.get("variant") or tiles[p["asset_id"]]["variants"][0] for p in pieces
         if tiles[p["asset_id"]]["variants"])
+    shrink = max(0.1, float(bot.dodoland_params.get(guild_id, "dodoland_tile_scale")))
     out = set()
     for p in pieces:
         tile = tiles[p["asset_id"]]
@@ -42,7 +43,7 @@ def _blocked(bot, guild_id: int, cells_w: int, cells_h: int) -> set:
         w, h = sizes.get(vid, (0, 0))
         if not w:
             continue
-        wc = w / tile["cell_px"] * float(p.get("scale", 1))
+        wc = w / tile["cell_px"] / shrink * float(p.get("scale", 1))
         hc = wc * h / w
         cx, cy = p["x"] / 100 * cells_w, p["y"] / 100 * cells_h
         # The anchor is 85% down the drawing; the footprint is its bottom 40%.
