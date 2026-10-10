@@ -27,6 +27,7 @@ stale, there is no job, and a stroke invalidates exactly what it touched.
 from __future__ import annotations
 
 import json
+import time
 
 from aiohttp import web
 
@@ -39,6 +40,11 @@ from helpers.dodoland import terrainart
 _CACHE: dict[tuple, str] = {}
 _VERSION: dict[int, int] = {}
 _CACHE_MAX = 3000
+# When this process started. Part of every version: the counter starts at 0
+# again on a restart, and the browser holds terrain for ten minutes, so without
+# it a restart served yesterday's ground under today's "v=0" — after the 4x
+# regrid, old-grid chunks laid out on the new grid.
+_BOOT = int(time.time())
 
 # Undo, as the previous encoded state of whatever chunks a stroke touched. A
 # stroke covers tens of thousands of cells but only a handful of chunks, and a
@@ -64,8 +70,11 @@ def _fresh(guild_id: int, world: dict) -> None:
         _REV[int(guild_id)] = rev
 
 
-def version(guild_id: int) -> int:
-    return _VERSION.get(int(guild_id), 0)
+def version(guild_id: int) -> str:
+    """The browser's cache key for a guild's terrain: this process, the world's
+    revision (bumped by tools that rewrite it), and the paints since."""
+    g = int(guild_id)
+    return f"{_BOOT}.{_REV.get(g, 0)}.{_VERSION.get(g, 0)}"
 
 
 def invalidate(guild_id: int, chunks=None) -> None:
@@ -78,7 +87,7 @@ def invalidate(guild_id: int, chunks=None) -> None:
     the server now forgets exactly what stopped being true.
     """
     guild_id = int(guild_id)
-    _VERSION[guild_id] = version(guild_id) + 1
+    _VERSION[guild_id] = _VERSION.get(guild_id, 0) + 1
     if chunks is None:
         for key in [k for k in _CACHE if k[0] == guild_id]:
             _CACHE.pop(key, None)

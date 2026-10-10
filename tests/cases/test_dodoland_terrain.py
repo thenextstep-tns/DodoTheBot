@@ -280,7 +280,7 @@ print("brush           an implausibly long stroke is refused, not truncated")
 # stale can outlive a stroke. This is what stands in for a rebuild.
 was = terrain_api.version(GUILD)
 paint({"kind": forest, "radius": 1, "points": [[200, 200]]})
-assert terrain_api.version(GUILD) > was, "a paint left the rendered map cached"
+assert terrain_api.version(GUILD) != was, "a paint left the rendered map cached"
 print("brush           a stroke invalidates what it changed, with no job to run")
 
 # A drag is sampled about sixty times a second and moves further than that

@@ -250,3 +250,13 @@ pointer), so what is shown is what is painted. Arming a toolkit piece shows a
 ghost of it at the cursor, at its placed size. Influence reloads after a town
 is placed/moved/removed and after any decor change; its server cache key now
 includes piece positions, not only the count.
+
+**Terrain cache key survives restarts; no black screen while it loads.**
+`terrain_api.version()` is now `"<boot>.<world rev>.<paints>"` (it was an
+in-memory counter that restarted at 0, while the browser holds terrain responses
+for 10 minutes — so after a restart, and after the regrid, `v=0` could serve the
+old ground). The reference image stays visible until the first overview
+arrives (about 5-7 s on a cold process: page 2.6 s, then world, overview and
+influence 1.5-2.7 s each) instead of being hidden as soon as the world loads,
+which left a black frame. Checked against real data through a read-only GET
+harness (scratchpad `harness/serve.py`, port 8790, stopped afterwards).

@@ -292,6 +292,10 @@ SCRIPT = r"""
         // scaled back up into the full cell grid the <svg> is laid out in.
         g.setAttribute('transform', 'scale(' + terr.world.overview_step + ')');
         g.innerHTML = svg;
+        // The reference stays up until there is ground to replace it, so the
+        // seconds the first overview takes are the uploaded map, not a black
+        // screen. Hidden once: after that the slider owns it.
+        if (svg && !terr.refHidden) { terr.refHidden = true; world_el().style.setProperty('--refop', 0); }
       });
   }
   function terrDefs() {
@@ -625,9 +629,8 @@ SCRIPT = r"""
       terrDefs();
       terrOverview();
       terrDetail();
-      // Start with the reference hidden: the terrain *is* the map now, and the
-      // upload is only there to trace against.
-      world_el().style.setProperty('--refop', 0);
+      // The reference is hidden when the overview arrives (terrOverview): the
+      // terrain *is* the map now, and the upload is only there to trace against.
     })
     .catch(function () { terrSay('The world could not be loaded.', true); });
 """
