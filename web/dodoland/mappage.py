@@ -115,6 +115,13 @@ def _collect(bot, guild) -> dict:
     base_pct = float(bot.dodoland_params.get(guild.id, "dodoland_town_width_pct"))
     growth = max(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_town_growth")))
     biggest = max((p["power"] for p in result["order"]), default=0)
+    # Drawn as halls, every town is one small building at the same size, and
+    # the influence layer is what grows; drawn classic, the town itself grows.
+    halls = str(bot.dodoland_params.get(guild.id, "dodoland_town_style")) == "hall"
+    hall_cells = float(bot.dodoland_params.get(guild.id, "dodoland_hall_cells"))
+    cells_w = max(1, bot.dodoland_terrain.world(guild.id)["cells_w"] or 1)
+    from helpers.dodoland import townart as _townart
+    hall_pct = round(hall_cells * _townart.WIDTH / _townart.HALL_SPAN / cells_w * 100, 4)
     people = []
     for person in result["order"]:
         uid = person["user_id"]
@@ -159,7 +166,8 @@ def _collect(bot, guild) -> dict:
             # curve. Linear growth would let one prolific person's settlement
             # swallow the map while everybody else stayed a speck, which is the
             # same reason the old marker sizing used a root.
-            "w": round(base_pct * (1 + (growth - 1) * _grown(person["power"], biggest)), 4),
+            "w": hall_pct if halls else
+                 round(base_pct * (1 + (growth - 1) * _grown(person["power"], biggest)), 4),
             # Placed relative to the town's own box, so it travels with the
             # town when the town is moved or grows.
             "decor": [{"id": d["piece_id"], "a": d["asset_id"],

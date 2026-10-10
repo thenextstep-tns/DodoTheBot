@@ -1966,6 +1966,32 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
     return body
 
 
+# How much of the 120-unit box a lone building takes, so a town hall can be
+# sized by the building rather than by the empty box around it.
+HALL_SPAN = 34.0
+
+
+def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = "",
+             flag_url: str = "", uid: str = "t") -> str:
+    """A town drawn as its town hall alone, with its flag flying.
+
+    The flag is the town's own picture when it has one and a pennant in the
+    town's colour when it does not — there is always a flag. It is handed to the
+    building, which knows where its own pole is; a building that has no pole of
+    its own gets one at its roof, so a hall never flies two flags or none.
+    """
+    draw = SHAPES.get(shape or "hall", _hall)
+    tier = max(1, min(6, int(tier)))
+    colour = colour or PALETTE[0]
+    cloth = banner(flag_url, f"h{uid}") if flag_url else ""
+    body = draw(WIDTH / 2, GROUND_Y, tier, colour, symbol, cloth)
+    flies = (cloth and cloth in body) or ('class="banner"' in body and not cloth)
+    if not flies:
+        top = GROUND_Y - family_height(shape or "hall", tier)
+        body += _flagpost(WIDTH / 2, top, colour, 10.0, cloth)
+    return f'<g class="hall">{body}</g>'
+
+
 def one_svg(shape: str, tier: int, colour: Optional[str] = None,
             symbol: str = "") -> str:
     """A single building on its own, for previews and the buildings editor."""

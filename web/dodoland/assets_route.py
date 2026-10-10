@@ -114,6 +114,18 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
 
     reached = int(person.get("reached") or 0)
 
+    # Drawn as a hall: the town hall alone, its flag on it. Its reach is the
+    # influence layer and its other buildings are what its owner places.
+    if str(bot.dodoland_params.get(guild.id, "dodoland_town_style")) == "hall":
+        key = str(bot.dodoland_params.get(guild.id, "dodoland_town_hall"))
+        hall = next((b for b in buildings if b["key"] == key), {"key": key, "shape": "hall"})
+        score = (person.get("buildings") or {}).get(key) or {}
+        tier = int(score["tier"]) + 1 if score.get("tier") is not None else 1
+        return townart.hall_svg(
+            hall.get("shape") or "hall", tier,
+            town_rules.building_colour(details, key, "") or townart.colour_for(str(user_id)),
+            hall.get("symbol") or "", flag_url if details.get("image") else "", str(user_id))
+
     # How many ordinary houses stand around what they built. **Linear in reach**
     # on purpose: this is the one number on the map that is supposed to say how
     # connected somebody is, and a logarithm made sixty people and three hundred

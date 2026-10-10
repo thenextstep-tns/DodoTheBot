@@ -47,4 +47,15 @@ assert result["removed"] == 2 and lib.by_source(f"building:{GUILD}:menagerie:1")
 assert lib.by_source(f"building:{GUILD}:moot:1")["name"] == "The Moot · Shed"
 print("buildings       renames follow the building and a removed building takes its tiles")
 
+# A town drawn as a hall always flies exactly one flag: the town's picture when
+# it has one, a pennant in its colour when it does not — whatever the shape.
+from helpers.dodoland import townart  # noqa: E402
+
+for shape in townart.SHAPES:
+    plain = townart.hall_svg(shape, 3, "#c0392b")
+    pictured = townart.hall_svg(shape, 3, "#c0392b", flag_url="/p.png", uid="9")
+    assert plain.count('class="banner"') == 1, f"{shape} hall without a picture flies no pennant"
+    assert pictured.count("townflag") == 1 and 'class="banner"' not in pictured,         f"{shape} hall flies two flags or none"
+print("halls           every hall flies one flag, its picture or its own pennant")
+
 print("PASS")
