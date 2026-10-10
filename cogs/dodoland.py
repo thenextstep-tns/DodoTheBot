@@ -388,7 +388,7 @@ class DodoLand(commands.Cog, name="dodoland"):
         """Draw every world's overview and work out its towns' areas before
         anybody opens the map, so the first visitor after a restart does not
         wait for them. Blocking; runs in an executor; never raises."""
-        from web.dodoland import influence_api, terrain_api
+        from web.dodoland import influence_api, roads_api, terrain_api
 
         for guild in list(self.bot.guilds):
             try:
@@ -396,6 +396,7 @@ class DodoLand(commands.Cog, name="dodoland"):
                     continue
                 terrain_api.picture_bytes(self.bot, guild.id)
                 influence_api.warm(self.bot, guild)
+                roads_api.current(self.bot, guild)
             except Exception as error:  # noqa: BLE001 - warming is a courtesy, not a duty
                 self.bot.logger.error(f"DodoLand could not warm the map of {guild.id}: {error}")
 

@@ -411,3 +411,37 @@ ivy) are genuine small details of 16 px packs, not broken cuts, so they stay.
 All eleven backlog items are done. Still open from the original plan: roads
 (step 3), the player-facing building flow on the player page (players placing
 their own town's buildings inside their area from `/me`), walkers.
+
+### Step 3 — roads (11 Oct 2026)
+
+`helpers/dodoland/roads.py` (pure) + `web/dodoland/roads_api.py`
+(`GET /guild/{gid}/dodoland/roads`, cached per guild, rebuilt when terrain,
+plots, road-blocking pieces or settings change and at least daily; warmed at
+`on_ready`). Links: pair rows over the standing window between placed towns,
+each town's `dodoland_roads_per_town` (3) strongest with at least
+`dodoland_roads_min` (3) interactions. A* on a `dodoland_roads_step` (2)
+coarser grid: `move` cost, shallows/rivers crossable at `dodoland_roads_bridge`
+(6) per step and drawn as plank bridges, deep sea / mountains / road-blocking
+pieces (`passable` False — buildings too) impassable, existing road ground at
+`dodoland_roads_reuse` (0.35) so roads merge. Strongest links routed first. A
+Pillow flood fill refuses towns no road could join before searching. Paths are
+string-pulled (80-point window) and Chaikin-rounded. Drawn in `#dltroads`
+(Roads layer), `dodoland_roads_width` (2.4 cells). Roads reload when a town is
+placed/moved/removed. Live data: one road (40 interactions) across the
+continent with 3 bridges, ~3.5 s to compute, cached.
+
+### Earned buildings only, at the current tier (Nik, 11 Oct)
+
+A town builds **only what it has earned, at the tier it has reached, one of
+each**: the Build section lists exactly those; a building it already has is
+marked *built* and clicking it finds and selects it. The server enforces the
+same (`decor_api._town_may_build`). A placed town building is **drawn at the
+town's current tier** (`currentTile`), so it upgrades as the town progresses.
+
+### Selecting on the live map (Nik, 11 Oct)
+
+Tested on Nik's own Chrome against the live bot: selecting objects failed
+because the edit layer had been left on *Buildings* (by Build-in-this-town),
+and every other layer was `pointer-events: none`. Now any visible piece can be
+selected (selecting one moves editing to its layer), and a click picks the
+nearest piece within 10 screen px — zoomed out, a flower is a pixel.

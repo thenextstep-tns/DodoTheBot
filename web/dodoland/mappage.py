@@ -591,10 +591,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlworld.hide-objects .dlpiece.L-objects,
 .dlworld.hide-buildings .dlpiece.L-buildings,
 .dlworld.hide-buildings .dltown { display: none; }
-/* Only the layer being edited can be picked up. */
-.dlworld[data-edit="environment"] .dlpiece:not(.L-environment),
-.dlworld[data-edit="objects"] .dlpiece:not(.L-objects),
-.dlworld[data-edit="buildings"] .dlpiece:not(.L-buildings) { pointer-events: none; }
+/* Any piece that can be seen can be picked up; the layer being edited only
+   decides what the toolkit offers. Locking the other layers silently made
+   trees unclickable for anyone whose last edit was a building. */
 .dllayerpanel { position: fixed; top: 60px; right: 16px; width: 290px; z-index: 28;
   background: var(--paper); border: 1px solid var(--edge); border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0,0,0,.3); padding: 10px 0 2px; }
@@ -668,6 +667,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlbuildtile img { width: 100%; height: 40px; object-fit: contain; }
 .dlbuildtile.px img { image-rendering: pixelated; }
 .dlbuildtile span { font-size: 10px; line-height: 1.15; text-align: center; }
+.dlbuildtile.placed { border-style: dashed; opacity: .75; }
+.dlbuildtile small { font-size: 9px; color: var(--soft); }
 .dlwallrow { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .dlzsep { display: block; height: 1px; margin: 4px 6px; background: var(--edge); }
 .dlzoom button svg { display: block; margin: auto; }
@@ -1144,17 +1145,40 @@ _SCRIPT = r"""
     for (var i = 0; i < p.built.length; i++) if (p.built[i].key === key) return p.built[i].tier;
     return 0;
   }
+  // What a town may build: each building it has earned, at the tier it has
+  // reached in it — not the tiers below. A town's buildings show where it is,
+  // and an old tier of something it has outgrown says nothing true.
   function buildable(p) {
     return D.assets.filter(function (a) {
-      return a.layer === 'buildings' && a.building && a.tier && townTier(p, a.building) >= a.tier;
+      return a.layer === 'buildings' && a.building && a.tier && townTier(p, a.building) === a.tier;
     });
+  }
+  // The tile showing `building` at the tier town `p` has reached now.
+  function currentTile(p, building) {
+    var tier = townTier(p, building);
+    for (var i = 0; i < D.assets.length; i++) {
+      var a = D.assets[i];
+      if (a.layer === 'buildings' && a.building === building && a.tier === tier) return a;
+    }
+    return null;
+  }
+  // The piece a town already has for a building, if it has placed one.
+  function townPiece(p, building) {
+    for (var i = 0; i < D.world.length; i++) {
+      var piece = D.world[i], a = piece.t === String(p.id) && assetById(piece.a);
+      if (a && a.building === building) return piece;
+    }
+    return null;
   }
   function buildSection(p) {
     var tiles = buildable(p);
     var cards = tiles.slice(0, 60).map(function (a) {
-      return '<button class="dlbuildtile' + (a.px ? ' px' : '') + '" data-build="' + a.id + '" title="' +
-        escapeHtml(a.name) + '"><img alt="" loading="lazy" src="' + assetUrl(a.id) + '"><span>' +
-        escapeHtml(a.name.split(' · ').pop()) + '</span></button>';
+      var placed = townPiece(p, a.building);
+      return '<button class="dlbuildtile' + (a.px ? ' px' : '') + (placed ? ' placed' : '') +
+        '" data-build="' + a.id + '" title="' + escapeHtml(a.name) +
+        (placed ? ' — already built; click to find it' : '') + '"><img alt="" loading="lazy" src="' +
+        assetUrl(a.id) + '"><span>' + escapeHtml(a.name.split(' · ').pop()) + '</span>' +
+        (placed ? '<small>built</small>' : '') + '</button>';
     }).join('');
     var walls = [['', 'None'], ['palisade', 'Palisade'], ['stone', 'Stone']].map(function (w) {
       return '<button data-walls="' + w[0] + '" class="' + ((p.walls || '') === w[0] ? 'own' : '') + '">' + w[1] + '</button>';
@@ -1166,6 +1190,17 @@ _SCRIPT = r"""
   }
   function buildFor(p, tileId) {
     if (layerState.edit !== 'buildings') { layerState.edit = 'buildings'; applyLayers(); fillKitCats(); }
+    // One of each: a town that has its tavern already is shown it, not given
+    // a second one.
+    var a = assetById(tileId), placed = a && townPiece(p, a.building);
+    if (placed) {
+      setTool('hand'); selectOnly([placed.id]);
+      view.x = frame.clientWidth / 2 - placed.x / 100 * nat.w * view.k;
+      view.y = frame.clientHeight / 2 - placed.y / 100 * nat.h * view.k;
+      clamp(); apply();
+      kitSay(p.name + ' has this already. Drag it to move it.');
+      return;
+    }
     armedAsset = tileId; mix = [tileId];
     setTool('pencil');
     building = p.id;
@@ -1224,8 +1259,9 @@ _SCRIPT = r"""
       hint.textContent = point ? 'Placed.' : 'Removed from the map.';
       redraw(); renderList();
       // A town's area is its own overlay, worked out from where the town is:
-      // moved or removed, the old area has to go with it.
+      // moved or removed, the old area has to go with it — and its roads.
       if (typeof loadInfluence === 'function') loadInfluence();
+      if (typeof loadRoads === 'function') loadRoads();
     });
   }
   frame.addEventListener('click', function (ev) {
@@ -1247,6 +1283,8 @@ _SCRIPT = r"""
     if (ev.target.closest && ev.target.closest('.dlzoom, .dlhint')) return;
     // Nothing armed and nothing under the pointer: let go — of a held piece
     // and of the open town, whose area goes with it.
+    var near = tool === 'hand' && nearestPiece(ev.clientX, ev.clientY, 10);
+    if (near) { selectOnly([near.id]); return; }
     if (selIds().length) selectOnly([]);
     if (openId) { closeCard(); }
   });
@@ -1431,6 +1469,12 @@ _SCRIPT = r"""
   function drawPiece(piece) {
     var el = document.createElement('div');
     var meta = typeof assetById === 'function' ? assetById(piece.a) : null;
+    // A town's building grows with the town: drawn at the tier reached now,
+    // whatever tier it was when it was put down.
+    if (piece.t && meta && meta.building && byId[piece.t]) {
+      var now = currentTile(byId[piece.t], meta.building);
+      if (now && now.id !== piece.a) { piece = Object.assign({}, piece, {a: now.id, v: ''}); meta = now; }
+    }
     el.className = 'dlpiece L-' + (piece.l || 'objects') + (piece.f ? ' flip' : '') +
       (meta && meta.px ? ' px' : '');
     el.dataset.id = piece.id;
@@ -1532,6 +1576,7 @@ _SCRIPT = r"""
       rows.innerHTML = LAYERS.map(function (l) {
         var hidden = layerState.hidden.indexOf(l.key) >= 0;
         var n = l.key === 'influence' ? (D.influence || []).length
+              : l.key === 'roads' ? (D.roads || []).length
               : D.world.filter(function (p) { return (p.l || 'objects') === l.key; }).length;
         var says = hidden ? 'hidden' : 'shown';
         if (l.key === 'influence' && !hidden) says = layerState.inflAll ? 'all' : 'selected';
@@ -1747,6 +1792,10 @@ _SCRIPT = r"""
     });
     var p = heldPiece && pieceById(heldPiece);
     if (p) { fitSlider(p.a); kitScale.value = p.s; }
+    if (p && ids.length === 1 && (p.l || 'objects') !== editLayer()) {
+      layerState.edit = p.l || 'objects';
+      applyLayers(); fillKitCats(); renderKit();
+    }
     if (ids.length) kitSay(ids.length === 1
       ? 'Selected. Drag it to move it; size, mirror or remove it below.'
       : ids.length + ' selected. Drag one to move them all; Delete removes them.');
@@ -1782,6 +1831,23 @@ _SCRIPT = r"""
   function pieceClick(ev, piece) {
     ev.stopPropagation();
     if (tool === 'hand' && moved <= 6 && !sel[piece.id]) selectOnly([piece.id]);
+  }
+  function shownLayer(layer) { return layerState.hidden.indexOf(layer || 'objects') < 0; }
+  // The piece a click meant: the one under it, or failing that the nearest
+  // within a few screen pixels. Zoomed out a flower is a pixel across, and a
+  // pixel cannot be clicked.
+  function nearestPiece(clientX, clientY, reach) {
+    var best = null, bestD = reach;
+    D.world.forEach(function (p) {
+      var el = pieces[p.id];
+      if (!el || !shownLayer(p.l)) return;
+      var r = el.getBoundingClientRect();
+      var dx = Math.max(r.left - clientX, 0, clientX - r.right);
+      var dy = Math.max(r.top - clientY, 0, clientY - r.bottom);
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= bestD) { bestD = d; best = p; }
+    });
+    return best;
   }
   // Everything selected moves together, by the pointer's travel in map units.
   function dragSelection(ev, el) {
@@ -1859,21 +1925,27 @@ _SCRIPT = r"""
       boxEl.style.display = 'none';
       var travel = Math.abs(ev.clientX - g0.x) + Math.abs(ev.clientY - g0.y);
       if (travel < 4) {
-        // A click with the pointer on empty ground: let go, and close a town.
+        // A click: the piece it meant, if one is near enough; else let go of
+        // everything and close a town.
+        var near = nearestPiece(ev.clientX, ev.clientY, 10);
+        if (near) {
+          if (g0.add) { if (sel[near.id]) delete sel[near.id]; else sel[near.id] = true; selChanged(); }
+          else selectOnly([near.id]);
+          return;
+        }
         if (!g0.add) selectOnly([]);
         if (openId) closeCard();
         return;
       }
       var a = toMap(Math.min(g0.x, ev.clientX), Math.min(g0.y, ev.clientY));
       var b = toMap(Math.max(g0.x, ev.clientX), Math.max(g0.y, ev.clientY));
-      var layer = editLayer();
       var hit = D.world.filter(function (p) {
-        return (p.l || 'objects') === layer && p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
+        return shownLayer(p.l) && p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y;
       }).map(function (p) { return p.id; });
       if (!g0.add) sel = {};
       hit.forEach(function (id) { sel[id] = true; });
       selChanged();
-      if (!hit.length) kitSay('Nothing on the ' + layer + ' layer in that box.');
+      if (!hit.length) kitSay('Nothing placed in that box.');
     }
   }
 

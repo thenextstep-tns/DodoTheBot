@@ -154,6 +154,12 @@ async def api_world_decor(request: web.Request):
                 None, influence_api.inside, bot, guild, town, body.get("x") or 0, body.get("y") or 0)
             if not ok:
                 return _bad("That is outside the town's area. Build inside its reach.")
+            # Only what the town has earned, at the tier it has reached in it,
+            # and one of each.
+            refused = await asyncio.get_running_loop().run_in_executor(
+                None, _town_may_build, bot, guild, town, tile)
+            if refused:
+                return _bad(refused)
         # An admin dressing the world is not spending an unlock, so no
         # ``allowed`` set is passed: the locks exist to pace what players may
         # place, and the person who wrote them is not the person they pace.
@@ -198,6 +204,46 @@ def _unlocked(bot, guild, user_id: int) -> set:
     )
     return tile_rules.unlocked_for(_player_tiles(bot, guild),
                                    result["people"].get(int(user_id)), buildings)
+
+
+def _tiers(bot, guild, user_id: int) -> dict[str, int]:
+    """``{building key: tier reached}`` for one person, tiers counted from 1;
+    a building they have not earned is absent."""
+    buildings = bot.dodoland_buildings.buildings(guild.id)
+    since = store_module.days_back(
+        int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
+    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
+    result = standing.guild_standings(
+        bot.dodoland, bot.dodoland_params, guild.id, buildings,
+        since=since, user_ids=[user_id],
+        rows=[row for row in every if int(row.get("user_id", 0)) == int(user_id)],
+        pair_rows=pairs)
+    person = result["people"].get(int(user_id)) or {}
+    return {key: int(score["tier"]) + 1 for key, score in (person.get("buildings") or {}).items()
+            if score.get("tier") is not None}
+
+
+def _town_may_build(bot, guild, town_id, tile: dict) -> str:
+    """Why this town may not put this tile down, or ``""`` if it may.
+
+    A town builds its own buildings: one of each it has earned, shown at the
+    tier it has reached in it — its achievements, not a catalogue. Blocking.
+    """
+    want = (tile.get("requires") or {}).get("building") or ""
+    if tile.get("layer") != "buildings" or not want:
+        return "A town builds its own buildings; decorate it from the toolkit."
+    tier = _tiers(bot, guild, int(town_id)).get(want)
+    if not tier:
+        return "This town has not earned that building yet."
+    if int((tile.get("requires") or {}).get("tier") or 0) != tier:
+        return "A town builds at the tier it has reached, and only that one."
+    tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild.id)}
+    for piece in bot.dodoland_decor.world(guild.id):
+        if str(piece.get("town") or "") != str(town_id):
+            continue
+        if ((tiles.get(piece.get("asset_id")) or {}).get("requires") or {}).get("building") == want:
+            return "This town has that building already. Move the one it has."
+    return ""
 
 
 def _player_tiles(bot, guild) -> list[dict]:

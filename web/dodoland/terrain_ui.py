@@ -51,6 +51,8 @@ CSS = """
   stroke-linecap: square; }
 .dltline.wide { stroke-width: calc(3px * var(--inv, 1)); }
 .dlwall { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dlroad { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dlworld.hide-roads #dltroads { display: none; }
 .dlworld.hide-buildings #dltwalls { display: none; }
 .dltdash { stroke-width: calc(1.5px * var(--inv, 1));
   stroke-dasharray: calc(5px * var(--inv, 1)) calc(3px * var(--inv, 1)); }
@@ -161,7 +163,7 @@ SCRIPT = r"""
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g><g id="dltwalls"></g>' +
+      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g><g id="dltroads"></g><g id="dltwalls"></g>' +
       '<rect id="dltsel" class="dltline dltdash" fill="rgba(240,166,79,.12)" stroke="#f0a64f" ' +
       'style="display:none"/>' +
       // The brush's exact footprint: the cells a stroke here will paint, traced
@@ -566,6 +568,36 @@ SCRIPT = r"""
       .catch(function () { if (typeof loaded === 'function') loaded('reach'); });
   }
 
+  // --- roads ------------------------------------------------------------ //
+  // Laid by the bot between towns whose people talk to each other (roads_api).
+  // Drawn in cell units like everything built: a packed-earth road with a
+  // darker verge, and plank bridges where it crosses water.
+  function loadRoads() {
+    fetch('/guild/' + D.gid + '/dodoland/roads')
+      .then(function (r) { return r.ok ? r.json() : {roads: []}; })
+      .then(function (res) {
+        var g = document.getElementById('dltroads');
+        if (!g) return;
+        var w = res.width || 2.4, out = [];
+        (res.roads || []).forEach(function (road) {
+          out.push('<path class="dlroad" d="' + road.d + '" stroke="#6b5136" stroke-width="' + (w + 0.9) + '"/>');
+        });
+        (res.roads || []).forEach(function (road) {
+          out.push('<path class="dlroad" d="' + road.d + '" stroke="#c8a676" stroke-width="' + w + '"/>');
+        });
+        (res.roads || []).forEach(function (road) {
+          (road.bridges || []).forEach(function (d) {
+            out.push('<path class="dlroad" d="' + d + '" stroke="#4a3220" stroke-width="' + (w + 1.4) + '" stroke-linecap="butt"/>' +
+                     '<path class="dlroad" d="' + d + '" stroke="#9c7347" stroke-width="' + (w + 0.4) + '" stroke-linecap="butt" stroke-dasharray="0.55 0.3"/>');
+          });
+        });
+        g.innerHTML = out.join('');
+        D.roads = res.roads || [];
+        if (typeof applyLayers === 'function') applyLayers();
+      })
+      .catch(function () {});
+  }
+
   // --- walls ------------------------------------------------------------ //
   // A walled town's wall runs along its area's smoothed border, so it grows
   // with the town instead of being laid stone by stone. Drawn in cell units:
@@ -705,6 +737,7 @@ SCRIPT = r"""
       terrSetup(world);
       rearm();
       loadInfluence();
+      loadRoads();
       terrDefs();
       terrOverview();
       terrDetail();
