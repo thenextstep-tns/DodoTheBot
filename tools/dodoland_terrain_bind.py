@@ -112,6 +112,7 @@ def main() -> None:
     for i, key, name in plan:
         kinds[i] = {**kinds[i], "tile_id": tiles[name]["tile_id"], "hex": GROUNDS[name][0]}
     store.set_kinds(args.guild, kinds)
+    store.touch(args.guild)
     print(f"done: {len(plan)} kinds bound")
 
 

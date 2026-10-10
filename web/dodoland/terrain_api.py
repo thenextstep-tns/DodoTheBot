@@ -52,6 +52,18 @@ _HISTORY_MAX = 40
 _HEX: dict[str, str] = {}
 
 
+_REV: dict[int, int] = {}
+
+
+def _fresh(guild_id: int, world: dict) -> None:
+    """Drop everything drawn for a guild whose world a tool rewrote since."""
+    rev = int(world.get("rev") or 0)
+    if _REV.get(int(guild_id)) != rev:
+        if int(guild_id) in _REV:
+            invalidate(guild_id)
+        _REV[int(guild_id)] = rev
+
+
 def version(guild_id: int) -> int:
     return _VERSION.get(int(guild_id), 0)
 
@@ -168,6 +180,7 @@ async def terrain_world(request: web.Request):
     of tiles the brush paints with."""
     bot, guild = request.app["bot"], request["guild"]
     world = bot.dodoland_terrain.world(guild.id)
+    _fresh(guild.id, world)
     tiles = _tile_index(bot, guild)
     world["kinds"] = T.sync_tile_kinds(world["kinds"], tiles)
     cats = {c["cat_id"]: c["name"] for c in bot.dodoland_tiles.categories()}
@@ -204,6 +217,7 @@ async def terrain_defs(request: web.Request):
     """
     bot, guild = request.app["bot"], request["guild"]
     world = bot.dodoland_terrain.world(guild.id)
+    _fresh(guild.id, world)
     tiles = _tile_index(bot, guild)
     used = [tiles[k["tile_id"]] for k in world["kinds"] if k.get("tile_id") in tiles]
     dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
@@ -221,6 +235,7 @@ async def terrain_overview(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     store = bot.dodoland_terrain
     world = store.world(guild.id)
+    _fresh(guild.id, world)
     if not world["cells_w"]:
         return web.Response(text="", content_type="image/svg+xml")
     step = _overview_step(world["cells_w"])
@@ -256,6 +271,7 @@ async def terrain_chunks(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     store = bot.dodoland_terrain
     world = store.world(guild.id)
+    _fresh(guild.id, world)
     cxs, cys = store.chunk_counts(guild.id)
     try:
         x0, y0, x1, y1 = (int(v) for v in (request.query.get("r") or "").split(","))
@@ -363,6 +379,7 @@ async def api_terrain_paint(request: web.Request):
         return _bad("That request could not be read.")
 
     world = store.world(guild.id)
+    _fresh(guild.id, world)
     if not world["cells_w"]:
         return _bad("This server has no world yet. Import the map first.")
     width, height = world["cells_w"], world["cells_h"]
@@ -485,6 +502,7 @@ async def terrain_cells(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     store = bot.dodoland_terrain
     world = store.world(guild.id)
+    _fresh(guild.id, world)
     try:
         x0, y0, x1, y1 = (int(v) for v in (request.query.get("r") or "").split(","))
     except (TypeError, ValueError):

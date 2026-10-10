@@ -51,6 +51,7 @@ def main() -> None:
         snap = {tuple(map(int, k.split(","))): v
                 for k, v in json.loads(args.rollback.read_text(encoding="utf-8")).items()}
         print(f"restored {store.restore(args.guild, snap)} chunks")
+        store.touch(args.guild)
         return
 
     library = tile_rules.TileLibrary(database.dodoland_tiles, database.dodoland_tile_cats,
@@ -103,6 +104,7 @@ def main() -> None:
     args.backup.write_text(json.dumps({f"{cx},{cy}": v for (cx, cy), v in snap.items()}),
                            encoding="utf-8")
     store.paint(args.guild, edits)
+    store.touch(args.guild)
     print(f"painted {len(edits)} cells in {len(keys)} chunks (backup: {args.backup})")
 
     placed = 0

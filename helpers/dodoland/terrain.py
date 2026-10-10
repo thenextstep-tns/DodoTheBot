@@ -282,6 +282,9 @@ class TerrainStore:
             "built_kinds": row.get("built_kinds") or base_kinds(BUILT),
             "source_w": int(row.get("source_w") or 0),
             "source_h": int(row.get("source_h") or 0),
+            # Bumped by anything that writes the world from outside the panel
+            # (an import, a rebuild), so a running server drops what it drew.
+            "rev": int(row.get("rev") or 0),
         }
 
     def set_world(self, guild_id: int, *, cells_w: int, cells_h: int,
@@ -298,6 +301,12 @@ class TerrainStore:
             changes["kinds"] = kinds
         self._config.update_one({"_id": int(guild_id)}, {"$set": changes}, upsert=True)
         return self.world(guild_id)
+
+    def touch(self, guild_id: int) -> None:
+        """Tell running servers the world changed under them. Tools call this
+        after writing; the panel's own strokes invalidate exactly what they
+        touched instead, which is far cheaper."""
+        self._config.update_one({"_id": int(guild_id)}, {"$inc": {"rev": 1}}, upsert=True)
 
     def set_kinds(self, guild_id: int, kinds: list[dict]) -> None:
         """Store the vocabulary. Callers only ever append to it or edit an entry

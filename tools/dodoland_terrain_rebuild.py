@@ -152,6 +152,7 @@ def main() -> None:
             x, y = cx * T.CHUNK + i % T.CHUNK, cy * T.CHUNK + i // T.CHUNK
             cells[i] = grid.get((x, y), T.UNKNOWN)
         store.write_chunk(args.guild, cx, cy, cells)
+    store.touch(args.guild)
     print(f"rewrote {len(keys)} chunks with {len(kinds) - 1} tile kinds")
 
 
