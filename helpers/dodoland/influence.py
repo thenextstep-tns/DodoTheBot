@@ -32,7 +32,7 @@ from helpers.dodoland import terrainart
 DIAGONAL = math.sqrt(2.0)
 # A hard ceiling on cells per area, so a mis-set budget cannot make one request
 # flood a whole continent cell by cell.
-MAX_CELLS = 60_000
+MAX_CELLS = 400_000
 
 
 def reach(power: float, strongest: float, base: float, top: float) -> float:

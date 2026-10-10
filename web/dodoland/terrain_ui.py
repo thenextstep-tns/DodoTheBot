@@ -86,7 +86,7 @@ DRAWER = """
   <div class="dlkitgrid" id="dltkinds"></div>
   <div class="dltmix" id="dltmix"></div>
   <div class="dltsliders" id="dltbrush">
-    <label for="dltradius">Size</label><input type="range" id="dltradius" min="0" max="40" value="6"><output id="dltradiusn">6</output>
+    <label for="dltradius">Size</label><input type="range" id="dltradius" min="0" max="64" value="12"><output id="dltradiusn">12</output>
     <label for="dltdensity">Density</label><input type="range" id="dltdensity" min="5" max="100" step="5" value="100"><output id="dltdensityn">100%</output>
     <label for="dltsoft">Soft edge</label><input type="range" id="dltsoft" min="0" max="100" step="5" value="0"><output id="dltsoftn">0%</output>
   </div>
@@ -118,7 +118,7 @@ SCRIPT = r"""
   // `armed` is what the map page checks before handing a drag to us: null when
   // no tool is ready, otherwise the tool's name.
   var terr = {world: null, armed: null, tool: 'brush', mix: [], erase: false,
-              radius: 6, density: 1, soft: 0, sel: null, pattern: null,
+              radius: 12, density: 1, soft: 0, sel: null, pattern: null,
               have: {}, shown: true, busy: false, ver: 0};
   var terrLayer = document.createElement('div');
   terrLayer.className = 'dlterrain';

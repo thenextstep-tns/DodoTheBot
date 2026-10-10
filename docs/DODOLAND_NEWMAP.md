@@ -218,3 +218,20 @@ base map is for). Done:
 
 The built-in kind list (`terrain._BASE_KINDS`) still exists in code for the map
 importer and as a new world's default; it is no longer in this world or any UI.
+
+**The grid is 4x finer (3832 x 1812).** One cell per reference-map pixel made a
+cell house-sized, so a river could not be thinner than a house.
+`tools/dodoland_terrain_regrid.py GUILD --factor 4 --features f.json` redraws
+the grid from the server's **vector** reference SVG (re-rasterised, not blown up
+from old cells), draws rivers at least 3 cells wide, paints the region ellipses,
+and floods the open sea (more than `--band` cells from land, joined to the edge)
+as deep water. Dry run by default (`--preview p.png`); `--write --backup b.json`.
+Features are map fractions, so the same file works at any factor. Every placed
+position is a percentage, so nothing moved.
+
+Cell-based settings were multiplied by 4 on this server so the world reads the
+same size: influence base 24 / top 160, hall 10 cells, tile scale 1.25.
+`influence.MAX_CELLS` 60k -> 400k (one big town now covers ~70k cells, ~0.2 s).
+The overview step is a power of two (8 here) so it divides a 64-cell chunk.
+Brush size up to 64 cells (default 12). Max zoom on this server is 50, about
+12 px per cell, so tile textures show from about 1/5 of that.

@@ -127,9 +127,14 @@ def _overview_step(cells_w: int) -> int:
     """Coarse enough to be one quick request, fine enough to be the same coast.
 
     Aims for roughly four hundred cells across, which is about the width a whole
-    continent is ever drawn at on screen anyway.
+    continent is ever drawn at on screen anyway. A power of two, so it divides a
+    chunk evenly: a step of 10 on 64-cell chunks puts every chunk 6.4 cells from
+    the next but draws it 7 wide, and the seams overlap.
     """
-    return max(1, round(cells_w / 400.0))
+    step = 1
+    while step * 2 <= min(T.CHUNK, cells_w / 400.0):
+        step *= 2
+    return step
 
 
 # --------------------------------------------------------------------------- #
