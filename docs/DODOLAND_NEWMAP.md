@@ -235,3 +235,18 @@ same size: influence base 24 / top 160, hall 10 cells, tile scale 1.25.
 The overview step is a power of two (8 here) so it divides a 64-cell chunk.
 Brush size up to 64 cells (default 12). Max zoom on this server is 50, about
 12 px per cell, so tile textures show from about 1/5 of that.
+
+**Overlay lines are screen pixels, and the influence follows its town.** Every
+overlay inside the zoomed world was being scaled by the zoom: SVG
+`non-scaling-stroke` only undoes the SVG's own viewBox, not the CSS transform on
+`#dlworld`, and the browser rounds a sub-pixel CSS outline up to 1px before
+scaling it. So at zoom 20-50 the influence border, brush ring and piece outline
+were 20-80 px fat. Now: SVG overlay strokes use `.dltline` (width
+`calc(Npx * var(--inv))`), and held/hovered pieces are marked by `.dlmark` boxes
+on the frame (screen space), not outlines on the piece.
+The brush cursor is the exact footprint (same disc test as the server, cell
+edges, faint fill); size 0 is one cell. `cellAt` floors (the cell under the
+pointer), so what is shown is what is painted. Arming a toolkit piece shows a
+ghost of it at the cursor, at its placed size. Influence reloads after a town
+is placed/moved/removed and after any decor change; its server cache key now
+includes piece positions, not only the count.

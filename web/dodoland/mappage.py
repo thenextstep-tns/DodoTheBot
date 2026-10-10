@@ -493,16 +493,17 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlpiece img { display: block; width: 100%; height: auto;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .dlpiece.flip img { transform: scaleX(-1); }
-/* An outline rather than a filter: a filter inside the scaled world rasterises
-   whatever it touches, which is the same rule the towns live under. */
-/* Selected: a thin line on screen, not in the world. The world is scaled by
-   the zoom, so a 2px outline became a fat band zoomed in; --inv is one screen
-   pixel in world units. */
-.dlpiece.on { outline: calc(1.5px * var(--inv, 1)) solid var(--lantern);
-  outline-offset: calc(3px * var(--inv, 1)); border-radius: calc(4px * var(--inv, 1));
-  box-shadow: 0 0 0 calc(1px * var(--inv, 1)) rgba(0, 0, 0, .35); }
-.dlpiece:hover:not(.on) { outline: calc(1px * var(--inv, 1)) dashed rgba(240, 166, 79, .7);
-  outline-offset: calc(3px * var(--inv, 1)); }
+/* Held and hovered pieces are marked by boxes on the frame, in screen pixels,
+   not by outlines on the pieces. Anything drawn inside the zoomed world is
+   scaled by the zoom, and a browser rounds an outline thinner than one pixel up
+   to one before it scales — so a "1px" line was fifty pixels at full zoom. */
+.dlmark { position: absolute; pointer-events: none; z-index: 20; display: none;
+  border: 1.5px solid var(--lantern); border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
+.dlmark.hover { border: 1px dashed rgba(240, 166, 79, .85); box-shadow: none; }
+/* Where the armed piece will land, at the size it will land at. */
+.dlpiece.ghost { opacity: .6; pointer-events: none; display: none; z-index: 19; }
+.dlframe.placing .dlpiece.ghost.live { display: block; }
 /* Grabbable, and grabbed. touch-action stops the browser treating a drag on a
    piece as a scroll of the page underneath it. */
 .dlpiece { touch-action: none; cursor: grab; }
@@ -619,6 +620,7 @@ _SCRIPT = r"""
     // being a name. The towns themselves scale with the world on purpose.
     world.style.setProperty('--inv', (1 / view.k).toFixed(4));
     levelOfDetail();
+    if (typeof placeMarks === 'function') placeMarks();
   }
   function clamp() {
     // Two different jobs depending on which is bigger. When the world is larger
@@ -1014,6 +1016,9 @@ _SCRIPT = r"""
       frame.classList.remove('placing');
       hint.textContent = point ? 'Placed.' : 'Removed from the map.';
       redraw(); renderList();
+      // A town's area is its own overlay, worked out from where the town is:
+      // moved or removed, the old area has to go with it.
+      if (typeof loadInfluence === 'function') loadInfluence();
     });
   }
   frame.addEventListener('click', function (ev) {
@@ -1216,6 +1221,7 @@ _SCRIPT = r"""
         piece.y = from.y + (dy / view.k / nat.h) * 100;
         el.style.left = piece.x + '%';
         el.style.top = piece.y + '%';
+        placeMarks();
       }
 
       function onUp() {
@@ -1236,10 +1242,55 @@ _SCRIPT = r"""
       el.addEventListener('pointerup', onUp);
       el.addEventListener('pointercancel', onUp);
     });
+    el.addEventListener('pointerenter', function () { hovered = piece.id; placeMarks(); });
+    el.addEventListener('pointerleave', function () {
+      if (hovered === piece.id) { hovered = null; placeMarks(); }
+    });
     world.appendChild(el);
     pieces[piece.id] = el;
     return el;
   }
+
+  // --- marks: what is held, what is under the pointer ------------------- //
+  var hovered = null;
+  var holdMark = document.createElement('div'), hoverMark = document.createElement('div');
+  holdMark.className = 'dlmark'; hoverMark.className = 'dlmark hover';
+  frame.appendChild(holdMark); frame.appendChild(hoverMark);
+  function markAt(mark, el) {
+    if (!el) { mark.style.display = 'none'; return; }
+    var r = el.getBoundingClientRect(), f = frame.getBoundingClientRect(), pad = 2;
+    mark.style.left = (r.left - f.left - pad) + 'px';
+    mark.style.top = (r.top - f.top - pad) + 'px';
+    mark.style.width = (r.width + pad * 2) + 'px';
+    mark.style.height = (r.height + pad * 2) + 'px';
+    mark.style.display = 'block';
+  }
+  function placeMarks() {
+    markAt(holdMark, heldPiece && pieces[heldPiece]);
+    markAt(hoverMark, hovered && hovered !== heldPiece && !armedAsset && pieces[hovered]);
+  }
+
+  // The armed piece, following the pointer at the size it will be placed at,
+  // anchored the same way a placed one is.
+  var ghost = document.createElement('div');
+  ghost.className = 'dlpiece ghost';
+  ghost.innerHTML = '<img alt="">';
+  world.appendChild(ghost);
+  function aimGhost(ev) {
+    if (!armedAsset || !nat.w) { ghost.classList.remove('live'); return; }
+    var b = frame.getBoundingClientRect();
+    var probe = {a: armedAsset, v: '', s: parseFloat(kitScale.value) || 1};
+    var w = pieceWidth(probe);
+    if (w) ghost.style.width = w;
+    var src = assetUrl(armedAsset);
+    var img = ghost.firstChild;
+    if (img.getAttribute('src') !== src) img.setAttribute('src', src);
+    ghost.style.left = ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100 + '%';
+    ghost.style.top = ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100 + '%';
+    ghost.classList.add('live');
+  }
+  frame.addEventListener('pointermove', aimGhost);
+  frame.addEventListener('pointerleave', function () { ghost.classList.remove('live'); });
 
   // --- layers ------------------------------------------------------------ //
   var LAYERS = [
@@ -1294,10 +1345,11 @@ _SCRIPT = r"""
   };
 
   function redrawDecor() {
-    world.querySelectorAll('.dlpiece').forEach(function (n) { n.remove(); });
+    world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) { n.remove(); });
     pieces = {};
     D.world.forEach(drawPiece);
     if (heldPiece && pieces[heldPiece]) pieces[heldPiece].classList.add('on');
+    placeMarks();
   }
 
   function resizeDecor() {
@@ -1320,9 +1372,10 @@ _SCRIPT = r"""
     heldPiece = (!keep && heldPiece === id) ? null : id;
     armedAsset = null;
     frame.classList.remove('placing');
-    world.querySelectorAll('.dlpiece').forEach(function (n) {
+    world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) {
       n.classList.toggle('on', n.dataset.id === heldPiece);
     });
+    placeMarks();
     var p = heldPiece && pieceById(heldPiece);
     if (p) { fitSlider(p.a); kitScale.value = p.s;
              kitSay(kitScale.disabled ? 'Held. This one has a fixed size; mirror it or remove it.'
@@ -1341,6 +1394,8 @@ _SCRIPT = r"""
     }).then(function (res) {
       if (!res.ok) { kitSay(res.error || 'That did not work.', true); return; }
       then(res);
+      // A placed piece can block a town's growth, so its area may have changed.
+      if (typeof loadInfluence === 'function') loadInfluence();
     }).catch(function (err) { kitSay(String(err), true); });
   }
 

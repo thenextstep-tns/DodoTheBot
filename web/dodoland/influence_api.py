@@ -102,8 +102,11 @@ def _key(bot, guild) -> tuple:
     from web.dodoland import terrain_api
 
     params = bot.dodoland_params
+    # Where every piece stands, not only how many there are: moving a mountain
+    # range changes who it blocks without changing the count.
     return (terrain_api.version(guild.id),
-            bot.dodoland_decor.count(guild.id, "world"),
+            tuple(sorted((str(p.get("piece_id")), p.get("x"), p.get("y"), p.get("scale"))
+                         for p in bot.dodoland_decor.world(guild.id))),
             tuple(sorted((k, tuple(sorted(v.items()))) for k, v in bot.dodoland_buildings.plots(guild.id).items())),
             tuple(params.get(guild.id, k) for k in ("dodoland_influence_base", "dodoland_influence_top",
                                                     "dodoland_influence_clear_forest")))

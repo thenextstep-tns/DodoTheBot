@@ -43,6 +43,15 @@ CSS = """
 .dlterrain.off { display: none; }
 .dlworld .dltown, .dlworld .dlpiece { z-index: 5; }
 .dlframe.painting { cursor: crosshair; }
+/* Overlay lines a fixed number of screen pixels wide at any zoom.
+   non-scaling-stroke alone undoes only the SVG's own viewBox; the zoom is a CSS
+   transform on the world around it, which still scaled a 1.6px line by 50.
+   --inv (one screen pixel in world units) undoes that too. */
+.dltline { vector-effect: non-scaling-stroke; stroke-width: calc(1px * var(--inv, 1));
+  stroke-linecap: square; }
+.dltline.wide { stroke-width: calc(3px * var(--inv, 1)); }
+.dltdash { stroke-width: calc(1.5px * var(--inv, 1));
+  stroke-dasharray: calc(5px * var(--inv, 1)) calc(3px * var(--inv, 1)); }
 
 /* The terrain drawer, on the left like the toolkit and never open with it. */
 .dlterrdrawer { left: 0; right: auto; border-left: 0;
@@ -151,14 +160,14 @@ SCRIPT = r"""
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
       '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g>' +
-      '<rect id="dltsel" fill="rgba(240,166,79,.12)" stroke="#f0a64f" stroke-width="1.5" ' +
-      'stroke-dasharray="4 3" vector-effect="non-scaling-stroke" style="display:none"/>' +
-      // Drawn in cell units inside the same viewBox, so it is the shape that
-      // will actually be painted rather than an approximation of it.
-      '<circle id="dltcursor" r="0" fill="none" stroke="#fff" stroke-width="1" ' +
-      'vector-effect="non-scaling-stroke" style="display:none"/>' +
-      '<circle id="dltcursor2" r="0" fill="none" stroke="#000" stroke-width="3" ' +
-      'vector-effect="non-scaling-stroke" opacity=".45" style="display:none"/></svg>';
+      '<rect id="dltsel" class="dltline dltdash" fill="rgba(240,166,79,.12)" stroke="#f0a64f" ' +
+      'style="display:none"/>' +
+      // The brush's exact footprint: the cells a stroke here will paint, traced
+      // along their edges. Built once per size and moved with a transform.
+      '<g id="dltcursor" style="display:none" pointer-events="none">' +
+      '<path id="dltcurfill" fill="#fff" fill-opacity=".14" shape-rendering="crispEdges"/>' +
+      '<path id="dltcurhalo" class="dltline wide" fill="none" stroke="#000" stroke-opacity=".55"/>' +
+      '<path id="dltcurline" class="dltline" fill="none" stroke="#fff"/></g></svg>';
     world_el().appendChild(terrLayer);
     renderCats();
     renderPalette();
@@ -354,26 +363,53 @@ SCRIPT = r"""
     var b = frame.getBoundingClientRect();
     var fx = (clientX - b.left - view.x) / (nat.w * view.k);
     var fy = (clientY - b.top - view.y) / (nat.h * view.k);
-    return [Math.round(fx * terr.world.cells_w), Math.round(fy * terr.world.cells_h)];
+    // Floor: cell (x, y) is the square from x to x + 1, so the cell under the
+    // pointer is the one painted. Rounding picked the nearest corner, which put
+    // the brush half a cell off what it showed.
+    return [Math.floor(fx * terr.world.cells_w), Math.floor(fy * terr.world.cells_h)];
   }
   function hideCursor() {
-    ['dltcursor', 'dltcursor2'].forEach(function (id) {
-      var c = document.getElementById(id);
-      if (c) c.style.display = 'none';
-    });
+    var c = document.getElementById('dltcursor');
+    if (c) c.style.display = 'none';
+  }
+  // The same disc the server paints (dx² + dy² <= r²), as two paths around
+  // the origin cell: its cells, and the edges between a covered cell and an
+  // uncovered one. Size 0 is one cell — a single tile.
+  var footprintFor = -1;
+  function footprint(r) {
+    if (footprintFor === r) return;
+    footprintFor = r;
+    var inside = {}, fill = [], line = [];
+    function has(x, y) { return inside[x + ',' + y] === 1; }
+    for (var dy = -r; dy <= r; dy++) {
+      var run = -1;
+      for (var dx = -r; dx <= r + 1; dx++) {
+        var on = dx <= r && dx * dx + dy * dy <= r * r;
+        if (on) inside[dx + ',' + dy] = 1;
+        if (on && run < 0) run = dx;
+        if (!on && run >= 0) { fill.push('M' + run + ' ' + dy + 'h' + (dx - run) + 'v1h' + (run - dx) + 'z'); run = -1; }
+      }
+    }
+    for (var y = -r; y <= r + 1; y++) {
+      for (var x = -r; x <= r + 1; x++) {
+        var me = has(x, y);
+        if (me !== has(x, y - 1)) line.push('M' + x + ' ' + y + 'h1');
+        if (me !== has(x - 1, y)) line.push('M' + x + ' ' + y + 'v1');
+      }
+    }
+    document.getElementById('dltcurfill').setAttribute('d', fill.join(''));
+    document.getElementById('dltcurhalo').setAttribute('d', line.join(''));
+    document.getElementById('dltcurline').setAttribute('d', line.join(''));
   }
   function moveCursor(ev) {
-    var a = document.getElementById('dltcursor'), b = document.getElementById('dltcursor2');
-    if (!a || !b) return;
-    var cell = (terr.armed && terr.armed !== 'select') ? cellAt(ev.clientX, ev.clientY) : null;
+    var c = document.getElementById('dltcursor');
+    if (!c) return;
+    var cell = terr.armed ? cellAt(ev.clientX, ev.clientY) : null;
     if (!cell) { hideCursor(); return; }
-    // +0.5 so the ring sits on the cell boundary rather than through its
-    // middle, which is the difference between "these cells" and "about here".
-    var r = terr.radius + 0.5;
-    [a, b].forEach(function (c) {
-      c.setAttribute('cx', cell[0]); c.setAttribute('cy', cell[1]);
-      c.setAttribute('r', r); c.style.display = '';
-    });
+    // Selecting picks cells one at a time, so it shows the one cell it is on.
+    footprint(terr.armed === 'select' ? 0 : terr.radius);
+    c.setAttribute('transform', 'translate(' + cell[0] + ' ' + cell[1] + ')');
+    c.style.display = '';
   }
   frame.addEventListener('pointermove', moveCursor);
   frame.addEventListener('pointerleave', hideCursor);
@@ -496,8 +532,8 @@ SCRIPT = r"""
         g.innerHTML = D.influence.map(function (t) {
           return '<g data-town="' + t.id + '"><path d="' + t.fill + '" fill="' + t.colour +
             '" fill-opacity=".16" shape-rendering="crispEdges"/>' +
-            '<path d="' + t.line + '" fill="none" stroke="' + t.colour + '" stroke-width="1.6" ' +
-            'stroke-dasharray="5 3" vector-effect="non-scaling-stroke" stroke-linecap="round"/></g>';
+            '<path class="dltline dltdash" d="' + t.line + '" fill="none" stroke="' + t.colour +
+            '"/></g>';
         }).join('');
         if (typeof applyLayers === 'function') applyLayers();
       });
@@ -550,10 +586,7 @@ SCRIPT = r"""
   }
   slider('dltradius', String, function (v) {
     terr.radius = v;
-    ['dltcursor', 'dltcursor2'].forEach(function (id) {
-      var c = document.getElementById(id);
-      if (c && c.style.display !== 'none') c.setAttribute('r', v + 0.5);
-    });
+    if (terr.armed && terr.armed !== 'select') footprint(v);
   });
   slider('dltdensity', function (v) { return v + '%'; }, function (v) { terr.density = v / 100; });
   slider('dltsoft', function (v) { return v + '%'; }, function (v) { terr.soft = v / 100; });
