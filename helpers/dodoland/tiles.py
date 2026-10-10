@@ -197,7 +197,23 @@ def scale_range(tile: Optional[dict]) -> tuple[float, float]:
 
 
 def _size(data: bytes) -> tuple[int, int]:
-    """Pixel size of an upload, or (0, 0) when it cannot be read (an SVG)."""
+    """Pixel size of an upload; an SVG's from its own width and height (or
+    viewBox), which the image library cannot read; (0, 0) if neither works."""
+    head = bytes(data[:2048]).lstrip()
+    if head.startswith(b"<"):
+        import re
+
+        text = head.decode("utf-8", "replace")
+        tag = re.search(r"<svg[^>]*>", text)
+        if tag:
+            w = re.search(r'\swidth="([\d.]+)', tag.group(0))
+            h = re.search(r'\sheight="([\d.]+)', tag.group(0))
+            box = re.search(r'viewBox="[\d.\-]+[ ,]+[\d.\-]+[ ,]+([\d.]+)[ ,]+([\d.]+)"', tag.group(0))
+            if w and h:
+                return int(float(w.group(1))), int(float(h.group(1)))
+            if box:
+                return int(float(box.group(1))), int(float(box.group(2)))
+        return 0, 0
     try:
         from io import BytesIO
 

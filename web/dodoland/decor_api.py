@@ -145,7 +145,9 @@ def _player_tiles(bot, guild) -> list[dict]:
     """What players may place on their towns here: map objects with player
     access. Tiles nobody but admins may use are not shown locked — a lock says
     "you can earn this", and an admin-only mountain range is not earnable."""
-    return bot.dodoland_tiles.usable(guild.id, "objects", "player")
+    # Map objects (layer 3) and the server's buildings (layer 4).
+    return (bot.dodoland_tiles.usable(guild.id, "objects", "player")
+            + bot.dodoland_tiles.usable(guild.id, "buildings", "player"))
 
 
 async def api_town_decor(request: web.Request):
@@ -182,13 +184,14 @@ async def api_town_decor(request: web.Request):
         # this handler runs on the bot's own event loop.
         allowed = await asyncio.get_running_loop().run_in_executor(
             None, _unlocked, bot, guild, uid)
+        placed = bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)
         piece = bot.dodoland_decor.place(
             guild.id, scope=decor_rules.SCOPE_TOWN, owner_id=uid,
             asset_id=body.get("asset_id"), x=body.get("x"), y=body.get("y"),
             scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
-            allowed=allowed, layer="objects",
-            scale_range=tile_rules.scale_range(
-                bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)))
+            allowed=allowed,
+            layer=(placed or {}).get("layer", "objects"),
+            scale_range=tile_rules.scale_range(placed))
         # The map reads decor out of the shared snapshot, so a piece nobody can
         # see for a minute looks exactly like a piece that did not save.
         player.invalidate(guild.id)

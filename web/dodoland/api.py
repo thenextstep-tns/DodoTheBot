@@ -47,6 +47,25 @@ async def api_dodoland_param(request: web.Request):
     return web.json_response({"ok": True, "value": value})
 
 
+async def _sync_building_tiles(bot, guild) -> None:
+    """Rebuild the server's placeable building tiles from its buildings. Never
+    fails a save: the tiles are derived, and the next save rebuilds them."""
+    import asyncio
+
+    from helpers.dodoland import building_tiles
+
+    def work():
+        from web.dodoland.theme import TOWN_ART_CSS
+
+        building_tiles.sync(bot.dodoland_tiles, guild.id,
+                            bot.dodoland_buildings.buildings(guild.id), css=TOWN_ART_CSS)
+
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, work)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def api_dodoland_buildings(request: web.Request):
     """Replace this guild's buildings."""
     from web.routes import _record_change
@@ -63,6 +82,7 @@ async def api_dodoland_buildings(request: web.Request):
         return _bad(f"Unknown metric: {error}")
     await _record_change(request, "dodoland_buildings", "buildings", "",
                          f"{len(saved)} buildings", "DodoLand buildings")
+    await _sync_building_tiles(bot, guild)
     return web.json_response({"ok": True, "buildings": saved})
 
 
@@ -106,6 +126,7 @@ async def api_dodoland_shapes(request: web.Request):
     if changed:
         await _record_change(request, "dodoland_buildings", "shapes", "",
                              f"{len(changed)} reset", "DodoLand shapes reset")
+    await _sync_building_tiles(bot, guild)
     return web.json_response({"ok": True, "changed": changed})
 
 
