@@ -508,4 +508,51 @@ too_many = asyncio.run(terrain_api.terrain_rle(_Get(rle_bot, {"r": "0,0,40,40"})
 assert too_many.status == 400 or rle_store.chunk_counts(GUILD)[0] < 40
 print("baking          the ground arrives as run-length chunks, with each kind's layout and land flag")
 
+# Smooth borders, worked out by the page at bake time (no canvas needed for the
+# geometry): a road painted diagonally is one shape, regular stairs straighten,
+# a plaza keeps its four sides, and rounding stays close to the corners.
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+from web.dodoland import terrain_ui  # noqa: E402
+
+_node = shutil.which("node")
+if _node:
+    _js = terrain_ui.SCRIPT
+    _fns = _js[_js.index("  // A region's border as closed loops of cell corners"):_js.index("  // The smoothed outline of a region of the area")]
+    _probe = _fns + r"""
+var A = 40, out = [];
+function grid(fill) { var g = new Uint16Array(A * A); fill(g); return g; }
+function loops(g) { return bakeLoops(bakeHalf(g, A, function (v) { return v === 1; }), A * 2, function (v) { return v === 1; }); }
+// A one-cell road painted diagonally: one loop, not beads.
+var road = grid(function (g) { for (var i = 2; i < 30; i++) g[(i) * A + i] = 1; });
+out.push('road=' + loops(road).length);
+// Stairs two over and six down: straightened, the left edge is two points.
+var stairs = grid(function (g) { for (var y = 0; y < 36; y++) { var x0 = 4 + Math.floor(y / 6) * 2; for (var x = x0; x < x0 + 8; x++) g[y * A + x] = 1; } });
+var sl = loops(stairs)[0], straight = bakeSimplify(sl, 2 * 1.8);
+out.push('stairs=' + sl.length + '>' + straight.length);
+// A 10 x 10 plaza: four corners before, four after straightening.
+var plaza = grid(function (g) { for (var y = 10; y < 20; y++) for (var x = 10; x < 20; x++) g[y * A + x] = 1; });
+var pl = loops(plaza)[0];
+out.push('plaza=' + pl.length + '>' + bakeSimplify(pl, 3).length);
+// Rounding by one cell moves no point more than a cell (two half-cells) off a side.
+var rounded = bakeRound(pl, 1.6), off = 0;
+rounded.forEach(function (pt) {
+  var dx = Math.min(Math.abs(pt[0] - 20), Math.abs(pt[0] - 40)), dy = Math.min(Math.abs(pt[1] - 20), Math.abs(pt[1] - 40));
+  off = Math.max(off, Math.min(dx, dy));
+});
+out.push('off=' + off.toFixed(2));
+console.log(out.join(' '));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as _f:
+        _f.write(_probe)
+    _run = subprocess.run([_node, _f.name], capture_output=True, text=True)
+    _got = dict(part.split("=") for part in _run.stdout.split())
+    assert _got.get("road") == "1", ("a diagonal road traced as beads", _run.stdout, _run.stderr)
+    _before, _after = (int(v) for v in _got["stairs"].split(">"))
+    assert _after <= 6 < _before, f"stairs were not straightened: {_got['stairs']}"
+    assert _got["plaza"] == "4>4", f"a square plaza lost or gained corners: {_got['plaza']}"
+    assert float(_got["off"]) <= 1.6 + 1e-6, f"rounding moved a point {_got['off']} half-cells off a side"
+    print(f"smoothing       a diagonal road is one line, stairs straighten ({_got['stairs']}), a plaza keeps its sides")
+
 print("PASS")

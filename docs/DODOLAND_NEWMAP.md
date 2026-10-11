@@ -888,3 +888,19 @@ deep by trunk position, each strip a canvas with `z-index: depth(lowest trunk)`
 like pieces and walkers; `.dlforest` is `display: contents` so the strips stack
 among them (far-out hiding is the `.far` class, so the Layers switch still
 works). A walker is at most one strip wrong.
+
+### Smooth borders, step 1 (done)
+In the bake (`terrain_ui.py`, `bakeChunk`), with a margin of at least 3 cells of
+neighbours so curves carry over chunk lines: non-land kinds fill exact cells;
+land kinds go lowest rank first — the lowest fills all land, each higher kind k
+fills the smoothed outline of (land kinds >= k), clipped to land (coasts stay
+square); each kind's blend is grown and blurred from the edge it was drawn
+with and kept to land. Outline: `bakeHalf` (half-cell grid, bridges where two
+cells touch only at a corner, so a diagonal road is one shape) ->
+`bakeLoops` -> `bakeSimplify` (Douglas–Peucker, `dodoland_ground_straighten`
+1.5 cells x strength: regular stairs run straight; at 1.8 a 2-over-6-down
+staircase is one straight edge) -> `bakeRound` (corners rounded by a fixed
+distance, never more than half a side, so a big plaza keeps its sides).
+`dodoland_ground_smoothing` (1; 0 = the square cells exactly as before).
+2-4 ms per bordered chunk in Chrome (0.4 ms plain), once per chunk.
+Step 2 (per-stroke smoothing, sharp corners on demand) is next.
