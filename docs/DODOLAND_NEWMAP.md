@@ -562,3 +562,18 @@ The page takes its URLs from `D.ep` (base, paint, undo, decor, town, settle).
   which opens Terrain), town placing and other towns' controls.
 * All 16 painted ground tiles now have Players access (owner can untick).
 * The member's town page links to "The map" when the world page is on.
+
+### Moving a town moves what is in it (11 Oct)
+
+`web/dodoland/town_move.move_town` (both the admin settle and the member's own
+settle use it): it collects the town's buildings (`town == uid`) and anything
+its owner placed inside its old area (`by == uid`), settles the hall, and puts
+each piece at the same offset from the new hall. A piece landing where nothing
+stands (a kind with no `move`: water, mountains) goes to the nearest open cell
+in the new area; one outside the new area goes to the nearest open cell inside
+it; the hall dropped in the sea goes to the nearest open ground. Each such
+adjustment comes back as a plain sentence (`notes`), shown in a dismissable
+notice at the top of the map; the page applies `moved` positions at once.
+Checked on a copy of the live data: a small move keeps every offset exactly;
+a drop into the sea puts the hall on the nearest shore with both notices.
+Members removing their own town now also take its buildings with it.

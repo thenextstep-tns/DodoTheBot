@@ -209,7 +209,13 @@ async def api_dodoland_settle(request: web.Request):
         x, y = float(body.get("x")), float(body.get("y"))
     except (TypeError, ValueError):
         return _bad("A town needs a position.")
-    spot = bot.dodoland_buildings.settle(guild.id, user_id, x, y)
+    # A town moves with everything in it, keeping where each thing stood
+    # relative to its hall (web/dodoland/town_move.py).
+    import asyncio
+
+    from web.dodoland import town_move
+    spot = await asyncio.get_running_loop().run_in_executor(
+        None, town_move.move_town, bot, guild, user_id, x, y)
     return web.json_response({"ok": True, **spot})
 
 

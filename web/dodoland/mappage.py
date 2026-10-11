@@ -779,6 +779,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Armed, everything placed is ground to stamp on rather than something to grab. */
 .dlframe.placing .dlpiece { pointer-events: none; }
 .dlpiece.preview { opacity: .55; pointer-events: none; }
+.dlnotice { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 45;
+  display: none; max-width: min(560px, calc(100% - 32px)); padding: 10px 38px 10px 14px;
+  border-radius: 10px; background: rgba(40, 28, 14, .96); color: #fbecd2;
+  border: 1px solid var(--lantern); box-shadow: 0 6px 24px rgba(0,0,0,.45); font-size: 13px; }
+.dlnotice.on { display: block; }
+.dlnotice p { margin: 2px 0; }
+.dlnotice button { position: absolute; top: 6px; right: 8px; background: none; border: 0;
+  color: inherit; font-size: 18px; cursor: pointer; }
 /* A building's pop-up, above it, on screen. */
 .dlpop { position: absolute; display: none; z-index: 30; transform: translate(-50%, -100%);
   min-width: 180px; max-width: 300px; padding: 9px 12px 10px; border-radius: 10px;
@@ -1447,6 +1455,19 @@ _SCRIPT = r"""
     hint.textContent = 'Click the map to place ' + byId[id].name;
     renderList();
   }
+  // A notice the map cannot hide: top centre, above the drawers, until it is
+  // dismissed or a while has passed.
+  var notice = document.createElement('div');
+  notice.className = 'dlnotice';
+  frame.appendChild(notice);
+  function notify(lines) {
+    notice.innerHTML = lines.map(function (l) { return '<p>' + escapeHtml(l) + '</p>'; }).join('') +
+      '<button title="Dismiss">&times;</button>';
+    notice.querySelector('button').onclick = function () { notice.classList.remove('on'); };
+    notice.classList.add('on');
+    clearTimeout(notify.t);
+    notify.t = setTimeout(function () { notice.classList.remove('on'); }, 14000);
+  }
   function place(id, point) {
     if (!D.ep.settle) return;
     fetch(D.ep.settle, {
@@ -1460,6 +1481,16 @@ _SCRIPT = r"""
       armed = null;
       frame.classList.remove('placing');
       hint.textContent = point ? 'Placed.' : 'Removed from the map.';
+      if (point && res.moved && res.moved.length) {
+        // Everything in the town came with it, at the same offset from the hall.
+        var at = {};
+        res.moved.forEach(function (m) { at[m.piece_id] = m; });
+        D.world.forEach(function (q) { if (at[q.id]) { q.x = at[q.id].x; q.y = at[q.id].y; } });
+        redrawDecor();
+        hint.textContent = 'Moved, with ' + res.moved.length +
+          (res.moved.length === 1 ? ' thing' : ' things') + ' that belong to it.';
+      }
+      if (res.notes && res.notes.length) notify(res.notes);
       if (!point) {
         // Its buildings went with it, on the server; and on the page.
         D.world = D.world.filter(function (q) { return q.t !== String(id); });

@@ -660,13 +660,18 @@ async def api_my_settle(request: web.Request):
 
     if body.get("remove"):
         bot.dodoland_buildings.unsettle(guild.id, uid)
+        # Its buildings go with the town they belonged to, as on the admin side.
+        bot.dodoland_decor.remove_town_buildings(guild.id, uid)
         invalidate(guild.id)
         return web.json_response({"ok": True, "removed": True})
     try:
         x, y = float(body.get("x")), float(body.get("y"))
     except (TypeError, ValueError):
         return _bad("A town needs a position.")
-    spot = bot.dodoland_buildings.settle(guild.id, uid, x, y)
+    # Everything in the town moves with it (web/dodoland/town_move.py).
+    from web.dodoland import town_move
+    spot = await asyncio.get_running_loop().run_in_executor(
+        None, town_move.move_town, bot, guild, uid, x, y)
     # The world page reads plots out of the snapshot, so a move nobody can see
     # for a minute looks exactly like a move that did not save.
     invalidate(guild.id)
