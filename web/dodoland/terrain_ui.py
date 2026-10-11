@@ -430,6 +430,16 @@ SCRIPT = r"""
   frame.addEventListener('pointermove', moveCursor);
   frame.addEventListener('pointerleave', hideCursor);
 
+  // Escape or a right click: the terrain brush, the eraser and a selection go;
+  // the drawer stays open on what it was showing.
+  function terrPutDown() {
+    terr.mix = []; terr.erase = false; terr.sel = null;
+    if (stroke) stroke = null;
+    drawSel();
+    rearm();
+    renderPalette();
+    hideCursor();
+  }
   function drawSel() {
     var r = document.getElementById('dltsel');
     if (!r) return;

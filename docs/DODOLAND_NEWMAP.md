@@ -510,3 +510,10 @@ art's per-town tiers had the same flaw before today.
 their tier growth and smoke were a few pixels. Town building tiles are now
 drawn at the hall's scale (`mappage._tile_cells`). The **town hall's row**
 shows "Town hall" instead of Build: the placed town is the hall.
+
+**Escape / right click put everything down** (`putDown()` in mappage,
+`terrPutDown()` in terrain_ui): armed kit tile and brush mix, Build-for-town,
+Move-a-building, moving a town, the terrain brush / eraser / selection, the
+piece selection, a half-drawn box or brush stroke — then back to the hand.
+Escape works from inside a drawer's field too (it blurs it); the rename field
+keeps its own Escape (cancel the rename).

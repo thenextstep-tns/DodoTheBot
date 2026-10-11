@@ -2378,17 +2378,45 @@ _SCRIPT = r"""
 
   window.addEventListener('keydown', function (ev) {
     var t = ev.target, tag = t && t.tagName;
+    var key = (ev.key || '').toLowerCase();
+    // Escape puts down whatever is in hand, even from a field in a drawer.
+    if (key === 'escape') {
+      if (t && t.blur && tag !== 'BODY') t.blur();
+      putDown();
+      return;
+    }
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-    var key = (ev.key || '').toLowerCase();
     var pick = {v: 'pointer', h: 'hand', p: 'pencil', b: 'brush'}[key];
     if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
     if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
-    if (key === 'escape') {
-      armedAsset = null; mix = []; building = null; relocating = null;
-      frame.classList.remove('placing');
-      selectOnly([]); renderKit();
+  });
+
+  // Put down whatever is in hand — Escape, or a right click on the map. A tile
+  // armed in the kit, a brush mix, a building from a town's card, a building
+  // being moved, a town being moved, the terrain brush, a selection, a stroke
+  // or a box half drawn: all of it, and back to the hand.
+  function putDown() {
+    armedAsset = null; mix = []; building = null; relocating = null;
+    if (gesture === 'brush' && stroke2) {
+      stroke2.previews.forEach(function (el) { el.remove(); });
+      stroke2 = null;
     }
+    gesture = null;
+    boxEl.style.display = 'none';
+    if (armed) { armed = null; renderList(); }
+    frame.classList.remove('placing');
+    ghost.classList.remove('live');
+    if (typeof terrPutDown === 'function') terrPutDown();
+    if (selIds().length) selectOnly([]);
+    setTool('hand', true);
+    renderKit();
+    hint.textContent = 'Drag to move, scroll to zoom';
+    kitSay('');
+  }
+  frame.addEventListener('contextmenu', function (ev) {
+    ev.preventDefault();
+    putDown();
   });
 
   setTool(tool);
