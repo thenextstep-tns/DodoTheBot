@@ -497,9 +497,16 @@ async def api_terrain_paint(request: web.Request):
         # The brush, once: which offsets a disc of this radius covers, and how
         # far out each one is. Round, not square — square corners read as
         # deliberate when they are not.
-        disc = [(dx, dy, ((dx * dx + dy * dy) ** 0.5) / radius if radius else 0.0)
-                for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)
-                if not radius or dx * dx + dy * dy <= radius * radius]
+        # Round by default; square for roads, walls of hedge, anything with an
+        # edge that should run straight. "far" is the distance to the rim in
+        # the brush's own shape, so a soft edge softens a square as a square.
+        if str(body.get("shape") or "round") == "square":
+            disc = [(dx, dy, max(abs(dx), abs(dy)) / radius if radius else 0.0)
+                    for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)]
+        else:
+            disc = [(dx, dy, ((dx * dx + dy * dy) ** 0.5) / radius if radius else 0.0)
+                    for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)
+                    if not radius or dx * dx + dy * dy <= radius * radius]
         clean = []
         for point in points:
             try:

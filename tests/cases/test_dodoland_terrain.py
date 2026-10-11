@@ -442,4 +442,13 @@ assert again["moved"] and brush.at(GUILD, 450, 450) == sand and brush.at(GUILD, 
 assert member({}, area, uid=78, undo=False)["moved"] is False, "one member undid another's stroke"
 print("members         paint inside their area; undo and redo are theirs and spare others' work")
 
+# A square brush paints a square: corners included, nothing past its edge.
+square = paint({"kind": sand, "radius": 3, "shape": "square", "points": [[30, 470]]})
+assert square["ok"] and square["cells"] <= 49
+assert brush.at(GUILD, 33, 473) == sand and brush.at(GUILD, 27, 467) == sand, "a square brush lost its corners"
+assert brush.at(GUILD, 34, 470) != sand, "a square brush reached past its edge"
+round_ = paint({"kind": sand, "radius": 3, "points": [[60, 470]]})
+assert brush.at(GUILD, 63, 473) != sand, "the round brush painted its corners"
+print("brush           round and square brushes paint their own shapes")
+
 print("PASS")

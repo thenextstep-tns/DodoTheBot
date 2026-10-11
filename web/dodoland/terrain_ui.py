@@ -74,6 +74,8 @@ CSS = """
   grid-template-columns: auto 1fr 3.2em; gap: 6px 10px; align-items: center;
   font-size: 12px; color: var(--soft); }
 .dltsliders input[type=range] { width: 100%; }
+.dltsliders .dltshape { margin: 0; }
+.dltsliders .dltshape button { padding: 4px 6px; font-size: 12px; }
 .dltsliders output { text-align: right; font-variant-numeric: tabular-nums; }
 .dltpanel { padding: 8px 14px; border-top: 1px solid var(--edge); font-size: 12px;
   color: var(--soft); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -99,6 +101,7 @@ DRAWER = """
   <div class="dlkitgrid" id="dltkinds"></div>
   <div class="dltmix" id="dltmix"></div>
   <div class="dltsliders" id="dltbrush">
+    <span class="dltlabel">Shape</span><div class="dlseg dltshape" id="dltshape"><button data-shape="round" class="on" title="Round brush">&#9679; Round</button><button data-shape="square" title="Square brush: straight edges, for roads">&#9632; Square</button></div><span></span>
     <label for="dltradius">Size</label><input type="range" id="dltradius" min="0" max="64" value="12"><output id="dltradiusn">12</output>
     <label for="dltdensity">Density</label><input type="range" id="dltdensity" min="5" max="100" step="5" value="100"><output id="dltdensityn">100%</output>
     <label for="dltsoft">Soft edge</label><input type="range" id="dltsoft" min="0" max="100" step="5" value="0"><output id="dltsoftn">0%</output>
@@ -131,7 +134,7 @@ SCRIPT = r"""
   // `armed` is what the map page checks before handing a drag to us: null when
   // no tool is ready, otherwise the tool's name.
   var terr = {world: null, armed: null, tool: 'brush', mix: [], erase: false,
-              radius: 12, density: 1, soft: 0, sel: null, pattern: null,
+              radius: 12, shape: 'round', density: 1, soft: 0, sel: null, pattern: null,
               have: {}, shown: true, busy: false, ver: 0};
   var terrLayer = document.createElement('div');
   terrLayer.className = 'dlterrain';
@@ -391,16 +394,17 @@ SCRIPT = r"""
   // The same disc the server paints (dx² + dy² <= r²), as two paths around
   // the origin cell: its cells, and the edges between a covered cell and an
   // uncovered one. Size 0 is one cell — a single tile.
-  var footprintFor = -1;
+  var footprintFor = '';
   function footprint(r) {
-    if (footprintFor === r) return;
-    footprintFor = r;
+    var shape = terr.armed === 'select' ? 'square' : terr.shape;
+    if (footprintFor === r + shape) return;
+    footprintFor = r + shape;
     var inside = {}, fill = [], line = [];
     function has(x, y) { return inside[x + ',' + y] === 1; }
     for (var dy = -r; dy <= r; dy++) {
       var run = -1;
       for (var dx = -r; dx <= r + 1; dx++) {
-        var on = dx <= r && dx * dx + dy * dy <= r * r;
+        var on = dx <= r && (shape === 'square' || dx * dx + dy * dy <= r * r);
         if (on) inside[dx + ',' + dy] = 1;
         if (on && run < 0) run = dx;
         if (!on && run >= 0) { fill.push('M' + run + ' ' + dy + 'h' + (dx - run) + 'v1h' + (run - dx) + 'z'); run = -1; }
@@ -475,7 +479,7 @@ SCRIPT = r"""
     stroke = null;
     if (!points || !terr.armed) return;
     if (terr.armed === 'select') { rearm(); return; }
-    var body = {mode: 'brush', radius: terr.radius, points: points.slice(0, 4000)};
+    var body = {mode: 'brush', radius: terr.radius, shape: terr.shape, points: points.slice(0, 4000)};
     if (terr.armed === 'pattern') body.pattern = terr.pattern;
     paint(body, 'Painting…');
   }
@@ -707,6 +711,17 @@ SCRIPT = r"""
     var el = document.getElementById(id), out = document.getElementById(id + 'n');
     el.oninput = function () { var v = parseInt(el.value, 10) || 0; apply(v); out.textContent = show(v); };
   }
+  // Round or square; remembered per viewer.
+  try { if (window.localStorage.getItem('dl-brush-shape') === 'square') terr.shape = 'square'; } catch (e) {}
+  document.querySelectorAll('#dltshape button').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.shape === terr.shape);
+    b.onclick = function () {
+      terr.shape = b.dataset.shape;
+      try { window.localStorage.setItem('dl-brush-shape', terr.shape); } catch (e) {}
+      document.querySelectorAll('#dltshape button').forEach(function (o) { o.classList.toggle('on', o === b); });
+      if (terr.armed && terr.armed !== 'select') footprint(terr.radius);
+    };
+  });
   slider('dltradius', String, function (v) {
     terr.radius = v;
     if (terr.armed && terr.armed !== 'select') footprint(v);

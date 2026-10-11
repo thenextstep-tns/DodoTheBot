@@ -592,3 +592,8 @@ Members removing their own town now also take its buildings with it.
   colour from tier 3 (`hbanner`, waving); sparks from tier 5 — on top of its
   tier effects and the owner's flourish. The hall no longer carries an emblem
   medallion (it sat on its flag).
+
+**Square brush** (11 Oct): the terrain brush has a Round / Square switch (above
+Size; remembered per viewer). The server rasterises `shape: "square"` as the
+full square with the soft edge measured to its rim (Chebyshev distance); the
+cursor outline follows the shape. For roads and anything with straight edges.
