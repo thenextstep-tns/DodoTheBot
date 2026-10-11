@@ -520,64 +520,46 @@ SCRIPT = r"""
       }
     return out;
   }
-  // Douglas–Peucker: the fewest points within ``tol`` of the line. Regular
-  // stairs come out as straight runs; a plaza's corners, far from any such
-  // line, stay.
-  function bakeDP(pts, tol) {
-    if (pts.length < 3) return pts;
-    var keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]], t2 = tol * tol;
-    keep[0] = keep[pts.length - 1] = 1;
-    while (stack.length) {
-      var seg = stack.pop(), i0 = seg[0], i1 = seg[1], a = pts[i0], b = pts[i1];
-      var dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy, far = -1, at = -1;
-      for (var i = i0 + 1; i < i1; i++) {
-        var px = pts[i][0] - a[0], py = pts[i][1] - a[1], d2;
-        if (len2) { var c = (px * dy - py * dx); d2 = c * c / len2; } else d2 = px * px + py * py;
-        if (d2 > far) { far = d2; at = i; }
-      }
-      if (far > t2) { keep[at] = 1; stack.push([i0, at], [at, i1]); }
+  // An outline evened out along its own length: the corner points resampled
+  // every half cell, then each moved to a Gaussian-weighted average of its
+  // neighbours along the outline (a Gaussian of ``reach`` half-cells). Stairs and
+  // spikes shorter than that even out into slopes and curves; a long side
+  // stays straight, a big shape keeps its size (it shrinks only by about
+  // reach squared over its radius).
+  function bakeResample(loop) {
+    var out = [];
+    for (var i = 0; i < loop.length; i++) {
+      var a = loop[i], b = loop[(i + 1) % loop.length];
+      var n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
+      for (var j = 0; j < n; j++) out.push([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]);
     }
-    return pts.filter(function (pt, i) { return keep[i]; });
+    return out;
   }
-  function bakeSimplify(loop, tol) {
-    if (loop.length < 4 || tol <= 0) return loop;
-    // A closed loop splits at its first point and the point furthest from it.
-    var far = 0, at = 0;
-    loop.forEach(function (pt, i) {
-      var d = (pt[0] - loop[0][0]) * (pt[0] - loop[0][0]) + (pt[1] - loop[0][1]) * (pt[1] - loop[0][1]);
-      if (d > far) { far = d; at = i; }
-    });
-    var one = bakeDP(loop.slice(0, at + 1), tol), two = bakeDP(loop.slice(at).concat([loop[0]]), tol);
-    var out = one.slice(0, -1).concat(two.slice(0, -1));
-    return out.length >= 3 ? out : loop;
-  }
-  // Corners rounded by a fixed distance (never more than half an edge), a
-  // few times over: a curve of about that radius however long the sides are.
-  function bakeRound(pts, d) {
-    for (var n = 0; n < 3; n++, d /= 2) {
-      var out = [];
-      for (var i = 0; i < pts.length; i++) {
-        var p = pts[i], a = pts[(i - 1 + pts.length) % pts.length], b = pts[(i + 1) % pts.length];
-        var la = Math.hypot(a[0] - p[0], a[1] - p[1]) || 1, lb = Math.hypot(b[0] - p[0], b[1] - p[1]) || 1;
-        var ca = Math.min(d, la / 2) / la, cb = Math.min(d, lb / 2) / lb;
-        out.push([p[0] + (a[0] - p[0]) * ca, p[1] + (a[1] - p[1]) * ca]);
-        out.push([p[0] + (b[0] - p[0]) * cb, p[1] + (b[1] - p[1]) * cb]);
+  function bakeGauss(pts, reach) {
+    var n = pts.length, sigma = reach, r = Math.ceil(sigma * 3);
+    if (n < 4 || sigma < 0.25) return pts;
+    r = Math.min(r, Math.floor((n - 1) / 2));
+    var w = [], total = 0;
+    for (var j = -r; j <= r; j++) { var v = Math.exp(-j * j / (2 * sigma * sigma)); w.push(v); total += v; }
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var x = 0, y = 0;
+      for (var j = -r; j <= r; j++) {
+        var q = pts[((i + j) % n + n) % n], k = w[j + r];
+        x += q[0] * k; y += q[1] * k;
       }
-      pts = out;
+      out.push([x / total, y / total]);
     }
-    return pts;
+    return out;
   }
-  // The smoothed outline of a region of the area, as a path in chunk pixels
-  // (``m`` cells of margin taken off). Strength 1 straightens stairs to within
-  // the server's "straighten" distance and rounds corners by most of a cell;
-  // lower keeps more of both.
+  // The smoothed outline of a region of the area, as a path in pixels with
+  // ``m`` cells of margin taken off.
   function bakeSmoothPath(area, A, m, res, test, strength) {
     var path = new Path2D(), s = Math.min(1, strength);
-    var half = bakeHalf(area, A, test);
-    bakeLoops(half, A * 2, function (v) { return v === 1; }).forEach(function (loop) {
+    var reach = 2 * (D.sizes.straighten === undefined ? 1.5 : D.sizes.straighten) * s;
+    bakeLoops(bakeHalf(area, A, test), A * 2, function (v) { return v === 1; }).forEach(function (loop) {
       // Half-cell units throughout, then back to cells.
-      var tol = D.sizes.straighten === undefined ? 1.5 : D.sizes.straighten;
-      var pts = bakeRound(bakeSimplify(loop, 2 * tol * s), 1.6 * s);
+      var pts = bakeGauss(bakeResample(loop), reach);
       pts.forEach(function (pt, i) {
         var x = (pt[0] / 2 - m) * res, y = (pt[1] / 2 - m) * res;
         if (i) path.lineTo(x, y); else path.moveTo(x, y);
@@ -591,121 +573,99 @@ SCRIPT = r"""
     var K = bake.kinds, width = D.sizes.blend_width || 0, strength = D.sizes.blend_strength || 0;
     var smooth = Math.max(0, D.sizes.smoothing || 0);
     var blend = BLUR_OK && width > 0 && strength > 0;
-    // Enough of the neighbours that a blend reaches in and a curve carries on
-    // over the chunk line exactly as the neighbour draws it.
-    var m = Math.max(blend ? Math.ceil(width) + 1 : 0, smooth > 0 ? 3 : 0,
-                     (D.sizes.coast_width || 0) > 0 ? Math.ceil(D.sizes.coast_width * 2.4) + 1 : 0), A = 64 + 2 * m;
-    var area = bakeArea(cx, cy, m), size = 64 * res, ready = true;
-    var cv = document.createElement('canvas');
-    cv.width = cv.height = size;
-    var ctx = cv.getContext('2d');
-    var inChunk = {}, near = {};
-    for (var y = 0; y < A; y++)
-      for (var x = 0; x < A; x++) {
-        var v = area[y * A + x];
-        near[v] = 1;
-        if (x >= m && x < m + 64 && y >= m && y < m + 64) inChunk[v] = 1;
-      }
-    function isLand(v) { return v && K[v] && K[v].land; }
+    var coastK = D.sizes.coast_shading || 0, coastW = D.sizes.coast_width || 0;
+    var coast = BLUR_OK && coastK > 0 && coastW > 0;
+    // Everything is drawn on a canvas a margin larger than the chunk, so a
+    // curve, a blend or the coast's shading carries over the chunk line just
+    // as the neighbour draws it; the chunk is cut out at the end.
+    var m = Math.max(blend ? Math.ceil(width) + 1 : 0,
+                     smooth > 0 ? Math.ceil(2 * (D.sizes.straighten || 1.5)) + 2 : 0,
+                     coast ? Math.ceil(coastW * 2.4) + 1 : 0, 1);
+    var A = 64 + 2 * m, big = A * res, size = 64 * res, ready = true;
+    var area = bakeArea(cx, cy, m);
+    var near = {};
+    for (var i = 0; i < A * A; i++) near[area[i]] = 1;
     function known(v) { return v && K[v]; }
-    // Every kind, lowest rank first. Smoothed, each fills the smoothed outline
-    // of itself *and everything ranked above it* — water included — so where a
-    // corner is rounded off, what shows is the ground actually beneath it (an
-    // island's rounded corner shows the lake, not some grass from elsewhere).
-    // The lowest fills all known ground. Unsmoothed, each fills its own cells.
-    // 0 is unknown ground, left for the overview underneath.
-    var knownClip = bakePath(area, A, res, m, m, 64, known);
+    function isLand(v) { return v && K[v] && K[v].land; }
+    function canvas() { var c = document.createElement('canvas'); c.width = c.height = big; return c; }
     var kinds = Object.keys(near).map(Number).filter(known).sort(function (a, b) { return a - b; });
-    // Where a blend may fall: land, as it is drawn (smoothed, the water's own
-    // smoothed outline is the shore), never onto the water.
-    var landClip = blend ? (smooth > 0 ? bakeSmoothPath(area, A, m, res, isLand, smooth)
-                                       : bakePath(area, A, res, m, m, 64, isLand)) : null;
+    // Each kind's shape, once. Smoothed, a kind's shape is the outline of
+    // itself *and everything ranked above it*: drawn lowest first, where a
+    // corner is rounded off what shows is the ground beneath. The lowest
+    // fills all known ground. Unsmoothed, each is its own cells.
+    var shapes = {};
+    kinds.forEach(function (k, i) {
+      shapes[k] = smooth > 0 && i === 0 ? null
+        : smooth > 0 ? bakeSmoothPath(area, A, 0, res, function (v) { return known(v) && v >= k; }, smooth)
+        : bakePath(area, A, res, 0, 0, A, function (v) { return v === k; });
+    });
+    var knownClip = bakePath(area, A, res, 0, 0, A, known);
+    function fillShape(c, k) {
+      if (shapes[k]) c.fill(shapes[k], 'evenodd'); else c.fillRect(0, 0, big, big);
+    }
+    // Land and water as drawn, from the very same shapes in the same order,
+    // so the blend and the coast's shading meet the fills exactly.
+    var landMask = canvas(), waterMask = canvas();
+    if (blend || coast) {
+      var lc = landMask.getContext('2d');
+      lc.save(); lc.clip(knownClip); lc.fillStyle = '#fff';
+      kinds.forEach(function (k) {
+        lc.globalCompositeOperation = K[k].land ? 'source-over' : 'destination-out';
+        fillShape(lc, k);
+      });
+      lc.restore();
+      var wc = waterMask.getContext('2d');
+      wc.fillStyle = '#fff'; wc.fill(knownClip);
+      wc.globalCompositeOperation = 'destination-out'; wc.drawImage(landMask, 0, 0);
+    }
+    // A shape (or picture) blurred, kept to a mask, and tinted.
+    function soft(draw, sigma, keep, tint) {
+      var src = canvas(), sc = src.getContext('2d');
+      sc.fillStyle = '#fff'; sc.strokeStyle = '#fff';
+      draw(sc);
+      var out = canvas(), oc = out.getContext('2d');
+      oc.filter = 'blur(' + Math.max(0.5, sigma * res).toFixed(1) + 'px)';
+      oc.drawImage(src, 0, 0);
+      oc.filter = 'none';
+      oc.globalCompositeOperation = 'destination-in'; oc.drawImage(keep, 0, 0);
+      oc.globalCompositeOperation = 'source-in'; oc.fillStyle = tint; oc.fillRect(0, 0, big, big);
+      return out;
+    }
+    var cv = canvas(), ctx = cv.getContext('2d');
     var lowestLand = Infinity;
     kinds.forEach(function (k) { if (K[k].land) lowestLand = Math.min(lowestLand, k); });
-    kinds.forEach(function (k, i) {
-      var style = bakeStyle(ctx, k, res, cx * 64, cy * 64);
+    kinds.forEach(function (k) {
+      var style = bakeStyle(ctx, k, res, cx * 64 - m, cy * 64 - m);
       if (style === null) { ready = false; return; }
-      var test = smooth > 0 ? function (v) { return known(v) && v >= k; } : function (v) { return v === k; };
-      ctx.save();
-      ctx.clip(knownClip);
-      ctx.fillStyle = style;
-      if (smooth > 0 && i === 0) ctx.fillRect(0, 0, size, size);
-      else if (smooth > 0) ctx.fill(bakeSmoothPath(area, A, m, res, test, smooth), 'evenodd');
-      else ctx.fill(bakePath(area, A, res, m, m, 64, test));
-      ctx.restore();
-      // The blend, land into land only: the kind's drawn shape grown by half
-      // the width and blurred once, filled with its texture, kept to land.
-      // Kinds ranked above are drawn after and cover what spilled onto them.
+      ctx.save(); ctx.clip(knownClip); ctx.fillStyle = style; fillShape(ctx, k); ctx.restore();
+      // The blend, land into land: the kind's shape grown by half the width
+      // and blurred, kept to land as drawn, in the kind's own texture. Kinds
+      // ranked above are drawn after and cover what spilled onto them.
       if (!blend || !K[k].land || k <= lowestLand) return;
-      var landTest = smooth > 0 ? function (v) { return isLand(v) && v >= k; } : function (v) { return v === k; };
-      var shape = document.createElement('canvas');
-      shape.width = shape.height = A * res;
-      var sc = shape.getContext('2d');
-      var region = smooth > 0 ? bakeSmoothPath(area, A, 0, res, landTest, smooth)
-                              : bakePath(area, A, res, 0, 0, A, landTest);
-      sc.fillStyle = '#fff'; sc.strokeStyle = '#fff';
-      sc.lineWidth = width * res; sc.lineJoin = 'round';
-      sc.fill(region, 'evenodd'); sc.stroke(region);
-      var mask = document.createElement('canvas');
-      mask.width = mask.height = size;
-      var mc = mask.getContext('2d');
-      mc.filter = 'blur(' + Math.max(0.5, width * res / 3).toFixed(1) + 'px)';
-      mc.drawImage(shape, -m * res, -m * res);
-      mc.filter = 'none';
-      mc.globalCompositeOperation = 'destination-in';
-      mc.fill(landClip, 'evenodd');
-      mc.globalCompositeOperation = 'source-in';
-      mc.fillStyle = style;
-      mc.fillRect(0, 0, size, size);
-      ctx.globalAlpha = strength;
-      ctx.drawImage(mask, 0, 0);
-      ctx.globalAlpha = 1;
+      // Its land only: smoothed, its fill shape takes in the water ranked
+      // above it, and a blend must not spill from a lake's shore.
+      var from = smooth > 0 ? bakeSmoothPath(area, A, 0, res, function (v) { return isLand(v) && v >= k; }, smooth)
+                            : shapes[k];
+      var spill = soft(function (c) {
+        c.lineWidth = width * res; c.lineJoin = 'round';
+        c.fill(from, 'evenodd'); c.stroke(from);
+      }, width / 3, landMask, style);
+      ctx.globalAlpha = strength; ctx.drawImage(spill, 0, 0); ctx.globalAlpha = 1;
     });
-    // The coast: the land a little darker towards the water, the water a
-    // little brighter with surf, both from the shore as drawn (smoothed), so
-    // they follow its curve instead of the cells. Two soft masks, once.
-    var coastK = D.sizes.coast_shading || 0, coastW = D.sizes.coast_width || 0;
-    var anyWater = kinds.some(function (k) { return !K[k].land; });
-    var anyLand = kinds.some(function (k) { return K[k].land; });
-    if (BLUR_OK && coastK > 0 && coastW > 0 && anyWater && anyLand) {
-      // Water and land each from their own cells (never "not land": past the
-      // map's edge, or a neighbour not read yet, is neither), smoothed alike.
-      var isWater = function (v) { return v && K[v] && !K[v].land; };
-      var shapeOf = function (test, off) {
-        return smooth > 0 ? bakeSmoothPath(area, A, off, res, test, smooth)
-                          : bakePath(area, A, res, off, off, off ? 64 : A, test);
-      };
-      var paint = function (path) {
-        var c = document.createElement('canvas');
-        c.width = c.height = A * res;
-        var x = c.getContext('2d');
-        x.fillStyle = '#fff'; x.fill(path, 'evenodd');
-        return c;
-      };
-      var wet = paint(shapeOf(isWater, 0)), dry = paint(shapeOf(isLand, 0));
-      var landHere = shapeOf(isLand, m), waterHere = shapeOf(isWater, m);
-      // The blurred shape of one side, kept to the other side.
-      var soft = function (src, sigma, keep, colour) {
-        var mk = document.createElement('canvas');
-        mk.width = mk.height = size;
-        var c = mk.getContext('2d');
-        c.filter = 'blur(' + Math.max(0.5, sigma * res).toFixed(1) + 'px)';
-        c.drawImage(src, -m * res, -m * res);
-        c.filter = 'none';
-        c.globalCompositeOperation = 'destination-in';
-        c.fill(keep, 'evenodd');
-        c.globalCompositeOperation = 'source-in';
-        c.fillStyle = colour; c.fillRect(0, 0, size, size);
-        return mk;
-      };
+    // The coast: land a little darker towards the water, water a little
+    // brighter with surf, from the shore as drawn.
+    if (coast && kinds.some(function (k) { return !K[k].land; }) && kinds.some(function (k) { return K[k].land; })) {
       // Half strength at the shore line (the blur), so twice the old values.
       ctx.globalAlpha = Math.min(1, 0.36 * coastK);
-      ctx.drawImage(soft(wet, coastW * 0.8, landHere, '#000'), 0, 0);
+      ctx.drawImage(soft(function (c) { c.drawImage(waterMask, 0, 0); }, coastW * 0.8, landMask, '#000'), 0, 0);
       ctx.globalAlpha = Math.min(1, 0.7 * Math.min(1, coastK));
-      ctx.drawImage(soft(dry, coastW * 0.5, waterHere, '#fff'), 0, 0);
+      ctx.drawImage(soft(function (c) { c.drawImage(landMask, 0, 0); }, coastW * 0.5, waterMask, '#fff'), 0, 0);
       ctx.globalAlpha = 1;
     }
-    return {canvas: cv, ready: ready};
+    var out = document.createElement('canvas');
+    out.width = out.height = size;
+    out.getContext('2d').drawImage(cv, m * res, m * res, size, size, 0, 0, size, size);
+    return {canvas: out, ready: ready};
   }
   function bakeShow(key, res) {
     var made = bakeChunk(key, res), at = key.split(',');

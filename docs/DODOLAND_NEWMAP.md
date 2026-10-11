@@ -919,3 +919,16 @@ Step 2 (per-stroke smoothing, sharp corners on demand) is next.
   `dodoland_coast_shade_width` 1 cell; strength = detail x overview shading).
   Masks come from actual water / land cells, not "not land", so the map edge
   and unread neighbours get no rim.
+* **Second pass** (Nik: "something is off"): (1) a pale crescent under a lake
+  island — the fills, the blend and the coast each smoothed their own outline,
+  so one shore came out as several slightly different curves. Now each chunk
+  bakes on a canvas `m` cells larger than itself; per kind one shape; a land
+  mask is drawn by replaying the very same fills (land white, water cleared),
+  and blends and coast shading use that mask, so they meet the fills exactly;
+  the chunk is cut out at the end. A blend spills only from land (`isLand &&
+  v >= k`), never from a lake's shore. (2) Douglas–Peucker made islands into
+  faceted polygons; Taubin smoothing kept stairs (it preserves low
+  frequencies). Now `bakeResample` (half-cell spacing) + `bakeGauss` (Gaussian
+  along the outline, sigma = `dodoland_ground_straighten` cells x strength,
+  relabelled "smoothing reach"): organic shapes stay organic, a 1-over-1-down
+  stair is within 0.00 cells of straight, a plaza keeps 96% of its size.
