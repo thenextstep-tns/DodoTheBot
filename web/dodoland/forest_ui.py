@@ -64,6 +64,8 @@ SCRIPT = r"""
   }
   // A stand's grid: spaced by its trees' average width at its size, closer
   // the denser, rows 0.8 of a step apart (a staggered stand, not a plantation).
+  // The spacing, in tree widths, runs straight from the server's setting at 0%
+  // density to its setting at 100%.
   function standShape(stand) {
     if (stand._shape) return stand._shape;
     var tiles = [], total = 0;
@@ -72,7 +74,10 @@ SCRIPT = r"""
       if (a && a.wc) { tiles.push(a); total += a.wc * Math.min(a.hi, Math.max(a.lo, stand.scale)); }
     });
     var w = tiles.length ? total / tiles.length : 2;
-    var gap = Math.max(0.3, w * (1.15 - stand.density));
+    var at0 = D.sizes.forest_gap_zero, at1 = D.sizes.forest_gap_full;
+    if (at0 === undefined) at0 = 1.95;
+    if (at1 === undefined) at1 = 0.95;
+    var gap = Math.max(0.3, w * (at0 + (at1 - at0) * stand.density));
     stand._shape = {tiles: tiles, gap: gap, row: gap * 0.8};
     return stand._shape;
   }

@@ -337,6 +337,8 @@ async def map_page(request: web.Request):
         "forest_detail": float(bot.dodoland_params.get(guild.id, "dodoland_forest_detail_max")),
         "forest_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_forest_chunks_max")),
         "forest_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_full_at")),
+        "forest_gap_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_full")),
+        "forest_gap_zero": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_zero")),
     }
 
     body = f"""<!doctype html>
@@ -418,7 +420,7 @@ async def map_page(request: web.Request):
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
     <div class="dlbrushopts" id="dlbrushopts" hidden>
       <div class="dlseg" id="dlbrushpat"><button data-pat="forest" class="on">Forest</button><button data-pat="scatter">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>{forest_ui.MODE}
-      <label title="Forest: how tightly the trees pack. High is a canopy with no ground between trees.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
+      <label title="Forest: how tightly the trees pack. 100% stands them about crown to crown; lower lets ground show between them. The spacing at each end is set in the panel.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
       <label>Radius <input type="range" id="dlbrad" min="1" max="60" value="8"><output id="dlbradn">8</output></label>
       <label>Spacing <input type="range" id="dlbsp" min="1" max="40" value="6"><output id="dlbspn">6</output></label>
       <label>Size jitter <input type="range" id="dlbjit" min="0" max="60" step="5" value="15"><output id="dlbjitn">15%</output></label>

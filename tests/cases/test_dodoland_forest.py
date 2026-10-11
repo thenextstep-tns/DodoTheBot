@@ -129,7 +129,7 @@ from web.dodoland import forest_ui  # noqa: E402
 node = shutil.which("node")
 if node:
     probe = r"""
-var D = {cells_w: 3832};
+var D = {cells_w: 3832, sizes: {forest_gap_full: 0.95, forest_gap_zero: 1.95}};
 var assets = {oak: {id: 'oak', wc: 3, lo: 0.5, hi: 3}, pine: {id: 'pine', wc: 2, lo: 0.5, hi: 3}};
 function assetById(id) { return assets[id] || null; }
 var FOREST = {stands: [{key: 'none'}, {mix: ['oak', 'pine'], density: 0.75, scale: 1, jitter: 0.15, flip: true, seed: 12345}]};
@@ -145,13 +145,21 @@ var out = [];
   var sorted = a.every(function (t, i) { return !i || a[i - 1].y <= t.y; });
   out.push([a.length, same, inside, sorted].join(':'));
 });
+// The density slider: 100% spaces trees as the old 20% did, 80% as the old 0%.
+var spacing = [1, 0.8, 0.2].map(function (d) {
+  return standShape({mix: ['oak'], density: d, scale: 1}).gap / 3;
+}).map(function (g) { return g.toFixed(2); });
+out.push('spacing=' + spacing.join(','));
 console.log(out.join(' '));
 """
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(probe)
     result = subprocess.run([node, f.name], capture_output=True, text=True)
     parts = result.stdout.split()
-    assert len(parts) == 3, (result.stdout, result.stderr)
+    assert len(parts) == 4, (result.stdout, result.stderr)
+    spacing = parts.pop().split("=")[1].split(",")
+    assert spacing == ["0.95", "1.15", "1.75"], f"the density slider spaces trees {spacing} tree widths apart"
+    print(f"density         100% / 80% / 20% stand trees {' / '.join(spacing)} of their widths apart")
     for part in parts:
         count, same, inside, ordered = part.split(":")
         assert int(count) > 100, f"a half-painted chunk grew only {count} trees"

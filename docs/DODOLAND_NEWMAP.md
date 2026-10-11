@@ -804,3 +804,7 @@ every map payload). A forest is now **painted, not placed**:
 Next steps: undo for forest strokes; canopy in the zoomed-out picture; depth
 strips so a tree south of a house draws in front of it; turning existing
 brushed trees into painted forest; members painting in their area.
+* Density re-scaled (Nik): spacing in tree widths runs linearly from
+  `dodoland_forest_spacing_zero` (1.95) at 0% to `dodoland_forest_spacing_full`
+  (0.95) at 100% — the old 20% is now 100%, the old 0% is 80%. Applies to
+  forests already painted (their stored density is read through it).
