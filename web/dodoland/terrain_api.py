@@ -273,14 +273,17 @@ def shade_bytes(bot, guild_id: int) -> bytes:
     strength = float(bot.dodoland_params.get(guild_id, "dodoland_detail_shading"))
     if not world["cells_w"] or strength <= 0:
         return b""
-    ver = version(guild_id) + f".{strength}"
+    ver = version(guild_id) + f".{strength}.nocoast"
     hit = _SHADES.get(int(guild_id))
     if hit and hit[0] == ver:
         return hit[1]
     tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
     data = terrain_raster.shade(bot.dodoland_terrain, guild_id,
                                 shading=strength * float(bot.dodoland_params.get(guild_id, "dodoland_overview_shading")),
-                                kinds=T.sync_tile_kinds(world["kinds"], tiles))
+                                kinds=T.sync_tile_kinds(world["kinds"], tiles),
+                                # The coast band and surf are drawn by the page
+                                # from the smoothed shore (terrain_ui bake).
+                                coast=False)
     _SHADES[int(guild_id)] = (ver, data)
     return data
 

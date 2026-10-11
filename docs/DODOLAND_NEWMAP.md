@@ -910,3 +910,12 @@ Step 2 (per-stroke smoothing, sharp corners on demand) is next.
   known kind ranks and fills smooth(kinds >= k), so a rounded corner shows the
   ground actually under it; both rank orders checked in Chrome. Blends stay
   land into land, kept off the water by the smoothed land outline.
+* **Coast shading follows the smooth shore** (Nik: "the shader is still
+  pixelated"). The close-up overlay's coast terms (dark land edge, surf) were
+  one cell wide, so they kept the old stairs. `terrain_raster.render_shade`
+  takes `coast=False` for the overlay (`shade_bytes`; depth and rock relief
+  stay; the zoomed-out picture keeps everything), and the bake draws both from
+  the smoothed water and land shapes as blurred masks (`coast_width`,
+  `dodoland_coast_shade_width` 1 cell; strength = detail x overview shading).
+  Masks come from actual water / land cells, not "not land", so the map edge
+  and unread neighbours get no rim.

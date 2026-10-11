@@ -465,6 +465,12 @@ assert img[40, 110, 3] > img[40, 45, 3] or img[40, 41, 0] == 255, "deep water is
 assert img[40, 40, 0] == 255 and img[40, 40, 3] > 0, "no surf along the shore"
 assert not np.asarray(terrain_raster.render_shade(cells, kinds, shading=0))[..., 3].any(), "shading 0 still shaded"
 print("shading         the close-up layer darkens depth, lights the surf, leaves land bare")
+# Close up, the coast's edge and surf are the page's (from the smoothed shore):
+# the overlay without them keeps the depth but has no one-cell bands.
+bare = np.asarray(terrain_raster.render_shade(cells, kinds, coast=False))
+assert bare[40, 40, 3] == 0 and bare[40, 39, 3] == 0, "the overlay still draws the stepped coast bands"
+assert bare[40, 110, 3] > 0, "dropping the coast bands dropped the depth too"
+print("shading         the close-up overlay leaves the coast's bands to the smoothed bake")
 
 # The close-up ground is baked by the map from run-length chunks: the endpoint
 # sends every chunk asked for (empty for unpainted) and how each kind is drawn

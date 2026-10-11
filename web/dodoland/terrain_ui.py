@@ -593,7 +593,8 @@ SCRIPT = r"""
     var blend = BLUR_OK && width > 0 && strength > 0;
     // Enough of the neighbours that a blend reaches in and a curve carries on
     // over the chunk line exactly as the neighbour draws it.
-    var m = Math.max(blend ? Math.ceil(width) + 1 : 0, smooth > 0 ? 3 : 0), A = 64 + 2 * m;
+    var m = Math.max(blend ? Math.ceil(width) + 1 : 0, smooth > 0 ? 3 : 0,
+                     (D.sizes.coast_width || 0) > 0 ? Math.ceil(D.sizes.coast_width * 2.4) + 1 : 0), A = 64 + 2 * m;
     var area = bakeArea(cx, cy, m), size = 64 * res, ready = true;
     var cv = document.createElement('canvas');
     cv.width = cv.height = size;
@@ -660,6 +661,50 @@ SCRIPT = r"""
       ctx.drawImage(mask, 0, 0);
       ctx.globalAlpha = 1;
     });
+    // The coast: the land a little darker towards the water, the water a
+    // little brighter with surf, both from the shore as drawn (smoothed), so
+    // they follow its curve instead of the cells. Two soft masks, once.
+    var coastK = D.sizes.coast_shading || 0, coastW = D.sizes.coast_width || 0;
+    var anyWater = kinds.some(function (k) { return !K[k].land; });
+    var anyLand = kinds.some(function (k) { return K[k].land; });
+    if (BLUR_OK && coastK > 0 && coastW > 0 && anyWater && anyLand) {
+      // Water and land each from their own cells (never "not land": past the
+      // map's edge, or a neighbour not read yet, is neither), smoothed alike.
+      var isWater = function (v) { return v && K[v] && !K[v].land; };
+      var shapeOf = function (test, off) {
+        return smooth > 0 ? bakeSmoothPath(area, A, off, res, test, smooth)
+                          : bakePath(area, A, res, off, off, off ? 64 : A, test);
+      };
+      var paint = function (path) {
+        var c = document.createElement('canvas');
+        c.width = c.height = A * res;
+        var x = c.getContext('2d');
+        x.fillStyle = '#fff'; x.fill(path, 'evenodd');
+        return c;
+      };
+      var wet = paint(shapeOf(isWater, 0)), dry = paint(shapeOf(isLand, 0));
+      var landHere = shapeOf(isLand, m), waterHere = shapeOf(isWater, m);
+      // The blurred shape of one side, kept to the other side.
+      var soft = function (src, sigma, keep, colour) {
+        var mk = document.createElement('canvas');
+        mk.width = mk.height = size;
+        var c = mk.getContext('2d');
+        c.filter = 'blur(' + Math.max(0.5, sigma * res).toFixed(1) + 'px)';
+        c.drawImage(src, -m * res, -m * res);
+        c.filter = 'none';
+        c.globalCompositeOperation = 'destination-in';
+        c.fill(keep, 'evenodd');
+        c.globalCompositeOperation = 'source-in';
+        c.fillStyle = colour; c.fillRect(0, 0, size, size);
+        return mk;
+      };
+      // Half strength at the shore line (the blur), so twice the old values.
+      ctx.globalAlpha = Math.min(1, 0.36 * coastK);
+      ctx.drawImage(soft(wet, coastW * 0.8, landHere, '#000'), 0, 0);
+      ctx.globalAlpha = Math.min(1, 0.7 * Math.min(1, coastK));
+      ctx.drawImage(soft(dry, coastW * 0.5, waterHere, '#fff'), 0, 0);
+      ctx.globalAlpha = 1;
+    }
     return {canvas: cv, ready: ready};
   }
   function bakeShow(key, res) {

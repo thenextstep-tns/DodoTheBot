@@ -345,6 +345,11 @@ async def map_page(request: web.Request):
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "straighten": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_straighten"))),
+        # The coast's dark land edge and surf, drawn in the bake from the
+        # smoothed shore at the strength the close-up shading has.
+        "coast_shading": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_detail_shading")) *
+                             float(bot.dodoland_params.get(guild.id, "dodoland_overview_shading"))),
+        "coast_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_coast_shade_width"))),
         "blend_strength": max(0.0, min(0.99, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_strength")))),
         "forest_gap_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_full")),
         "forest_gap_zero": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_zero")),

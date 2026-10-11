@@ -151,7 +151,8 @@ def picture(store, guild_id: int, colours: dict, *, shading: float = 1.0,
                          seed=guild_id, shading=shading, grain=grain))
 
 
-def render_shade(cells, kinds: list[dict], *, seed: int = 1, shading: float = 1.0):
+def render_shade(cells, kinds: list[dict], *, seed: int = 1, shading: float = 1.0,
+                 coast: bool = True):
     """The overview's shading on its own, as an RGBA ``PIL.Image``: transparent
     where there is none, dark where the picture darkens (deep water, the land's
     edge along a coast, the shadowed side of a mountain), light where it
@@ -178,10 +179,14 @@ def render_shade(cells, kinds: list[dict], *, seed: int = 1, shading: float = 1.
         near = 0.6 * _blur(land, 6) + 0.4 * _blur(land, 28)
         depth = np.clip(1.0 - near * 3.0, 0.0, 1.0)
         dark = np.where(is_water, 0.28 * shading * depth, dark)
-        edge = land & _grow(is_water, 1)
-        dark = np.where(edge, dark + 0.18 * shading, dark)
-        shore = _grow(land, 1) & is_water
-        bright = np.where(shore, 0.35 * min(1.0, shading), bright)
+        # The coast's darker land edge and its surf are one cell wide, so on
+        # a smoothed shore they would follow the old stairs. ``coast=False``
+        # leaves them to the page, which draws them from the smooth shore.
+        if coast:
+            edge = land & _grow(is_water, 1)
+            dark = np.where(edge, dark + 0.18 * shading, dark)
+            shore = _grow(land, 1) & is_water
+            bright = np.where(shore, 0.35 * min(1.0, shading), bright)
         if rock.any():
             height = _blur(rock, 2.5) * (0.75 + 0.25 * _noise(rng, h, w, 6))
             gy, gx = np.gradient(height)
@@ -197,14 +202,15 @@ def render_shade(cells, kinds: list[dict], *, seed: int = 1, shading: float = 1.
     return Image.fromarray(out, "RGBA")
 
 
-def shade(store, guild_id: int, *, shading: float = 1.0, kinds: Iterable[dict] = None) -> bytes:
+def shade(store, guild_id: int, *, shading: float = 1.0, kinds: Iterable[dict] = None,
+          coast: bool = True) -> bytes:
     """The encoded shading layer of a guild's world straight from its store."""
     world = store.world(guild_id)
     cxs, cys = store.chunk_counts(guild_id)
     chunks = store.chunks(guild_id, [(cx, cy) for cy in range(cys) for cx in range(cxs)])
     cells = grid(chunks, world["cells_w"], world["cells_h"])
     image = render_shade(cells, list(kinds) if kinds is not None else world["kinds"],
-                         seed=guild_id, shading=shading)
+                         seed=guild_id, shading=shading, coast=coast)
     buffer = io.BytesIO()
     image.save(buffer, "WEBP", quality=80, method=4)
     return buffer.getvalue()
