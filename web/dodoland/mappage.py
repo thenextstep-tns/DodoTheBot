@@ -333,16 +333,17 @@ async def map_page(request: web.Request):
 <style>{_CSS}</style>
 </head><body>
 <div class="dlbar">
-  <a class="dlback" href="{f'/guild/{guild.id}/dodoland/me' if player else f'/guild/{guild.id}/dodoland'}">&larr; {'Your town' if player else 'DodoLand'}</a>
-  <b>{_e(guild.name)}</b>
-  <span class="dlcount"><b id="dlplaced">{len(placed)}</b> on the map ·
-    <b id="dlwaiting">{len(unplaced)}</b> waiting ·
-    {len(data['people'])} with standing</span>
-  <span class="dlspacer"></span>
-  <button id="dllayers" class="dlghost">▤ Layers</button>
-  <button id="dlterr" class="dlghost">🗺 Terrain</button>
-  <button id="dlkit" class="dlghost"{' hidden' if player else ''}>🧰 Toolkit</button>
-  <button id="dltoggle" class="dlghost">Towns list</button>
+  <!-- The making tools on the left, side by side, beside the drawers they
+       open; the server's name in the middle; looking-around on the right. -->
+  <div class="dlbarside">
+    <button id="dlterr" class="dlghost">🗺 Terrain</button>
+    <button id="dlkit" class="dlghost"{' hidden' if player else ''}>🧰 Toolkit</button>
+  </div>
+  <b class="dltitle">{_e(guild.name)}</b>
+  <div class="dlbarside right">
+    <button id="dllayers" class="dlghost">▤ Layers</button>
+    <button id="dltoggle" class="dlghost">Towns list</button>
+  </div>
 </div>
 
 <div class="dllayerpanel" id="dllayerpanel" hidden>
@@ -456,6 +457,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlbar { position: fixed; inset: 0 0 auto 0; height: 52px; z-index: 30;
   display: flex; align-items: center; gap: 14px; padding: 0 16px;
   background: var(--bar); color: #f4e6cf; box-shadow: 0 2px 12px rgba(0,0,0,.4); }
+.dlbarside { display: flex; gap: 10px; flex: 1 1 0; min-width: 0; }
+.dlbarside.right { justify-content: flex-end; }
+.dltitle { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 17px; text-align: center; }
 .dlback { color: #f0c98a; text-decoration: none; }
 .dlback:hover { text-decoration: underline; }
 .dlcount { font-size: 13px; opacity: .8; }
@@ -1138,9 +1143,7 @@ _SCRIPT = r"""
     world.querySelectorAll('.dltown').forEach(function (n) { n.remove(); });
     nodes = {};
     levelOfDetail();
-    var on = D.people.filter(function (p) { return p.plot; }).length;
-    document.getElementById('dlplaced').textContent = on;
-    document.getElementById('dlwaiting').textContent = D.people.length - on;
+    // The counts left the top bar; nothing to update there any more.
   }
 
   // --- the town card ----------------------------------------------------- //

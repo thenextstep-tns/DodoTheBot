@@ -634,3 +634,7 @@ Placed list. **Landmark mode** (a switch in the toolkit, shown only to the bot
 owner and the server's owner): while on, everything placed with the pencil or
 the brush is a landmark from the moment it lands (`landmark: true` on place /
 place_many). Remembered per viewer.
+
+**Top bar** (11 Oct): Terrain and Toolkit on the left (beside the drawers they
+open), the server's name centred, Layers and Towns list on the right. The back
+link and the counts are gone.
