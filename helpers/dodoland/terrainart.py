@@ -152,34 +152,40 @@ def _land(kind: Optional[dict]) -> bool:
     return bool(kind) and not kind.get("water") and str(kind.get("key") or "") != "unknown"
 
 
-def edge_path(cells: list[int], kinds: list[dict], *, right: Optional[list[int]] = None,
-              below: Optional[list[int]] = None, size: int = T.CHUNK) -> str:
-    """Where two different kinds of land meet, as one path of cell edges.
+def blend_edges(cells: list[int], kinds: list[dict], *, right: Optional[list[int]] = None,
+                below: Optional[list[int]] = None, size: int = T.CHUNK) -> dict[int, str]:
+    """Where two different kinds of land meet, as cell edges grouped by the
+    kind that spills over the border: ``{kind index: path}``.
 
-    Inside the chunk, and across its right and bottom borders when those
-    neighbours are given, so a border running over a chunk line is drawn once
-    and unbroken. Water is left out: the coast has its own shading.
+    One kind per border spills into the other (the higher index), never both:
+    two textures laid over each other both ways cancel out. Inside the chunk,
+    and across its right and bottom borders when those neighbours are given, so
+    a border on a chunk line is blended once. Water is left out: the coast has
+    its own shading.
     """
-    def kind(value: int) -> Optional[dict]:
-        return kinds[value] if 0 <= value < len(kinds) else None
+    land = [_land(k) for k in kinds]
 
-    land = [_land(kind(v)) for v in range(len(kinds))]
+    def spill(a: int, b: int) -> Optional[int]:
+        if a == b or not (0 <= a < len(land) and 0 <= b < len(land)) or not (land[a] and land[b]):
+            return None
+        return max(a, b)
 
-    def differs(a: int, b: int) -> bool:
-        return a != b and 0 <= a < len(land) and 0 <= b < len(land) and land[a] and land[b]
-
-    horizontal: dict[int, list[int]] = {}   # y of the edge -> x of each cell edge
-    vertical: dict[int, list[int]] = {}
+    horizontal: dict[int, dict[int, list[int]]] = {}   # kind -> y of the edge -> xs
+    vertical: dict[int, dict[int, list[int]]] = {}
     for y in range(size):
         row = y * size
         for x in range(size):
             here = cells[row + x]
             east = cells[row + x + 1] if x + 1 < size else (right[row] if right else None)
             south = cells[row + size + x] if y + 1 < size else (below[x] if below else None)
-            if east is not None and differs(here, east):
-                vertical.setdefault(x + 1, []).append(y)
-            if south is not None and differs(here, south):
-                horizontal.setdefault(y + 1, []).append(x)
+            if east is not None:
+                kind = spill(here, east)
+                if kind is not None:
+                    vertical.setdefault(kind, {}).setdefault(x + 1, []).append(y)
+            if south is not None:
+                kind = spill(here, south)
+                if kind is not None:
+                    horizontal.setdefault(kind, {}).setdefault(y + 1, []).append(x)
 
     def runs(values: list[int]):
         values = sorted(values)
@@ -191,20 +197,62 @@ def edge_path(cells: list[int], kinds: list[dict], *, right: Optional[list[int]]
             prev = v
         yield start, prev - start + 1
 
+    out: dict[int, str] = {}
+    for kind in set(horizontal) | set(vertical):
+        parts = []
+        for y, xs in (horizontal.get(kind) or {}).items():
+            parts.extend(f"M{x} {y}h{n}" for x, n in runs(xs))
+        for x, ys in (vertical.get(kind) or {}).items():
+            parts.extend(f"M{x} {y}v{n}" for y, n in runs(ys))
+        out[kind] = "".join(parts)
+    return out
+
+
+def blend_svg(edges: dict[int, str], kinds: list[dict], *, width: float, steps: int,
+              strength: float = 0.9, colours: Optional[dict] = None,
+              offset: tuple[float, float] = (0.0, 0.0)) -> str:
+    """The cross-fade along those borders: the spilling kind's own texture laid
+    over its neighbour in ``steps`` nested strokes, ``width`` cells out at the
+    widest, so it fades from ``strength`` at the border to nothing.
+
+    The strokes' opacities are chosen so the cover rises in even steps (each
+    stroke adds the same share), and every stroke of a kind is one path, so
+    where its border turns a corner the overlap is painted once, not twice.
+    """
+    if not edges or width <= 0 or steps < 1 or strength <= 0:
+        return ""
+    colours = colours or palette_rules.PALETTE
+    steps = max(1, min(12, int(steps)))
+    strength = min(0.99, float(strength))
+    # Cover after the k widest strokes: strength * k / steps. Opacity of stroke
+    # k is what takes the cover from step k-1 to step k.
+    alphas, before = [], 0.0
+    for k in range(1, steps + 1):
+        after = strength * k / steps
+        alphas.append(1 - (1 - after) / (1 - before))
+        before = after
     out = []
-    for y, xs in horizontal.items():
-        out.extend(f"M{x} {y}h{n}" for x, n in runs(xs))
-    for x, ys in vertical.items():
-        out.extend(f"M{x} {y}v{n}" for y, n in runs(ys))
-    return "".join(out)
+    for kind_index in sorted(edges):
+        kind = kinds[kind_index] if 0 <= kind_index < len(kinds) else None
+        if not kind or not edges[kind_index]:
+            continue
+        paint = (f"url(#{pattern_id(str(kind.get('key') or ''))})" if kind.get("tile_id")
+                 else kind_fill(kind, colours))
+        for k, alpha in enumerate(alphas):
+            half = width * (steps - k) / steps
+            out.append(f'<path d="{edges[kind_index]}" fill="none" stroke="{paint}" '
+                       f'stroke-opacity="{alpha:.3g}" stroke-width="{half * 2:.3g}" '
+                       f'stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>')
+    body = "".join(out)
+    dx, dy = offset
+    return f'<g transform="translate({dx:g},{dy:g})">{body}</g>' if (dx or dy) and body else body
 
 
 def chunk_svg(cells: list[int], kinds: list[dict], *,
               colours: Optional[dict] = None, cell: float = 1.0,
               width: int = T.CHUNK, height: int = T.CHUNK,
               offset: tuple[float, float] = (0.0, 0.0),
-              textured: bool = False, edges: str = "",
-              edge_width: float = 0.0, edge_strength: float = 0.0) -> str:
+              textured: bool = False) -> str:
     """One chunk as SVG: a single ``<path>`` per kind of ground present.
 
     ``shape-rendering="crispEdges"`` is not decoration. Adjacent rectangles that
@@ -229,13 +277,6 @@ def chunk_svg(cells: list[int], kinds: list[dict], *,
                 else kind_fill(kind, colours))
         out.append(f'<path fill="{fill}" '
                    f'shape-rendering="crispEdges" d="{"".join(parts)}"/>')
-    # The shade where two grounds meet: a narrow dark line in a wider faint
-    # one, so it reads as a soft edge rather than a drawn outline.
-    if edges and edge_width > 0 and edge_strength > 0:
-        out.append(f'<path d="{edges}" fill="none" stroke="#000" stroke-opacity="{edge_strength / 2:.3g}" '
-                   f'stroke-width="{edge_width * 2:.3g}" pointer-events="none"/>'
-                   f'<path d="{edges}" fill="none" stroke="#000" stroke-opacity="{edge_strength:.3g}" '
-                   f'stroke-width="{edge_width:.3g}" pointer-events="none"/>')
     body = "".join(out)
     if dx or dy:
         return f'<g transform="translate({dx:g},{dy:g})">{body}</g>'

@@ -390,11 +390,12 @@ async def terrain_chunks(request: web.Request):
     if len(wanted) > 400:
         return _bad("Too many chunks at once; zoom in or ask for fewer.")
 
-    # The shade where two grounds meet, from the server's settings; part of
-    # the cache key, so changing it redraws what was drawn before.
-    edge_width = max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_edge_width")))
-    edge_strength = max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_edge_strength"))))
-    look = (round(edge_width, 3), round(edge_strength, 3))
+    # Where two grounds meet they fade into each other, as the server sets it;
+    # part of the cache key, so changing it redraws what was drawn before.
+    blend_width = max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width")))
+    blend_steps = max(1, int(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_steps")))
+    blend_strength = max(0.0, min(0.99, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_strength"))))
+    look = (round(blend_width, 3), blend_steps, round(blend_strength, 3))
     missing = [key for key in wanted
                if (guild.id, T.TERRAIN, key[0], key[1], look) not in _CACHE]
 
@@ -411,13 +412,19 @@ async def terrain_chunks(request: web.Request):
             for key in missing:
                 chunk = cells[key]
                 right, below = cells.get((key[0] + 1, key[1])), cells.get((key[0], key[1] + 1))
-                edges = terrainart.edge_path(
-                    chunk, world["kinds"], right=right,
-                    below=below[:T.CHUNK] if below else None) if edge_width > 0 and edge_strength > 0 else ""
-                out[key] = terrainart.chunk_svg(
-                    chunk, world["kinds"], colours=colours, textured=True,
-                    offset=(key[0] * T.CHUNK, key[1] * T.CHUNK),
-                    edges=edges, edge_width=edge_width, edge_strength=edge_strength)
+                offset = (key[0] * T.CHUNK, key[1] * T.CHUNK)
+                fill = terrainart.chunk_svg(chunk, world["kinds"], colours=colours,
+                                            textured=True, offset=offset)
+                blend = ""
+                if blend_width > 0 and blend_strength > 0:
+                    blend = terrainart.blend_svg(
+                        terrainart.blend_edges(chunk, world["kinds"], right=right,
+                                               below=below[:T.CHUNK] if below else None),
+                        world["kinds"], width=blend_width, steps=blend_steps,
+                        strength=blend_strength, colours=colours, offset=offset)
+                # Kept apart: every chunk's fill goes down before any blend,
+                # or a fade over a chunk line would vanish under the next fill.
+                out[key] = (fill, blend)
             return out
 
         drawn = await asyncio.get_running_loop().run_in_executor(None, draw)
@@ -426,8 +433,8 @@ async def terrain_chunks(request: web.Request):
         for key, svg in drawn.items():
             _CACHE[(guild.id, T.TERRAIN, key[0], key[1], look)] = svg
 
-    body = "".join(_CACHE.get((guild.id, T.TERRAIN, cx, cy, look), "")
-                   for cx, cy in wanted)
+    drawn = [_CACHE.get((guild.id, T.TERRAIN, cx, cy, look)) or ("", "") for cx, cy in wanted]
+    body = "".join(d[0] for d in drawn) + "".join(d[1] for d in drawn)
     return web.Response(text=body, content_type="image/svg+xml",
                         headers={"Cache-Control": "private, max-age=600"})
 

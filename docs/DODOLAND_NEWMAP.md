@@ -820,3 +820,15 @@ halo twice as wide at half strength. Vector, so thin at any zoom (the coast
 shade is a 1px-per-cell picture). Both settings are in the chunk cache key;
 `invalidate` also drops the left and upper neighbours of a painted chunk.
 0.8 ms per chunk on the live map.
+* **Replaced the same day** (Nik: "it should blend one into another, not be a
+  hard boundary"): no line any more. `terrainart.blend_edges` groups the border
+  edges by the kind that spills (the higher index — never both ways, two
+  textures crossed both ways cancel out); `blend_svg` lays that kind's own
+  pattern over its neighbour in `dodoland_tile_blend_steps` (8) nested strokes
+  out to `dodoland_tile_blend_width` (1.2 cells), opacities chosen so cover
+  rises in even steps to `dodoland_tile_blend_strength` (0.9) at the border.
+  One path per kind, so corners are not painted twice. The chunks endpoint now
+  sends every chunk's fill first and every blend after, so a fade over a chunk
+  line is not buried under the next chunk. Checked by rendering real tiles in
+  headless Chrome: 1.0-1.5 cells rounds the cell staircase into a slope.
+  `dodoland_tile_edge_*` are gone.
