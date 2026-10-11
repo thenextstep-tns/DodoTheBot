@@ -28,14 +28,17 @@ _CELLS: dict[int, dict[str, set]] = {}
 _TTL = 300
 
 
-def _blocked(bot, guild_id: int, cells_w: int, cells_h: int, flag: str = "spreads") -> set:
+def _blocked(bot, guild_id: int, cells_w: int, cells_h: int, flag: str = "spreads",
+             landmarks: bool = False) -> set:
     """Cells under placed features whose tile says no to ``flag`` — for a
     town's area ``spreads`` (a mountain range, a pond), for a road ``passable``
     (those, and every building: a road goes round a house). Their footprint is
     the lower part of the drawing, where it stands on the ground."""
     tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
+    # ``landmarks``: the ground under every landmark instead, whatever its tile.
     pieces = [p for p in bot.dodoland_decor.world(guild_id)
-              if (tiles.get(p["asset_id"]) or {}).get(flag) is False]
+              if (p.get("locked") if landmarks else (tiles.get(p["asset_id"]) or {}).get(flag) is False)
+              and p["asset_id"] in tiles]
     sizes = bot.dodoland_tiles.art_sizes(
         p.get("variant") or tiles[p["asset_id"]]["variants"][0] for p in pieces
         if tiles[p["asset_id"]]["variants"])

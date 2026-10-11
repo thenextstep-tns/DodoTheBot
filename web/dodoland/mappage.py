@@ -208,6 +208,7 @@ def _collect(bot, guild) -> dict:
                        # Who placed it, for the toolkit's Placed list.
                        "by": str(d.get("by") or ""), "bn": str(d.get("by_name") or ""),
                        "t": str(d.get("town") or ""),
+                       "k": bool(d.get("locked")),
                        "at": int(d.get("at") or 0)} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
@@ -262,7 +263,12 @@ async def map_page(request: web.Request):
     player = bool(request.get("player"))
     base = request.get("dl_base") or f"/guild/{guild.id}/dodoland"
     api = (f"/api/guild/{guild.id}/dodoland/me" if player else f"/api/guild/{guild.id}/dodoland")
-    endpoints = {"base": base, "player": player,
+    # Landmark mode is the map's own setting-up tool: for the bot owner and the
+    # server's owner, nobody else sees it.
+    from helpers import panel_access
+    landmark_mode = (not player) and (request.get("scope") == panel_access.SCOPE_OWNER or
+                                      str(getattr(guild, "owner_id", "") or "") == viewer)
+    endpoints = {"base": base, "player": player, "landmark_mode": landmark_mode,
                  "paint": api + "/terrain/paint", "undo": api + "/terrain/undo",
                  "decor": api + ("/build" if player else "/decor"),
                  "town": api + "/town", "settle": "" if player else api + "/settle"}
@@ -391,6 +397,8 @@ async def map_page(request: web.Request):
     <button class="dlghost" id="dlkitclose">&times;</button>
   </div>
   <div class="dlseg dlkittabs"><button data-tab="lib" class="on">Library</button><button data-tab="placed">Placed</button></div>
+  <label class="dllandmode" id="dllandmode" hidden title="Everything you place while this is on is a landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it">
+    <input type="checkbox" id="dllandmodebox"> &#128274; Landmark mode <span>— everything I place stays put</span></label>
   <div class="dlkitpane" id="dlkitlib">
     <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
@@ -416,6 +424,7 @@ async def map_page(request: web.Request):
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
       step="0.05" value="1"></label>
     <button class="dlghost" id="dlkitflip">Mirror</button>
+    <button class="dlghost" id="dlkitlock" title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it">&#128274; Landmark</button>
     <button class="dlghost" id="dlkitdel">Remove</button>
   </div>
   <p class="dlkitmsg" id="dlkitmsg"></p>
@@ -645,6 +654,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border: 1.5px solid var(--lantern); border-radius: 3px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
 .dlmark.hover { border: 1px dashed rgba(240, 166, 79, .85); box-shadow: none; }
+/* A landmark's box: steady blue, with a lock. */
+.dlmark.locked { border-color: #7fb2ff; }
+.dlmark.locked::after { content: "🔒"; position: absolute; top: -18px; left: 50%;
+  transform: translateX(-50%); font-size: 12px; }
 /* Where the armed piece will land, at the size it will land at. */
 .dlpiece.ghost { opacity: .6; pointer-events: none; display: none; z-index: 19; }
 .dlframe.placing .dlpiece.ghost.live { display: block; }
@@ -762,6 +775,11 @@ body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; borde
 .dlzsep { display: block; height: 1px; margin: 4px 6px; background: var(--edge); }
 .dlzoom button svg { display: block; margin: auto; }
 .dlkittabs { margin: 10px 14px 0; }
+.dllandmode { display: flex; align-items: center; gap: 6px; margin: 8px 14px 0; padding: 6px 10px;
+  border: 1px dashed var(--edge); border-radius: 8px; font-size: 12px; cursor: pointer; }
+.dllandmode span { color: var(--soft); }
+.dllandmode.on { border-style: solid; border-color: #7fb2ff; background: rgba(127, 178, 255, .1); }
+.dllandmode[hidden] { display: none; }
 .dlkitpane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .dlkitpane[hidden] { display: none; }
 .dlbrushopts { padding: 4px 14px 8px; display: grid; gap: 6px; font-size: 12px; color: var(--soft); }
@@ -1797,7 +1815,11 @@ _SCRIPT = r"""
       frame.appendChild(m);
       markPool.push(m);
     }
-    markPool.forEach(function (m, i) { markAt(m, i < ids.length ? pieces[ids[i]] : null); });
+    markPool.forEach(function (m, i) {
+      markAt(m, i < ids.length ? pieces[ids[i]] : null);
+      var p = i < ids.length && pieceById(ids[i]);
+      m.classList.toggle('locked', !!(p && p.k));
+    });
     markAt(hoverMark, hovered && !sel[hovered] && !frame.classList.contains('placing') && pieces[hovered]);
   }
 
@@ -1963,14 +1985,15 @@ _SCRIPT = r"""
 
   function placeDecor(point) {
     decorPost({action: 'place', asset_id: armedAsset, x: point.x, y: point.y,
-               scale: parseFloat(kitScale.value) || 1, town: building || ''},
+               scale: parseFloat(kitScale.value) || 1, town: building || '',
+               landmark: !building && landmarkMode},
       function (res) {
         D.world.push({id: res.piece.piece_id, a: res.piece.asset_id, v: res.piece.variant || '',
                       l: res.piece.layer || 'objects',
                       x: res.piece.x, y: res.piece.y, s: res.piece.scale,
                       f: !!res.piece.flip, by: String(res.piece.by || ''),
                       bn: res.piece.by_name || '', at: res.piece.at || 0,
-                      t: res.piece.town || ''});
+                      t: res.piece.town || '', k: !!res.piece.locked});
         redrawDecor();
         if (building) {
           // One of each: once it stands, the pencil is put down and the card
@@ -2020,6 +2043,10 @@ _SCRIPT = r"""
   function removeSelection() {
     var ids = selIds();
     if (!ids.length) { kitSay('Select a placed piece first.', true); return; }
+    if (selectedPieces().some(function (p) { return p.k; })) {
+      kitSay('That is a landmark. Unlock it first to remove it.', true);
+      return;
+    }
     decorPost({action: 'remove_many', piece_ids: ids}, function (res) {
       D.world = D.world.filter(function (q) { return !sel[q.id]; });
       sel = {};
@@ -2028,6 +2055,36 @@ _SCRIPT = r"""
     });
   }
   document.getElementById('dlkitdel').onclick = removeSelection;
+  // Landmark mode: only offered to the bot owner and the server's owner; while
+  // on, everything they place is a landmark from the moment it lands.
+  var landmarkMode = false;
+  (function () {
+    var row = document.getElementById('dllandmode'), box = document.getElementById('dllandmodebox');
+    if (!D.ep.landmark_mode || !row) return;
+    row.hidden = false;
+    try { landmarkMode = window.localStorage.getItem('dl-landmark-mode') === '1'; } catch (e) {}
+    box.checked = landmarkMode;
+    row.classList.toggle('on', landmarkMode);
+    box.onchange = function () {
+      landmarkMode = box.checked;
+      row.classList.toggle('on', landmarkMode);
+      try { window.localStorage.setItem('dl-landmark-mode', landmarkMode ? '1' : '0'); } catch (e) {}
+      kitSay(landmarkMode ? 'Landmark mode: what you place now stays put.' : 'Landmark mode off.');
+    };
+  })();
+  // Landmarks: the selection locked, or unlocked if all of it already is.
+  document.getElementById('dlkitlock').onclick = function () {
+    var chosen = selectedPieces();
+    if (!chosen.length) { kitSay('Select a placed piece first.', true); return; }
+    var lock = !chosen.every(function (p) { return p.k; });
+    decorPost({action: lock ? 'lock' : 'unlock', piece_ids: chosen.map(function (p) { return p.id; })},
+      function () {
+        chosen.forEach(function (p) { p.k = lock; });
+        redrawDecor(); selChanged();
+        kitSay(lock ? (chosen.length === 1 ? 'Now a landmark.' : chosen.length + ' landmarks.')
+                    : (chosen.length === 1 ? 'No longer a landmark.' : chosen.length + ' unlocked.'));
+      });
+  };
   function closeKit() {
     kitDrawer.classList.remove('open');
     armedAsset = null; mix = [];
@@ -2202,6 +2259,10 @@ _SCRIPT = r"""
   }
   // Everything selected moves together, by the pointer's travel in map units.
   function dragSelection(ev, el) {
+    if (selectedPieces().some(function (p) { return p.k; })) {
+      kitSay('That is a landmark. Unlock it first to move it.', true);
+      return;
+    }
     var start = {x: ev.clientX, y: ev.clientY}, travelled = 0;
     var group = selectedPieces().map(function (p) { return {p: p, x: p.x, y: p.y}; });
     try { el.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -2435,11 +2496,12 @@ _SCRIPT = r"""
         kitSay('Placed ' + placed + '.');
         return;
       }
-      decorPost({action: 'place_many', items: batch}, function (res) {
+      decorPost({action: 'place_many', items: batch, landmark: landmarkMode}, function (res) {
         res.pieces.forEach(function (row) {
           D.world.push({id: row.piece_id, a: row.asset_id, v: row.variant || '', l: row.layer || 'objects',
                         x: row.x, y: row.y, s: row.scale, f: !!row.flip,
-                        by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0});
+                        by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0,
+                        k: !!row.locked});
         });
         placed += res.pieces.length;
         next();
@@ -2480,7 +2542,7 @@ _SCRIPT = r"""
       var who = mine ? '' : ' · ' + escapeHtml(p.bn || (p.by ? 'someone' : 'from before names were kept'));
       return '<div class="dlplaced' + (sel[p.id] ? ' on' : '') + (a && a.px ? ' px' : '') + '" data-id="' + p.id + '">' +
         '<img alt="" loading="lazy" src="' + assetUrl(p.a) + '">' +
-        '<div>' + escapeHtml(a ? a.name : 'A removed tile') +
+        '<div>' + (p.k ? '&#128274; ' : '') + escapeHtml(a ? a.name : 'A removed tile') +
         '<small>' + Math.round(p.x / 100 * D.cells_w) + ', ' + Math.round(p.y / 100 * cellsH()) +
         ' · ' + escapeHtml(p.l || 'objects') + who + '</small></div>' +
         '<button data-del="' + p.id + '" title="Remove it">×</button></div>';
@@ -2642,7 +2704,8 @@ _SCRIPT = r"""
     var scale = 1 / (LIFE.units_per_cell || 3.4);           // town-art units to cells
     var keep = [{x: hx, y: hy - 3, r: 7}];                   // the hall and its steps
     D.world.forEach(function (q) {
-      if (q.t !== String(p.id)) return;
+      // Clear of its own buildings, and of every landmark.
+      if (q.t !== String(p.id) && !q.k) return;
       var a = assetById(q.a), w = ((a && a.wc) || 8) * (q.s || 1);
       keep.push({x: q.x / 100 * cw, y: q.y / 100 * ch - w * 0.2, r: w * 0.45});
     });

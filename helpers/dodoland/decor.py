@@ -141,7 +141,8 @@ class DecorStore:
               allowed: Optional[set] = None,
               scale_range: tuple = (MIN_SCALE, MAX_SCALE),
               variant: str = "", source: str = "", layer: str = "objects",
-              placed_by: int = 0, placed_by_name: str = "", town: str = "") -> dict:
+              placed_by: int = 0, placed_by_name: str = "", town: str = "",
+              locked: bool = False) -> dict:
         """Put one thing down, and return the row that was written.
 
         ``scale_range`` is what the tile may be sized to — ``(1, 1)`` for a
@@ -177,11 +178,13 @@ class DecorStore:
         if town:
             # Which town it was built for, if it was: the town's own buildings.
             row["town"] = str(town)[:24]
+        if locked:
+            row["locked"] = True   # placed in landmark mode
         self._col.insert_one(dict(row))
         return row
 
     def place_many(self, guild_id: int, items: list[dict], *, placed_by: int = 0,
-                   placed_by_name: str = "") -> list[dict]:
+                   placed_by_name: str = "", locked: bool = False) -> list[dict]:
         """Many world pieces in one write — a brush stroke.
 
         Each item is ``{asset_id, x, y, scale, flip, variant, layer,
@@ -202,6 +205,9 @@ class DecorStore:
                           variant=item.get("variant") or "", layer=item.get("layer") or "objects",
                           placed_by=placed_by, placed_by_name=placed_by_name)
                 for item in items]
+        if locked:
+            for row in rows:
+                row["locked"] = True
         self._col.insert_many([dict(row) for row in rows])
         return rows
 
@@ -282,6 +288,29 @@ class DecorStore:
             query.update({"scope": SCOPE_TOWN, "owner_id": int(owner_id)})
         result = self._col.update_one(query, {"$set": changes})
         return bool(getattr(result, "modified_count", 0))
+
+    def set_landmark(self, guild_id: int, piece_ids: list, locked: bool) -> int:
+        """Make world pieces landmarks, or ordinary pieces again.
+
+        A landmark is the map as its admins set it up: nobody moves or removes
+        it (an admin unlocks it first), no town carries it off when it moves,
+        and no member paints the ground under it.
+        """
+        self._ensure_indexes()
+        ids = [str(p) for p in piece_ids or []][:2000]
+        if not ids:
+            return 0
+        result = self._col.update_many({"guild_id": int(guild_id), "scope": SCOPE_WORLD,
+                                        "piece_id": {"$in": ids}}, {"$set": {"locked": bool(locked)}})
+        return int(getattr(result, "modified_count", 0))
+
+    def landmarks(self, guild_id: int, piece_ids) -> set:
+        """Which of these pieces are landmarks."""
+        ids = [str(p) for p in piece_ids or []]
+        if not ids:
+            return set()
+        return {row["piece_id"] for row in self._col.find(
+            {"guild_id": int(guild_id), "piece_id": {"$in": ids}, "locked": True}, {"piece_id": 1})}
 
     def remove_town_buildings(self, guild_id: int, town_id) -> int:
         """Every piece built for one town, gone: what Remove Town takes with it."""

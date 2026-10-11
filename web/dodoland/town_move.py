@@ -71,6 +71,8 @@ def carried(pieces, uid: int, in_old_area) -> list:
     """
     out = []
     for piece in pieces:
+        if piece.get("locked"):
+            continue   # a landmark belongs to the map, not to any town
         built_here = str(piece.get("town") or "") == str(uid)
         theirs = int(piece.get("by") or 0) == int(uid) and in_old_area(piece)
         if built_here or theirs:

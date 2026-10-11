@@ -184,6 +184,16 @@ class FakeCollection:
             return type("Result", (), {"modified_count": 1})()
         return type("Result", (), {"modified_count": 0})()
 
+    def update_many(self, query: dict, update: dict, upsert: bool = False):
+        n = 0
+        for doc in self.docs:
+            if _matches(doc, query or {}):
+                self._apply(doc, update)
+                n += 1
+        if not n and upsert:
+            return self.update_one(query, update, upsert=True)
+        return type("Result", (), {"modified_count": n})()
+
     def find_one_and_update(self, query: dict, update: dict, return_document=True,
                             upsert: bool = False):
         for doc in self.docs:

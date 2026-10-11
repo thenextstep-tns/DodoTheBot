@@ -86,6 +86,19 @@ async def api_world_decor(request: web.Request):
     member = guild.get_member(who) if who and hasattr(guild, "get_member") else None
     who_name = (getattr(member, "display_name", "") or "") if member else ""
     try:
+        if action in ("lock", "unlock"):
+            n = bot.dodoland_decor.set_landmark(guild.id, body.get("piece_ids") or [], action == "lock")
+            await _record_change(request, "dodoland_decor", "world", "", action,
+                                 f"DodoLand landmark {action}ed ({n})")
+            return web.json_response({"ok": True, "changed": n})
+
+        # A landmark stays where it is until an admin unlocks it.
+        touched = ([body.get("piece_id")] if action in ("move", "remove") else
+                   [m.get("piece_id") for m in (body.get("moves") or []) if m] if action == "move_many" else
+                   (body.get("piece_ids") or []) if action == "remove_many" else [])
+        if touched and bot.dodoland_decor.landmarks(guild.id, touched):
+            return _bad("That is a landmark. Unlock it first to move or remove it.")
+
         if action == "place_many":
             # A brush stroke: many pieces of a few tiles, checked once per tile
             # and written in one go.
@@ -107,7 +120,8 @@ async def api_world_decor(request: web.Request):
                               "variant": tile["variants"][0] if tile["variants"] else "",
                               "layer": tile["layer"]})
             rows = bot.dodoland_decor.place_many(guild.id, items, placed_by=who,
-                                                 placed_by_name=who_name)
+                                                 placed_by_name=who_name,
+                                                 locked=bool(body.get("landmark")))
             await _record_change(request, "dodoland_decor", "world", "", "placed",
                                  f"DodoLand map decor placed ({len(rows)})")
             return web.json_response({"ok": True, "pieces": rows})
@@ -182,7 +196,8 @@ async def api_world_decor(request: web.Request):
             # own tile, and this keeps a stamp that gains a variant from
             # turning into a lucky dip again.
             variant=tile["variants"][0] if tile["variants"] else "",
-            layer=tile["layer"], placed_by=who, placed_by_name=who_name, town=town)
+            layer=tile["layer"], placed_by=who, placed_by_name=who_name, town=town,
+            locked=bool(body.get("landmark")))
         await _record_change(request, "dodoland_decor", "world", "", "placed",
                              "DodoLand map decor placed")
         return web.json_response({"ok": True, "piece": piece})

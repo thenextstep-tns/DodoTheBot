@@ -615,3 +615,22 @@ cursor outline follows the shape. For roads and anything with straight edges.
   An admin's or another member's piece inside that area stays put, whoever is
   doing the moving. Tested (`test_dodoland_settle`) and checked on a copy of the
   live data.
+
+### Landmarks and Landmark mode (11 Oct)
+
+A **landmark** is a world piece with `locked: true` — the map as its admins set
+it up:
+* nobody moves or removes it: the admin decor endpoint refuses move/remove of a
+  locked piece ("Unlock it first"), the page refuses to drag or delete it, and
+  the member build endpoint never touches one, even one built for their town;
+* no moving town carries it (`town_move.carried` skips locked pieces, even the
+  owner's own);
+* members cannot paint the ground under it (`player_map.paint` subtracts the
+  landmarks' footprints, `influence_api._blocked(landmarks=True)`);
+* generated houses keep clear of it.
+Admins lock / unlock the selection with **🔒 Landmark** in the toolkit
+(`action: lock|unlock`); landmarks show a blue box with a lock, and 🔒 in the
+Placed list. **Landmark mode** (a switch in the toolkit, shown only to the bot
+owner and the server's owner): while on, everything placed with the pencil or
+the brush is a landmark from the moment it lands (`landmark: true` on place /
+place_many). Remembered per viewer.

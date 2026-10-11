@@ -66,8 +66,15 @@ async def paint(request: web.Request):
     area = await asyncio.get_running_loop().run_in_executor(None, _area, bot, guild, uid)
     if not area:
         return web.json_response({"ok": False, "error": "Your town is not on the map yet."}, status=400)
+    from web.dodoland import influence_api
+
+    world = bot.dodoland_terrain.world(guild.id)
+    held = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: influence_api._blocked(bot, guild.id, world["cells_w"], world["cells_h"],
+                                             landmarks=True))
     request["player"] = True
-    request["paint_filter"] = area.__contains__
+    # Their area, less the ground landmarks stand on.
+    request["paint_filter"] = lambda cell: cell in area and cell not in held
     return await terrain_api.api_terrain_paint(request)
 
 
@@ -105,7 +112,9 @@ async def build(request: web.Request):
 
     def own(piece_id) -> dict:
         row = bot.dodoland_decor.piece(guild.id, str(piece_id or ""))
-        return row if row and str(row.get("town") or "") == mine else None
+        # Their own town's, and never a landmark, even one built for them.
+        ok = row and str(row.get("town") or "") == mine and not row.get("locked")
+        return row if ok else None
 
     try:
         if action in ("move", "move_many"):

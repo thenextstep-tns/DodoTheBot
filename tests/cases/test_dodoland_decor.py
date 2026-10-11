@@ -212,4 +212,16 @@ assert gone == 3, "remove_many reached past the world into a town"
 assert len(owned.world(9)) == 3 and len(owned.town(9, 5)) == 1
 print("owned           pieces remember who placed them; a stroke is one write; removal stays in the world")
 
+# Landmarks: placed as one, or made one later; found by id; unlocked again.
+marks = DecorStore(FakeCollection())
+fixed = marks.place(9, scope="world", asset_id="statue", x=50, y=50, placed_by=1, locked=True)
+plain = marks.place(9, scope="world", asset_id="tree", x=51, y=50, placed_by=1)
+assert fixed.get("locked") is True and "locked" not in plain
+assert marks.landmarks(9, [fixed["piece_id"], plain["piece_id"]]) == {fixed["piece_id"]}
+assert marks.set_landmark(9, [plain["piece_id"]], True) == 1
+assert marks.landmarks(9, [plain["piece_id"]]) == {plain["piece_id"]}
+marks.set_landmark(9, [fixed["piece_id"], plain["piece_id"]], False)
+assert marks.landmarks(9, [fixed["piece_id"], plain["piece_id"]]) == set()
+print("landmarks       placed locked or locked later, and unlocked again")
+
 print("PASS")
