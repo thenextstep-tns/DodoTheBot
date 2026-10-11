@@ -396,7 +396,8 @@ class DodoLand(commands.Cog, name="dodoland"):
                     continue
                 terrain_api.picture_bytes(self.bot, guild.id)
                 influence_api.warm(self.bot, guild)
-                roads_api.current(self.bot, guild)
+                if self.bot.dodoland_params.get(guild.id, "dodoland_roads_on"):
+                    roads_api.current(self.bot, guild)
             except Exception as error:  # noqa: BLE001 - warming is a courtesy, not a duty
                 self.bot.logger.error(f"DodoLand could not warm the map of {guild.id}: {error}")
 

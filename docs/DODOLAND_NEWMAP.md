@@ -445,3 +445,28 @@ because the edit layer had been left on *Buildings* (by Build-in-this-town),
 and every other layer was `pointer-events: none`. Now any visible piece can be
 selected (selecting one moves editing to its layer), and a click picks the
 nearest piece within 10 screen px — zoomed out, a flower is a pixel.
+
+### Nik's round of 11 Oct (morning)
+
+1. **Map cleared to land and water** for hand drawing: every land kind other
+   than Meadow grass (fields, dunes, forest, swamp, hills, mountains) repainted
+   Meadow grass (521,768 cells in 413 chunks), and all placed pieces removed (4).
+   Backup in the scratchpad `backup_before_flatten.json` (world, chunks, decor).
+2. **Ground's Edit opens the Terrain drawer** (Ground is painted, not placed).
+   The "bushes on the ground" were four placed objects, now removed; the
+   Meadow grass tile itself is clean.
+3. **Buildings only from a town's card.** The toolkit never offers buildings
+   (Buildings layer edit disabled; a saved edit layer of buildings falls back to
+   objects). Each earned building's row in the card has ✎ (rename in place,
+   saved through `building_names`) and **Build** — the current tier of that
+   town's building, no choice of tier; once placed it says **Built** and finds
+   it. Clicking a placed building opens its town's card. Clicking inside the
+   open town's own area no longer closes it (`inOpenArea`: the area's fill
+   path, `isPointInFill`); only clicking outside does.
+4. **Roads off**: `dodoland_roads_on` defaults to False and is not warmed.
+5. **The stretching, found on Nik's machine**: the world was laid out at the
+   reference image's 958 px and zoomed up to 50x, so a 0.8 px tree had its
+   edges rounded to whole layout pixels (0 or 1 px) before the zoom. The world
+   is now laid out `WS = 16` times larger and zoomed 16 times less (`kMin/kMax`,
+   `--ws` for the few fixed sizes inside it: the town dot), so pieces and halls
+   are many layout pixels and the rounding is invisible.

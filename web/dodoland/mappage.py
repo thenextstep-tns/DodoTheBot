@@ -457,21 +457,24 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* In flow, not absolute: when a town is a dot this is its only visible child,
    and an absolutely positioned one left the town with no height and therefore
    nothing to click. A dot you cannot open is not a town on a map. */
-.dldot { display: none; width: 11px; height: 11px; border-radius: 50%;
-  margin: 0 auto; background: #f0c98a; border: 2px solid #4a3524;
-  box-shadow: 0 1px 3px rgba(0,0,0,.5); }
-.dltown.tiny { min-width: 14px; }
+/* Sizes inside the world are in world pixels, which are --ws to a pixel of
+   the reference image. */
+.dldot { display: none; width: calc(11px * var(--ws, 1)); height: calc(11px * var(--ws, 1));
+  border-radius: 50%; margin: 0 auto; background: #f0c98a;
+  border: calc(2px * var(--ws, 1)) solid #4a3524;
+  box-shadow: 0 calc(1px * var(--ws, 1)) calc(3px * var(--ws, 1)) rgba(0,0,0,.5); }
+.dltown.tiny { min-width: calc(14px * var(--ws, 1)); }
 .dltown.dim { opacity: .5; }
 /* A filter on anything inside the scaled world rasterises it, so the selected
    town is marked with an outline on its ground plate rather than a glow. Same
    reason will-change is banned above: keep the vectors vectors. */
 .dltown.on .dlart { outline: none; }
 .dltown.on ellipse:first-of-type { stroke: var(--lantern); stroke-width: 3; }
-.dltown.on .dldot { box-shadow: 0 0 0 3px var(--lantern); }
+.dltown.on .dldot { box-shadow: 0 0 0 calc(3px * var(--ws, 1)) var(--lantern); }
 /* The name is drawn at a constant screen size, because a label that shrinks
    with the map stops being a label. It is the one thing here that is
    counter-scaled, and only ever the text. */
-.dlname { position: absolute; left: 50%; top: 100%; margin-top: 4px;
+.dlname { position: absolute; left: 50%; top: 100%; margin-top: calc(4px * var(--inv, 1));
   transform: translateX(-50%) scale(var(--inv, 1)); transform-origin: top center;
   padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
   color: #fff6e4; background: rgba(20,14,8,.82); white-space: nowrap;
@@ -659,6 +662,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlkitmsg { margin: 0; padding: 0 14px 12px; font-size: 12px; color: var(--soft); }
 .dlkitmsg.bad { color: #c0392b; font-weight: 600; }
 .dlbuild { margin-top: 12px; border-top: 1px solid var(--edge); padding-top: 10px; }
+.dlcard .btop { display: flex; align-items: center; gap: 6px; }
+.dlcard .btop .bpts { margin-left: auto; opacity: .7; }
+.dlcard .btop button { flex: 0 0 auto; padding: 2px 8px; font-size: 12px; border-radius: 6px; }
+.dlcard .btop .bico { padding: 2px 5px; background: none; border-color: transparent; opacity: .55; }
+.dlcard .btop .bico:hover { opacity: 1; border-color: var(--edge); }
+.dlcard .btop .bbuild { background: var(--lantern); border-color: var(--lantern); color: #fff; }
+.dlcard .btop .bbuild.built { background: none; color: var(--soft); border-color: var(--edge); }
+.dlcard .brename { flex: 1 1 auto; min-width: 0; font: inherit; padding: 2px 6px; }
 .dlbuildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
   margin: 8px 0; max-height: 210px; overflow-y: auto; }
 .dlbuildtile { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px;
@@ -748,6 +759,16 @@ _SCRIPT = r"""
   setTimeout(liftLoading, 20000);
 
   var view = {x: 0, y: 0, k: 1}, nat = {w: 0, h: 0};
+  // The world is laid out WS times larger than the reference image and zoomed
+  // WS times less, which looks the same. It is not cosmetic: the browser
+  // rounds a box's edges to whole layout pixels before the zoom is applied,
+  // and at 958 px across a tree was 0.8 px wide — rounded to 0 or 1 depending
+  // on where it stood, then magnified fifty times. That was the stretching.
+  // Laid out large, a tree is a dozen pixels and the rounding cannot be seen.
+  var WS = 16;
+  world.style.setProperty('--ws', WS);
+  function kMin() { return D.sizes.min_zoom / WS; }
+  function kMax() { return D.sizes.max_zoom / WS; }
   function apply() {
     world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.k + ')';
     // Towns live in map space but are drawn at screen size, so each is scaled
@@ -772,7 +793,7 @@ _SCRIPT = r"""
   function fit() {
     if (!nat.w || !nat.h) return;
     // Re-read: a resize or a replaced image can change these underneath us.
-    if (base && base.naturalWidth) { nat.w = base.naturalWidth; nat.h = base.naturalHeight; }
+    if (base && base.naturalWidth) { nat.w = base.naturalWidth * WS; nat.h = base.naturalHeight * WS; }
     // Measured after layout: called too early the frame has no height yet and
     // the map ends up stranded in the middle of a black screen, which is what
     // it did. A little air so the coastline is not flush against the edges.
@@ -780,12 +801,12 @@ _SCRIPT = r"""
     if (!fw || !fh) { requestAnimationFrame(fit); return; }
     var pad = 24;
     view.k = Math.min((fw - pad * 2) / nat.w, (fh - pad * 2) / nat.h);
-    view.k = Math.min(D.sizes.max_zoom, Math.max(D.sizes.min_zoom, view.k));
+    view.k = Math.min(kMax(), Math.max(kMin(), view.k));
     clamp();
     apply();
   }
   function zoom(f, cx, cy) {
-    var n = Math.min(D.sizes.max_zoom, Math.max(D.sizes.min_zoom, view.k * f));
+    var n = Math.min(kMax(), Math.max(kMin(), view.k * f));
     if (n === view.k) return;
     view.x = cx - (cx - view.x) * (n / view.k);
     view.y = cy - (cy - view.y) * (n / view.k);
@@ -796,8 +817,8 @@ _SCRIPT = r"""
     // An SVG with no intrinsic size reports 0, so fall back to what it actually
     // laid out at rather than to a number that makes fit() meaningless.
     var box = base.getBoundingClientRect();
-    nat.w = base.naturalWidth || Math.round(box.width) || frame.clientWidth;
-    nat.h = base.naturalHeight || Math.round(box.height) || frame.clientHeight;
+    nat.w = (base.naturalWidth || Math.round(box.width) || frame.clientWidth) * WS;
+    nat.h = (base.naturalHeight || Math.round(box.height) || frame.clientHeight) * WS;
     // Width only: the image carries its own aspect, and pinning a height too
     // means any disagreement between the two shows as the world drifting away
     // from the coastline drawn on it.
@@ -1004,12 +1025,20 @@ _SCRIPT = r"""
       var rooms = (b.rooms && b.rooms.length)
         ? b.rooms.map(escapeHtml).join(' ')
         : 'No rooms are attached to it yet.';
+      // On the building's own row: rename it, and build it — at the tier
+      // this town has reached, which is the only tier it can be built at.
+      var tile = p.plot ? currentTile(p, b.key) : null;
+      var placed = tile && townPiece(p, b.key);
       return '<li class="bline' + (on ? ' focus' : '') + '"' +
         ' data-key="' + escapeHtml(b.key) + '">' +
-        '<div class="btop"><span>' + escapeHtml(b.name) + ' — <b>' +
+        '<div class="btop"><span class="bnm">' + escapeHtml(b.name) + ' — <b>' +
         escapeHtml(b.title) + '</b></span>' +
-        '<span style="margin-left:auto;opacity:.7">' + b.points.toLocaleString() +
-        '</span></div>' +
+        '<button class="bico" data-rename="' + escapeHtml(b.key) + '" title="Rename it">&#9998;</button>' +
+        '<span class="bpts">' + b.points.toLocaleString() + '</span>' +
+        (tile ? '<button class="bbuild' + (placed ? ' built' : '') + '" data-build="' + escapeHtml(b.key) + '" title="' +
+          (placed ? 'Built — show it on the map' : 'Put it on the map, inside this town') + '">' +
+          (placed ? 'Built' : 'Build') + '</button>' : '') +
+        '</div>' +
         (on ? '<div class="brooms">Built by ' + rooms + '</div>' : '') +
         '</li>';
     }).join('') || '<li style="opacity:.7">Nothing built yet.</li>';
@@ -1042,7 +1071,7 @@ _SCRIPT = r"""
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
-      (p.plot ? buildSection(p) : '') +
+      (p.plot ? wallSection(p) : '') +
       '<div class="acts">' +
         (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
@@ -1069,6 +1098,7 @@ _SCRIPT = r"""
       b.onclick = function () {
         var act = b.dataset.act;
         if (b.dataset.build) { buildFor(p, b.dataset.build); return; }
+        if (b.dataset.rename) { renameBuilding(p, b.dataset.rename, b); return; }
         if (b.dataset.walls !== undefined) { setWalls(p, b.dataset.walls); return; }
         if (act === 'close') { closeCard(); }
         else if (act === 'move') { arm(id); closeCard(); }
@@ -1145,14 +1175,8 @@ _SCRIPT = r"""
     for (var i = 0; i < p.built.length; i++) if (p.built[i].key === key) return p.built[i].tier;
     return 0;
   }
-  // What a town may build: each building it has earned, at the tier it has
-  // reached in it — not the tiers below. A town's buildings show where it is,
-  // and an old tier of something it has outgrown says nothing true.
-  function buildable(p) {
-    return D.assets.filter(function (a) {
-      return a.layer === 'buildings' && a.building && a.tier && townTier(p, a.building) === a.tier;
-    });
-  }
+  // A town builds each building it has earned at the tier it has reached in
+  // it — never the tiers below: its buildings show where it is.
   // The tile showing `building` at the tier town `p` has reached now.
   function currentTile(p, building) {
     var tier = townTier(p, building);
@@ -1170,26 +1194,53 @@ _SCRIPT = r"""
     }
     return null;
   }
-  function buildSection(p) {
-    var tiles = buildable(p);
-    var cards = tiles.slice(0, 60).map(function (a) {
-      var placed = townPiece(p, a.building);
-      return '<button class="dlbuildtile' + (a.px ? ' px' : '') + (placed ? ' placed' : '') +
-        '" data-build="' + a.id + '" title="' + escapeHtml(a.name) +
-        (placed ? ' — already built; click to find it' : '') + '"><img alt="" loading="lazy" src="' +
-        assetUrl(a.id) + '"><span>' + escapeHtml(a.name.split(' · ').pop()) + '</span>' +
-        (placed ? '<small>built</small>' : '') + '</button>';
-    }).join('');
+  function wallSection(p) {
     var walls = [['', 'None'], ['palisade', 'Palisade'], ['stone', 'Stone']].map(function (w) {
       return '<button data-walls="' + w[0] + '" class="' + ((p.walls || '') === w[0] ? 'own' : '') + '">' + w[1] + '</button>';
     }).join('');
-    return '<div class="dlbuild"><b>Build in this town</b>' +
-      (cards ? '<div class="dlbuildgrid">' + cards + '</div>'
-             : '<p class="sub">Nothing built yet that can be placed: buildings unlock as the town earns them.</p>') +
-      '<div class="dlwallrow"><span class="sub">Walls round its area</span><div class="acts">' + walls + '</div></div></div>';
+    return '<div class="dlbuild"><div class="dlwallrow"><span class="sub">Walls round its area</span>' +
+      '<div class="acts">' + walls + '</div></div></div>';
   }
-  function buildFor(p, tileId) {
-    if (layerState.edit !== 'buildings') { layerState.edit = 'buildings'; applyLayers(); fillKitCats(); }
+  // Renaming in place: the row's name becomes a field; Enter or leaving it
+  // saves, Escape puts it back. Naming is free and moves no number.
+  function renameBuilding(p, key, button) {
+    var row = button.closest('.bline'), label = row && row.querySelector('.bnm');
+    var b = p.built.filter(function (x) { return x.key === key; })[0];
+    if (!label || !b) return;
+    var field = document.createElement('input');
+    field.className = 'brename'; field.maxLength = 48; field.value = b.name;
+    label.replaceWith(field);
+    field.focus(); field.select();
+    var done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      if (!save || field.value.trim() === b.name) { open(p.id); return; }
+      var names = {};
+      p.built.forEach(function (x) {
+        var v = x.key === key ? field.value.trim() : x.name;
+        if (v && v !== x.given) names[x.key] = v;
+      });
+      fetch('/api/guild/' + D.gid + '/dodoland/town', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: p.id, building_names: names})
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res.ok) b.name = field.value.trim() || b.given;
+        else hint.textContent = res.error || 'That name was not saved.';
+        open(p.id);
+      });
+    }
+    field.addEventListener('keydown', function (ev) {
+      ev.stopPropagation();
+      if (ev.key === 'Enter') finish(true);
+      if (ev.key === 'Escape') finish(false);
+    });
+    field.addEventListener('blur', function () { finish(true); });
+  }
+  function buildFor(p, key) {
+    var tileId = (currentTile(p, key) || {}).id;
+    if (!tileId) { hint.textContent = 'There is no drawing of that building at this tier yet.'; return; }
+    if (layerState.edit !== 'buildings') { layerState.edit = 'buildings'; applyLayers(); }
     // One of each: a town that has its tavern already is shown it, not given
     // a second one.
     var a = assetById(tileId), placed = a && townPiece(p, a.building);
@@ -1202,11 +1253,11 @@ _SCRIPT = r"""
       return;
     }
     armedAsset = tileId; mix = [tileId];
-    setTool('pencil');
     building = p.id;
+    setTool('pencil', true);
     frame.classList.add('placing');
-    renderKit();
-    kitSay('Building for ' + p.name + ': click inside its area.');
+    hint.textContent = 'Building ' + a.name.split(' · ')[0] + ' for ' + p.name +
+      ': click inside its area. Escape to stop.';
   }
   function setWalls(p, style) {
     fetch('/api/guild/' + D.gid + '/dodoland/town', {
@@ -1220,6 +1271,18 @@ _SCRIPT = r"""
       });
       if (typeof drawWalls === 'function') drawWalls();
     });
+  }
+
+  function inOpenArea(clientX, clientY) {
+    var g = openId && document.querySelector('#dltinfl > g[data-town="' + openId + '"]');
+    var fill = g && g.querySelector('path');
+    var svg = fill && fill.ownerSVGElement;
+    if (!svg || typeof terr === 'undefined' || !terr.world) return false;
+    var b = frame.getBoundingClientRect();
+    var pt = svg.createSVGPoint();
+    pt.x = (clientX - b.left - view.x) / (nat.w * view.k) * terr.world.cells_w;
+    pt.y = (clientY - b.top - view.y) / (nat.h * view.k) * terr.world.cells_h;
+    try { return fill.isPointInFill(pt); } catch (e) { return false; }
   }
 
   // The open town's area of influence is the one drawn; closing the town, or
@@ -1284,9 +1347,11 @@ _SCRIPT = r"""
     // Nothing armed and nothing under the pointer: let go — of a held piece
     // and of the open town, whose area goes with it.
     var near = tool === 'hand' && nearestPiece(ev.clientX, ev.clientY, 10);
-    if (near) { selectOnly([near.id]); return; }
+    if (near) { selectOnly([near.id]); showTownOf(near); return; }
     if (selIds().length) selectOnly([]);
-    if (openId) { closeCard(); }
+    // Inside the open town's own area is still that town; only outside it
+    // is clicking away.
+    if (openId && !inOpenArea(ev.clientX, ev.clientY)) { closeCard(); }
   });
 
   // --- the list ---------------------------------------------------------- //
@@ -1375,8 +1440,11 @@ _SCRIPT = r"""
   // a time; which one survives a reload as a per-viewer convenience.
   var kitCat = document.getElementById('dlkitcat');
   function editLayer() { return world.dataset.edit || 'objects'; }
+  // Buildings are never in the toolkit: a town builds its own, from its card,
+  // at the tier it has earned. The toolkit is for dressing the world.
   function kitAssets() {
-    return D.assets.filter(function (a) { return a.layer === editLayer(); });
+    var layer = editLayer() === 'buildings' ? 'objects' : editLayer();
+    return D.assets.filter(function (a) { return a.layer === layer; });
   }
   function fillKitCats() {
     if (!kitCat) return;
@@ -1463,7 +1531,7 @@ _SCRIPT = r"""
     var a = typeof assetById === 'function' ? assetById(piece.a) : null;
     var wc = a ? ((a.vw && a.vw[piece.v]) || a.wc) : 0;
     if (wc && D.cells_w) return (wc * piece.s / D.cells_w * 100) + '%';
-    return (D.decorsize * piece.s / nat.w * 100) + '%';
+    return (D.decorsize * WS * piece.s / nat.w * 100) + '%';
   }
 
   function drawPiece(piece) {
@@ -1555,15 +1623,18 @@ _SCRIPT = r"""
 
   // --- layers ------------------------------------------------------------ //
   var LAYERS = [
-    {key: 'ground', label: 'Ground', sub: 'layer 1 · painted', edit: false},
+    {key: 'ground', label: 'Ground', sub: 'layer 1 · painted in the Terrain drawer', edit: true},
     {key: 'environment', label: 'Environment features', sub: 'layer 1 · placed', edit: true},
     {key: 'influence', label: 'Influence', sub: 'each town’s area', edit: false},
     {key: 'roads', label: 'Roads', sub: 'layer 2 · drawn by the bot', edit: false},
     {key: 'objects', label: 'Map objects', sub: 'layer 3', edit: true},
-    {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4', edit: true}
+    {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4 · built from a town’s card', edit: false}
   ];
   var layerState = {hidden: [], edit: 'objects'};
   try { layerState = JSON.parse(window.localStorage.getItem('dl-layers')) || layerState; } catch (e) {}
+  // Nothing in the toolkit edits buildings any more; a saved choice of it
+  // would leave the kit empty.
+  if (layerState.edit === 'buildings' || layerState.edit === 'ground') layerState.edit = 'objects';
   function applyLayers() {
     LAYERS.forEach(function (l) {
       world.classList.toggle('hide-' + l.key, layerState.hidden.indexOf(l.key) >= 0);
@@ -1603,6 +1674,13 @@ _SCRIPT = r"""
       });
       rows.querySelectorAll('[data-edit]').forEach(function (b) {
         b.onclick = function () {
+          // Ground is painted, so editing it is the Terrain drawer.
+          if (b.dataset.edit === 'ground') {
+            if (!document.getElementById('dlterrdrawer').classList.contains('open')) {
+              document.getElementById('dlterr').click();
+            }
+            return;
+          }
           layerState.edit = b.dataset.edit;
           armedAsset = null; mix = []; sel = {}; heldPiece = null;
           frame.classList.remove('placing');
@@ -1676,6 +1754,17 @@ _SCRIPT = r"""
                       bn: res.piece.by_name || '', at: res.piece.at || 0,
                       t: res.piece.town || ''});
         redrawDecor();
+        if (building) {
+          // One of each: once it stands, the pencil is put down and the card
+          // says Built.
+          var town = byId[building];
+          armedAsset = null; mix = []; building = null;
+          frame.classList.remove('placing');
+          setTool('hand');
+          hint.textContent = 'Built.';
+          if (town) open(town.id);
+          return;
+        }
         kitSay('Placed. Click again to place another.');
       });
   }
@@ -1762,7 +1851,7 @@ _SCRIPT = r"""
     pencil: 'Pencil: pick a tile, then click the map to put it down.',
     brush: 'Brush: pick tiles (shift-click for a mix), then drag on the map.'
   };
-  function setTool(t) {
+  function setTool(t, quiet) {
     tool = t;
     try { window.localStorage.setItem('dl-tool', t); } catch (e) {}
     document.querySelectorAll('.dlzoom [data-tool]').forEach(function (b) {
@@ -1771,12 +1860,12 @@ _SCRIPT = r"""
     frame.dataset.tool = t;
     var placing = t === 'pencil' || t === 'brush';
     if (t !== 'pencil') building = null;
-    if (placing && !kitDrawer.classList.contains('open')) openKit();
+    if (placing && !quiet && !kitDrawer.classList.contains('open')) openKit();
     document.getElementById('dlbrushopts').hidden = t !== 'brush';
     frame.classList.toggle('placing', placing && !!armedAsset);
     if (!placing) { ghost.classList.remove('live'); }
     brushCursor(null);
-    kitSay(HINT[t]);
+    if (!quiet) kitSay(HINT[t]);
   }
   document.querySelectorAll('.dlzoom [data-tool]').forEach(function (b) {
     b.onclick = function (ev) { ev.stopPropagation(); setTool(b.dataset.tool); };
@@ -1830,7 +1919,13 @@ _SCRIPT = r"""
   }
   function pieceClick(ev, piece) {
     ev.stopPropagation();
-    if (tool === 'hand' && moved <= 6 && !sel[piece.id]) selectOnly([piece.id]);
+    if (moved > 6 && tool === 'hand') return;
+    if (tool === 'hand' && !sel[piece.id]) selectOnly([piece.id]);
+    showTownOf(piece);
+  }
+  // A building belongs to a town: clicking it is asking about that town.
+  function showTownOf(piece) {
+    if (piece && piece.t && byId[piece.t]) open(piece.t);
   }
   function shownLayer(layer) { return layerState.hidden.indexOf(layer || 'objects') < 0; }
   // The piece a click meant: the one under it, or failing that the nearest
@@ -1931,10 +2026,11 @@ _SCRIPT = r"""
         if (near) {
           if (g0.add) { if (sel[near.id]) delete sel[near.id]; else sel[near.id] = true; selChanged(); }
           else selectOnly([near.id]);
+          showTownOf(near);
           return;
         }
         if (!g0.add) selectOnly([]);
-        if (openId) closeCard();
+        if (openId && !inOpenArea(ev.clientX, ev.clientY)) closeCard();
         return;
       }
       var a = toMap(Math.min(g0.x, ev.clientX), Math.min(g0.y, ev.clientY));
@@ -2087,7 +2183,7 @@ _SCRIPT = r"""
         if ((p.l || 'objects') !== editLayer()) { layerState.edit = p.l || 'objects'; applyLayers(); fillKitCats(); renderKit(); }
         selectOnly([id]);
         // Centred on it, at a zoom where it can be seen.
-        if (view.k < 8) view.k = Math.min(D.sizes.max_zoom, 8);
+        if (view.k < 8 / WS) view.k = Math.min(kMax(), 8 / WS);
         view.x = frame.clientWidth / 2 - p.x / 100 * nat.w * view.k;
         view.y = frame.clientHeight / 2 - p.y / 100 * nat.h * view.k;
         clamp(); apply();

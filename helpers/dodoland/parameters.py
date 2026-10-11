@@ -187,7 +187,7 @@ _BASE_PARAMETERS: list[dict] = [
     {"key": "dodoland_count_self_acts", "cog": "dodoland", "type": "bool", "default": False,
      "label": "Count acts on yourself",
      "description": "Whether reacting to or replying to your own message scores. Off: it is the cheapest farm there is."},
-    {"key": "dodoland_roads_on", "cog": "dodoland", "type": "bool", "default": True,
+    {"key": "dodoland_roads_on", "cog": "dodoland", "type": "bool", "default": False,
      "label": "Roads between towns",
      "description": "Whether the map lays roads between placed towns whose people talk to each other. The bot finds the way over the terrain; nobody draws them."},
     {"key": "dodoland_roads_per_town", "cog": "dodoland", "type": "int", "default": 3,
