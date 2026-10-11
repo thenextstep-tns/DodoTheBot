@@ -1175,6 +1175,10 @@ _SCRIPT = r"""
     var p = byId[id];
     if (!p) return;
     openId = id;
+    // What this viewer may do to this town: an admin anything, a member their
+    // own. Decided before the rows are drawn — decided after, it was still
+    // unset when they were, and every row lost its rename, Build, Move and Delete.
+    var mayEdit = !D.ep.player || (D.me && String(p.id) === String(D.me));
     world.querySelectorAll('.dltown').forEach(function (n) {
       n.classList.toggle('on', n.dataset.id === id);
     });
@@ -1222,8 +1226,6 @@ _SCRIPT = r"""
     // else's is an administrative act and says so, rather than quietly looking
     // like editing your own.
     var mine = D.me && String(p.id) === String(D.me);
-    // What this viewer may do to this town: an admin anything, a member their own.
-    var mayEdit = !D.ep.player || mine;
     card.innerHTML =
       '<h3>' + escapeHtml(p.name) +
         (mine ? ' <span class="yours">yours</span>' : '') + '</h3>' +

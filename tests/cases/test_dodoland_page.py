@@ -636,4 +636,12 @@ for _one in sorted(_needs_rule):
     assert f".{_one}" in map_body,         f"the artwork emits .{_one} and nothing in the stylesheet mentions it"
 print(f"motion          all {len(_needs_rule)} effect classes the artwork emits are styled")
 
+# The town card decides what the viewer may do *before* drawing the building
+# rows that use it; decided after, every row silently lost Build / Move /
+# Delete / rename (11 Oct).
+_open = map_body[map_body.index("function open(id, focusKey)"):]
+assert _open.index("var mayEdit") < _open.index("var rows = p.built.map"),     "the card's rows are drawn before it knows whether the viewer may edit the town"
+assert "data-build=" in _open and "data-movebld=" in _open and "data-rename=" in _open
+print("card            edit rights are known before the building rows are drawn")
+
 print("PASS")
