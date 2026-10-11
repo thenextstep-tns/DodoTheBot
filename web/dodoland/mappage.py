@@ -399,7 +399,7 @@ async def map_page(request: web.Request):
   </div>
   <div class="dlseg dlkittabs"><button data-tab="lib" class="on">Library</button><button data-tab="placed">Placed</button></div>
   <label class="dllandmode" id="dllandmode" hidden title="Everything you place while this is on is a landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it">
-    <input type="checkbox" id="dllandmodebox"> &#128274; Landmark mode <span>— everything I place stays put</span></label>
+    <input type="checkbox" id="dllandmodebox"><b>&#128274; Landmark mode</b><span>Everything I place stays put</span></label>
   <div class="dlkitpane" id="dlkitlib">
     <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
@@ -575,6 +575,11 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border-left: 1px solid var(--edge); box-shadow: -6px 0 24px rgba(0,0,0,.28);
   transform: translateX(100%); transition: transform .18s ease; }
 .dldrawer.open { transform: none; }
+/* In a drawer only the lists scroll and give up height; everything else —
+   headers, tabs, switches, sliders, footers — keeps its own. Without this the
+   column squeezed the Library / Placed tabs until their labels were cut off. */
+.dldrawer > :not(.dlkitpane):not(.dlkitgrid):not(.dllist),
+.dlkitpane > :not(.dlkitgrid):not(.dlplacedlist) { flex-shrink: 0; }
 .dldhead { display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--edge); }
 .dldhead .dlghost { border-color: var(--edge); }
@@ -779,8 +784,11 @@ body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; borde
 .dlzsep { display: block; height: 1px; margin: 4px 6px; background: var(--edge); }
 .dlzoom button svg { display: block; margin: auto; }
 .dlkittabs { margin: 10px 14px 0; }
-.dllandmode { display: flex; align-items: center; gap: 6px; margin: 8px 14px 0; padding: 6px 10px;
-  border: 1px dashed var(--edge); border-radius: 8px; font-size: 12px; cursor: pointer; }
+.dllandmode { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center;
+  margin: 8px 14px 0; padding: 6px 10px; border: 1px dashed var(--edge); border-radius: 8px;
+  font-size: 12px; cursor: pointer; }
+.dllandmode input { grid-row: span 2; margin: 0; }
+.dllandmode b { font-weight: 600; white-space: nowrap; }
 .dllandmode span { color: var(--soft); }
 .dllandmode.on { border-style: solid; border-color: #7fb2ff; background: rgba(127, 178, 255, .1); }
 .dllandmode[hidden] { display: none; }
