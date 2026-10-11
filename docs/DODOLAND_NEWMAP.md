@@ -684,3 +684,20 @@ variation/grain); `terrain_api.shade_bytes` caches it per terrain version
 `/terrain/shade` and `/me/w/terrain/shade`; the client lays it in `#dltshade`
 above the tiles with the same fade-in opacity as the tiles, so the look is
 continuous. `dodoland_detail_shading` (1.0) scales it; 0 turns it off.
+
+### Influence at large reaches
+Nik set the strongest town's reach 40 -> 500 and the map crawled: a recompute
+took 40 s (search 19 s, fill/line/ring 18 s, 1.26 MB payload), and it ran
+inside whatever request came next — every 5 minutes (`_TTL`) and on every
+change. Now, with identical areas (checked cell for cell on live data):
+* `influence.grow_grid` — the same Dijkstra over a flat cost list built once per
+  compute (`influence_api._cost_grid`, `inf` = never) instead of a cost
+  callback; about 2x faster.
+* `fill_path` and `loops` find runs/border edges in numpy; only the border is
+  walked in Python. ~10x faster.
+* The stepped `line` is only built when there is no `ring` (the page only uses
+  it as a fallback).
+* `current()`: when nothing it was made from changed and only the TTL ran out,
+  the old areas are served and the new ones made on a thread (`_refresh`, one
+  per guild, `_LOCKS`). A real change still recomputes before answering.
+Live (top reach 340, 15 towns): 8.3 s total, ~3.5 s of it standings, 760 KB.

@@ -156,7 +156,7 @@ _BASE_PARAMETERS: list[dict] = [
      "description": "How far the least powerful placed town's area of influence reaches, in map cells of open ground. An area spreads from the town hall like water, paying what each kind of ground costs to grow onto, so it reaches less far through hills and not at all across sea or mountains. 0 means a town is only its own plot."},
     {"key": "dodoland_influence_top", "cog": "dodoland", "type": "float", "default": 40.0,
      "label": "Influence of the strongest town (cells)",
-     "description": "How far the most powerful town reaches. Everything in between sits on a square-root curve of town power, the same curve town size uses, so one prolific person's area cannot swallow the map. Set it equal to the weakest town's for every area to be the same size."},
+     "description": "How far the most powerful town reaches. Everything in between sits on a square-root curve of town power, the same curve town size uses, so one prolific person's area cannot swallow the map. Set it equal to the weakest town's for every area to be the same size. The work grows with the square of this: at a few hundred, recomputing every area takes several seconds (done behind the scenes when only standings changed), and one area stops at 400,000 cells."},
     {"key": "dodoland_influence_water_cost", "cog": "dodoland", "type": "float", "default": 2.0,
      "label": "Influence cost over water",
      "description": "How many cells of open ground one cell of water a town's area may spread over costs (only water whose tile lets influence spread, such as shallow water; deep sea never). 1 treats shallows like land; higher keeps an area hugging its coast."},

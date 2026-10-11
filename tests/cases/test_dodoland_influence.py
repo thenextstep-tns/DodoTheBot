@@ -72,6 +72,49 @@ assert path.startswith("M") and path.endswith("Z") and path.count("M") == 1
 assert I.ring_path({(5, 5)}) == "", "a stray cell gets no wall"
 print("ring            the border smoothed into closed loops; a stray cell gets none")
 
+# The fast search over a flat cost list is the same search: same cells for a
+# lake, dear hills and the map's edges (where a step must not wrap a row).
+import random  # noqa: E402
+rng = random.Random(4)
+rough = {(x, y): (None if rng.random() < 0.15 else rng.choice((1.0, 1.0, 2.0, 3.0)))
+         for x in range(W) for y in range(H)}
+flat = [math.inf if rough[(i % W, i // W)] is None else rough[(i % W, i // W)] for i in range(W * H)]
+for origin, budget in (((50, 50), 30), ((0, 50), 20), ((W - 1, 10), 25), ((3, H - 2), 40)):
+    slow = I.grow(origin, budget, lambda x, y: rough[(x, y)], W, H)
+    assert I.grow_grid(origin, budget, flat, W, H) == slow, origin
+assert I.grow_grid((500, 5), 10, flat, W, H) == set()
+blob = I.grow((50, 50), 30, lambda x, y: rough[(x, y)], W, H)
+covered = set()
+for part in I.fill_path(blob).split("M")[1:]:
+    x, rest = part.split(" ", 1)
+    y, rest = rest.split("h", 1)
+    w, rest = rest.split("v", 1)
+    h = rest.split("h", 1)[0]
+    covered |= {(int(x) + i, int(y) + j) for i in range(int(w)) for j in range(int(h))}
+assert covered == blob, "the fill does not cover the area exactly"
+print("growth          the flat-list search finds the same cells; the fill covers them exactly")
+
+# A due refresh serves the areas already made at once and works the new ones
+# out behind them; a real change is worked out before answering.
+import time as _time  # noqa: E402
+from web.dodoland import influence_api as IA  # noqa: E402
+made, keys = [], {"k": 1}
+IA._key = lambda bot, guild: keys["k"]
+IA.compute = lambda bot, guild: (made.append(1), IA._CELLS.__setitem__(guild.id, {}), {"n": len(made)})[2]
+class _G:
+    id = 99
+assert IA.current(None, _G)["n"] == 1
+IA._CACHE[99] = (1, _time.time() - IA._TTL - 1, IA._CACHE[99][2])
+assert IA.current(None, _G)["n"] == 1, "a due refresh made the caller wait"
+for _ in range(100):
+    if 99 not in IA._REFRESHING and len(made) == 2:
+        break
+    _time.sleep(0.02)
+assert IA.current(None, _G)["n"] == 2, "the refresh behind never landed"
+keys["k"] = 2
+assert IA.current(None, _G)["n"] == 3, "a change was answered from the old areas"
+print("cache           a due refresh happens behind the answer; a change is never served stale")
+
 # Walls are a town's style, not pieces: only the known styles are accepted.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from fake_mongo import FakeCollection  # noqa: E402

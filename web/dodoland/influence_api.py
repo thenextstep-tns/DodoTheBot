@@ -5,11 +5,16 @@ Reads the terrain grid, the placed features that block growth, the plots and the
 standings, and hands each town's area to ``helpers.dodoland.influence``. The
 answer is cached per guild and thrown away when anything it was made from
 changes: the terrain version, the world's pieces, the plots or the settings.
+Those are worked out again before answering. When only the standings may have
+moved (``_TTL``), the areas already made are served at once and the new ones
+are worked out behind them, so nobody waits for a refresh.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import threading
 import time
 
 from aiohttp import web
@@ -26,6 +31,10 @@ _CACHE: dict[int, tuple] = {}
 # inside that town's area" is asked of when a building is placed.
 _CELLS: dict[int, dict[str, set]] = {}
 _TTL = 300
+# One computation per guild at a time; which guilds are refreshing behind.
+_LOCKS: dict[int, threading.Lock] = {}
+_REFRESHING: set[int] = set()
+_log = logging.getLogger(__name__)
 
 
 def _blocked(bot, guild_id: int, cells_w: int, cells_h: int, flag: str = "spreads",
@@ -62,6 +71,24 @@ def _blocked(bot, guild_id: int, cells_w: int, cells_h: int, flag: str = "spread
     return out
 
 
+def _cost_grid(chunks: dict, grow_cost: list, blocked: set, cells_w: int, cells_h: int) -> list:
+    """What growing onto each cell costs, as one flat list (``y * w + x``),
+    ``inf`` where an area never goes: built once and shared by every town."""
+    import math
+
+    import numpy as np
+
+    from helpers.dodoland import terrain_raster
+
+    grid = terrain_raster.grid(chunks, cells_w, cells_h)
+    table = np.array([math.inf if c is None else float(c) for c in grow_cost] or [math.inf])
+    costs = np.where((grid >= 0) & (grid < len(table)), table[np.clip(grid, 0, len(table) - 1)], math.inf)
+    if blocked:
+        xs, ys = zip(*blocked)
+        costs[np.asarray(ys), np.asarray(xs)] = math.inf
+    return costs.ravel().tolist()
+
+
 def compute(bot, guild) -> dict:
     """The payload: one entry per placed town."""
     params = bot.dodoland_params
@@ -92,12 +119,7 @@ def compute(bot, guild) -> dict:
     grow_cost = [c * water_cost if c is not None and k.get("water") else c
                  for c, k in zip(grow_cost, kinds)]
     blocked = _blocked(bot, guild.id, cells_w, cells_h)
-
-    def cost(x, y):
-        if (x, y) in blocked:
-            return None
-        value = chunks[(x // T.CHUNK, y // T.CHUNK)][(y % T.CHUNK) * T.CHUNK + (x % T.CHUNK)]
-        return grow_cost[value] if 0 <= value < len(grow_cost) else None
+    costs = _cost_grid(chunks, grow_cost, blocked, cells_w, cells_h)
 
     towns = []
     areas: dict[str, set] = {}
@@ -107,13 +129,16 @@ def compute(bot, guild) -> dict:
         budget = influence.reach(power, strongest, base, top)
         origin = (int(float(plot.get("x", 50)) / 100 * cells_w),
                   int(float(plot.get("y", 50)) / 100 * cells_h))
-        cells = influence.grow(origin, budget, cost, cells_w, cells_h)
+        cells = influence.grow_grid(origin, budget, costs, cells_w, cells_h)
         areas[str(uid)] = cells
+        # The border smoothed: the area's line, and where walls go. The stepped
+        # line is only the page's fallback when there is no ring to draw.
+        ring = influence.ring_path(cells)
         towns.append({"id": str(uid), "colour": townart.colour_for(str(uid)),
                       "reach": round(budget, 1), "cells": len(cells),
-                      "fill": influence.fill_path(cells), "line": influence.outline_path(cells),
-                      # The border smoothed: the area's line, and where walls go.
-                      "ring": influence.ring_path(cells)})
+                      "fill": influence.fill_path(cells),
+                      "line": "" if ring else influence.outline_path(cells),
+                      "ring": ring})
     _CELLS[guild.id] = areas
     return {"towns": towns, "cells_w": cells_w, "cells_h": cells_h}
 
@@ -143,10 +168,33 @@ def current(bot, guild) -> dict:
     Blocking."""
     key = _key(bot, guild)
     cached = _CACHE.get(guild.id)
-    if not cached or cached[0] != key or time.time() - cached[1] > _TTL or guild.id not in _CELLS:
-        _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
-        cached = _CACHE[guild.id]
+    if cached and cached[0] == key and guild.id in _CELLS:
+        # Nothing it was made from has changed; only the standings may have.
+        # Serve it, and if it is due, refresh it behind the answer.
+        if time.time() - cached[1] > _TTL and guild.id not in _REFRESHING:
+            _REFRESHING.add(guild.id)
+            threading.Thread(target=_refresh, args=(bot, guild, key), daemon=True).start()
+        return cached[2]
+    with _LOCKS.setdefault(guild.id, threading.Lock()):
+        cached = _CACHE.get(guild.id)
+        if not cached or cached[0] != key or guild.id not in _CELLS:
+            _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
+            cached = _CACHE[guild.id]
     return cached[2]
+
+
+def _refresh(bot, guild, key) -> None:
+    """The due refresh, on its own thread."""
+    try:
+        with _LOCKS.setdefault(guild.id, threading.Lock()):
+            cached = _CACHE.get(guild.id)
+            if cached and cached[0] == key and time.time() - cached[1] <= _TTL:
+                return   # somebody else just made it
+            _CACHE[guild.id] = (key, time.time(), compute(bot, guild))
+    except Exception:  # noqa: BLE001 — the old areas keep being served
+        _log.exception("DodoLand influence refresh failed for guild %s", guild.id)
+    finally:
+        _REFRESHING.discard(guild.id)
 
 
 def warm(bot, guild) -> None:
