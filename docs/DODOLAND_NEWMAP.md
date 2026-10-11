@@ -832,3 +832,29 @@ shade is a 1px-per-cell picture). Both settings are in the chunk cache key;
   line is not buried under the next chunk. Checked by rendering real tiles in
   headless Chrome: 1.0-1.5 cells rounds the cell staircase into a slope.
   `dodoland_tile_edge_*` are gone.
+
+### Close-up ground is baked, not vector
+The vector chunks (one SVG path per kind, filled with `<pattern>`s, and then
+the stroked blend on top) made panning jittery: the browser re-rasterises
+vector work on every move. Now (`terrain_ui.py`, "the close-up ground, baked"):
+* `GET .../terrain/rle?r=cx0,cy0,cx1,cy1` (+ member alias) sends each chunk's
+  RLE and, per kind, `{fill, layout, land}`; `terrainart.pattern_layout` is the
+  old `tile_pattern`'s 4x4 variant block (same `_pick`), so textures sit where
+  they always did.
+* The page bakes each visible chunk into a canvas: per kind, a world-aligned
+  `CanvasPattern` of its block fills its cells. Blend: for each land kind that
+  outranks a land kind in the chunk (the higher spills, as before), its shape
+  over the chunk plus a margin of neighbours' cells, grown by `width` and
+  blurred once (`ctx.filter`), masked to the lower land kinds, filled with its
+  texture, drawn at `blend_strength`. No canvas filter (old Safari): hard edges.
+* Shown as an SVG `<image>` (blob URL) in `#dltdetail`, so it stays under
+  shading, influence, roads and walls; 64.04 cells wide so there is no seam.
+  3 chunks baked per frame; detail tiers 2/4/8/16 px per cell
+  (`dodoland_ground_detail_max` 16); `dodoland_ground_chunks_max` (300) kept.
+* A stroke/undo's `touched` chunks are re-read and they and their 8 neighbours
+  re-baked (`bakeTouched`); nothing else is.
+* Gone: `terrain/chunks`, `terrain/defs` (+ member aliases), `pattern_defs`,
+  `tile_pattern`, `pattern_id`, `chunk_svg(textured=)`, `blend_edges`,
+  `blend_svg`, `dodoland_tile_blend_steps`. Blend defaults a touch less washy:
+  width 1.2 -> 0.9 cells, strength 0.9 -> 0.85. Checked in headless Chrome
+  with the real bake code on real tiles.

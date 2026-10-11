@@ -322,13 +322,6 @@ SCRIPT = r"""
     };
     sp.src = shadeUrl;
   }
-  function terrDefs() {
-    fetch(terrUrl('defs', '?v=' + terr.ver)).then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (defs) {
-        var g = document.getElementById('dltdefs');
-        if (g) g.innerHTML = defs || '';
-      });
-  }
 
   // Which chunks the viewport covers, in chunk coordinates.
   function visibleChunks() {
@@ -360,36 +353,281 @@ SCRIPT = r"""
     };
   }
 
-  function terrDetail() {
-    if (terr.busy || !terr.world) return;
-    var box = visibleChunks();
-    var g = document.getElementById('dltdetail');
-    if (!g) return;
-    if (!box) { g.innerHTML = ''; terr.have = {}; return; }
-    var need = [];
-    for (var cy = box.y0; cy <= box.y1; cy++) {
-      for (var cx = box.x0; cx <= box.x1; cx++) {
-        if (!terr.have[cx + ',' + cy + ',' + terr.ver]) need.push([cx, cy]);
+  // --- the close-up ground, baked ------------------------------------------ //
+  // Each 64-cell chunk is drawn once into a canvas — its textures, and where
+  // two grounds meet, one faded into the other through a soft mask — and shown
+  // as a plain picture. Moving and scaling finished pictures is what the
+  // browser does fastest, so panning costs the same however much is drawn.
+  // A stroke re-bakes only the chunks it touched and their neighbours.
+  var bake = {kinds: null, art: '', rle: {}, cells: {}, known: {}, gen: {}, drawn: {},
+              imgs: {}, blocks: {}, fetching: false, queued: false};
+  var BLUR_OK = (function () {
+    try { var c = document.createElement('canvas').getContext('2d'); return typeof c.filter === 'string'; }
+    catch (e) { return false; }
+  })();
+  function bakeDecode(rle) {
+    var out = new Uint16Array(4096), i = 0;
+    String(rle || '').split(' ').forEach(function (part) {
+      var x = part.indexOf('x');
+      if (x < 0) return;
+      var n = +part.slice(0, x), v = +part.slice(x + 1);
+      out.fill(v, i, Math.min(4096, i + n));
+      i += n;
+    });
+    return out;
+  }
+  function bakeBump(cx, cy) {
+    for (var dy = -1; dy <= 1; dy++)
+      for (var dx = -1; dx <= 1; dx++) {
+        var k = (cx + dx) + ',' + (cy + dy);
+        bake.gen[k] = (bake.gen[k] || 0) + 1;
+      }
+  }
+  // After a stroke or an undo: forget those chunks' cells, so they are read
+  // again, and mark them and their neighbours (whose blends reach them) stale.
+  function bakeTouched(touched) {
+    touched.forEach(function (t) { delete bake.known[t[0] + ',' + t[1]]; bakeBump(t[0], t[1]); });
+  }
+  function bakeImg(vid) {
+    var im = bake.imgs[vid];
+    if (!im) {
+      im = bake.imgs[vid] = new Image();
+      im.decoding = 'async';
+      im.onload = function () { bakeSoon(); };
+      im.src = bake.art + vid;
+    }
+    return im.complete && im.naturalWidth ? im : null;
+  }
+  // A kind's 4x4 block of tiles at a detail, once; null until its art is in.
+  function bakeBlock(k, res) {
+    var key = k + '@' + res;
+    if (bake.blocks[key]) return bake.blocks[key];
+    var lay = bake.kinds[k].layout, imgs = [];
+    for (var i = 0; i < lay.block.length; i++) {
+      var im = bakeImg(lay.block[i]);
+      if (!im) return null;
+      imgs.push(im);
+    }
+    var cw = lay.size[0] * res, ch = lay.size[1] * res;
+    var cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(cw * 4)); cv.height = Math.max(1, Math.round(ch * 4));
+    var ctx = cv.getContext('2d');
+    // Pixel art stays crisp when drawn larger; drawn smaller it is smoothed,
+    // or a field shimmers.
+    ctx.imageSmoothingEnabled = res < (lay.px || 16);
+    for (var j = 0; j < 4; j++)
+      for (var x = 0; x < 4; x++)
+        ctx.drawImage(imgs[j * 4 + x], Math.round(x * cw), Math.round(j * ch),
+                      Math.round((x + 1) * cw) - Math.round(x * cw), Math.round((j + 1) * ch) - Math.round(j * ch));
+    bake.blocks[key] = cv;
+    return cv;
+  }
+  // The fill for kind k on a canvas whose top-left is world cell (ox, oy):
+  // its block repeated from the world's origin, so neighbouring chunks meet.
+  function bakeStyle(ctx, k, res, ox, oy) {
+    var kind = bake.kinds[k];
+    if (!kind.layout) return kind.fill;
+    var block = bakeBlock(k, res);
+    if (!block) return null;
+    var pat = ctx.createPattern(block, 'repeat');
+    var bw = block.width, bh = block.height;
+    var tx = -((ox * res) % bw), ty = -((oy * res) % bh);
+    if (pat.setTransform) pat.setTransform(new DOMMatrix([1, 0, 0, 1, tx, ty]));
+    return pat;
+  }
+  // The cells of a square around a chunk (margin m), from it and its neighbours.
+  function bakeArea(cx, cy, m) {
+    var A = 64 + 2 * m, out = new Uint16Array(A * A);
+    for (var y = 0; y < A; y++) {
+      var gy = cy * 64 - m + y, ky = Math.floor(gy / 64), ly = gy - ky * 64;
+      for (var x = 0; x < A; x++) {
+        var gx = cx * 64 - m + x, kx = Math.floor(gx / 64), lx = gx - kx * 64;
+        var cells = bake.cells[kx + ',' + ky];
+        out[y * A + x] = cells ? cells[ly * 64 + lx] : 0;
       }
     }
-    if (!need.length) return;
-    if ((box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) > 400) return;
-    terr.busy = true;
-    fetch(terrUrl('chunks', '?r=' + box.x0 + ',' + box.y0 + ',' + box.x1 + ',' + box.y1 +
-                  '&v=' + terr.ver))
-      .then(function (r) { return r.ok ? r.text() : ''; })
-      .then(function (svg) {
-        terr.busy = false;
-        if (!svg) return;
-        g.innerHTML = svg;
-        terr.have = {};
-        for (var cy = box.y0; cy <= box.y1; cy++) {
-          for (var cx = box.x0; cx <= box.x1; cx++) {
-            terr.have[cx + ',' + cy + ',' + terr.ver] = 1;
+    return out;
+  }
+  // Rows of runs where test(value) holds, as one path in canvas pixels.
+  function bakePath(cells, A, res, x0, y0, n, test) {
+    var path = new Path2D();
+    for (var y = y0; y < y0 + n; y++) {
+      var x = x0;
+      while (x < x0 + n) {
+        if (!test(cells[y * A + x])) { x++; continue; }
+        var s = x;
+        while (x < x0 + n && test(cells[y * A + x])) x++;
+        path.rect((s - x0) * res, (y - y0) * res, (x - s) * res, res);
+      }
+    }
+    return path;
+  }
+  function bakeChunk(key, res) {
+    var at = key.split(','), cx = +at[0], cy = +at[1];
+    var K = bake.kinds, width = D.sizes.blend_width || 0, strength = D.sizes.blend_strength || 0;
+    var blend = BLUR_OK && width > 0 && strength > 0;
+    var m = blend ? Math.ceil(width) + 1 : 0, A = 64 + 2 * m;
+    var area = bakeArea(cx, cy, m), size = 64 * res, ready = true;
+    var cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    var ctx = cv.getContext('2d');
+    var inChunk = {}, near = {};
+    for (var y = 0; y < A; y++)
+      for (var x = 0; x < A; x++) {
+        var v = area[y * A + x];
+        near[v] = 1;
+        if (x >= m && x < m + 64 && y >= m && y < m + 64) inChunk[v] = 1;
+      }
+    Object.keys(inChunk).forEach(function (k) {
+      k = +k;
+      if (!k || !K[k]) return;   // 0 is unknown ground: left for the overview
+      var style = bakeStyle(ctx, k, res, cx * 64, cy * 64);
+      if (style === null) { ready = false; return; }
+      ctx.fillStyle = style;
+      ctx.fill(bakePath(area, A, res, m, m, 64, function (v) { return v === k; }));
+    });
+    if (blend) {
+      // Where two kinds of land meet, the higher spills over the lower (never
+      // both ways: crossed both ways they cancel out): its own shape grown by
+      // half the width and blurred is the mask its texture is laid through,
+      // kept to the lower land kinds of this chunk.
+      var lowest = Infinity;
+      Object.keys(inChunk).forEach(function (k) { k = +k; if (k && K[k] && K[k].land) lowest = Math.min(lowest, k); });
+      Object.keys(near).map(Number).filter(function (k) {
+        return k && K[k] && K[k].land && k > lowest;
+      }).sort(function (a, b) { return a - b; }).forEach(function (k) {
+        var style = bakeStyle(ctx, k, res, cx * 64, cy * 64);
+        if (style === null) { ready = false; return; }
+        var shape = document.createElement('canvas');
+        shape.width = shape.height = A * res;
+        var sc = shape.getContext('2d'), region = bakePath(area, A, res, 0, 0, A, function (v) { return v === k; });
+        sc.fillStyle = '#fff'; sc.strokeStyle = '#fff';
+        sc.lineWidth = width * res; sc.lineJoin = 'round';
+        sc.fill(region); sc.stroke(region);
+        var mask = document.createElement('canvas');
+        mask.width = mask.height = size;
+        var mc = mask.getContext('2d');
+        mc.filter = 'blur(' + Math.max(0.5, width * res / 3).toFixed(1) + 'px)';
+        mc.drawImage(shape, -m * res, -m * res);
+        mc.filter = 'none';
+        mc.globalCompositeOperation = 'destination-in';
+        mc.fill(bakePath(area, A, res, m, m, 64, function (v) { return v && K[v] && K[v].land && v < k; }));
+        mc.globalCompositeOperation = 'source-in';
+        mc.fillStyle = style;
+        mc.fillRect(0, 0, size, size);
+        ctx.globalAlpha = strength;
+        ctx.drawImage(mask, 0, 0);
+        ctx.globalAlpha = 1;
+      });
+    }
+    return {canvas: cv, ready: ready};
+  }
+  function bakeShow(key, res) {
+    var made = bakeChunk(key, res), at = key.split(',');
+    var g = document.getElementById('dltdetail');
+    if (!g) return;
+    var gen = bake.gen[key] || 0;
+    made.canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var url = URL.createObjectURL(blob), old = bake.drawn[key];
+      var el = old && old.el && old.el.isConnected ? old.el
+        : document.createElementNS('http://www.w3.org/2000/svg', 'image');
+      // A hair over 64 cells, so neighbouring pictures never show a seam.
+      el.setAttribute('x', at[0] * 64); el.setAttribute('y', at[1] * 64);
+      el.setAttribute('width', 64.04); el.setAttribute('height', 64.04);
+      el.setAttribute('preserveAspectRatio', 'none');
+      el.setAttribute('style', 'image-rendering:pixelated;pointer-events:none');
+      el.setAttribute('href', url);
+      if (!el.isConnected) g.appendChild(el);
+      if (old && old.url) URL.revokeObjectURL(old.url);
+      bake.drawn[key] = {el: el, url: url, res: res, gen: gen, ready: made.ready};
+    }, 'image/png');
+    // Claimed now, so it is not baked twice while the picture encodes.
+    bake.drawn[key] = Object.assign({}, bake.drawn[key] || {}, {res: res, gen: gen, ready: made.ready, pending: true});
+  }
+  function bakeRes(per) {
+    var want = per * (window.devicePixelRatio || 1), res = 2;
+    while (res < want && res < 64) res *= 2;
+    return Math.min(res, D.sizes.ground_detail || 16);
+  }
+  function bakeSoon() {
+    if (bake.queued) return;
+    bake.queued = true;
+    requestAnimationFrame(function () { bake.queued = false; terrDetail(); });
+  }
+  function bakeFetch(box) {
+    if (bake.fetching) return;
+    // One chunk more all round than is drawn: a chunk's blend reaches in from
+    // its neighbours.
+    var x0 = Math.max(0, box.x0 - 1), y0 = Math.max(0, box.y0 - 1);
+    var x1 = Math.min(terr.world.chunks_x - 1, box.x1 + 1), y1 = Math.min(terr.world.chunks_y - 1, box.y1 + 1);
+    var missing = false;
+    for (var cy = y0; cy <= y1 && !missing; cy++)
+      for (var cx = x0; cx <= x1; cx++) if (!bake.known[cx + ',' + cy]) { missing = true; break; }
+    if (!missing && bake.kinds) return;
+    bake.fetching = true;
+    fetch(terrUrl('rle', '?r=' + [x0, y0, x1, y1].join(',') + '&v=' + encodeURIComponent(terr.ver)))
+      .then(function (r) { return r.ok ? r.json() : {ok: false}; })
+      .then(function (res) {
+        bake.fetching = false;
+        if (!res.ok) return;
+        if (!bake.kinds || res.kinds.length !== bake.kinds.length) bake.blocks = {};
+        bake.kinds = res.kinds;
+        bake.art = res.art;
+        Object.keys(res.chunks).forEach(function (key) {
+          var rle = res.chunks[key];
+          bake.known[key] = true;
+          if (bake.rle[key] !== rle) {
+            bake.rle[key] = rle;
+            bake.cells[key] = rle ? bakeDecode(rle) : null;
+            var at = key.split(',');
+            bakeBump(+at[0], +at[1]);
           }
-        }
+        });
+        bakeSoon();
       })
-      .catch(function () { terr.busy = false; });
+      .catch(function () { bake.fetching = false; });
+  }
+  // Called whenever the view moves (and after a stroke): fetch what is
+  // missing, bake what is due a few chunks a frame, let go of the furthest.
+  function terrDetail() {
+    if (!terr.world) return;
+    var box = visibleChunks();
+    var g = document.getElementById('dltdetail');
+    if (!g || !box) return;
+    if ((box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1) > 400) return;
+    bakeFetch(box);
+    if (!bake.kinds) return;
+    var per = (nat.w * view.k) / terr.world.cells_w, res = bakeRes(per), budget = 3, more = false;
+    for (var cy = box.y0; cy <= box.y1; cy++) {
+      for (var cx = box.x0; cx <= box.x1; cx++) {
+        var key = cx + ',' + cy, d = bake.drawn[key];
+        if (!bake.known[key]) { more = true; continue; }
+        if (!bake.cells[key]) {
+          if (d && d.el) { d.el.remove(); if (d.url) URL.revokeObjectURL(d.url); delete bake.drawn[key]; }
+          continue;
+        }
+        var stale = !d || d.gen !== (bake.gen[key] || 0) || (!d.ready && !d.pending) ||
+          (d.res < res && d.res < (D.sizes.ground_detail || 16));
+        if (!stale) continue;
+        if (budget-- > 0) bakeShow(key, res); else more = true;
+      }
+    }
+    if (more) bakeSoon();
+    var keys = Object.keys(bake.drawn), cap = D.sizes.ground_chunks || 300;
+    if (keys.length > cap) {
+      var mx = (box.x0 + box.x1) / 2, my = (box.y0 + box.y1) / 2;
+      keys.sort(function (a, b) {
+        var pa = a.split(','), pb = b.split(',');
+        return (Math.abs(pb[0] - mx) + Math.abs(pb[1] - my)) - (Math.abs(pa[0] - mx) + Math.abs(pa[1] - my));
+      });
+      keys.slice(0, keys.length - cap).forEach(function (key) {
+        var d = bake.drawn[key];
+        if (d.el) d.el.remove();
+        if (d.url) URL.revokeObjectURL(d.url);
+        delete bake.drawn[key];
+      });
+    }
   }
 
   // --- pointer ----------------------------------------------------------- //
@@ -528,7 +766,6 @@ SCRIPT = r"""
       // A tile painted for the first time adds a ground, and its pattern.
       if (res.kinds && terr.world.kinds && res.kinds !== terr.world.kinds.length) {
         terr.world.kinds.length = res.kinds;
-        terrDefs();
       }
       terrApplyChange(res);
     }).catch(function (err) { terrSay(String(err), true); });
@@ -540,7 +777,7 @@ SCRIPT = r"""
   var overviewTimer = null;
   function terrApplyChange(res) {
     terr.ver = res.version;
-    terr.have = {};
+    bakeTouched(res.touched || []);
     terrDetail();
     setUndo(res.undo, res.redo);
     if (overviewTimer) clearTimeout(overviewTimer);
@@ -782,7 +1019,6 @@ SCRIPT = r"""
       rearm();
       loadInfluence();
       loadRoads();
-      terrDefs();
       terrOverview();
       terrDetail();
       // The reference is hidden when the overview arrives (terrOverview): the

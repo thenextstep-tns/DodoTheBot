@@ -372,13 +372,14 @@ mountain = {**kinds[i], "key": kinds[i]["key"] + "_mountains", "move": None, "gr
 assert T.sync_tile_kinds([mountain], {"g1": grass})[0]["move"] is None
 print("tiles           a kind with fixed costs keeps them whatever its tile says")
 
-defs = terrainart.pattern_defs(kinds, {"g1": grass, "w1": water}, "/art/",
-                               {"a": (16, 16), "b": (16, 16), "c": (32, 32)})
-assert defs.count("<pattern") == 2 and "/art/a" in defs and "/art/b" in defs
+layout = terrainart.pattern_layout("g", grass, {"a": (16, 16), "b": (16, 16)})
+assert len(layout["block"]) == 16 and set(layout["block"]) <= {"a", "b"}
+assert layout == terrainart.pattern_layout("g", grass, {"a": (16, 16), "b": (16, 16)}), "the layout moved between calls"
 # A 32px tile still covers one cell: scale is the tile's own px per cell.
-assert 'width="1" height="1"' in terrainart.tile_pattern("x", water, "/art/", {"c": (32, 32)})
+assert terrainart.pattern_layout("x", water, {"c": (32, 32)})["size"] == [1.0, 1.0]
+# A big texture (a 256px paving at 64px per cell) spans 4 x 4 cells.
+assert terrainart.pattern_layout("p", {"variants": ["t"], "cell_px": 64}, {"t": (256, 256)})["size"] == [4.0, 4.0]
 grid = [i] * T.CELLS
-assert f"url(#{terrainart.pattern_id(kinds[i]['key'])})" in terrainart.chunk_svg(grid, kinds, textured=True)
 assert "#46934f" in terrainart.chunk_svg(grid, kinds), "far away a tile is its average colour"
 assert not hasattr(terrainart, "MOTIFS"), "the generated motifs came back"
 print("tiles           ground is a tile pattern up close and the tile's colour far away")
@@ -465,48 +466,46 @@ assert img[40, 40, 0] == 255 and img[40, 40, 3] > 0, "no surf along the shore"
 assert not np.asarray(terrain_raster.render_shade(cells, kinds, shading=0))[..., 3].any(), "shading 0 still shaded"
 print("shading         the close-up layer darkens depth, lights the surf, leaves land bare")
 
-# Where two grounds meet they fade into each other: one spills its texture over
-# the other along the border (never both ways), the coast is left to its own
-# shading, a border on a chunk line is blended once and unbroken.
-from helpers.dodoland import terrainart  # noqa: E402
-kinds_e = T.base_kinds(T.TERRAIN)
-g_i, s_i, w_i = T.index_of(kinds_e, "grass"), T.index_of(kinds_e, "sand"), T.index_of(kinds_e, "sea")
-C = T.CHUNK
-patch = [g_i] * (C * C)
-for y in range(10, 20):
-    for x in range(10, 20):
-        patch[y * C + x] = s_i
-edges = terrainart.blend_edges(patch, kinds_e)
-assert list(edges) == [max(g_i, s_i)], f"both grounds spill over the same border: {list(edges)}"
-total = sum(int(part[1:].split("h")[-1].split("v")[-1]) for part in edges[max(g_i, s_i)].split("M")[1:])
-assert total == 40, (edges, total)
-wet = [g_i] * (C * C)
-for y in range(10, 20):
-    for x in range(10, 20):
-        wet[y * C + x] = w_i
-assert terrainart.blend_edges(wet, kinds_e) == {}, "the coast was blended as well as shaded"
-edge = [g_i] * (C * C)
-for y in range(C):
-    edge[y * C + C - 1] = s_i
-across = terrainart.blend_edges(edge, kinds_e, right=[g_i] * (C * C))
-assert f"M{C} 0v{C}" in across[max(g_i, s_i)], "the border along the chunk line was not blended"
-assert f"M{C} " not in terrainart.blend_edges(edge, kinds_e)[max(g_i, s_i)], "a border was blended against a chunk not given"
-svg = terrainart.blend_svg(edges, kinds_e, width=0.6, steps=6, strength=0.9)
-assert svg.count("<path") == 6 and 'stroke-width="1.2"' in svg and 'stroke-linecap="round"' in svg
-alphas = [float(part.split('"')[0]) for part in svg.split('stroke-opacity="')[1:]]
-cover = 1.0
-for alpha in alphas:
-    cover *= 1 - alpha
-assert abs((1 - cover) - 0.9) < 0.01, f"the blend covers {1 - cover:.2f} at the border, not 0.9"
-assert terrainart.blend_svg(edges, kinds_e, width=0, steps=6) == "", "a blend of width 0 was drawn"
-print("blend           grounds fade into each other one way, the coast does not, chunk lines are seamless")
+# The close-up ground is baked by the map from run-length chunks: the endpoint
+# sends every chunk asked for (empty for unpainted) and how each kind is drawn
+# and whether it is land, which is what the blend follows.
+class _Params:
+    def get(self, guild_id, key):
+        return {"dodoland_tile_scale": 1.0}.get(key, 0)
 
-# Painting a chunk forgets the neighbours that blend a border with it.
-terrain_api._CACHE.clear()
-for cx, cy in ((5, 5), (4, 5), (5, 4), (6, 5), (5, 6)):
-    terrain_api._CACHE[(GUILD, T.TERRAIN, cx, cy, (0.6, 6, 0.9))] = ("x", "")
-terrain_api.invalidate(GUILD, [(5, 5)])
-assert set(k[2:4] for k in terrain_api._CACHE) == {(6, 5), (5, 6)}, terrain_api._CACHE.keys()
-print("blend           a paint redraws the chunks to its left and above as well")
+
+class _TilesLib:
+    def tiles(self, guild_id):
+        return [{"tile_id": "g1", "name": "Grass", "variants": ["a", "b"], "cell_px": 16, "passable": True}]
+
+    def art_sizes(self, vids):
+        return {v: (16, 16) for v in vids}
+
+
+rle_store = T.TerrainStore(FakeCollection(), FakeCollection())
+rle_store.set_world(GUILD, cells_w=256, cells_h=256)
+g_kind = rle_store.kind_for_tile(GUILD, {"tile_id": "g1", "name": "Grass", "variants": ["a", "b"], "passable": True})
+rle_store.paint(GUILD, {(x, y): g_kind for x in range(70, 80) for y in range(5, 9)})
+rle_bot = _Bot(rle_store)
+rle_bot.dodoland_params, rle_bot.dodoland_tiles = _Params(), _TilesLib()
+
+
+class _Get(_Req):
+    def __init__(self, bot, query):
+        super().__init__(bot, None)
+        self.query = query
+
+
+import json as _json  # noqa: E402
+got = _json.loads(asyncio.run(terrain_api.terrain_rle(_Get(rle_bot, {"r": "0,0,1,1"}))).body.decode())
+assert got["ok"] and set(got["chunks"]) == {"0,0", "1,0", "0,1", "1,1"}, got["chunks"].keys()
+assert got["chunks"]["1,0"] and not got["chunks"]["0,0"], "a painted chunk came back empty, or an empty one painted"
+assert got["kinds"][g_kind]["layout"]["block"] and got["kinds"][g_kind]["land"] is True
+sea_i = T.index_of(T.base_kinds(T.TERRAIN), "sea")
+assert got["kinds"][sea_i]["land"] is False and got["kinds"][0]["land"] is False, "water or unknown counted as land"
+assert got["art"].endswith("/tiles/art/")
+too_many = asyncio.run(terrain_api.terrain_rle(_Get(rle_bot, {"r": "0,0,40,40"})))
+assert too_many.status == 400 or rle_store.chunk_counts(GUILD)[0] < 40
+print("baking          the ground arrives as run-length chunks, with each kind's layout and land flag")
 
 print("PASS")

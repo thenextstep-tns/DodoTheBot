@@ -337,6 +337,12 @@ async def map_page(request: web.Request):
         "forest_detail": float(bot.dodoland_params.get(guild.id, "dodoland_forest_detail_max")),
         "forest_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_forest_chunks_max")),
         "forest_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_full_at")),
+        # The close-up ground, baked per chunk: how finely, how many kept, and
+        # how two grounds blend where they meet.
+        "ground_detail": float(bot.dodoland_params.get(guild.id, "dodoland_ground_detail_max")),
+        "ground_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_ground_chunks_max")),
+        "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
+        "blend_strength": max(0.0, min(0.99, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_strength")))),
         "forest_gap_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_full")),
         "forest_gap_zero": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_zero")),
     }

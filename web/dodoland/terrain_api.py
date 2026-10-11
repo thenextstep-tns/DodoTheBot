@@ -98,9 +98,6 @@ def invalidate(guild_id: int, chunks=None) -> None:
             _CACHE.pop(key, None)
         return
     touched = {(int(cx), int(cy)) for cx, cy in chunks}
-    # A chunk draws the border it shares with its right and lower neighbours,
-    # so the chunks to the left of and above a change are stale too.
-    touched |= {(cx - 1, cy) for cx, cy in touched} | {(cx, cy - 1) for cx, cy in touched}
     for key in [k for k in _CACHE if k[0] == guild_id
                 and (k[2] == "overview" or (k[2], k[3]) in touched)]:
         _CACHE.pop(key, None)
@@ -233,27 +230,6 @@ async def terrain_world(request: web.Request):
     })
 
 
-async def terrain_defs(request: web.Request):
-    """The texture patterns, once for the whole map.
-
-    Separate from the chunks because a pattern is defined once and referenced by
-    every region that uses it; shipping them inside each of sixty chunks would
-    be sixty copies of every tile.
-    """
-    bot, guild = request.app["bot"], request["guild"]
-    world = bot.dodoland_terrain.world(guild.id)
-    _fresh(guild.id, world)
-    tiles = _tile_index(bot, guild)
-    used = [tiles[k["tile_id"]] for k in world["kinds"] if k.get("tile_id") in tiles]
-    dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
-    return web.Response(
-        text=terrainart.pattern_defs(
-            world["kinds"], tiles, request.get("dl_base", f"/guild/{guild.id}/dodoland") + "/tiles/art/", dims,
-            shrink=float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale"))),
-        content_type="image/svg+xml",
-        headers={"Cache-Control": "private, max-age=600"})
-
-
 # guild -> (version, webp bytes). One picture per guild: a few hundred KB.
 _PICTURES: dict[int, tuple[str, bytes]] = {}
 
@@ -369,10 +345,11 @@ async def terrain_overview(request: web.Request):
         headers={"Cache-Control": "private, max-age=600"})
 
 
-async def terrain_chunks(request: web.Request):
-    """Full detail for a rectangle of chunks: ``?r=cx0,cy0,cx1,cy1``."""
-    import asyncio
-
+async def terrain_rle(request: web.Request):
+    """``GET …/terrain/rle?r=cx0,cy0,cx1,cy1`` — what the map bakes the close-up
+    ground from: every chunk's run-length cells in the box (empty for none),
+    and for each kind of ground how to draw it (its tile's layout, or a flat
+    colour) and whether it is land, for blending."""
     bot, guild = request.app["bot"], request["guild"]
     store = bot.dodoland_terrain
     world = store.world(guild.id)
@@ -385,58 +362,28 @@ async def terrain_chunks(request: web.Request):
     x0, y0 = max(0, x0), max(0, y0)
     x1, y1 = min(cxs - 1, x1), min(cys - 1, y1)
     wanted = [(cx, cy) for cy in range(y0, y1 + 1) for cx in range(x0, x1 + 1)]
-    # A viewport, not a world. Without this a crafted request asks for the whole
-    # continent at full detail in one go.
-    if len(wanted) > 400:
+    # A viewport, not a world.
+    if len(wanted) > 600:
         return _bad("Too many chunks at once; zoom in or ask for fewer.")
-
-    # Where two grounds meet they fade into each other, as the server sets it;
-    # part of the cache key, so changing it redraws what was drawn before.
-    blend_width = max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width")))
-    blend_steps = max(1, int(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_steps")))
-    blend_strength = max(0.0, min(0.99, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_strength"))))
-    look = (round(blend_width, 3), blend_steps, round(blend_strength, 3))
-    missing = [key for key in wanted
-               if (guild.id, T.TERRAIN, key[0], key[1], look) not in _CACHE]
-
-    if missing:
-        def draw():
-            colours = _colours(bot, guild.id)
-            # The neighbours to the right and below too: a chunk draws the
-            # border it shares with them, so the line runs on unbroken.
-            cxs, cys = store.chunk_counts(guild.id)
-            around = set(missing) | {(cx + 1, cy) for cx, cy in missing if cx + 1 < cxs} | \
-                {(cx, cy + 1) for cx, cy in missing if cy + 1 < cys}
-            cells = store.chunks(guild.id, sorted(around))
-            out = {}
-            for key in missing:
-                chunk = cells[key]
-                right, below = cells.get((key[0] + 1, key[1])), cells.get((key[0], key[1] + 1))
-                offset = (key[0] * T.CHUNK, key[1] * T.CHUNK)
-                fill = terrainart.chunk_svg(chunk, world["kinds"], colours=colours,
-                                            textured=True, offset=offset)
-                blend = ""
-                if blend_width > 0 and blend_strength > 0:
-                    blend = terrainart.blend_svg(
-                        terrainart.blend_edges(chunk, world["kinds"], right=right,
-                                               below=below[:T.CHUNK] if below else None),
-                        world["kinds"], width=blend_width, steps=blend_steps,
-                        strength=blend_strength, colours=colours, offset=offset)
-                # Kept apart: every chunk's fill goes down before any blend,
-                # or a fade over a chunk line would vanish under the next fill.
-                out[key] = (fill, blend)
-            return out
-
-        drawn = await asyncio.get_running_loop().run_in_executor(None, draw)
-        if len(_CACHE) > _CACHE_MAX:
-            _CACHE.clear()
-        for key, svg in drawn.items():
-            _CACHE[(guild.id, T.TERRAIN, key[0], key[1], look)] = svg
-
-    drawn = [_CACHE.get((guild.id, T.TERRAIN, cx, cy, look)) or ("", "") for cx, cy in wanted]
-    body = "".join(d[0] for d in drawn) + "".join(d[1] for d in drawn)
-    return web.Response(text=body, content_type="image/svg+xml",
-                        headers={"Cache-Control": "private, max-age=600"})
+    rows = store.snapshot(guild.id, wanted, layer=T.TERRAIN)
+    tiles = _tile_index(bot, guild)
+    kinds = T.sync_tile_kinds(world["kinds"], tiles)
+    used = [tiles[k["tile_id"]] for k in kinds if k.get("tile_id") in tiles]
+    dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
+    shrink = float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale"))
+    colours = _colours(bot, guild.id)
+    out_kinds = []
+    for kind in kinds:
+        tile = tiles.get(kind.get("tile_id"))
+        out_kinds.append({
+            "fill": terrainart.kind_fill(kind, colours),
+            "layout": terrainart.pattern_layout(str(kind.get("key") or ""), tile, dims, shrink) if tile else None,
+            "land": bool(kind) and not kind.get("water") and str(kind.get("key") or "") != "unknown"})
+    return web.json_response(
+        {"ok": True, "version": version(guild.id), "kinds": out_kinds,
+         "art": request.get("dl_base", f"/guild/{guild.id}/dodoland") + "/tiles/art/",
+         "chunks": {f"{cx},{cy}": rle for (cx, cy), rle in rows.items()}},
+        headers={"Cache-Control": "private, max-age=600"})
 
 
 # --------------------------------------------------------------------------- #
