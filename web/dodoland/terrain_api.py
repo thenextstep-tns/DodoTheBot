@@ -98,6 +98,9 @@ def invalidate(guild_id: int, chunks=None) -> None:
             _CACHE.pop(key, None)
         return
     touched = {(int(cx), int(cy)) for cx, cy in chunks}
+    # A chunk draws the border it shares with its right and lower neighbours,
+    # so the chunks to the left of and above a change are stale too.
+    touched |= {(cx - 1, cy) for cx, cy in touched} | {(cx, cy - 1) for cx, cy in touched}
     for key in [k for k in _CACHE if k[0] == guild_id
                 and (k[2] == "overview" or (k[2], k[3]) in touched)]:
         _CACHE.pop(key, None)
@@ -387,27 +390,43 @@ async def terrain_chunks(request: web.Request):
     if len(wanted) > 400:
         return _bad("Too many chunks at once; zoom in or ask for fewer.")
 
+    # The shade where two grounds meet, from the server's settings; part of
+    # the cache key, so changing it redraws what was drawn before.
+    edge_width = max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_edge_width")))
+    edge_strength = max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_edge_strength"))))
+    look = (round(edge_width, 3), round(edge_strength, 3))
     missing = [key for key in wanted
-               if (guild.id, T.TERRAIN, key[0], key[1], 1) not in _CACHE]
+               if (guild.id, T.TERRAIN, key[0], key[1], look) not in _CACHE]
 
     if missing:
         def draw():
             colours = _colours(bot, guild.id)
-            cells = store.chunks(guild.id, missing)
+            # The neighbours to the right and below too: a chunk draws the
+            # border it shares with them, so the line runs on unbroken.
+            cxs, cys = store.chunk_counts(guild.id)
+            around = set(missing) | {(cx + 1, cy) for cx, cy in missing if cx + 1 < cxs} | \
+                {(cx, cy + 1) for cx, cy in missing if cy + 1 < cys}
+            cells = store.chunks(guild.id, sorted(around))
             out = {}
-            for key, chunk in cells.items():
+            for key in missing:
+                chunk = cells[key]
+                right, below = cells.get((key[0] + 1, key[1])), cells.get((key[0], key[1] + 1))
+                edges = terrainart.edge_path(
+                    chunk, world["kinds"], right=right,
+                    below=below[:T.CHUNK] if below else None) if edge_width > 0 and edge_strength > 0 else ""
                 out[key] = terrainart.chunk_svg(
                     chunk, world["kinds"], colours=colours, textured=True,
-                    offset=(key[0] * T.CHUNK, key[1] * T.CHUNK))
+                    offset=(key[0] * T.CHUNK, key[1] * T.CHUNK),
+                    edges=edges, edge_width=edge_width, edge_strength=edge_strength)
             return out
 
         drawn = await asyncio.get_running_loop().run_in_executor(None, draw)
         if len(_CACHE) > _CACHE_MAX:
             _CACHE.clear()
         for key, svg in drawn.items():
-            _CACHE[(guild.id, T.TERRAIN, key[0], key[1], 1)] = svg
+            _CACHE[(guild.id, T.TERRAIN, key[0], key[1], look)] = svg
 
-    body = "".join(_CACHE.get((guild.id, T.TERRAIN, cx, cy, 1), "")
+    body = "".join(_CACHE.get((guild.id, T.TERRAIN, cx, cy, look), "")
                    for cx, cy in wanted)
     return web.Response(text=body, content_type="image/svg+xml",
                         headers={"Cache-Control": "private, max-age=600"})

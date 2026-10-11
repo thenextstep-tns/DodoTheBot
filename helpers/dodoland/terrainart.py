@@ -148,11 +148,63 @@ def _subpath(x: int, y: int, w: int, h: int, cell: float) -> str:
             f"h{-w * cell:g}z")
 
 
+def _land(kind: Optional[dict]) -> bool:
+    return bool(kind) and not kind.get("water") and str(kind.get("key") or "") != "unknown"
+
+
+def edge_path(cells: list[int], kinds: list[dict], *, right: Optional[list[int]] = None,
+              below: Optional[list[int]] = None, size: int = T.CHUNK) -> str:
+    """Where two different kinds of land meet, as one path of cell edges.
+
+    Inside the chunk, and across its right and bottom borders when those
+    neighbours are given, so a border running over a chunk line is drawn once
+    and unbroken. Water is left out: the coast has its own shading.
+    """
+    def kind(value: int) -> Optional[dict]:
+        return kinds[value] if 0 <= value < len(kinds) else None
+
+    land = [_land(kind(v)) for v in range(len(kinds))]
+
+    def differs(a: int, b: int) -> bool:
+        return a != b and 0 <= a < len(land) and 0 <= b < len(land) and land[a] and land[b]
+
+    horizontal: dict[int, list[int]] = {}   # y of the edge -> x of each cell edge
+    vertical: dict[int, list[int]] = {}
+    for y in range(size):
+        row = y * size
+        for x in range(size):
+            here = cells[row + x]
+            east = cells[row + x + 1] if x + 1 < size else (right[row] if right else None)
+            south = cells[row + size + x] if y + 1 < size else (below[x] if below else None)
+            if east is not None and differs(here, east):
+                vertical.setdefault(x + 1, []).append(y)
+            if south is not None and differs(here, south):
+                horizontal.setdefault(y + 1, []).append(x)
+
+    def runs(values: list[int]):
+        values = sorted(values)
+        start = prev = values[0]
+        for v in values[1:]:
+            if v != prev + 1:
+                yield start, prev - start + 1
+                start = v
+            prev = v
+        yield start, prev - start + 1
+
+    out = []
+    for y, xs in horizontal.items():
+        out.extend(f"M{x} {y}h{n}" for x, n in runs(xs))
+    for x, ys in vertical.items():
+        out.extend(f"M{x} {y}v{n}" for y, n in runs(ys))
+    return "".join(out)
+
+
 def chunk_svg(cells: list[int], kinds: list[dict], *,
               colours: Optional[dict] = None, cell: float = 1.0,
               width: int = T.CHUNK, height: int = T.CHUNK,
               offset: tuple[float, float] = (0.0, 0.0),
-              textured: bool = False) -> str:
+              textured: bool = False, edges: str = "",
+              edge_width: float = 0.0, edge_strength: float = 0.0) -> str:
     """One chunk as SVG: a single ``<path>`` per kind of ground present.
 
     ``shape-rendering="crispEdges"`` is not decoration. Adjacent rectangles that
@@ -177,6 +229,13 @@ def chunk_svg(cells: list[int], kinds: list[dict], *,
                 else kind_fill(kind, colours))
         out.append(f'<path fill="{fill}" '
                    f'shape-rendering="crispEdges" d="{"".join(parts)}"/>')
+    # The shade where two grounds meet: a narrow dark line in a wider faint
+    # one, so it reads as a soft edge rather than a drawn outline.
+    if edges and edge_width > 0 and edge_strength > 0:
+        out.append(f'<path d="{edges}" fill="none" stroke="#000" stroke-opacity="{edge_strength / 2:.3g}" '
+                   f'stroke-width="{edge_width * 2:.3g}" pointer-events="none"/>'
+                   f'<path d="{edges}" fill="none" stroke="#000" stroke-opacity="{edge_strength:.3g}" '
+                   f'stroke-width="{edge_width:.3g}" pointer-events="none"/>')
     body = "".join(out)
     if dx or dy:
         return f'<g transform="translate({dx:g},{dy:g})">{body}</g>'

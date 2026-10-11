@@ -465,4 +465,42 @@ assert img[40, 40, 0] == 255 and img[40, 40, 3] > 0, "no surf along the shore"
 assert not np.asarray(terrain_raster.render_shade(cells, kinds, shading=0))[..., 3].any(), "shading 0 still shaded"
 print("shading         the close-up layer darkens depth, lights the surf, leaves land bare")
 
+# The shade where two grounds meet: a line along every border between two kinds
+# of land, none along the coast (it has its own), unbroken over chunk lines.
+from helpers.dodoland import terrainart  # noqa: E402
+kinds_e = T.base_kinds(T.TERRAIN)
+g_i, s_i, w_i = T.index_of(kinds_e, "grass"), T.index_of(kinds_e, "sand"), T.index_of(kinds_e, "sea")
+C = T.CHUNK
+patch = [g_i] * (C * C)
+for y in range(10, 20):
+    for x in range(10, 20):
+        patch[y * C + x] = s_i
+line = terrainart.edge_path(patch, kinds_e)
+total = sum(int(part[1:].split("h")[-1].split("v")[-1]) for part in line.split("M")[1:])
+assert total == 40, (line, total)
+wet = [g_i] * (C * C)
+for y in range(10, 20):
+    for x in range(10, 20):
+        wet[y * C + x] = w_i
+assert terrainart.edge_path(wet, kinds_e) == "", "the coast got a ground border as well as its shading"
+# Sand up to the chunk's right edge, the neighbour grass: the border on the line is drawn.
+edge = [g_i] * (C * C)
+for y in range(C):
+    edge[y * C + C - 1] = s_i
+across = terrainart.edge_path(edge, kinds_e, right=[g_i] * (C * C))
+assert f"M{C} 0v{C}" in across, "the border along the chunk line was left out"
+assert f"M{C} " not in terrainart.edge_path(edge, kinds_e), "a border was drawn against a chunk not given"
+svg = terrainart.chunk_svg(patch, kinds_e, textured=True, edges=line, edge_width=0.12, edge_strength=0.3)
+assert 'stroke-width="0.12"' in svg and 'stroke-opacity="0.3"' in svg
+assert "stroke" not in terrainart.chunk_svg(patch, kinds_e, textured=True, edges=line), "an edge of width 0 was drawn"
+print("edges           grounds meeting get a thin shade, the coast does not, chunk lines are seamless")
+
+# Painting a chunk forgets the neighbours that draw a border with it.
+terrain_api._CACHE.clear()
+for cx, cy in ((5, 5), (4, 5), (5, 4), (6, 5), (5, 6)):
+    terrain_api._CACHE[(GUILD, T.TERRAIN, cx, cy, (0.12, 0.3))] = "x"
+terrain_api.invalidate(GUILD, [(5, 5)])
+assert set(k[2:4] for k in terrain_api._CACHE) == {(6, 5), (5, 6)}, terrain_api._CACHE.keys()
+print("edges           a paint redraws the chunks to its left and above as well")
+
 print("PASS")

@@ -808,3 +808,15 @@ brushed trees into painted forest; members painting in their area.
   `dodoland_forest_spacing_zero` (1.95) at 0% to `dodoland_forest_spacing_full`
   (0.95) at 100% — the old 20% is now 100%, the old 0% is 80%. Applies to
   forests already painted (their stored density is read through it).
+
+### Shade where grounds meet
+Close up, a thin soft line now runs wherever two different kinds of land meet
+(grass on grass, grass on road) — the coast's shading was the only edge before.
+`terrainart.edge_path` finds the cell edges between two different non-water,
+known kinds (inside the chunk and across its right/bottom borders, so lines run
+on over chunk lines); `chunk_svg` draws them as a dark core
+(`dodoland_tile_edge_width` 0.12 cells, `dodoland_tile_edge_strength` 0.3) in a
+halo twice as wide at half strength. Vector, so thin at any zoom (the coast
+shade is a 1px-per-cell picture). Both settings are in the chunk cache key;
+`invalidate` also drops the left and upper neighbours of a painted chunk.
+0.8 ms per chunk on the live map.
