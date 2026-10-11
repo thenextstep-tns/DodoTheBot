@@ -344,6 +344,7 @@ async def map_page(request: web.Request):
         "ground_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_ground_chunks_max")),
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
+        "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),
         "straighten": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_straighten"))),
         # The coast's dark land edge and surf, drawn in the bake from the
         # smoothed shore at the strength the close-up shading has.
@@ -1883,6 +1884,62 @@ _SCRIPT = r"""
     return (D.decorsize * WS * piece.s / nat.w * 100) + '%';
   }
 
+  // Which pixels of a piece's picture are painted, read once per picture
+  // into a small alpha map (pictures are ours, so the canvas is not tainted).
+  var alphaMaps = {};
+  function paintedAt(el, clientX, clientY) {
+    var need = D.sizes.hit_alpha === undefined ? 96 : D.sizes.hit_alpha;
+    if (need <= 0) return true;   // the whole picture takes clicks, as it used to
+    var img = el.querySelector('img');
+    if (!img || !img.complete || !img.naturalWidth) return true;   // not known yet: solid
+    var key = img.currentSrc || img.src, map = alphaMaps[key];
+    if (map === undefined) {
+      try {
+        var w = Math.min(256, img.naturalWidth), h = Math.max(1, Math.round(img.naturalHeight * w / img.naturalWidth));
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        var x = c.getContext('2d');
+        x.drawImage(img, 0, 0, w, h);
+        map = alphaMaps[key] = {w: w, h: h, a: x.getImageData(0, 0, w, h).data};
+      } catch (e) { map = alphaMaps[key] = null; }
+    }
+    if (!map) return true;
+    var r = img.getBoundingClientRect();
+    var fx = (clientX - r.left) / r.width, fy = (clientY - r.top) / r.height;
+    if (!(fx >= 0 && fx < 1 && fy >= 0 && fy < 1)) return false;
+    if (el.classList.contains('flip')) fx = 1 - fx;
+    // A faint glow or shadow is not the building: well over half opaque.
+    return map.a[(Math.floor(fy * map.h) * map.w + Math.floor(fx * map.w)) * 4 + 3] >= need;
+  }
+  // What a press on ``el`` really lands on: the piece if it is painted there,
+  // else the first painted piece or other thing of the map beneath it, else
+  // the map itself (``{}``).
+  function pieceHit(ev, el) {
+    if (paintedAt(el, ev.clientX, ev.clientY)) return {piece: el._piece, el: el};
+    var stack = document.elementsFromPoint(ev.clientX, ev.clientY), past = false;
+    for (var i = 0; i < stack.length; i++) {
+      var e = stack[i];
+      if (!past) { if (e === el || el.contains(e)) past = true; continue; }
+      var p = e.closest && e.closest('.dlpiece');
+      if (p && p !== el && p._piece) {
+        if (paintedAt(p, ev.clientX, ev.clientY)) return {piece: p._piece, el: p};
+        continue;
+      }
+      if (e === world || e === frame || !frame.contains(e)) return {};
+      if (e.closest && (e.closest('.dltown') || e.closest('.dlhouse'))) return {other: e};
+    }
+    return {};
+  }
+  // Hand the press to what is beneath, as if it had been pressed there.
+  function passOn(ev, target, type) {
+    ev.stopPropagation();
+    var init = {bubbles: true, cancelable: true, clientX: ev.clientX, clientY: ev.clientY,
+                button: ev.button, buttons: ev.buttons, shiftKey: ev.shiftKey};
+    target.dispatchEvent(type === 'click' ? new MouseEvent('click', init)
+      : new PointerEvent(type, Object.assign(init, {pointerId: ev.pointerId, isPrimary: ev.isPrimary,
+                                                    pointerType: ev.pointerType})));
+  }
+
   function drawPiece(piece) {
     var el = document.createElement('div');
     var meta = typeof assetById === 'function' ? assetById(piece.a) : null;
@@ -1908,9 +1965,26 @@ _SCRIPT = r"""
     // listened for `click` could be selected and never moved: every attempt to
     // drag one panned the map underneath it instead. Stopping the event here
     // is what keeps the map still while a piece is being moved.
-    el.addEventListener('pointerdown', function (ev) { pieceDown(ev, piece, el); });
-    el.addEventListener('click', function (ev) { pieceClick(ev, piece); });
-    el.addEventListener('pointerenter', function () { hovered = piece.id; placeMarks(); });
+    // A piece answers only where it is painted: its picture's empty corners
+    // and faint glow pass the press, the click and the hover on to whatever
+    // is underneath — another piece, a house, a town, or the map.
+    el._piece = piece;
+    el.addEventListener('pointerdown', function (ev) {
+      var hit = pieceHit(ev, el);
+      if (hit.piece) pieceDown(ev, hit.piece, hit.el);
+      else if (hit.other) passOn(ev, hit.other, 'pointerdown');
+    });
+    el.addEventListener('click', function (ev) {
+      var hit = pieceHit(ev, el);
+      if (hit.piece) pieceClick(ev, hit.piece);
+      else if (hit.other) passOn(ev, hit.other, 'click');
+    });
+    el.addEventListener('pointermove', function (ev) {
+      var solid = paintedAt(el, ev.clientX, ev.clientY);
+      el.style.cursor = solid ? '' : 'inherit';
+      var want = solid ? piece.id : (hovered === piece.id ? null : hovered);
+      if (want !== hovered) { hovered = want; placeMarks(); }
+    });
     el.addEventListener('pointerleave', function () {
       if (hovered === piece.id) { hovered = null; placeMarks(); }
     });

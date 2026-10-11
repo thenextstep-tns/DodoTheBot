@@ -932,3 +932,15 @@ Step 2 (per-stroke smoothing, sharp corners on demand) is next.
   along the outline, sigma = `dodoland_ground_straighten` cells x strength,
   relabelled "smoothing reach"): organic shapes stay organic, a 1-over-1-down
   stair is within 0.00 cells of straight, a plaza keeps 96% of its size.
+
+### Placed things are clickable only where painted
+Like the town hall (inline SVG, `visiblePainted`), but for every placed piece,
+whose `<img>` took clicks over its whole rectangle (transparent corners,
+glows, soft shadows). `mappage.paintedAt` reads each picture once into a
+256px alpha map (`alphaMaps`, keyed by src) and asks the pixel under the
+pointer; below `dodoland_hit_alpha` (96 of 255; 0 = the whole rectangle, as
+before) the press is not the piece's. `pieceHit` walks
+`document.elementsFromPoint` past it: the first painted piece beneath takes
+it, a town or house gets it re-dispatched (`passOn`), otherwise it bubbles on
+to the map (pan, tools). Hover outline and cursor follow the same test.
+Checked in headless Chrome with overlapping pieces, a glow and a town.
