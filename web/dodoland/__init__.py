@@ -45,7 +45,7 @@ def dodoland_routes() -> list:
     )
     from web.dodoland.terrain_api import (
         api_terrain_paint, api_terrain_undo, terrain_cells, terrain_chunks,
-        terrain_defs, terrain_overview, terrain_picture, terrain_world,
+        terrain_defs, terrain_overview, terrain_picture, terrain_shade, terrain_world,
     )
     from web.dodoland.influence_api import influence_layer
     from web.dodoland.roads_api import roads_layer
@@ -91,6 +91,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/terrain/defs", configure(terrain_defs)),
         web.get("/guild/{gid}/dodoland/terrain/overview", configure(terrain_overview)),
         web.get("/guild/{gid}/dodoland/terrain/picture", configure(terrain_picture)),
+        web.get("/guild/{gid}/dodoland/terrain/shade", configure(terrain_shade)),
         web.get("/guild/{gid}/dodoland/terrain/chunks", configure(terrain_chunks)),
         web.get("/guild/{gid}/dodoland/terrain/cells", configure(terrain_cells)),
         # Every placed town's area of influence, for the map's Influence layer.
@@ -135,6 +136,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/me/w/terrain/world", player.require_town(world=True)(player_map.reader(terrain_world))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/defs", player.require_town(world=True)(player_map.reader(terrain_defs))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/picture", player.require_town(world=True)(player_map.reader(terrain_picture))),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/shade", player.require_town(world=True)(player_map.reader(terrain_shade))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/chunks", player.require_town(world=True)(player_map.reader(terrain_chunks))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/cells", player.require_town(world=True)(player_map.reader(terrain_cells))),
         web.get("/guild/{gid}/dodoland/me/w/influence", player.require_town(world=True)(player_map.reader(influence_layer))),

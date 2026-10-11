@@ -149,3 +149,62 @@ def picture(store, guild_id: int, colours: dict, *, shading: float = 1.0,
     cells = grid(chunks, world["cells_w"], world["cells_h"])
     return encode(render(cells, list(kinds) if kinds is not None else world["kinds"], colours,
                          seed=guild_id, shading=shading, grain=grain))
+
+
+def render_shade(cells, kinds: list[dict], *, seed: int = 1, shading: float = 1.0):
+    """The overview's shading on its own, as an RGBA ``PIL.Image``: transparent
+    where there is none, dark where the picture darkens (deep water, the land's
+    edge along a coast, the shadowed side of a mountain), light where it
+    brightens (surf, the lit side). Laid over the close-up tiles so a coast and
+    a lake's depth read up close as they do from afar.
+
+    The broad variation and the grain are left out: over real tile art they
+    only muddy it.
+    """
+    import numpy as np
+    from PIL import Image
+
+    h, w = cells.shape
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    index = np.clip(cells, 0, max(0, len(kinds) - 1))
+    is_water = np.array([bool(k.get("water")) for k in kinds] or [False])[index]
+    unset = index == T.UNKNOWN
+    land = ~is_water & ~unset
+    rock = np.array([bool(k.get("move") is None and not k.get("water")) for k in kinds] or [False])[index] & land
+
+    dark = np.zeros((h, w), dtype="float32")
+    bright = np.zeros((h, w), dtype="float32")
+    if shading > 0:
+        near = 0.6 * _blur(land, 6) + 0.4 * _blur(land, 28)
+        depth = np.clip(1.0 - near * 3.0, 0.0, 1.0)
+        dark = np.where(is_water, 0.28 * shading * depth, dark)
+        edge = land & _grow(is_water, 1)
+        dark = np.where(edge, dark + 0.18 * shading, dark)
+        shore = _grow(land, 1) & is_water
+        bright = np.where(shore, 0.35 * min(1.0, shading), bright)
+        if rock.any():
+            height = _blur(rock, 2.5) * (0.75 + 0.25 * _noise(rng, h, w, 6))
+            gy, gx = np.gradient(height)
+            lit = np.clip(-(gx + gy) * 6.0, -1.0, 1.0) * 0.35 * shading
+            dark = np.where(rock & (lit < 0), dark - lit, dark)
+            bright = np.where(rock & (lit > 0), bright + lit, bright)
+    white = bright > dark
+    alpha = np.clip(np.where(white, bright, dark), 0, 1)
+    out = np.zeros((h, w, 4), dtype="uint8")
+    out[..., :3] = np.where(white[..., None], 255, 0).astype("uint8")
+    out[..., 3] = (alpha * 255).astype("uint8")
+    out[unset] = 0
+    return Image.fromarray(out, "RGBA")
+
+
+def shade(store, guild_id: int, *, shading: float = 1.0, kinds: Iterable[dict] = None) -> bytes:
+    """The encoded shading layer of a guild's world straight from its store."""
+    world = store.world(guild_id)
+    cxs, cys = store.chunk_counts(guild_id)
+    chunks = store.chunks(guild_id, [(cx, cy) for cy in range(cys) for cx in range(cxs)])
+    cells = grid(chunks, world["cells_w"], world["cells_h"])
+    image = render_shade(cells, list(kinds) if kinds is not None else world["kinds"],
+                         seed=guild_id, shading=shading)
+    buffer = io.BytesIO()
+    image.save(buffer, "WEBP", quality=80, method=4)
+    return buffer.getvalue()

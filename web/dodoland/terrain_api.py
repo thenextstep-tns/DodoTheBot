@@ -280,6 +280,44 @@ def picture_bytes(bot, guild_id: int) -> bytes:
     return data
 
 
+# guild -> (version, webp bytes) of the shading layer.
+_SHADES: dict[int, tuple[str, bytes]] = {}
+
+
+def shade_bytes(bot, guild_id: int) -> bytes:
+    """The overview's shading alone (``terrain_raster.render_shade``), laid over
+    the close-up tiles. Made once per terrain version. Blocking."""
+    from helpers.dodoland import terrain_raster
+
+    world = bot.dodoland_terrain.world(guild_id)
+    _fresh(guild_id, world)
+    strength = float(bot.dodoland_params.get(guild_id, "dodoland_detail_shading"))
+    if not world["cells_w"] or strength <= 0:
+        return b""
+    ver = version(guild_id) + f".{strength}"
+    hit = _SHADES.get(int(guild_id))
+    if hit and hit[0] == ver:
+        return hit[1]
+    tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
+    data = terrain_raster.shade(bot.dodoland_terrain, guild_id,
+                                shading=strength * float(bot.dodoland_params.get(guild_id, "dodoland_overview_shading")),
+                                kinds=T.sync_tile_kinds(world["kinds"], tiles))
+    _SHADES[int(guild_id)] = (ver, data)
+    return data
+
+
+async def terrain_shade(request: web.Request):
+    """``GET …/terrain/shade?v=`` — the shading laid over the close-up tiles."""
+    import asyncio
+
+    bot, guild = request.app["bot"], request["guild"]
+    data = await asyncio.get_running_loop().run_in_executor(None, shade_bytes, bot, guild.id)
+    if not data:
+        return web.Response(status=404, text="No shading.", content_type="text/plain")
+    return web.Response(body=data, content_type="image/webp",
+                        headers={"Cache-Control": "private, max-age=600"})
+
+
 async def terrain_picture(request: web.Request):
     """``GET …/terrain/picture?v=`` — the overview the map shows zoomed out."""
     import asyncio

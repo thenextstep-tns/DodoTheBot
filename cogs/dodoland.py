@@ -398,6 +398,7 @@ class DodoLand(commands.Cog, name="dodoland"):
                 if not self.bot.dodoland_terrain.world(guild.id)["cells_w"]:
                     continue
                 terrain_api.picture_bytes(self.bot, guild.id)
+                terrain_api.shade_bytes(self.bot, guild.id)
                 influence_api.warm(self.bot, guild)
                 if self.bot.dodoland_params.get(guild.id, "dodoland_roads_on"):
                     roads_api.current(self.bot, guild)

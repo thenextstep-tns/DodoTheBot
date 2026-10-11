@@ -674,3 +674,13 @@ count change. On live data the top town goes 1,288 -> 153 people reached (place
 unchanged); a few towns move several places. Houses are `reached //
 dodoland_people_per_house` (10), so they drop too — Nik to retune (2 keeps
 about the old density).
+
+### Shading kept up close
+Far out the ground is the overview picture, whose shading (water darkening with
+depth, surf, the coast's darker edge, mountain relief) vanished once real tiles
+faded in. `terrain_raster.render_shade` draws that shading alone as RGBA (no
+variation/grain); `terrain_api.shade_bytes` caches it per terrain version
+(`_SHADES`, ~4 s, ~360 KB on live data, warmed at start). Served at
+`/terrain/shade` and `/me/w/terrain/shade`; the client lays it in `#dltshade`
+above the tiles with the same fade-in opacity as the tiles, so the look is
+continuous. `dodoland_detail_shading` (1.0) scales it; 0 turns it off.

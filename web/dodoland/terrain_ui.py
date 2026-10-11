@@ -53,6 +53,7 @@ CSS = """
 .dlwall { fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .dlroad { fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .dlworld.hide-roads #dltroads { display: none; }
+.dlworld.hide-ground #dltshade { display: none; }
 .dlworld.hide-buildings #dltwalls { display: none; }
 .dltdash { stroke-width: calc(1.5px * var(--inv, 1));
   stroke-dasharray: calc(5px * var(--inv, 1)) calc(3px * var(--inv, 1)); }
@@ -166,7 +167,7 @@ SCRIPT = r"""
       '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
       'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
       world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltinfl"></g><g id="dltroads"></g><g id="dltwalls"></g>' +
+      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltshade"></g><g id="dltinfl"></g><g id="dltroads"></g><g id="dltwalls"></g>' +
       '<rect id="dltsel" class="dltline dltdash" fill="rgba(240,166,79,.12)" stroke="#f0a64f" ' +
       'style="display:none"/>' +
       // The brush's exact footprint: the cells a stroke here will paint, traced
@@ -309,6 +310,17 @@ SCRIPT = r"""
     };
     probe.onerror = function () { if (typeof loaded === 'function') loaded('ground'); };
     probe.src = url;
+    // The shading for close up, loaded the same way and kept out of sight
+    // until the tiles fade in.
+    var shadeUrl = terrUrl('shade', '?v=' + encodeURIComponent(terr.ver));
+    var sp = new Image();
+    sp.onload = function () {
+      var g = document.getElementById('dltshade');
+      if (!g || !terr.world) return;
+      g.innerHTML = '<image href="' + shadeUrl + '" x="0" y="0" width="' + terr.world.cells_w +
+        '" height="' + terr.world.cells_h + '" preserveAspectRatio="none" style="pointer-events:none"/>';
+    };
+    sp.src = shadeUrl;
   }
   function terrDefs() {
     fetch(terrUrl('defs', '?v=' + terr.ver)).then(function (r) { return r.ok ? r.text() : ''; })
@@ -330,7 +342,11 @@ SCRIPT = r"""
     var detail = document.getElementById('dltdetail');
     var from = (D.sizes.lod || {}).tiles;
     if (from === undefined) from = 2.5;
-    if (detail) detail.style.opacity = Math.max(0, Math.min(1, (perCellX - from) / 2)).toFixed(2);
+    var fade = Math.max(0, Math.min(1, (perCellX - from) / 2)).toFixed(2);
+    if (detail) detail.style.opacity = fade;
+    // The shading comes in with the tiles: far out it is already in the picture.
+    var shadeG = document.getElementById('dltshade');
+    if (shadeG) shadeG.style.opacity = fade;
     if (perCellX < from && total > 0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;

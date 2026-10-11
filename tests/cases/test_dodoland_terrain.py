@@ -451,4 +451,18 @@ round_ = paint({"kind": sand, "radius": 3, "points": [[60, 470]]})
 assert brush.at(GUILD, 63, 473) != sand, "the round brush painted its corners"
 print("brush           round and square brushes paint their own shapes")
 
+# The close-up shading: transparent inland, darker out to sea, surf on the shore.
+import numpy as np
+from helpers.dodoland import terrain_raster
+kinds = T.base_kinds(T.TERRAIN)
+grass_i, water_i = T.index_of(kinds, "grass"), T.index_of(kinds, "sea")
+cells = np.full((80, 120), water_i, dtype="int16")
+cells[:, :40] = grass_i
+img = np.asarray(terrain_raster.render_shade(cells, kinds))
+assert img[40, 10, 3] == 0, "the shading darkened plain land far from water"
+assert img[40, 110, 3] > img[40, 45, 3] or img[40, 41, 0] == 255, "deep water is no darker than the shore"
+assert img[40, 40, 0] == 255 and img[40, 40, 3] > 0, "no surf along the shore"
+assert not np.asarray(terrain_raster.render_shade(cells, kinds, shading=0))[..., 3].any(), "shading 0 still shaded"
+print("shading         the close-up layer darkens depth, lights the surf, leaves land bare")
+
 print("PASS")
