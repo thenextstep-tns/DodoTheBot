@@ -91,13 +91,21 @@ async def api_world_decor(request: web.Request):
             await _record_change(request, "dodoland_decor", "world", "", action,
                                  f"DodoLand landmark {action}ed ({n})")
             return web.json_response({"ok": True, "changed": n})
+        if action == "pin":
+            # A town building locked in place from its card, as its owner would.
+            n = bot.dodoland_decor.set_pinned(guild.id, body.get("piece_ids") or [], True)
+            return web.json_response({"ok": True, "changed": n})
 
-        # A landmark stays where it is until an admin unlocks it.
+        # A landmark, or anything locked in place, stays where it is until it
+        # is unlocked.
         touched = ([body.get("piece_id")] if action in ("move", "remove") else
                    [m.get("piece_id") for m in (body.get("moves") or []) if m] if action == "move_many" else
                    (body.get("piece_ids") or []) if action == "remove_many" else [])
-        if touched and bot.dodoland_decor.landmarks(guild.id, touched):
+        held = bot.dodoland_decor.held(guild.id, touched) if touched else {}
+        if "landmark" in held.values():
             return _bad("That is a landmark. Unlock it first to move or remove it.")
+        if held:
+            return _bad("That is locked in place. Unlock it first to move or remove it.")
 
         if action == "place_many":
             # A brush stroke: many pieces of a few tiles, checked once per tile

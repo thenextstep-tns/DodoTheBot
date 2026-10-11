@@ -701,3 +701,20 @@ change. Now, with identical areas (checked cell for cell on live data):
   the old areas are served and the new ones made on a thread (`_refresh`, one
   per guild, `_LOCKS`). A real change still recomputes before answering.
 Live (top reach 340, 15 towns): 8.3 s total, ~3.5 s of it standings, 760 KB.
+
+### Two kinds of lock
+* **Landmark** (`locked`, admin): the toolkit's 🔒 Landmark button / Landmark
+  mode. Unchanged: nobody moves or removes it, no town carries it, members
+  cannot paint under it.
+* **Locked in place** (`pinned`, member level): the 🔓/🔒 button on each placed
+  building's row in the town card. Stops a move/drag/delete/mirror until
+  unlocked, but it is still the town's: `town_move.carried` takes it along and
+  the ground under it can be painted. `decor.set_pinned` never touches a
+  landmark and, for members, only their own town's pieces.
+* Admins use the same row button: on a locked building it unlocks either kind
+  (`set_landmark(False)` clears both); on an unlocked one it pins (`action:
+  "pin"`), so an admin can lock a town building without making it a map
+  landmark. The toolkit button also unlocks either kind. Members cannot unlock
+  a landmark (button disabled, server refuses).
+* Refusals: `decor.held()` -> `{id: "landmark"|"pinned"}`, checked by both the
+  admin and member endpoints; the page shows pinned selections in amber.

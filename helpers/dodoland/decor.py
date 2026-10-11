@@ -300,9 +300,41 @@ class DecorStore:
         ids = [str(p) for p in piece_ids or []][:2000]
         if not ids:
             return 0
+        # Unlocking takes off a member's own lock too: an admin's one button
+        # frees anything, whoever locked it.
+        changes = {"locked": True} if locked else {"locked": False, "pinned": False}
         result = self._col.update_many({"guild_id": int(guild_id), "scope": SCOPE_WORLD,
-                                        "piece_id": {"$in": ids}}, {"$set": {"locked": bool(locked)}})
+                                        "piece_id": {"$in": ids}}, {"$set": changes})
         return int(getattr(result, "modified_count", 0))
+
+    def set_pinned(self, guild_id: int, piece_ids: list, pinned: bool, town=None) -> int:
+        """A member's own lock: their building stays put until they (or an
+        admin) unlock it, so it is not dragged or deleted by accident. Unlike a
+        landmark it is still the town's — it moves with the town, and the
+        ground under it can be painted. Never touches an admin's landmark.
+        ``town`` narrows it to that town's own pieces."""
+        self._ensure_indexes()
+        ids = [str(p) for p in piece_ids or []][:2000]
+        if not ids:
+            return 0
+        query = {"guild_id": int(guild_id), "scope": SCOPE_WORLD,
+                 "piece_id": {"$in": ids}, "locked": {"$ne": True}}
+        if town is not None:
+            query["town"] = str(town)
+        result = self._col.update_many(query, {"$set": {"pinned": bool(pinned)}})
+        return int(getattr(result, "modified_count", 0))
+
+    def held(self, guild_id: int, piece_ids) -> dict:
+        """Which of these pieces may not be moved or removed, and why:
+        ``{piece_id: "landmark" | "pinned"}``."""
+        ids = [str(p) for p in piece_ids or []]
+        if not ids:
+            return {}
+        return {row["piece_id"]: ("landmark" if row.get("locked") else "pinned")
+                for row in self._col.find(
+                    {"guild_id": int(guild_id), "piece_id": {"$in": ids},
+                     "$or": [{"locked": True}, {"pinned": True}]},
+                    {"piece_id": 1, "locked": 1})}
 
     def landmarks(self, guild_id: int, piece_ids) -> set:
         """Which of these pieces are landmarks."""

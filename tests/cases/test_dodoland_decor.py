@@ -224,4 +224,62 @@ marks.set_landmark(9, [fixed["piece_id"], plain["piece_id"]], False)
 assert marks.landmarks(9, [fixed["piece_id"], plain["piece_id"]]) == set()
 print("landmarks       placed locked or locked later, and unlocked again")
 
+# A member's own lock: on their own town's buildings, never on a landmark; an
+# admin's unlock frees both kinds.
+inn = marks.place(9, scope="world", asset_id="inn", x=52, y=50, placed_by=5)
+marks._col.update_one({"piece_id": inn["piece_id"]}, {"$set": {"town": "5"}})
+marks.set_landmark(9, [fixed["piece_id"]], True)
+assert marks.set_pinned(9, [inn["piece_id"], plain["piece_id"]], True, town="5") == 1, \
+    "a member locked a piece that is not their town's"
+assert marks.set_pinned(9, [fixed["piece_id"]], True) == 0, "a member's lock overwrote a landmark"
+assert marks.held(9, [inn["piece_id"], fixed["piece_id"], plain["piece_id"]]) == \
+    {inn["piece_id"]: "pinned", fixed["piece_id"]: "landmark"}
+marks.set_landmark(9, [inn["piece_id"], fixed["piece_id"]], False)
+assert marks.held(9, [inn["piece_id"], fixed["piece_id"]]) == {}, "an admin's unlock left a lock on"
+print("landmarks       members lock their own buildings in place; an admin unlocks anything")
+
+# The member's endpoint: lock and unlock their own; a locked one will not move
+# or go; an admin's landmark is beyond them.
+from aiohttp import web  # noqa: E402
+import json as _json  # noqa: E402
+from web.dodoland import player_map  # noqa: E402
+
+
+class _Bot:
+    dodoland_decor = marks
+
+
+class _Guild:
+    id = 9
+
+
+class _Req(dict):
+    def __init__(self, uid, body):
+        super().__init__(guild=_Guild(), uid=uid)
+        self.app = {"bot": _Bot()}
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+def member(uid, body):
+    return _json.loads(asyncio.run(player_map.build(_Req(uid, body))).body.decode())
+
+
+assert member(5, {"action": "lock", "piece_ids": [inn["piece_id"]]})["ok"]
+assert marks.held(9, [inn["piece_id"]]) == {inn["piece_id"]: "pinned"}
+refused = member(5, {"action": "remove_many", "piece_ids": [inn["piece_id"]]})
+assert not refused["ok"] and "Unlock" in refused["error"], refused
+refused = member(5, {"action": "move", "piece_id": inn["piece_id"], "x": 1, "y": 1})
+assert not refused["ok"] and "Unlock" in refused["error"], refused
+assert not member(6, {"action": "unlock", "piece_ids": [inn["piece_id"]]})["ok"], "another member unlocked it"
+assert member(5, {"action": "unlock", "piece_ids": [inn["piece_id"]]})["ok"]
+assert marks.held(9, [inn["piece_id"]]) == {}
+marks._col.update_one({"piece_id": fixed["piece_id"]}, {"$set": {"town": "5"}})
+marks.set_landmark(9, [fixed["piece_id"]], True)
+refused = member(5, {"action": "unlock", "piece_ids": [fixed["piece_id"]]})
+assert not refused["ok"] and "admins" in refused["error"], "a member unlocked an admin's landmark"
+print("landmarks       a member locks and unlocks their own; a landmark is the admins' alone")
+
 print("PASS")

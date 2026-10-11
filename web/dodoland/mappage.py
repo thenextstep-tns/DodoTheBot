@@ -209,6 +209,8 @@ def _collect(bot, guild) -> dict:
                        "by": str(d.get("by") or ""), "bn": str(d.get("by_name") or ""),
                        "t": str(d.get("town") or ""),
                        "k": bool(d.get("locked")),
+                       # Locked in place by its owner (or from its card).
+                       "pk": bool(d.get("pinned")),
                        "at": int(d.get("at") or 0)} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
@@ -429,7 +431,7 @@ async def map_page(request: web.Request):
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
       step="0.05" value="1"></label>
     <button class="dlghost" id="dlkitflip">Mirror</button>
-    <button class="dlghost" id="dlkitlock" title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it">&#128274; Landmark</button>
+    <button class="dlghost" id="dlkitlock" title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it. On something already locked (a landmark, or a building its owner locked in place) it unlocks it.">&#128274; Landmark</button>
     <button class="dlghost" id="dlkitdel">Remove</button>
   </div>
   <p class="dlkitmsg" id="dlkitmsg"></p>
@@ -680,8 +682,12 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlmark.hover { border: 1px dashed rgba(240, 166, 79, .85); box-shadow: none; }
 /* A landmark's box: steady blue, with a lock. */
 .dlmark.locked { border-color: #7fb2ff; }
-.dlmark.locked::after { content: "🔒"; position: absolute; top: -18px; left: 50%;
+.dlmark.locked::after, .dlmark.pinned::after { content: "🔒"; position: absolute; top: -18px; left: 50%;
   transform: translateX(-50%); font-size: 12px; }
+/* Locked in place by its owner: amber, the same lock. */
+.dlmark.pinned { border-color: #f0c34f; }
+.bico.block.on { color: #f0c34f; }
+.bline button[disabled] { opacity: .45; cursor: not-allowed; }
 /* Where the armed piece will land, at the size it will land at. */
 .dlpiece.ghost { opacity: .6; pointer-events: none; display: none; z-index: 40000; }
 .dlframe.placing .dlpiece.ghost.live { display: block; }
@@ -1227,9 +1233,13 @@ _SCRIPT = r"""
         (isHall && p.plot ? '<span class="bhall" title="The town is drawn as its hall; Move moves the town">Town hall</span>' : '') +
         (tile && !placed ? '<button class="bbuild" data-build="' + escapeHtml(b.key) +
           '" title="Put it on the map, inside this town">Build</button>' : '') +
-        (placed ? '<button class="bmove" data-movebld="' + escapeHtml(b.key) +
-          '" title="Click inside the town to move it there">Move</button>' +
-          '<button class="bdel" data-delbld="' + escapeHtml(b.key) + '" title="Take it off the map">Delete</button>' : '') +
+        (placed ? lockButton(placed, b.key) +
+          '<button class="bmove" data-movebld="' + escapeHtml(b.key) + '"' +
+          (placed.k || placed.pk ? ' disabled title="Locked in place. Unlock it first."'
+                                 : ' title="Click inside the town to move it there"') + '>Move</button>' +
+          '<button class="bdel" data-delbld="' + escapeHtml(b.key) + '"' +
+          (placed.k || placed.pk ? ' disabled title="Locked in place. Unlock it first."'
+                                 : ' title="Take it off the map"') + '>Delete</button>' : '') +
         '</div>' +
         (on ? '<div class="brooms">Built by ' + rooms + '</div>' : '') +
         '</li>';
@@ -1294,6 +1304,7 @@ _SCRIPT = r"""
         if (b.dataset.rename) { renameBuilding(p, b.dataset.rename, b); return; }
         if (b.dataset.movebld) { moveBuilding(p, b.dataset.movebld); return; }
         if (b.dataset.delbld) { deleteBuilding(p, b.dataset.delbld); return; }
+        if (b.dataset.lockbld) { lockBuilding(p, b.dataset.lockbld); return; }
         if (b.dataset.walls !== undefined) { setWalls(p, b.dataset.walls); return; }
         if (act === 'close') { closeCard(); }
         else if (act === 'move') { arm(id); closeCard(); }
@@ -1417,6 +1428,36 @@ _SCRIPT = r"""
       hint.textContent = 'Moved.';
       open(r.town.id);
     });
+  }
+  // Locking a building in place, from its row. A member locks and unlocks
+  // their own; an admin's landmark is beyond them. An admin unlocks anything
+  // with the same button, whoever locked it.
+  function lockButton(piece, key) {
+    var landmark = piece.k, held = piece.k || piece.pk;
+    var title = landmark
+      ? (D.ep.player ? 'A landmark the server’s admins set. Only they can unlock it.'
+                     : 'A landmark. Click to unlock it.')
+      : held ? 'Locked in place. Click to unlock it.'
+             : 'Lock it in place, so it is not moved or deleted by accident. It still moves with the town.';
+    return '<button class="bico block' + (held ? ' on' : '') + '" data-lockbld="' + escapeHtml(key) + '"' +
+      (landmark && D.ep.player ? ' disabled' : '') + ' title="' + title + '">' +
+      (held ? '&#128274;' : '&#128275;') + '</button>';
+  }
+  function lockBuilding(p, key) {
+    var piece = townPiece(p, key);
+    if (!piece) return;
+    if (piece.k && D.ep.player) {
+      hint.textContent = 'That is a landmark the server’s admins set. Only they can unlock it.';
+      return;
+    }
+    var unlock = piece.k || piece.pk;
+    decorPost({action: unlock ? 'unlock' : (D.ep.player ? 'lock' : 'pin'), piece_ids: [piece.id]},
+      function () {
+        if (unlock) { piece.k = false; piece.pk = false; } else { piece.pk = true; }
+        redrawDecor(); placeMarks();
+        hint.textContent = unlock ? 'Unlocked.' : 'Locked in place.';
+        open(p.id);
+      });
   }
   function deleteBuilding(p, key) {
     var piece = townPiece(p, key);
@@ -1869,6 +1910,7 @@ _SCRIPT = r"""
       markAt(m, i < ids.length ? pieces[ids[i]] : null);
       var p = i < ids.length && pieceById(ids[i]);
       m.classList.toggle('locked', !!(p && p.k));
+      m.classList.toggle('pinned', !!(p && p.pk && !p.k));
     });
     markAt(hoverMark, hovered && !sel[hovered] && !frame.classList.contains('placing') && pieces[hovered]);
   }
@@ -2082,9 +2124,20 @@ _SCRIPT = r"""
     decorPost({action: 'move_many', moves: chosen.map(function (p) {
       return {piece_id: p.id, scale: p.s}; })}, function () { kitSay('Resized.'); });
   };
+  // Whether the selection holds something locked; says so if it does.
+  function heldSay(verb) {
+    var chosen = selectedPieces();
+    var text = chosen.some(function (p) { return p.k; })
+      ? 'That is a landmark. Unlock it first to ' + verb + ' it.'
+      : chosen.some(function (p) { return p.pk; })
+        ? 'That is locked in place. Unlock it first to ' + verb + ' it.' : '';
+    if (text) { kitSay(text, true); hint.textContent = text; }
+    return !!text;
+  }
   document.getElementById('dlkitflip').onclick = function () {
     var chosen = selectedPieces();
     if (!chosen.length) { kitSay('Select a placed piece first.', true); return; }
+    if (heldSay('mirror')) return;
     chosen.forEach(function (p) { p.f = !p.f; });
     redrawDecor();
     decorPost({action: 'move_many', moves: chosen.map(function (p) {
@@ -2093,10 +2146,7 @@ _SCRIPT = r"""
   function removeSelection() {
     var ids = selIds();
     if (!ids.length) { kitSay('Select a placed piece first.', true); return; }
-    if (selectedPieces().some(function (p) { return p.k; })) {
-      kitSay('That is a landmark. Unlock it first to remove it.', true);
-      return;
-    }
+    if (heldSay('remove')) return;
     decorPost({action: 'remove_many', piece_ids: ids}, function (res) {
       D.world = D.world.filter(function (q) { return !sel[q.id]; });
       sel = {};
@@ -2126,10 +2176,10 @@ _SCRIPT = r"""
   document.getElementById('dlkitlock').onclick = function () {
     var chosen = selectedPieces();
     if (!chosen.length) { kitSay('Select a placed piece first.', true); return; }
-    var lock = !chosen.every(function (p) { return p.k; });
+    var lock = !chosen.every(function (p) { return p.k || p.pk; });
     decorPost({action: lock ? 'lock' : 'unlock', piece_ids: chosen.map(function (p) { return p.id; })},
       function () {
-        chosen.forEach(function (p) { p.k = lock; });
+        chosen.forEach(function (p) { p.k = lock; if (!lock) p.pk = false; });
         redrawDecor(); selChanged();
         kitSay(lock ? (chosen.length === 1 ? 'Now a landmark.' : chosen.length + ' landmarks.')
                     : (chosen.length === 1 ? 'No longer a landmark.' : chosen.length + ' unlocked.'));
@@ -2309,10 +2359,7 @@ _SCRIPT = r"""
   }
   // Everything selected moves together, by the pointer's travel in map units.
   function dragSelection(ev, el) {
-    if (selectedPieces().some(function (p) { return p.k; })) {
-      kitSay('That is a landmark. Unlock it first to move it.', true);
-      return;
-    }
+    if (heldSay('move')) return;
     var start = {x: ev.clientX, y: ev.clientY}, travelled = 0;
     var group = selectedPieces().map(function (p) { return {p: p, x: p.x, y: p.y}; });
     try { el.setPointerCapture(ev.pointerId); } catch (e) {}

@@ -84,10 +84,11 @@ pieces = [{"piece_id": "hall-tavern", "town": "7", "by": 1, "x": 90, "y": 90},  
           {"piece_id": "admins-tree", "by": 1, "x": 11, "y": 10},               # an admin's, inside
           {"piece_id": "owners-far", "by": 7, "x": 80, "y": 80},                # its owner's, outside
           {"piece_id": "old-piece", "x": 12, "y": 10},                          # nobody's, inside
-          {"piece_id": "owners-landmark", "by": 7, "x": 13, "y": 10, "locked": True}]  # a landmark, even its owner's
+          {"piece_id": "owners-landmark", "by": 7, "x": 13, "y": 10, "locked": True},  # a landmark, even its owner's
+          {"piece_id": "locked-inn", "town": "7", "by": 7, "x": 14, "y": 10, "pinned": True}]  # locked by its owner
 inside = lambda piece: piece["x"] < 50  # noqa: E731
 took = {p["piece_id"] for p in town_move.carried(pieces, 7, inside)}
-assert took == {"hall-tavern", "owners-tree"}, took
+assert took == {"hall-tavern", "owners-tree", "locked-inn"}, took
 print("moving          a town takes its buildings and its owner's pieces, never anyone else's")
 
 print("PASS")

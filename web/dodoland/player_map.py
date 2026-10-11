@@ -117,11 +117,26 @@ async def build(request: web.Request):
         return row if ok else None
 
     try:
+        if action in ("lock", "unlock"):
+            ids = [str(i) for i in (body.get("piece_ids") or [])[:200]]
+            rows = [bot.dodoland_decor.piece(guild.id, i) for i in ids]
+            if any(r and r.get("locked") for r in rows):
+                return _bad("That is a landmark the server's admins set. Only they can unlock it.")
+            if not ids or any(own(i) is None for i in ids):
+                return _bad("You can lock only your own town's buildings.")
+            n = bot.dodoland_decor.set_pinned(guild.id, ids, action == "lock", town=mine)
+            return web.json_response({"ok": True, "changed": n})
+
+        def unpinned(ids) -> bool:
+            return not bot.dodoland_decor.held(guild.id, ids)
+
         if action in ("move", "move_many"):
             moves = body.get("moves") if action == "move_many" else [body]
             moves = [m for m in (moves or [])[:200] if m]
             if any(own(m.get("piece_id")) is None for m in moves):
                 return _bad("That is not one of your town's buildings.")
+            if not unpinned([m.get("piece_id") for m in moves]):
+                return _bad("You locked that in place. Unlock it first to move it.")
             refused = await decor_api._outside_area(bot, guild, moves)
             if refused:
                 return _bad(refused)
@@ -136,6 +151,8 @@ async def build(request: web.Request):
         if action in ("remove", "remove_many"):
             ids = body.get("piece_ids") if action == "remove_many" else [body.get("piece_id")]
             ids = [str(i) for i in (ids or []) if own(i) is not None]
+            if not unpinned(ids):
+                return _bad("You locked that in place. Unlock it first to delete it.")
             gone = bot.dodoland_decor.remove_many(guild.id, ids)
             return web.json_response({"ok": True, "removed": gone})
 
