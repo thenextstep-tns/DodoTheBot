@@ -187,6 +187,35 @@ def recent_rows(store, params, guild_id: int, since: Optional[str]) -> tuple[lis
     return rows, pairs
 
 
+# (guild, since, the rows object, buildings) -> standings over everybody
+_WHOLE: dict[tuple, dict] = {}
+
+
+def recent_standings(store, params, guild_id: int, buildings: list[dict],
+                     since: Optional[str]) -> dict:
+    """Everybody's standings over the window, from :func:`recent_rows`, shared
+    while those rows are.
+
+    **One person's tiers must come from this, never from scoring them alone.**
+    A tier's threshold is a percentile of everybody's points, so scoring one
+    person against only themselves moves every threshold: Beanburg's zoo came
+    out tier 6 alone and tier 3 among everyone, and the map refused to build
+    the tier its own card offered. Read-only, like the rows.
+    """
+    import json
+
+    rows, pairs = recent_rows(store, params, guild_id, since)
+    key = (int(guild_id), str(since or ""), id(rows),
+           json.dumps(buildings, sort_keys=True, default=str))
+    hit = _WHOLE.get(key)
+    if hit is None:
+        if len(_WHOLE) > 16:
+            _WHOLE.clear()
+        hit = _WHOLE[key] = guild_standings(store, params, guild_id, buildings, since=since,
+                                            rows=rows, pair_rows=pairs)
+    return hit
+
+
 def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
                     user_ids: Optional[Iterable[int]] = None,
                     since: Optional[str] = None, basis: str = "all",

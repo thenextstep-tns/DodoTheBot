@@ -495,3 +495,18 @@ nearest piece within 10 screen px — zoomed out, a flower is a pixel.
   (`dodoland_zoo_building`, menagerie) holds `dodoland_zoo_animals` (2) per
   tier, wandering inside it. Animated only when a cell is at least 1.2 px and
   the tab is visible. `dodoland_life_on` switches it off.
+
+### Zoo would not build; buildings a quarter size; the hall row (11 Oct)
+
+Found on Nik's Chrome: **Build on the zoo was refused** ("a town builds at the
+tier it has reached") because the server scored the town *alone*
+(`user_ids=[uid]` with only its rows), and tiers are percentiles of everybody:
+alone Beanburg's zoo was tier 6, among everyone tier 3 (what the card shows).
+All one-person scoring (town art, toolkit unlocks, the build check) now reads
+`standing.recent_standings` — everybody, cached with the shared rows. The town
+art's per-town tiers had the same flaw before today.
+**Buildings were drawn at a quarter of the hall's scale** (tile box 120 px /
+12 px per cell = 8 cells, while the hall's box is 10 x 120/34 = 35 cells), so
+their tier growth and smoke were a few pixels. Town building tiles are now
+drawn at the hall's scale (`mappage._tile_cells`). The **town hall's row**
+shows "Town hall" instead of Build: the placed town is the hall.

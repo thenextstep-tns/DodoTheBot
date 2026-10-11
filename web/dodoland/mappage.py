@@ -183,6 +183,10 @@ def _collect(bot, guild) -> dict:
                  if t["placement"] == "place" and "admin" in t["access"]]
     dims = bot.dodoland_tiles.art_sizes(v for t in placeable for v in t["variants"])
     shrink = max(0.1, float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale")))
+    # A town's buildings are drawn at its hall's scale: the hall's 120-unit box
+    # spans hall_cells x 120 / HALL_SPAN cells, and so does every building's.
+    hall_box = (float(bot.dodoland_params.get(guild.id, "dodoland_hall_cells"))
+                * townart.WIDTH / townart.HALL_SPAN)
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
@@ -201,11 +205,11 @@ def _collect(bot, guild) -> dict:
                         "layer": t["layer"],
                         # Each variant's own width in map cells: drawings in one
                         # tile are not all the same size.
-                        "vw": {v: round(dims.get(v, (0, 0))[0] / t["cell_px"] / shrink, 3)
+                        "vw": {v: _tile_cells(t, dims.get(v, (0, 0))[0], shrink, hall_box)
                                for v in t["variants"]},
                         # Natural width in map cells: the art's own width over
                         # its px-per-cell. A piece is drawn at this times its size.
-                        "wc": round(dims.get(t["variants"][0], (0, 0))[0] / t["cell_px"] / shrink, 3)
+                        "wc": _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box)
                         if t["variants"] else 0,
                         # Pixel art (the fixed-size packs) is drawn with hard
                         # pixels: a 6-pixel sprouts sprite smoothed up to a
@@ -214,6 +218,20 @@ def _collect(bot, guild) -> dict:
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
                        for t in placeable]}
+
+
+def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float) -> float:
+    """How many map cells wide a tile is drawn at size 1.
+
+    A tile's own art over its px-per-cell — except a town's generated buildings,
+    which are drawn at the town hall's scale. They were 120 px over 12 px per
+    cell, eight cells, while the hall beside them spanned thirty-five: every
+    building a quarter of its true size, its tier's growth and its smoke a few
+    pixels.
+    """
+    if str(tile.get("source") or "").startswith("building:"):
+        return round(hall_box, 3)
+    return round(art_w / tile["cell_px"] / shrink, 3)
 
 
 async def map_page(request: web.Request):
@@ -265,6 +283,9 @@ async def map_page(request: web.Request):
         "dot_below": int(bot.dodoland_params.get(guild.id, "dodoland_town_dot_below")),
         "detail_above": int(bot.dodoland_params.get(guild.id, "dodoland_detail_above")),
         "ratio": townart.HEIGHT / townart.WIDTH,
+        # The building the town itself is drawn as, when towns are halls.
+        "hall_key": (str(bot.dodoland_params.get(guild.id, "dodoland_town_hall"))
+                     if str(bot.dodoland_params.get(guild.id, "dodoland_town_style")) == "hall" else ""),
         "min_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_min_zoom")),
         "max_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_max_zoom")),
     }
@@ -688,6 +709,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlcard .btop .bico:hover { opacity: 1; border-color: var(--edge); }
 .dlcard .btop .bbuild { background: var(--lantern); border-color: var(--lantern); color: #fff; }
 .dlcard .btop .bmove, .dlcard .btop .bdel { background: none; color: inherit; border-color: var(--edge); }
+.dlcard .btop .bhall { font-size: 11px; color: var(--soft); border: 1px dashed var(--edge);
+  border-radius: 6px; padding: 2px 7px; }
 .dlcard .btop .bdel:hover { border-color: #c0392b; color: #e06a5a; }
 .dlcard .brename { flex: 1 1 auto; min-width: 0; font: inherit; padding: 2px 6px; }
 .dlbuildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
@@ -1051,7 +1074,9 @@ _SCRIPT = r"""
         : 'No rooms are attached to it yet.';
       // On the building's own row: rename it, and build it — at the tier
       // this town has reached, which is the only tier it can be built at.
-      var tile = p.plot ? currentTile(p, b.key) : null;
+      // The town hall is the town: it stands where the town is placed.
+      var isHall = D.sizes.hall_key && b.key === D.sizes.hall_key;
+      var tile = p.plot && !isHall ? currentTile(p, b.key) : null;
       var placed = tile && townPiece(p, b.key);
       return '<li class="bline' + (on ? ' focus' : '') + '"' +
         ' data-key="' + escapeHtml(b.key) + '">' +
@@ -1059,6 +1084,7 @@ _SCRIPT = r"""
         escapeHtml(b.title) + '</b></span>' +
         '<button class="bico" data-rename="' + escapeHtml(b.key) + '" title="Rename it">&#9998;</button>' +
         '<span class="bpts">' + b.points.toLocaleString() + '</span>' +
+        (isHall && p.plot ? '<span class="bhall" title="The town is drawn as its hall; Move moves the town">Town hall</span>' : '') +
         (tile && !placed ? '<button class="bbuild" data-build="' + escapeHtml(b.key) +
           '" title="Put it on the map, inside this town">Build</button>' : '') +
         (placed ? '<button class="bmove" data-movebld="' + escapeHtml(b.key) +

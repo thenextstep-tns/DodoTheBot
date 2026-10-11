@@ -203,13 +203,9 @@ def _unlocked(bot, guild, user_id: int) -> set:
     buildings = bot.dodoland_buildings.buildings(guild.id)
     since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
-    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
-    result = standing.guild_standings(
-        bot.dodoland, bot.dodoland_params, guild.id, buildings,
-        since=since, user_ids=[user_id],
-        rows=[row for row in every if int(row.get("user_id", 0)) == int(user_id)],
-        pair_rows=pairs,
-    )
+    # Among everybody: a tier is a percentile (see standing.recent_standings).
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
     return tile_rules.unlocked_for(_player_tiles(bot, guild),
                                    result["people"].get(int(user_id)), buildings)
 
@@ -239,12 +235,8 @@ def _tiers(bot, guild, user_id: int) -> dict[str, int]:
     buildings = bot.dodoland_buildings.buildings(guild.id)
     since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
-    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
-    result = standing.guild_standings(
-        bot.dodoland, bot.dodoland_params, guild.id, buildings,
-        since=since, user_ids=[user_id],
-        rows=[row for row in every if int(row.get("user_id", 0)) == int(user_id)],
-        pair_rows=pairs)
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
     person = result["people"].get(int(user_id)) or {}
     return {key: int(score["tier"]) + 1 for key, score in (person.get("buildings") or {}).items()
             if score.get("tier") is not None}

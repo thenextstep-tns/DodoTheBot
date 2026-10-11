@@ -98,14 +98,12 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
     since = store_module.days_back(window)
     lit_since = store_module.days_back(
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
-    # One person's rows out of the shared read: a page draws every town at
-    # once, and a query per town was a second per town.
-    every, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
+    # Scored among everybody, as the card and the map score them: a tier is a
+    # percentile, and one person scored alone gets the wrong ones.
+    every, _ = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
     rows = [row for row in every if int(row.get("user_id", 0)) == int(user_id)]
-    result = standing.guild_standings(
-        bot.dodoland, bot.dodoland_params, guild.id, buildings,
-        since=since, user_ids=[user_id], rows=rows, pair_rows=pairs,
-    )
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
     person = result["people"].get(user_id) or {}
     built = [{"key": key, "tier": int(score["tier"]) + 1}
              for key, score in (person.get("buildings") or {}).items()
