@@ -638,3 +638,15 @@ place_many). Remembered per viewer.
 **Top bar** (11 Oct): Terrain and Toolkit on the left (beside the drawers they
 open), the server's name centred, Layers and Towns list on the right. The back
 link and the counts are gone.
+
+### Depth: lower on the map is in front (11 Oct)
+
+Every piece (objects and buildings), town hall, house and walker takes its
+z-index from where it stands: `depth(y%) = 100 + y% * 100`, so what stands lower
+on the map is drawn in front, whatever its layer (Nik: buildings must follow the
+same logic as tiles). Flat environment features stay underneath. Houses and
+walkers are no longer drawn in one overlay SVG: each is its own element
+(`.dlstand`, an SVG in town-art units placed at its ground point by
+`standing()` / `stand()`), so they pass behind and in front of buildings
+properly; walkers restack every frame as they move. A hovered or open town
+lifts above its neighbours so its name stays readable.

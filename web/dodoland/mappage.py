@@ -566,7 +566,7 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
   color: #fff6e4; background: rgba(20,14,8,.82); white-space: nowrap;
   opacity: 0; transition: opacity .12s ease; pointer-events: none; }
-.dltown:hover { z-index: 9; }
+.dltown:hover, .dltown.on { z-index: 30000 !important; }
 .dltown:hover .dlname, .dlworld.named .dlname, .dltown.on .dlname { opacity: 1; }
 """ + theme.TOWN_ART_CSS + """
 /* Drawers float over the map rather than stealing its width. */
@@ -664,7 +664,7 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlmark.locked::after { content: "🔒"; position: absolute; top: -18px; left: 50%;
   transform: translateX(-50%); font-size: 12px; }
 /* Where the armed piece will land, at the size it will land at. */
-.dlpiece.ghost { opacity: .6; pointer-events: none; display: none; z-index: 19; }
+.dlpiece.ghost { opacity: .6; pointer-events: none; display: none; z-index: 40000; }
 .dlframe.placing .dlpiece.ghost.live { display: block; }
 /* Grabbable, and grabbed. touch-action stops the browser treating a drag on a
    piece as a scroll of the page underneath it. */
@@ -676,9 +676,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* The layers, bottom to top: painted ground (the terrain svg, z 1), the
    environment's placed features, roads, map objects, buildings and towns. */
 .dlpiece.L-environment { z-index: 2; }
-.dlpiece.L-objects { z-index: 4; }
-.dlpiece.L-buildings { z-index: 6; }
-.dlworld .dltown { z-index: 6; }
+/* Objects, buildings and towns take their depth from where they stand (the
+   page's depth()); only flat ground features are a layer of their own. */
 .dlworld.hide-influence #dltinfl,
 .dlworld.hide-ground #dltover, .dlworld.hide-ground #dltdetail,
 .dlworld.hide-environment .dlpiece.L-environment,
@@ -837,14 +836,15 @@ body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; borde
 .dlpop .dlpopfed { display: block; font-size: 12px; margin-top: 6px; }
 .dlpop button { margin-top: 8px; background: none; border: 1px solid var(--edge); border-radius: 6px;
   color: inherit; font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
-/* People and animals walk above everything built, in map cells. */
-.dllife { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-  pointer-events: none; z-index: 7; overflow: visible; }
-.dlworld.hide-life .dllife > g:not(.dlhouses), .dllife.far > g:not(.dlhouses) { display: none; }
-.dlworld.hide-buildings .dllife .dlhouses { display: none; }
+/* Houses and walkers stand on the map like pieces, each at its ground point. */
+.dlstand { position: absolute; pointer-events: none; }
+.dlstand svg { display: block; width: 100%; height: auto; overflow: visible; }
+.dlhouse.flip svg { transform: scaleX(-1); }
+.dlworld.hide-life .dlwalker, .dlworld.lifefar .dlwalker { display: none; }
+.dlworld.hide-buildings .dlhouse { display: none; }
 /* Houses can be picked up and moved, by whoever may edit that town. */
-.dllife .dlhouses.movable .dlhouse { pointer-events: visiblePainted; cursor: grab; }
-.dllife .dlhouse.dragging { cursor: grabbing; opacity: .85; }
+.dlhouse.movable { pointer-events: auto; cursor: grab; }
+.dlhouse.dragging { cursor: grabbing; opacity: .85; }
 .dlframe.placing .dlhouse, .dlframe.painting .dlhouse { pointer-events: none !important; }
 /* The life layer itself stays: the houses are in it, and they show from afar. */
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
@@ -898,6 +898,10 @@ _SCRIPT = r"""
   // on where it stood, then magnified fifty times. That was the stretching.
   // Laid out large, a tree is a dozen pixels and the rounding cannot be seen.
   var WS = 16;
+  // Depth: what stands lower on the map stands nearer, so it is drawn in front.
+  // One rule for every piece, town hall, house and walker, from where it stands
+  // (its y, in percent of the map). Flat ground features stay underneath.
+  function depth(yPct) { return 100 + Math.round(Math.max(0, Math.min(100, yPct)) * 100); }
   world.style.setProperty('--ws', WS);
   function kMin() { return D.sizes.min_zoom / WS; }
   function kMax() { return D.sizes.max_zoom / WS; }
@@ -1045,6 +1049,7 @@ _SCRIPT = r"""
     el.dataset.id = person.id;
     el.style.left = person.plot.x + '%';
     el.style.top = person.plot.y + '%';
+    el.style.zIndex = depth(person.plot.y);
     // A percentage of the world, which is the base image's own width, so a town
     // is a fixed fraction of the map whatever resolution that image happens to
     // be. It sits inside the element the zoom scales, so it shrinks and grows
@@ -1773,6 +1778,7 @@ _SCRIPT = r"""
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
+    if ((piece.l || 'objects') !== 'environment') el.style.zIndex = depth(piece.y);
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
     el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
@@ -2278,7 +2284,10 @@ _SCRIPT = r"""
         g.p.x = g.x + (dx / view.k / nat.w) * 100;
         g.p.y = g.y + (dy / view.k / nat.h) * 100;
         var node = pieces[g.p.id];
-        if (node) { node.style.left = g.p.x + '%'; node.style.top = g.p.y + '%'; }
+        if (node) {
+          node.style.left = g.p.x + '%'; node.style.top = g.p.y + '%';
+          if ((g.p.l || 'objects') !== 'environment') node.style.zIndex = depth(g.p.y);
+        }
       });
       placeMarks();
     }
@@ -2640,20 +2649,12 @@ _SCRIPT = r"""
   // People walk inside their town's area of influence, going from one spot in
   // it to another and stopping a while; animals do the same inside a zoo that
   // stands on the map. Who walks is the town's buildings (townart.LIFE): an
-  // inn brings drinkers and a dog, a keep a horse. Positions are in map cells,
-  // in an SVG laid over the world, so they zoom with everything else. Only
-  // animated while close enough to see and while the tab is visible.
-  var LIFE = D.life || {}, walkers = [], lifeSvg = null, lifeLast = 0, lifeRaf = null;
-  function lifeLayer() {
-    if (lifeSvg) return lifeSvg;
-    if (typeof terr === 'undefined' || !terr.world) return null;
-    lifeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    lifeSvg.setAttribute('class', 'dllife');
-    lifeSvg.setAttribute('viewBox', '0 0 ' + terr.world.cells_w + ' ' + terr.world.cells_h);
-    lifeSvg.setAttribute('preserveAspectRatio', 'none');
-    world.appendChild(lifeSvg);
-    return lifeSvg;
-  }
+  // inn brings drinkers and a dog, a keep a horse. Each walker, like each
+  // house, is its own element standing at its ground point, so it takes its
+  // depth from where it stands (see `depth`) and passes behind a building that
+  // is lower on the map. Only animated while close enough to see and while the
+  // tab is visible.
+  var LIFE = D.life || {}, walkers = [], lifeLast = 0, lifeRaf = null;
   function sprite(name, colour, hat) {
     var body = name === 'person' ? (LIFE.hats || [])[hat || 0] : (LIFE.sprites || {})[name];
     return String(body || '').split('@C@').join(colour);
@@ -2671,16 +2672,34 @@ _SCRIPT = r"""
     }
     return out;
   }
-  function addWalker(layer, kind, colour, hat, zone, at) {
-    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.innerHTML = '<g>' + sprite(kind, colour, hat) + '</g>';
-    layer.appendChild(g);
+  // Something standing on the map, drawn in town-art units: an element whose
+  // ground point (the art's own 0, groundY) is placed at a spot in cells.
+  // `box` is the art's extent [x, y, w, h] in its own units.
+  function standing(cls, body, box, groundY, cellsPerUnit) {
+    var el = document.createElement('div');
+    el.className = 'dlstand ' + cls;
+    el.innerHTML = '<svg viewBox="' + box.join(' ') + '" preserveAspectRatio="xMidYMax meet">' + body + '</svg>';
+    el.style.width = (box[2] * cellsPerUnit / terr.world.cells_w * 100) + '%';
+    var fx = -box[0] / box[2] * 100, fy = (groundY - box[1]) / box[3] * 100;
+    el.style.transform = 'translate(' + (-fx).toFixed(2) + '%,' + (-fy).toFixed(2) + '%)';
+    world.appendChild(el);
+    return el;
+  }
+  function stand(el, x, y) {
+    var px = x / terr.world.cells_w * 100, py = y / terr.world.cells_h * 100;
+    el.style.left = px + '%'; el.style.top = py + '%';
+    el.style.zIndex = depth(py);
+  }
+  var WALKER_BOX = [-5, -9, 10, 12];
+  function addWalker(kind, colour, hat, zone, at) {
     var animal = kind !== 'person' && kind !== 'child';
-    walkers.push({el: g, inner: g.firstChild, x: at.x, y: at.y, tx: at.x, ty: at.y,
+    var scale = kind === 'horse' ? 0.30 : kind === 'child' ? 0.17 : 0.21;
+    // People are drawn standing on y = 2.6, animals on y = 0.
+    var el = standing('dlwalker', sprite(kind, colour, hat), WALKER_BOX, animal ? 0 : 2.6, scale);
+    walkers.push({el: el, art: el.firstChild, x: at.x, y: at.y, tx: at.x, ty: at.y,
                   wait: Math.random() * 3, face: 1, zone: zone,
-                  speed: (animal ? 1.6 : 1.1) * (0.75 + Math.random() * 0.5),
-                  // A person ~1.6 cells tall: the figures are drawn ~7.6 units.
-                  scale: kind === 'horse' ? 0.30 : kind === 'child' ? 0.17 : 0.21});
+                  speed: (animal ? 1.6 : 1.1) * (0.75 + Math.random() * 0.5)});
+    stand(el, at.x, at.y);
   }
   // A town's ordinary houses: scattered through its area, thickest around the
   // hall, kept clear of the hall and of the buildings it has placed, and the
@@ -2694,12 +2713,13 @@ _SCRIPT = r"""
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
+  var HOUSE_BOX = [-7, -11, 14, 12];
   // Each house is a number (0, 1, 2…) and keeps it: its shape, its colour and
   // which way it faces come from the town and that number alone, and so does
   // where it stands — unless somebody has moved it, in which case the town's
   // record says where (p.house_at). Moved houses are laid first, so the rest
   // keep clear of them.
-  function drawHouses(layer, p, fill) {
+  function drawHouses(p, fill) {
     var n = Math.min(p.houses || 0, 80), cottages = LIFE.cottages || [];
     if (!n || !cottages.length) return;
     var cw = terr.world.cells_w, ch = terr.world.cells_h;
@@ -2742,30 +2762,22 @@ _SCRIPT = r"""
         return;
       }
     });
-    var shown = out.filter(function (h) { return h.x !== undefined; });
-    shown.sort(function (a, b) { return a.y - b.y; });
     // Who may move these: an admin any town's, a member their own.
     var movable = !D.ep.player || String(p.id) === String(D.me);
-    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'dlhouses' + (movable ? ' movable' : ''));
-    g.innerHTML = shown.map(function (h) {
-      return '<g class="dlhouse" data-town="' + p.id + '" data-i="' + h.i + '" data-x="' + h.x.toFixed(2) +
-        '" data-y="' + h.y.toFixed(2) + '" data-f="' + (h.f ? 1 : 0) + '" transform="' + houseAt(h.x, h.y, h.f, scale) + '">' +
-        h.c + '</g>';
-    }).join('');
-    layer.insertBefore(g, layer.firstChild);
-    if (movable) g.querySelectorAll('.dlhouse').forEach(function (el) { el.addEventListener('pointerdown', grabHouse); });
-  }
-  function houseAt(x, y, flip, scale) {
-    return 'translate(' + (+x).toFixed(2) + ' ' + (+y).toFixed(2) + ') scale(' +
-      (scale * (flip ? -1 : 1)).toFixed(4) + ' ' + scale.toFixed(4) + ')';
+    out.forEach(function (h) {
+      if (h.x === undefined) return;
+      var el = standing('dlhouse' + (movable ? ' movable' : '') + (h.f ? ' flip' : ''), h.c, HOUSE_BOX, 0, scale);
+      el.dataset.town = p.id; el.dataset.i = h.i; el.dataset.x = h.x; el.dataset.y = h.y;
+      stand(el, h.x, h.y);
+      if (movable) el.addEventListener('pointerdown', grabHouse);
+    });
   }
   // Moving a house: grab it with the pointer or the hand and put it down
   // inside its town's area. Houses are never removed, only moved.
   function grabHouse(ev) {
     if (ev.button !== 0 || frame.classList.contains('placing') || frame.classList.contains('painting')) return;
     ev.stopPropagation(); ev.preventDefault();
-    var el = ev.currentTarget, scale = 1 / (LIFE.units_per_cell || 3.4);
+    var el = ev.currentTarget;
     var from = {x: parseFloat(el.dataset.x), y: parseFloat(el.dataset.y)};
     var start = {x: ev.clientX, y: ev.clientY}, now = {x: from.x, y: from.y}, travelled = 0;
     var perCell = nat.w * view.k / terr.world.cells_w;
@@ -2775,7 +2787,7 @@ _SCRIPT = r"""
       travelled = Math.abs(m.clientX - start.x) + Math.abs(m.clientY - start.y);
       now.x = from.x + (m.clientX - start.x) / perCell;
       now.y = from.y + (m.clientY - start.y) / perCell;
-      el.setAttribute('transform', houseAt(now.x, now.y, el.dataset.f === '1', scale));
+      stand(el, now.x, now.y);
     }
     function up() {
       el.removeEventListener('pointermove', move);
@@ -2793,11 +2805,11 @@ _SCRIPT = r"""
       }).then(function (r) { return r.json(); }).then(function (res) {
         if (!res.ok) {
           // Outside the town's area: back where it was.
-          el.setAttribute('transform', houseAt(from.x, from.y, el.dataset.f === '1', scale));
+          stand(el, from.x, from.y);
           hint.textContent = res.error || 'That house could not go there.';
           return;
         }
-        el.dataset.x = now.x.toFixed(2); el.dataset.y = now.y.toFixed(2);
+        el.dataset.x = now.x; el.dataset.y = now.y;
         if (town) { town.house_at = town.house_at || {}; town.house_at[i] = [x, y]; }
         hint.textContent = 'House moved.';
       });
@@ -2808,15 +2820,14 @@ _SCRIPT = r"""
   }
   function buildLife() {
     walkers = [];
-    var layer = lifeLayer();
-    if (!layer) return;
-    layer.innerHTML = '';
+    if (typeof terr === 'undefined' || !terr.world) return;
+    world.querySelectorAll('.dlstand').forEach(function (n) { n.remove(); });
     // Houses stand whether or not anybody walks between them.
     D.people.forEach(function (p) {
       if (!p.plot || !p.houses) return;
       var g = document.querySelector('#dltinfl > g[data-town="' + p.id + '"]');
       var fill = g && g.querySelector('path');
-      if (fill) drawHouses(layer, p, fill);
+      if (fill) drawHouses(p, fill);
     });
     if (!LIFE.on) return;
     var strongest = Math.max.apply(null, D.people.map(function (p) { return p.power || 0; }).concat([1]));
@@ -2837,7 +2848,7 @@ _SCRIPT = r"""
       for (var i = 0; i < crowd; i++) {
         var pool = pools[i % pools.length];
         var kind = pool[Math.floor(i / pools.length) % pool.length];
-        addWalker(layer, kind, colours[i % colours.length], i % 3,
+        addWalker(kind, colours[i % colours.length], i % 3,
                   {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
       }
       // The zoo: animals inside it, more for each tier it has reached.
@@ -2850,7 +2861,7 @@ _SCRIPT = r"""
         var hues = ['#8a6a4a', '#b08a5a', '#6e5a48', '#c9a36a', '#7d6b5d', '#a8907a'];
         for (var j = 0; j < (LIFE.per_tier || 2) * tier; j++) {
           var zone = {type: 'zoo', cx: cx, cy: cy, r: w * 0.32};
-          addWalker(layer, kinds[j % kinds.length], hues[j % hues.length], 0, zone,
+          addWalker(kinds[j % kinds.length], hues[j % hues.length], 0, zone,
                     {x: cx + (Math.random() - 0.5) * zone.r, y: cy + (Math.random() - 0.5) * zone.r * 0.6});
         }
       }
@@ -2877,7 +2888,7 @@ _SCRIPT = r"""
     var dt = Math.min(0.25, (now - (lifeLast || now)) / 1000);
     lifeLast = now;
     var close = typeof terr !== 'undefined' && terr.world && nat.w * view.k / terr.world.cells_w >= 1.2;
-    if (lifeSvg) lifeSvg.classList.toggle('far', !close);   // hides walkers, not houses
+    world.classList.toggle('lifefar', !close);   // hides walkers, not houses
     if (close && !document.hidden) {
       walkers.forEach(function (w) {
         if (w.wait > 0) { w.wait -= dt; }
@@ -2895,8 +2906,8 @@ _SCRIPT = r"""
         }
         // A small bob while walking reads as walking at four pixels tall.
         var bob = w.wait > 0 ? 0 : Math.abs(Math.sin(now / 160 + w.speed * 7)) * 0.12;
-        w.el.setAttribute('transform', 'translate(' + w.x.toFixed(2) + ' ' + (w.y - bob).toFixed(2) + ') scale(' +
-                          (w.scale * w.face).toFixed(3) + ' ' + w.scale.toFixed(3) + ')');
+        stand(w.el, w.x, w.y - bob);
+        w.art.style.transform = w.face < 0 ? 'scaleX(-1)' : '';
       });
     }
     lifeRaf = requestAnimationFrame(stepLife);
