@@ -2525,11 +2525,14 @@ _SCRIPT = r"""
   // does not pile trees on trees.
   function forestDab(cx, cy) {
     var gap = Math.max(0.3, mixWidth() * (1.15 - brush.den));
-    var r = Math.max(brush.r, gap), out = [];
-    for (var gy = Math.floor((cy - r) / gap); gy <= Math.ceil((cy + r) / gap); gy++) {
-      for (var gx = Math.floor((cx - r) / gap); gx <= Math.ceil((cx + r) / gap); gx++) {
+    // Rows are closer than columns (0.8), and the rows looked at must be found
+    // in row units: in column units they drift off the brush the further down
+    // the map it is, and below the first few dozen rows it planted nothing.
+    var r = Math.max(brush.r, gap), row = gap * 0.8, out = [];
+    for (var gy = Math.floor((cy - r) / row); gy <= Math.ceil((cy + r) / row); gy++) {
+      for (var gx = Math.floor((cx - r) / gap) - 1; gx <= Math.ceil((cx + r) / gap); gx++) {
         // Every other row half a step over: a staggered stand, not a plantation.
-        var px = (gx + (gy % 2 ? 0.5 : 0)) * gap, py = gy * gap * 0.8;
+        var px = (gx + (gy % 2 ? 0.5 : 0)) * gap, py = gy * row;
         var dx = px - cx, dy = py - cy;
         if (dx * dx + dy * dy > r * r) continue;
         var key = gx + ',' + gy;

@@ -766,3 +766,11 @@ category as objects, like "Stone patch"). Library 1315 -> 1613 tiles.
 * ZRPG's painted drop shadows (black, alpha 92) are stripped before cutting.
 * Credits: LPC/ZRPG are CC-BY-SA 3.0 / CC-BY 3.0, named in each tile's `pack`.
   `item_imgs/tilesets/` is now actually in .gitignore (it was only untracked).
+
+### Forest brush planted nothing
+`forestDab` lays a staggered grid whose rows are `0.8 x gap` apart, but chose
+which rows to look at in `gap` units, so the rows it looked at drifted off the
+brush by `0.2 x y`: fine at the top of the map, nothing below row ~50 (the map
+is 1,812 rows). Rows are now found in row units (and one extra column for the
+half-step rows). `test_dodoland_page` runs `forestDab` in node at rows 50, 900
+and 1,790.
