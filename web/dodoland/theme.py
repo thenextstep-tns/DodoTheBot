@@ -242,6 +242,9 @@ TOWN_ART_CSS = """
   50%     { transform: translateY(-2.5px); }
 }
 .bcrown { transform-box: fill-box; transform-origin: center; }
+/* A town hall's own banners, flanking its square. */
+.hbanner { transform-box: fill-box; transform-origin: left center; }
+.dltown.close .hbanner { animation: dlwave 3.1s ease-in-out infinite; }
 .dltown.close .bcrown { animation: dlbreathe 6s ease-in-out infinite; }
 .dltown.close .u1 { animation: dlfloat 7s ease-in-out infinite; }
 .dltown.close .u2 { animation: dlfloat 9s ease-in-out infinite -2s; }

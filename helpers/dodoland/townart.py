@@ -1959,6 +1959,47 @@ def town_svg(buildings: Iterable[dict], *, lit: bool = True,
 HALL_SPAN = 34.0
 
 
+def _hall_dress(tier: int, colour: str, uid: str) -> tuple[str, str]:
+    """What stands around a town hall: the square it presides over.
+
+    A paved plaza that widens with the hall's tier; from tier two braziers at
+    its ends, from three banners in the town's colour either side, from five
+    sparks lifting off the braziers. Drawn about the hall's own ground point.
+    Returns (behind, in front). The moving parts are close-up only.
+    """
+    rx, ry = 26 + tier * 3.2, 6.5 + tier * 0.9
+    behind = (f'<defs><linearGradient id="pz{uid}" x1="0" y1="0" x2="0" y2="1">'
+              f'<stop offset="0%" stop-color="#d8ccb3"/><stop offset="100%" stop-color="#a99a7e"/>'
+              f'</linearGradient></defs>'
+              f'<ellipse cx="0" cy="2" rx="{rx:.1f}" ry="{ry:.1f}" fill="url(#pz{uid})" '
+              f'stroke="#7d6c55" stroke-width=".7"/>'
+              f'<ellipse cx="0" cy="2" rx="{rx * 0.68:.1f}" ry="{ry * 0.66:.1f}" fill="none" '
+              f'stroke="#958568" stroke-width=".5" stroke-dasharray="2 1.4"/>'
+              f'<ellipse cx="0" cy="2" rx="{rx * 0.36:.1f}" ry="{ry * 0.34:.1f}" fill="none" '
+              f'stroke="#958568" stroke-width=".45" stroke-dasharray="1.4 1.1"/>')
+    front = ""
+    ends = (-rx * 0.86, rx * 0.86)
+    if tier >= 2:  # braziers at the ends of the square
+        for bx in ends:
+            front += (f'<path d="M{bx - 2.2:.1f},1 L{bx + 2.2:.1f},1 L{bx + 1.4:.1f},3.6 '
+                      f'L{bx - 1.4:.1f},3.6 Z" fill="#4a3a2c"/>'
+                      f'<rect x="{bx - 0.5:.1f}" y="3.4" width="1" height="2.4" fill="#4a3a2c"/>')
+            front += _fx(f'<circle class="halo" cx="{bx:.1f}" cy="-1" r="4.2" fill="#ffb347" opacity=".35"/>'
+                         f'<path class="glow" d="M{bx - 1.6:.1f},1 Q{bx - 1.2:.1f},-2.6 {bx:.1f},-4.2 '
+                         f'Q{bx + 1.2:.1f},-2.6 {bx + 1.6:.1f},1 Z" fill="#ffcf5c"/>')
+    if tier >= 3:  # banners in the town's colour, flanking the hall
+        for bx in (-rx * 0.62, rx * 0.62):
+            front += (f'<line x1="{bx:.1f}" y1="2" x2="{bx:.1f}" y2="-21" stroke="{LINE}" stroke-width=".9"/>'
+                      f'<circle cx="{bx:.1f}" cy="-21.6" r=".9" fill="{LINE}"/>'
+                      f'<path class="hbanner" d="M{bx:.1f},-20 L{bx + 6:.1f},-19 L{bx + 6:.1f},-12 '
+                      f'L{bx + 3:.1f},-13.6 L{bx:.1f},-12 Z" fill="{colour}" stroke="{LINE}" stroke-width=".5"/>')
+    if tier >= 5:  # sparks lifting off the braziers
+        for i, bx in enumerate(ends * 2):
+            front += _fx(f'<circle class="spark s{i + 1}" cx="{bx + (i % 2) * 0.8:.1f}" cy="-4" '
+                         f'r=".8" fill="#ffd27f"/>')
+    return behind, front
+
+
 def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = "",
              flag_url: str = "", uid: str = "t", flourish: int = 0, glow: str = "") -> str:
     """A town drawn as its town hall alone, with its flag flying.
@@ -1972,11 +2013,18 @@ def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = 
     colour = colour or PALETTE[0]
     cloth = banner(flag_url, f"h{uid}") if flag_url else ""
     # As it would stand in a town: its tier's effects and its emblem with it.
-    body = building_svg(shape or "hall", tier, colour, symbol, uid=f"hb{uid}", carries=cloth)
+    # No medallion: the flag is what marks a town's hall, and the two landed on
+    # top of each other.
+    body = building_svg(shape or "hall", tier, colour, symbol, uid=f"hb{uid}", carries=cloth,
+                        emblem=False)
     flies = (cloth and cloth in body) or ('class="banner"' in body and not cloth)
     if not flies:
         top = GROUND_Y - family_height(shape or "hall", tier)
         body += _flagpost(WIDTH / 2, top, colour, 10.0, cloth)
+    # The square it presides over, under it and around it.
+    square, square_front = _hall_dress(tier, colour, f"hd{uid}")
+    body = (f'<g transform="translate({WIDTH / 2:.1f},{GROUND_Y:.1f})">{square}</g>' + body +
+            f'<g transform="translate({WIDTH / 2:.1f},{GROUND_Y:.1f})">{square_front}</g>')
     if flourish:
         # The owner's trial rank, on the hall: the same quiet frame a whole
         # town had — warm ground, lanterns, a band of light — sized to the hall.
@@ -1985,7 +2033,7 @@ def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = 
 
 
 def building_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = "",
-                 uid: str = "b", carries: str = "") -> str:
+                 uid: str = "b", carries: str = "", emblem: bool = True) -> str:
     """One building standing on its own **as it stands in a town**: its tier's
     effects (the ground warming, an aura, embers, at the top lifted over its
     shadow with a beam of light), the things that belong to it bobbing beside
@@ -2001,7 +2049,7 @@ def building_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: st
     front += _building_fx(family, tier, tint, symbol)
     mass = draw(0.0, 0.0, tier, tint, symbol, carries)
     attached = ""
-    if symbol:
+    if symbol and emblem:
         size = 5.6 + tier * 0.85
         attached += _emblem(0.0, -(family_height(family, tier) + 5 + tier * 0.7), symbol, size, tint, tier)
     mass = f'<g class="lifted">{mass}{attached}</g>' if tier == 6 else mass + attached

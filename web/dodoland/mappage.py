@@ -121,6 +121,8 @@ def _collect(bot, guild) -> dict:
     cells_w = max(1, bot.dodoland_terrain.world(guild.id)["cells_w"] or 1)
     from helpers.dodoland import townart as _townart
     hall_pct = round(hall_cells * _townart.WIDTH / _townart.HALL_SPAN / cells_w * 100, 4)
+    per_house = int(bot.dodoland_params.get(guild.id, "dodoland_people_per_house"))
+    house_cap = max(0, int(bot.dodoland_params.get(guild.id, "dodoland_max_houses")))
     people = []
     for person in result["order"]:
         uid = person["user_id"]
@@ -156,6 +158,9 @@ def _collect(bot, guild) -> dict:
             "power": person["power"],
             "place": person["place"],
             "reached": person["reached"],
+            # Ordinary houses around the hall, one per so many people reached:
+            # the classic town's rule, linear in reach on purpose.
+            "houses": (min(house_cap, int(person["reached"]) // per_house) if per_house > 0 else 0),
             "built": built,
             "flourish": int(shine.get("level", 0)),
             "flourish_label": shine.get("label") or "",
@@ -290,6 +295,11 @@ async def map_page(request: web.Request):
         "shapes": {b["key"]: (b.get("shape") or "") for b in data["buildings"]},
         "colours": list(townart.WALKER_COLOURS),
         "zoo_kinds": ["cat", "dog", "horse", "kiwi", "bird", "dove"],
+        # Every cottage shape in every house colour, at the town art's size;
+        # the page scales them by the hall's units per cell.
+        "cottages": [townart._cottage(0.0, 0.0, 7.6, roof, variant=v, wall=wall)
+                     for v in range(6) for roof, wall in townart.HOUSE_COLOURS],
+        "units_per_cell": round(townart.HALL_SPAN / float(bot.dodoland_params.get(guild.id, "dodoland_hall_cells")), 4),
     }
     if "dove" not in life["sprites"]:
         life["sprites"]["dove"] = townart._fa_walker("dove", 5.0)("@C@")
@@ -803,7 +813,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* People and animals walk above everything built, in map cells. */
 .dllife { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 7; overflow: visible; }
-.dlworld.hide-life .dllife, .dllife.far { display: none; }
+.dlworld.hide-life .dllife > g:not(.dlhouses), .dllife.far > g:not(.dlhouses) { display: none; }
+.dlworld.hide-buildings .dllife .dlhouses { display: none; }
+/* The life layer itself stays: the houses are in it, and they show from afar. */
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
 """ + terrain_ui.CSS + """
@@ -2595,12 +2607,68 @@ _SCRIPT = r"""
                   // A person ~1.6 cells tall: the figures are drawn ~7.6 units.
                   scale: kind === 'horse' ? 0.30 : kind === 'child' ? 0.17 : 0.21});
   }
+  // A town's ordinary houses: scattered through its area, thickest around the
+  // hall, kept clear of the hall and of the buildings it has placed, and the
+  // same every time for the same town (a seeded shuffle, not Math.random).
+  function seeded(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function drawHouses(layer, p, fill) {
+    var n = Math.min(p.houses || 0, 80), cottages = LIFE.cottages || [];
+    if (!n || !cottages.length) return;
+    var cw = terr.world.cells_w, ch = terr.world.cells_h;
+    var hx = p.plot.x / 100 * cw, hy = p.plot.y / 100 * ch;
+    var scale = 1 / (LIFE.units_per_cell || 3.4);           // town-art units to cells
+    var keep = [{x: hx, y: hy - 3, r: 7}];                   // the hall and its steps
+    D.world.forEach(function (q) {
+      if (q.t !== String(p.id)) return;
+      var a = assetById(q.a), w = ((a && a.wc) || 8) * (q.s || 1);
+      keep.push({x: q.x / 100 * cw, y: q.y / 100 * ch - w * 0.2, r: w * 0.45});
+    });
+    var rand = seeded(parseInt(String(p.id).slice(-9), 10) || 7);
+    var svg = fill.ownerSVGElement, pt = svg.createSVGPoint(), out = [], tries = 0;
+    var reach = 10 + Math.sqrt(n) * 4;
+    while (out.length < n && tries < n * 60) {
+      tries++;
+      // Nearer the hall more often: a town is densest at its centre.
+      var t = rand() * Math.PI * 2, d = reach * Math.pow(rand(), 0.75) + 6;
+      pt.x = hx + Math.cos(t) * d; pt.y = hy + Math.sin(t) * d * 0.8;
+      try { if (!fill.isPointInFill(pt)) continue; } catch (e) { break; }
+      var clash = keep.some(function (k) {
+        var dx = pt.x - k.x, dy = pt.y - k.y; return dx * dx + dy * dy < k.r * k.r;
+      });
+      if (clash) continue;
+      keep.push({x: pt.x, y: pt.y, r: 2.6});
+      out.push({x: pt.x, y: pt.y, c: cottages[Math.floor(rand() * cottages.length)], f: rand() < 0.5});
+    }
+    out.sort(function (a, b) { return a.y - b.y; });
+    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'dlhouses');
+    g.innerHTML = out.map(function (h) {
+      return '<g transform="translate(' + h.x.toFixed(2) + ' ' + h.y.toFixed(2) + ') scale(' +
+        (scale * (h.f ? -1 : 1)).toFixed(4) + ' ' + scale.toFixed(4) + ')">' + h.c + '</g>';
+    }).join('');
+    layer.insertBefore(g, layer.firstChild);
+  }
   function buildLife() {
     walkers = [];
-    if (!LIFE.on) return;
     var layer = lifeLayer();
     if (!layer) return;
     layer.innerHTML = '';
+    // Houses stand whether or not anybody walks between them.
+    D.people.forEach(function (p) {
+      if (!p.plot || !p.houses) return;
+      var g = document.querySelector('#dltinfl > g[data-town="' + p.id + '"]');
+      var fill = g && g.querySelector('path');
+      if (fill) drawHouses(layer, p, fill);
+    });
+    if (!LIFE.on) return;
     var strongest = Math.max.apply(null, D.people.map(function (p) { return p.power || 0; }).concat([1]));
     D.people.forEach(function (p) {
       if (!p.plot) return;
@@ -2659,7 +2727,7 @@ _SCRIPT = r"""
     var dt = Math.min(0.25, (now - (lifeLast || now)) / 1000);
     lifeLast = now;
     var close = typeof terr !== 'undefined' && terr.world && nat.w * view.k / terr.world.cells_w >= 1.2;
-    if (lifeSvg) lifeSvg.classList.toggle('far', !close);
+    if (lifeSvg) lifeSvg.classList.toggle('far', !close);   // hides walkers, not houses
     if (close && !document.hidden) {
       walkers.forEach(function (w) {
         if (w.wait > 0) { w.wait -= dt; }

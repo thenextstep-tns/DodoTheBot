@@ -577,3 +577,18 @@ notice at the top of the map; the page applies `moved` positions at once.
 Checked on a copy of the live data: a small move keeps every offset exactly;
 a drop into the sea puts the hall on the nearest shore with both notices.
 Members removing their own town now also take its buildings with it.
+
+### Houses back, and a town hall with a square (11 Oct)
+
+* **Ordinary houses** return on the map: each placed town gets the classic
+  town's count (`reached // dodoland_people_per_house`, capped by
+  `dodoland_max_houses`), drawn with the town art's cottages (6 shapes x house
+  colours) at the hall's scale, scattered through its area, thickest round the
+  hall, clear of the hall and its placed buildings, seeded by the town's id so
+  the layout is stable. They live in the life SVG under the walkers, belong to
+  the Buildings layer and stay visible zoomed out.
+* **The town hall's square** (`townart._hall_dress`): a paved plaza that widens
+  with tier; braziers with flickering flames from tier 2; banners in the town's
+  colour from tier 3 (`hbanner`, waving); sparks from tier 5 — on top of its
+  tier effects and the owner's flourish. The hall no longer carries an emblem
+  medallion (it sat on its flag).
