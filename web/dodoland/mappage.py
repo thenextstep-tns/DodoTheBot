@@ -477,7 +477,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border: 1px solid var(--edge); background: var(--paper); color: var(--ink);
   box-shadow: 0 2px 10px rgba(0,0,0,.35); }
 .dlzoom button.on { background: var(--lantern); color: #fff; }
-.dlhint { position: absolute; left: 16px; bottom: 16px; z-index: 12;
+/* Bottom centre: on the left it sat under the Terrain and Toolkit drawers. */
+.dlhint { position: absolute; left: 50%; bottom: 16px; z-index: 12;
+  transform: translateX(-50%); max-width: calc(100% - 32px); text-align: center;
   padding: 6px 12px; border-radius: 9px; font-size: 13px;
   background: rgba(0,0,0,.55); color: #fff3e0; }
 
@@ -894,6 +896,14 @@ _SCRIPT = r"""
   frame.addEventListener('pointerdown', function (ev) {
     // A brush stroke is a drag and so is a pan. Whichever is armed wins, and
     // only one ever can be.
+    // The wheel held down moves the map, always: over a piece, over a town,
+    // with any tool or brush in hand.
+    if (ev.button === 1) {
+      ev.preventDefault();
+      down = true; captured = false; moved = 0; pid = ev.pointerId;
+      last = {x: ev.clientX, y: ev.clientY};
+      return;
+    }
     if (typeof terr !== 'undefined' && terr.armed !== null && strokeStart(ev)) {
       painting = true;
       try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -2019,7 +2029,7 @@ _SCRIPT = r"""
   // A press on a placed piece. Armed, pieces take no pointer at all (CSS), so
   // this is only ever the pointer or the hand.
   function pieceDown(ev, piece, el) {
-    if (ev.button !== 0) return;
+    if (ev.button !== 0) return;   // the wheel pans; it passes through to the map
     var selected = !!sel[piece.id];
     // The hand on a piece that is not selected is still the hand: the map pans,
     // and a click without a drag selects it (pieceClick).
@@ -2414,6 +2424,9 @@ _SCRIPT = r"""
     hint.textContent = 'Drag to move, scroll to zoom';
     kitSay('');
   }
+  // Holding the wheel would otherwise start the browser's autoscroll.
+  frame.addEventListener('mousedown', function (ev) { if (ev.button === 1) ev.preventDefault(); });
+  frame.addEventListener('auxclick', function (ev) { if (ev.button === 1) ev.preventDefault(); });
   frame.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     putDown();

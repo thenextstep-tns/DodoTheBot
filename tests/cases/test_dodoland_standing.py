@@ -395,10 +395,20 @@ top = townart.town_svg([{"key": "k", "tier": 6}], shapes={"k": "keep"},
                        glow="#f1c40f", uid="top")
 for mark, why in (("lifted", "the top tier does not leave the ground"),
                   ("bbeam", "no beam of light at the top"),
-                  ("orbit", "nothing orbits the top tier"),
+                  ("bcrown", "no crown of light at the top tier"),
                   ("baura", "no aura at the top")):
     assert mark in top, why
-print("tiers           the top tier hovers, beams, orbits and glows")
+# Nothing circles a building any more (Nik, 11 Oct: "those rotating rings
+# were horrible"): no orbiting motes, no ring, no icons going round.
+for gone in ('class="orbit"', 'class="bring"', "fxorbit"):
+    assert gone not in top, f"{gone} is back"
+print("tiers           the top tier hovers, beams, glows and wears a crown; nothing orbits")
+
+# A building drawn on its own (a map tile) carries the same spectacle.
+alone = townart.building_svg("keep", 6, "#c0392b", "shield", uid="alone")
+for mark in ("lifted", "bbeam", "bcrown", "baura"):
+    assert mark in alone, f"a building on its own lost its top-tier {mark}"
+print("tiers           a building on its own keeps its tier's effects")
 
 # Effects must be gated so a wide view is not three hundred light shows.
 assert top.count('class="fx"') >= 4, "the spectacle is not behind the close-up gate"

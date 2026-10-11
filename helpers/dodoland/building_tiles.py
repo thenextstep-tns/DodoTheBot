@@ -40,7 +40,10 @@ def svg_for(building: dict, tier: int, css: str = "") -> bytes:
     building is wrapped as one; animations inside an SVG image still play.
     """
     colour = building.get("colour") or townart.colour_for(building["key"])
-    body = townart.one_svg(building.get("shape") or "", tier, colour, building.get("symbol") or "")
+    # As it stands in a town — tier effects, the things that belong to it, its
+    # emblem — not the bare masonry of ``one_svg``.
+    body = townart.building_svg(building.get("shape") or "", tier, colour,
+                                building.get("symbol") or "", uid=f"{building['key']}{tier}")
     head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {townart.WIDTH:g} '
             f'{townart.HEIGHT:g}" width="{townart.WIDTH:g}" height="{townart.HEIGHT:g}">')
     style = f"<style>{css}</style>" if css else ""

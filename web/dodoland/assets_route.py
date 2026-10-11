@@ -124,7 +124,9 @@ def draw_town(bot, guild, user_id: int, *, flag_url: str = "") -> str:
         return townart.hall_svg(
             hall.get("shape") or "hall", tier,
             town_rules.building_colour(details, key, "") or townart.colour_for(str(user_id)),
-            hall.get("symbol") or "", flag_url if details.get("image") else "", str(user_id))
+            hall.get("symbol") or "", flag_url if details.get("image") else "", str(user_id),
+            # The owner's trial rank, which is what flourish is, on the hall.
+            flourish=int(glow.get("level", 0)), glow=str(glow.get("colour") or ""))
 
     # How many ordinary houses stand around what they built. **Linear in reach**
     # on purpose: this is the one number on the map that is supposed to say how

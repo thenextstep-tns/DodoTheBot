@@ -1440,15 +1440,11 @@ def _tier_effects(tier: int, colour: str, uid: str) -> tuple[str, str]:
         # a town paints over whatever is above it.
         behind += _fx(f'<rect class="bbeam" x="-5" y="-62" width="10" height="62" '
                       f'fill="url(#bm{uid})"/>')
-        behind += _fx(f'<ellipse class="bring" cx="0" cy="{-16 - tier * 2:.0f}" '
-                      f'rx="{20 + tier:.0f}" ry="7" fill="none" stroke="{colour}" '
-                      f'stroke-width="1.3" opacity=".7"/>')
-        # Two motes going round the ring rather than sitting on it.
-        front += _fx(f'<g class="orbit">'
-                     f'<circle cx="{20 + tier:.0f}" cy="{-16 - tier * 2:.0f}" r="2" '
-                     f'fill="{colour}"/>'
-                     f'<circle cx="{-(20 + tier):.0f}" cy="{-16 - tier * 2:.0f}" r="1.5" '
-                     f'fill="{colour}" opacity=".8"/></g>')
+        # A crown of light resting on the roof, breathing — in place of the
+        # ring of light with motes going round it, which read as a spinning
+        # hoop and nothing else.
+        behind += _fx(f'<ellipse class="bcrown" cx="0" cy="{-22 - tier * 2:.0f}" '
+                      f'rx="{14 + tier:.0f}" ry="{9 + tier:.0f}" fill="{colour}" opacity=".22"/>')
     return behind, front
 
 
@@ -1578,23 +1574,15 @@ def _building_fx(family: str, tier: int, colour: str, symbol: str = "") -> str:
         name, motion, size = pool[index % len(pool)]
         lane = index // len(pool)
         if motion == "orbit":
-            # Round the building, in its own group so the rotation has a centre.
-            radius = 15 + tier * 1.6 + lane * 5
-            # Each icon sits in its own `upright` group, which the stylesheet
-            # turns backwards at exactly the speed the orbit turns forwards.
-            # Without it the icon tumbles with the orbit and spends half of
-            # every circuit upside down — which is what a music note over a
-            # playhouse was doing.
-            lead = icon(name, size, colour, cx=0, cy=0)
-            trail = icon(name, size * 0.8, colour, cx=0, cy=0)
+            # Hung either side of the building, each bobbing gently on its own
+            # beat. These used to circle it, which on a map of buildings read
+            # as a ring of rotating junk rather than as what the building is.
+            side = 15 + tier * 1.6 + lane * 5
             out.append(
-                f'<g class="fxorbit o{index % 4 + 1}">'
-                f'<g transform="translate({radius:.1f},{-(12 + tier * 2.2):.1f})">'
-                f'<g class="upright">{lead}</g></g>'
-                f'<g transform="translate({-radius * 0.72:.1f},'
-                f'{-(20 + tier * 2.6):.1f})">'
-                f'<g class="upright">{trail}</g></g>'
-                f'</g>')
+                f'<g class="fxbob b{index % 4 + 1}">'
+                f'{icon(name, size, colour, cx=side, cy=-(12 + tier * 2.2))}</g>'
+                f'<g class="fxbob b{(index + 2) % 4 + 1}">'
+                f'{icon(name, size * 0.8, colour, cx=-side * 0.72, cy=-(20 + tier * 2.6))}</g>')
         elif motion == "rise":
             out.append(f'<g class="fxrise u{index % 4 + 1}">'
                        f'{icon(name, size, colour, cx=-4 + index * 5, cy=-(16 + tier * 3))}'
@@ -1972,7 +1960,7 @@ HALL_SPAN = 34.0
 
 
 def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = "",
-             flag_url: str = "", uid: str = "t") -> str:
+             flag_url: str = "", uid: str = "t", flourish: int = 0, glow: str = "") -> str:
     """A town drawn as its town hall alone, with its flag flying.
 
     The flag is the town's own picture when it has one and a pennant in the
@@ -1980,16 +1968,45 @@ def hall_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = 
     building, which knows where its own pole is; a building that has no pole of
     its own gets one at its roof, so a hall never flies two flags or none.
     """
-    draw = SHAPES.get(shape or "hall", _hall)
     tier = max(1, min(6, int(tier)))
     colour = colour or PALETTE[0]
     cloth = banner(flag_url, f"h{uid}") if flag_url else ""
-    body = draw(WIDTH / 2, GROUND_Y, tier, colour, symbol, cloth)
+    # As it would stand in a town: its tier's effects and its emblem with it.
+    body = building_svg(shape or "hall", tier, colour, symbol, uid=f"hb{uid}", carries=cloth)
     flies = (cloth and cloth in body) or ('class="banner"' in body and not cloth)
     if not flies:
         top = GROUND_Y - family_height(shape or "hall", tier)
         body += _flagpost(WIDTH / 2, top, colour, 10.0, cloth)
+    if flourish:
+        # The owner's trial rank, on the hall: the same quiet frame a whole
+        # town had — warm ground, lanterns, a band of light — sized to the hall.
+        body = _defs(uid, glow or "#ffd27f") + _flourish(int(flourish), glow or "#ffd27f", uid, 0.20) + body
     return f'<g class="hall">{body}</g>'
+
+
+def building_svg(shape: str, tier: int, colour: Optional[str] = None, symbol: str = "",
+                 uid: str = "b", carries: str = "") -> str:
+    """One building standing on its own **as it stands in a town**: its tier's
+    effects (the ground warming, an aura, embers, at the top lifted over its
+    shadow with a beam of light), the things that belong to it bobbing beside
+    it, and its emblem. ``one_svg`` is the bare masonry; the map's building
+    tiles were made from that, which is why every placed building had lost its
+    tier's spectacle and they all read alike.
+    """
+    family = shape or DEFAULT_SHAPE
+    draw = SHAPES.get(family, _inn)
+    tier = max(1, min(6, int(tier)))
+    tint = colour or PALETTE[0]
+    behind, front = _tier_effects(tier, tint, uid)
+    front += _building_fx(family, tier, tint, symbol)
+    mass = draw(0.0, 0.0, tier, tint, symbol, carries)
+    attached = ""
+    if symbol:
+        size = 5.6 + tier * 0.85
+        attached += _emblem(0.0, -(family_height(family, tier) + 5 + tier * 0.7), symbol, size, tint, tier)
+    mass = f'<g class="lifted">{mass}{attached}</g>' if tier == 6 else mass + attached
+    return (_defs(uid, tint) + f'<g transform="translate({WIDTH / 2:.1f},{GROUND_Y:.1f})">'
+            f'{behind}{mass}{front}</g>')
 
 
 def one_svg(shape: str, tier: int, colour: Optional[str] = None,

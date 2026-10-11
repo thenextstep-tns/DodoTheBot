@@ -231,6 +231,18 @@ TOWN_ART_CSS = """
 .dltown.close .o2 .upright { animation: dlspin 22s linear infinite; }
 .dltown.close .o3 .upright { animation: dlspin 28s linear infinite reverse; }
 .dltown.close .o4 .upright { animation: dlspin 19s linear infinite; }
+/* What hangs beside a building bobs, each on its own beat. */
+.fxbob { transform-box: fill-box; transform-origin: center; }
+.dltown.close .b1 { animation: dlbob 4.2s ease-in-out infinite; }
+.dltown.close .b2 { animation: dlbob 5.1s ease-in-out infinite -1.3s; }
+.dltown.close .b3 { animation: dlbob 4.7s ease-in-out infinite -2.6s; }
+.dltown.close .b4 { animation: dlbob 5.6s ease-in-out infinite -0.7s; }
+@keyframes dlbob {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-2.5px); }
+}
+.bcrown { transform-box: fill-box; transform-origin: center; }
+.dltown.close .bcrown { animation: dlbreathe 6s ease-in-out infinite; }
 .dltown.close .u1 { animation: dlfloat 7s ease-in-out infinite; }
 .dltown.close .u2 { animation: dlfloat 9s ease-in-out infinite -2s; }
 .dltown.close .u3 { animation: dlfloat 11s ease-in-out infinite -5s; }
@@ -258,7 +270,9 @@ TOWN_ART_CSS = """
    to the ground now: a warm plate, lanterns round the shore, a band of light
    along it. Rank frames a town; what is *in* the town gives it its character.
    The turning sun and the orbiting hoop are gone. */
-.dltown.close .flring2 { animation: dlspin 60s linear infinite; }
+/* The outer band no longer turns: a spinning hoop under a town was the thing
+   that made rank look cheap. Only its sheen moves, with the inner one. */
+.dltown.close .flring2 { animation: dlsheen 9s ease-in-out infinite -3s; }
 .flring, .flring2 { transform-box: fill-box; transform-origin: center; }
 .dltown.close .flring { animation: dlsheen 6s ease-in-out infinite; }
 .dltown.close .flunder { animation: dlpulse 9s ease-in-out infinite; }

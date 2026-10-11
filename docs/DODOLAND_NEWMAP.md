@@ -517,3 +517,25 @@ Move-a-building, moving a town, the terrain brush / eraser / selection, the
 piece selection, a half-drawn box or brush stroke — then back to the hand.
 Escape works from inside a drawer's field too (it blurs it); the rename field
 keeps its own Escape (cancel the rename).
+
+### Effects, flourish on the hall, wheel pan, shallow coast (11 Oct)
+
+* **Placed buildings had never had their tier effects**: the building tiles were
+  made from `townart.one_svg`, the bare masonry. New `townart.building_svg`
+  composes a building exactly as a town does (tier effects behind and in front,
+  topical things, emblem, lifted at tier 6); tiles re-synced (90 updated). The
+  town hall uses it too.
+* **Nothing rotates any more** (Nik: "those rotating rings were horrible"):
+  topical icons that orbited a building now hang beside it and bob (`fxbob`,
+  `dlbob`); the tier-6 ring with orbiting motes is replaced by a breathing crown
+  of light (`bcrown`); the outer flourish band no longer spins.
+* **Flourish on the town hall**: `hall_svg(flourish=, glow=)` draws the owner's
+  trial-rank frame (warm ground, lanterns, light bands, motes) sized to the hall.
+* **Middle button held pans** from anywhere, with any tool; no autoscroll.
+  The hint box is bottom centre (it was under the drawers).
+* **The coast is Shallow water** (Summer Plains tile), not Lake water: lake
+  cells joined to the open sea and within 16 cells of deep water repainted
+  (267,025 cells, 357 chunks); inland lakes and rivers stay Lake water. Backup
+  `backup_before_shallow.json` in the scratchpad. Note: the Deep water tile is
+  currently set to let influence spread (not set by Claude) — towns can grow
+  over the open sea until that is unticked.
