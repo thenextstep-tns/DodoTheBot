@@ -121,7 +121,12 @@ async def api_world_decor(request: web.Request):
 
         if action == "move_many":
             moved = 0
-            for item in (body.get("moves") or [])[:2000]:
+            moves = (body.get("moves") or [])[:2000]
+            # A town's building stays inside its town's area, however it is moved.
+            refused = await _outside_area(bot, guild, moves)
+            if refused:
+                return _bad(refused)
+            for item in moves:
                 moved += bool(bot.dodoland_decor.move(
                     guild.id, (item or {}).get("piece_id"), x=item.get("x"), y=item.get("y"),
                     scale=item.get("scale"), flip=item.get("flip"),
@@ -136,6 +141,9 @@ async def api_world_decor(request: web.Request):
             return web.json_response({"ok": True, "removed": bool(gone)})
 
         if action == "move":
+            refused = await _outside_area(bot, guild, [body])
+            if refused:
+                return _bad(refused)
             changed = bot.dodoland_decor.move(
                 guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
                 scale=body.get("scale"), flip=body.get("flip"),
@@ -204,6 +212,25 @@ def _unlocked(bot, guild, user_id: int) -> set:
     )
     return tile_rules.unlocked_for(_player_tiles(bot, guild),
                                    result["people"].get(int(user_id)), buildings)
+
+
+async def _outside_area(bot, guild, moves: list) -> str:
+    """Why one of these moves would take a town's building out of its town's
+    area, or ``""``. Pieces that belong to no town move freely."""
+    import asyncio
+
+    from web.dodoland import influence_api
+
+    def check() -> str:
+        for item in moves:
+            if (item or {}).get("x") is None or item.get("y") is None:
+                continue
+            row = bot.dodoland_decor.piece(guild.id, str(item.get("piece_id") or ""))
+            town = str((row or {}).get("town") or "")
+            if town and not influence_api.inside(bot, guild, town, item["x"], item["y"]):
+                return "A town's building stays inside its town's area."
+        return ""
+    return await asyncio.get_running_loop().run_in_executor(None, check)
 
 
 def _tiers(bot, guild, user_id: int) -> dict[str, int]:

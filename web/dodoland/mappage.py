@@ -239,6 +239,24 @@ async def map_page(request: web.Request):
     unplaced = [p for p in data["people"] if not p["plot"]]
     # How large a piece of decor is drawn at 100% zoom, before its own scale.
     decor_size = int(bot.dodoland_params.get(guild.id, "dodoland_asset_size"))
+    # People and animals: the town art's own figures, drawn with a colour
+    # token the page fills in, and its rule for who each building brings.
+    life = {
+        "on": bool(bot.dodoland_params.get(guild.id, "dodoland_life_on")),
+        "max": int(bot.dodoland_params.get(guild.id, "dodoland_life_max")),
+        "zoo": str(bot.dodoland_params.get(guild.id, "dodoland_zoo_building")),
+        "per_tier": int(bot.dodoland_params.get(guild.id, "dodoland_zoo_animals")),
+        "sprites": {name: (draw("@C@") if name not in ("person",) else draw("@C@", hat=0))
+                    for name, draw in townart.WANDERERS.items()},
+        "hats": [townart._person("@C@", hat=h) for h in (0, 1, 2)],
+        "pools": {k: list(v) for k, v in townart.LIFE.items()},
+        "default": list(townart.DEFAULT_LIFE),
+        "shapes": {b["key"]: (b.get("shape") or "") for b in data["buildings"]},
+        "colours": list(townart.WALKER_COLOURS),
+        "zoo_kinds": ["cat", "dog", "horse", "kiwi", "bird", "dove"],
+    }
+    if "dove" not in life["sprites"]:
+        life["sprites"]["dove"] = townart._fa_walker("dove", 5.0)("@C@")
     sizes = {
         # A proportion of the map's width, not a pixel count. Positions are
         # percentages for the same reason: re-uploading the map at another
@@ -326,7 +344,8 @@ async def map_page(request: web.Request):
     <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
     <div class="dlbrushopts" id="dlbrushopts" hidden>
-      <div class="dlseg" id="dlbrushpat"><button data-pat="scatter" class="on">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>
+      <div class="dlseg" id="dlbrushpat"><button data-pat="forest" class="on">Forest</button><button data-pat="scatter">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>
+      <label title="Forest: how tightly the picked tiles pack. High is a canopy with no ground between trees.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
       <label>Radius <input type="range" id="dlbrad" min="1" max="60" value="8"><output id="dlbradn">8</output></label>
       <label>Spacing <input type="range" id="dlbsp" min="1" max="40" value="6"><output id="dlbspn">6</output></label>
       <label>Size jitter <input type="range" id="dlbjit" min="0" max="60" step="5" value="15"><output id="dlbjitn">15%</output></label>
@@ -358,7 +377,7 @@ async def map_page(request: web.Request):
                                  "world": data["world"],
                                  "assets": data["assets"],
                                  "cells_w": data["cells_w"],
-                                 "decorsize": decor_size})};</script>
+                                 "decorsize": decor_size, "life": life})};</script>
 <script>{_SCRIPT}</script>
 </body></html>"""
     return web.Response(text=body, content_type="text/html")
@@ -668,7 +687,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlcard .btop .bico { padding: 2px 5px; background: none; border-color: transparent; opacity: .55; }
 .dlcard .btop .bico:hover { opacity: 1; border-color: var(--edge); }
 .dlcard .btop .bbuild { background: var(--lantern); border-color: var(--lantern); color: #fff; }
-.dlcard .btop .bbuild.built { background: none; color: var(--soft); border-color: var(--edge); }
+.dlcard .btop .bmove, .dlcard .btop .bdel { background: none; color: inherit; border-color: var(--edge); }
+.dlcard .btop .bdel:hover { border-color: #c0392b; color: #e06a5a; }
 .dlcard .brename { flex: 1 1 auto; min-width: 0; font: inherit; padding: 2px 6px; }
 .dlbuildgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
   margin: 8px 0; max-height: 210px; overflow-y: auto; }
@@ -715,6 +735,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Armed, everything placed is ground to stamp on rather than something to grab. */
 .dlframe.placing .dlpiece { pointer-events: none; }
 .dlpiece.preview { opacity: .55; pointer-events: none; }
+/* People and animals walk above everything built, in map cells. */
+.dllife { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 7; overflow: visible; }
+.dlworld.hide-life .dllife, .dllife.far { display: none; }
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
 """ + terrain_ui.CSS + """
@@ -1035,9 +1059,11 @@ _SCRIPT = r"""
         escapeHtml(b.title) + '</b></span>' +
         '<button class="bico" data-rename="' + escapeHtml(b.key) + '" title="Rename it">&#9998;</button>' +
         '<span class="bpts">' + b.points.toLocaleString() + '</span>' +
-        (tile ? '<button class="bbuild' + (placed ? ' built' : '') + '" data-build="' + escapeHtml(b.key) + '" title="' +
-          (placed ? 'Built — show it on the map' : 'Put it on the map, inside this town') + '">' +
-          (placed ? 'Built' : 'Build') + '</button>' : '') +
+        (tile && !placed ? '<button class="bbuild" data-build="' + escapeHtml(b.key) +
+          '" title="Put it on the map, inside this town">Build</button>' : '') +
+        (placed ? '<button class="bmove" data-movebld="' + escapeHtml(b.key) +
+          '" title="Click inside the town to move it there">Move</button>' +
+          '<button class="bdel" data-delbld="' + escapeHtml(b.key) + '" title="Take it off the map">Delete</button>' : '') +
         '</div>' +
         (on ? '<div class="brooms">Built by ' + rooms + '</div>' : '') +
         '</li>';
@@ -1077,7 +1103,7 @@ _SCRIPT = r"""
           ? '<button data-act="edit" class="own">Customise your town</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
-        '<button data-act="remove">Remove</button>' +
+        '<button data-act="remove">Remove Town</button>' +
         '<button data-act="close">Close</button></div>' +
       '<div class="dledit">' +
         '<label>Town name</label>' +
@@ -1099,10 +1125,19 @@ _SCRIPT = r"""
         var act = b.dataset.act;
         if (b.dataset.build) { buildFor(p, b.dataset.build); return; }
         if (b.dataset.rename) { renameBuilding(p, b.dataset.rename, b); return; }
+        if (b.dataset.movebld) { moveBuilding(p, b.dataset.movebld); return; }
+        if (b.dataset.delbld) { deleteBuilding(p, b.dataset.delbld); return; }
         if (b.dataset.walls !== undefined) { setWalls(p, b.dataset.walls); return; }
         if (act === 'close') { closeCard(); }
         else if (act === 'move') { arm(id); closeCard(); }
-        else if (act === 'remove') { place(id, null); closeCard(); }
+        else if (act === 'remove') {
+          var own = D.world.filter(function (q) { return q.t === String(id); }).length;
+          var ask = 'Remove ' + p.name + ' from the map?' +
+            (own ? '\n\nIts ' + own + (own === 1 ? ' building' : ' buildings') + ' will be removed too.' : '') +
+            '\n\nWhat the town has earned is kept.';
+          if (!window.confirm(ask)) return;
+          place(id, null); closeCard();
+        }
         else if (act === 'edit') { editor.classList.toggle('open'); }
         else if (act === 'clearpic') { saveTown(id, {clear_image: true}); }
         else if (act === 'save') {
@@ -1193,6 +1228,39 @@ _SCRIPT = r"""
       if (a && a.building === building) return piece;
     }
     return null;
+  }
+  // Moving a building: the next click inside the town's area puts it there.
+  var relocating = null;   // {piece, town}
+  function moveBuilding(p, key) {
+    var piece = townPiece(p, key);
+    if (!piece) return;
+    relocating = {piece: piece, town: p};
+    armedAsset = null; building = null;
+    setTool('hand', true);
+    selectOnly([piece.id]);
+    hint.textContent = 'Click inside ' + p.name + '’s area to move it there. Escape to stop.';
+  }
+  function relocateTo(at) {
+    var r = relocating;
+    relocating = null;
+    decorPost({action: 'move', piece_id: r.piece.id, x: Math.round(at.x * 1000) / 1000,
+               y: Math.round(at.y * 1000) / 1000}, function () {
+      r.piece.x = at.x; r.piece.y = at.y;
+      redrawDecor();
+      hint.textContent = 'Moved.';
+      open(r.town.id);
+    });
+  }
+  function deleteBuilding(p, key) {
+    var piece = townPiece(p, key);
+    if (!piece) return;
+    decorPost({action: 'remove_many', piece_ids: [piece.id]}, function () {
+      D.world = D.world.filter(function (q) { return q.id !== piece.id; });
+      delete sel[piece.id];
+      redrawDecor(); selChanged();
+      hint.textContent = 'Taken off the map.';
+      open(p.id);
+    });
   }
   function wallSection(p) {
     var walls = [['', 'None'], ['palisade', 'Palisade'], ['stone', 'Stone']].map(function (w) {
@@ -1320,6 +1388,11 @@ _SCRIPT = r"""
       armed = null;
       frame.classList.remove('placing');
       hint.textContent = point ? 'Placed.' : 'Removed from the map.';
+      if (!point) {
+        // Its buildings went with it, on the server; and on the page.
+        D.world = D.world.filter(function (q) { return q.t !== String(id); });
+        redrawDecor();
+      }
       redraw(); renderList();
       // A town's area is its own overlay, worked out from where the town is:
       // moved or removed, the old area has to go with it — and its roads.
@@ -1331,6 +1404,11 @@ _SCRIPT = r"""
     if (swallowClick) { swallowClick = false; return; }
     if (moved > 6 || !nat.w) return;
     var b = frame.getBoundingClientRect();
+    if (relocating) {
+      relocateTo({x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
+                  y: ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100});
+      return;
+    }
     var at = {
       x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
       y: ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100
@@ -1628,7 +1706,8 @@ _SCRIPT = r"""
     {key: 'influence', label: 'Influence', sub: 'each town’s area', edit: false},
     {key: 'roads', label: 'Roads', sub: 'layer 2 · drawn by the bot', edit: false},
     {key: 'objects', label: 'Map objects', sub: 'layer 3', edit: true},
-    {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4 · built from a town’s card', edit: false}
+    {key: 'buildings', label: 'Buildings & towns', sub: 'layer 4 · built from a town’s card', edit: false},
+    {key: 'life', label: 'People & animals', sub: 'walking in each town', edit: false}
   ];
   var layerState = {hidden: [], edit: 'objects'};
   try { layerState = JSON.parse(window.localStorage.getItem('dl-layers')) || layerState; } catch (e) {}
@@ -1697,7 +1776,15 @@ _SCRIPT = r"""
   function redrawDecor() {
     world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) { n.remove(); });
     pieces = {};
+    // Back to front: of two overlapping trees the lower one stands in front,
+    // which is what makes a dense stand read as a wood.
+    D.world.sort(function (a, b) { return a.y - b.y; });
     D.world.forEach(drawPiece);
+    // A zoo put down or taken away changes who walks where.
+    if (typeof buildLife === 'function' && typeof terr !== 'undefined' && terr.world) {
+      clearTimeout(redrawDecor.life);
+      redrawDecor.life = setTimeout(buildLife, 300);
+    }
     Object.keys(sel).forEach(function (id) {
       if (pieces[id]) pieces[id].classList.add('on'); else delete sel[id];
     });
@@ -1727,7 +1814,7 @@ _SCRIPT = r"""
     if (sel[id] && selIds().length === 1) selectOnly([]); else selectOnly([id]);
   }
 
-  function decorPost(payload, then) {
+  function decorPost(payload, then, fail) {
     fetch('/api/guild/' + D.gid + '/dodoland/decor', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
@@ -1736,7 +1823,12 @@ _SCRIPT = r"""
         return {ok: false, error: 'The server answered with ' + r.status + '.'};
       });
     }).then(function (res) {
-      if (!res.ok) { kitSay(res.error || 'That did not work.', true); return; }
+      if (!res.ok) {
+        kitSay(res.error || 'That did not work.', true);
+        hint.textContent = res.error || 'That did not work.';
+        if (fail) fail(res);
+        return;
+      }
       then(res);
       // A placed piece can block a town's growth, so its area may have changed.
       if (typeof loadInfluence === 'function') loadInfluence();
@@ -1972,7 +2064,16 @@ _SCRIPT = r"""
       decorPost({action: 'move_many', moves: group.map(function (g) {
         return {piece_id: g.p.id, x: Math.round(g.p.x * 1000) / 1000,
                 y: Math.round(g.p.y * 1000) / 1000};
-      })}, function () { kitSay(group.length === 1 ? 'Moved.' : 'Moved ' + group.length + '.'); renderPlaced(); });
+      })}, function () { kitSay(group.length === 1 ? 'Moved.' : 'Moved ' + group.length + '.'); renderPlaced(); },
+      function () {
+        // Refused (a building dragged out of its town's area): back it goes.
+        group.forEach(function (g) {
+          g.p.x = g.x; g.p.y = g.y;
+          var node = pieces[g.p.id];
+          if (node) { node.style.left = g.x + '%'; node.style.top = g.y + '%'; }
+        });
+        placeMarks();
+      });
     }
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
@@ -2046,7 +2147,8 @@ _SCRIPT = r"""
   }
 
   // --- the brush ---------------------------------------------------------- //
-  var brush = {pat: 'scatter', r: 8, sp: 6, jit: 0.15, flip: true};
+  var brush = {pat: 'forest', r: 8, sp: 6, jit: 0.15, flip: true, den: 0.75};
+  var STROKE_MAX = 1600;
   var stroke2 = null;   // {items, last, carry, previews}
   function cellsH() {
     return (typeof terr !== 'undefined' && terr.world) ? terr.world.cells_h
@@ -2068,7 +2170,39 @@ _SCRIPT = r"""
     var m = toMap(ev.clientX, ev.clientY);
     return {x: m.x / 100 * D.cells_w, y: m.y / 100 * cellsH()};
   }
+  // The picked tiles' average width in cells, at the size they are placed.
+  function mixWidth() {
+    var base = parseFloat(kitScale.value) || 1, total = 0, n = 0;
+    mix.forEach(function (id) {
+      var a = assetById(id);
+      if (a && a.wc) { total += a.wc * Math.min(a.hi, Math.max(a.lo, base)); n++; }
+    });
+    return n ? total / n : 2;
+  }
+  // Forest: the brush is filled, not sprinkled. The picked tiles count as one
+  // tile and are laid on a jittered grid spaced by their own width, closer
+  // the denser, so crowns overlap into a wood rather than standing apart. A
+  // grid point is taken once per stroke, so going over the same ground again
+  // does not pile trees on trees.
+  function forestDab(cx, cy) {
+    var gap = Math.max(0.3, mixWidth() * (1.15 - brush.den));
+    var r = Math.max(brush.r, gap), out = [];
+    for (var gy = Math.floor((cy - r) / gap); gy <= Math.ceil((cy + r) / gap); gy++) {
+      for (var gx = Math.floor((cx - r) / gap); gx <= Math.ceil((cx + r) / gap); gx++) {
+        // Every other row half a step over: a staggered stand, not a plantation.
+        var px = (gx + (gy % 2 ? 0.5 : 0)) * gap, py = gy * gap * 0.8;
+        var dx = px - cx, dy = py - cy;
+        if (dx * dx + dy * dy > r * r) continue;
+        var key = gx + ',' + gy;
+        if (stroke2.taken[key]) continue;
+        stroke2.taken[key] = true;
+        out.push({x: px + (Math.random() - 0.5) * gap * 0.7, y: py + (Math.random() - 0.5) * gap * 0.6});
+      }
+    }
+    return out;
+  }
   function dab(cx, cy) {
+    if (brush.pat === 'forest') { placeAt(forestDab(cx, cy)); return; }
     var out = [], n = brush.pat === 'cluster' ? 3 + Math.floor(Math.random() * 3) : 1;
     var reach = brush.pat === 'line' ? brush.r * 0.15 : brush.pat === 'cluster' ? brush.r * 0.5 : brush.r;
     for (var i = 0; i < n; i++) {
@@ -2076,8 +2210,11 @@ _SCRIPT = r"""
       var t = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * reach;
       out.push({x: cx + Math.cos(t) * d, y: cy + Math.sin(t) * d});
     }
+    placeAt(out);
+  }
+  function placeAt(out) {
     out.forEach(function (c) {
-      if (stroke2.items.length >= 400) return;
+      if (stroke2.items.length >= STROKE_MAX) return;
       var id = mix[Math.floor(Math.random() * mix.length)] || armedAsset;
       var a = assetById(id);
       var base = parseFloat(kitScale.value) || 1;
@@ -2098,7 +2235,7 @@ _SCRIPT = r"""
     gesture = 'brush';
     try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
     var c = toCell(ev);
-    stroke2 = {items: [], last: c, carry: 0, previews: []};
+    stroke2 = {items: [], last: c, carry: 0, previews: [], taken: {}};
     dab(c.x, c.y);
   }
   function brushMove(ev) {
@@ -2108,7 +2245,8 @@ _SCRIPT = r"""
     if (!len) return;
     // One dab every `spacing` cells of travel, carried across moves so a slow
     // drag and a fast one leave the same trail.
-    var step = Math.max(0.5, brush.sp), t = step - stroke2.carry;
+    var step = brush.pat === 'forest' ? Math.max(0.5, brush.r * 0.5) : Math.max(0.5, brush.sp);
+    var t = step - stroke2.carry;
     while (t <= len) {
       dab(from.x + dx * t / len, from.y + dy * t / len);
       t += step;
@@ -2121,16 +2259,27 @@ _SCRIPT = r"""
     stroke2 = null;
     if (!s || !s.items.length) return;
     kitSay('Placing ' + s.items.length + '…');
-    decorPost({action: 'place_many', items: s.items}, function (res) {
-      s.previews.forEach(function (el) { el.remove(); });
-      res.pieces.forEach(function (row) {
-        D.world.push({id: row.piece_id, a: row.asset_id, v: row.variant || '', l: row.layer || 'objects',
-                      x: row.x, y: row.y, s: row.scale, f: !!row.flip,
-                      by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0});
-      });
-      redrawDecor();
-      kitSay('Placed ' + res.pieces.length + '.');
-    });
+    var batches = [];
+    for (var i = 0; i < s.items.length; i += 400) batches.push(s.items.slice(i, i + 400));
+    var placed = 0;
+    (function next() {
+      var batch = batches.shift();
+      if (!batch) {
+        s.previews.forEach(function (el) { el.remove(); });
+        redrawDecor();
+        kitSay('Placed ' + placed + '.');
+        return;
+      }
+      decorPost({action: 'place_many', items: batch}, function (res) {
+        res.pieces.forEach(function (row) {
+          D.world.push({id: row.piece_id, a: row.asset_id, v: row.variant || '', l: row.layer || 'objects',
+                        x: row.x, y: row.y, s: row.scale, f: !!row.flip,
+                        by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0});
+        });
+        placed += res.pieces.length;
+        next();
+      }, function () { s.previews.forEach(function (el) { el.remove(); }); redrawDecor(); });
+    })();
     // A refused stroke must not leave its previews behind.
     setTimeout(function () { s.previews.forEach(function (el) { if (el.parentNode) el.remove(); }); }, 15000);
   }
@@ -2147,6 +2296,7 @@ _SCRIPT = r"""
   brushSlider('dlbrad', String, function (v) { brush.r = v; });
   brushSlider('dlbsp', String, function (v) { brush.sp = v; });
   brushSlider('dlbjit', function (v) { return v + '%'; }, function (v) { brush.jit = v / 100; });
+  brushSlider('dlbden', function (v) { return v + '%'; }, function (v) { brush.den = v / 100; });
   document.getElementById('dlbflip').onchange = function () { brush.flip = this.checked; };
 
   // --- what you placed ---------------------------------------------------- //
@@ -2209,7 +2359,7 @@ _SCRIPT = r"""
     if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
     if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
     if (key === 'escape') {
-      armedAsset = null; mix = []; building = null;
+      armedAsset = null; mix = []; building = null; relocating = null;
       frame.classList.remove('placing');
       selectOnly([]); renderKit();
     }
@@ -2217,6 +2367,141 @@ _SCRIPT = r"""
 
   setTool(tool);
   kitSay('');
+  // --- life: people and animals ------------------------------------------ //
+  // People walk inside their town's area of influence, going from one spot in
+  // it to another and stopping a while; animals do the same inside a zoo that
+  // stands on the map. Who walks is the town's buildings (townart.LIFE): an
+  // inn brings drinkers and a dog, a keep a horse. Positions are in map cells,
+  // in an SVG laid over the world, so they zoom with everything else. Only
+  // animated while close enough to see and while the tab is visible.
+  var LIFE = D.life || {}, walkers = [], lifeSvg = null, lifeLast = 0, lifeRaf = null;
+  function lifeLayer() {
+    if (lifeSvg) return lifeSvg;
+    if (typeof terr === 'undefined' || !terr.world) return null;
+    lifeSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    lifeSvg.setAttribute('class', 'dllife');
+    lifeSvg.setAttribute('viewBox', '0 0 ' + terr.world.cells_w + ' ' + terr.world.cells_h);
+    lifeSvg.setAttribute('preserveAspectRatio', 'none');
+    world.appendChild(lifeSvg);
+    return lifeSvg;
+  }
+  function sprite(name, colour, hat) {
+    var body = name === 'person' ? (LIFE.hats || [])[hat || 0] : (LIFE.sprites || {})[name];
+    return String(body || '').split('@C@').join(colour);
+  }
+  // Spots inside an area, found once: random points kept if the area's fill
+  // contains them.
+  function spotsIn(fill, count) {
+    var svg = fill.ownerSVGElement, out = [], box = fill.getBBox(), tries = 0;
+    var pt = svg.createSVGPoint();
+    while (out.length < count && tries < count * 40) {
+      tries++;
+      pt.x = box.x + Math.random() * box.width;
+      pt.y = box.y + Math.random() * box.height;
+      try { if (fill.isPointInFill(pt)) out.push({x: pt.x, y: pt.y}); } catch (e) { return out; }
+    }
+    return out;
+  }
+  function addWalker(layer, kind, colour, hat, zone, at) {
+    var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.innerHTML = '<g>' + sprite(kind, colour, hat) + '</g>';
+    layer.appendChild(g);
+    var animal = kind !== 'person' && kind !== 'child';
+    walkers.push({el: g, inner: g.firstChild, x: at.x, y: at.y, tx: at.x, ty: at.y,
+                  wait: Math.random() * 3, face: 1, zone: zone,
+                  speed: (animal ? 1.6 : 1.1) * (0.75 + Math.random() * 0.5),
+                  // A person ~1.6 cells tall: the figures are drawn ~7.6 units.
+                  scale: kind === 'horse' ? 0.30 : kind === 'child' ? 0.17 : 0.21});
+  }
+  function buildLife() {
+    walkers = [];
+    if (!LIFE.on) return;
+    var layer = lifeLayer();
+    if (!layer) return;
+    layer.innerHTML = '';
+    var strongest = Math.max.apply(null, D.people.map(function (p) { return p.power || 0; }).concat([1]));
+    D.people.forEach(function (p) {
+      if (!p.plot) return;
+      var g = document.querySelector('#dltinfl > g[data-town="' + p.id + '"]');
+      var fill = g && g.querySelector('path');
+      if (!fill) return;
+      var spots = spotsIn(fill, 80);
+      if (!spots.length) return;
+      // Who walks here: one from each building family in turn, as in the town art.
+      var pools = p.built.map(function (b) {
+        return (LIFE.pools || {})[(LIFE.shapes || {})[b.key]] || LIFE.default || ['person'];
+      });
+      if (!pools.length) pools = [LIFE.default || ['person']];
+      var crowd = 2 + Math.round((Math.max(2, LIFE.max || 12) - 2) * Math.sqrt((p.power || 0) / strongest));
+      var colours = LIFE.colours || ['#5b4630'];
+      for (var i = 0; i < crowd; i++) {
+        var pool = pools[i % pools.length];
+        var kind = pool[Math.floor(i / pools.length) % pool.length];
+        addWalker(layer, kind, colours[i % colours.length], i % 3,
+                  {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
+      }
+      // The zoo: animals inside it, more for each tier it has reached.
+      var zoo = LIFE.zoo && townPiece(p, LIFE.zoo), tier = townTier(p, LIFE.zoo);
+      var meta = zoo && assetById(currentTile(p, LIFE.zoo) ? currentTile(p, LIFE.zoo).id : zoo.a);
+      if (zoo && tier && meta) {
+        var w = (meta.wc || 8) * (zoo.s || 1);
+        var cx = zoo.x / 100 * terr.world.cells_w, cy = zoo.y / 100 * terr.world.cells_h - w * 0.2;
+        var kinds = LIFE.zoo_kinds || ['cat', 'dog'];
+        var hues = ['#8a6a4a', '#b08a5a', '#6e5a48', '#c9a36a', '#7d6b5d', '#a8907a'];
+        for (var j = 0; j < (LIFE.per_tier || 2) * tier; j++) {
+          var zone = {type: 'zoo', cx: cx, cy: cy, r: w * 0.32};
+          addWalker(layer, kinds[j % kinds.length], hues[j % hues.length], 0, zone,
+                    {x: cx + (Math.random() - 0.5) * zone.r, y: cy + (Math.random() - 0.5) * zone.r * 0.6});
+        }
+      }
+    });
+    if (!lifeRaf && walkers.length) lifeRaf = requestAnimationFrame(stepLife);
+  }
+  function nextSpot(w) {
+    if (w.zone.type === 'zoo') {
+      var t = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * w.zone.r;
+      return {x: w.zone.cx + Math.cos(t) * d, y: w.zone.cy + Math.sin(t) * d * 0.6};
+    }
+    // Somewhere not too far: the nearest of a few random spots.
+    var best = null, bestD = Infinity, spots = w.zone.spots;
+    for (var i = 0; i < 4; i++) {
+      var s = spots[Math.floor(Math.random() * spots.length)];
+      var d2 = (s.x - w.x) * (s.x - w.x) + (s.y - w.y) * (s.y - w.y);
+      if (d2 < bestD) { bestD = d2; best = s; }
+    }
+    return best;
+  }
+  function stepLife(now) {
+    lifeRaf = null;
+    if (!walkers.length) return;
+    var dt = Math.min(0.25, (now - (lifeLast || now)) / 1000);
+    lifeLast = now;
+    var close = typeof terr !== 'undefined' && terr.world && nat.w * view.k / terr.world.cells_w >= 1.2;
+    if (lifeSvg) lifeSvg.classList.toggle('far', !close);
+    if (close && !document.hidden) {
+      walkers.forEach(function (w) {
+        if (w.wait > 0) { w.wait -= dt; }
+        else {
+          var dx = w.tx - w.x, dy = w.ty - w.y, d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 0.05) {
+            var s = nextSpot(w);
+            if (s) { w.tx = s.x; w.ty = s.y; }
+            w.wait = Math.random() < 0.5 ? Math.random() * 4 : 0;
+          } else {
+            var step = Math.min(d, w.speed * dt);
+            w.x += dx / d * step; w.y += dy / d * step;
+            if (Math.abs(dx) > 0.01) w.face = dx < 0 ? -1 : 1;
+          }
+        }
+        // A small bob while walking reads as walking at four pixels tall.
+        var bob = w.wait > 0 ? 0 : Math.abs(Math.sin(now / 160 + w.speed * 7)) * 0.12;
+        w.el.setAttribute('transform', 'translate(' + w.x.toFixed(2) + ' ' + (w.y - bob).toFixed(2) + ') scale(' +
+                          (w.scale * w.face).toFixed(3) + ' ' + w.scale.toFixed(3) + ')');
+      });
+    }
+    lifeRaf = requestAnimationFrame(stepLife);
+  }
+
   applyLayers();
   fillKitCats();
   renderKit();

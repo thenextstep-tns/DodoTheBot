@@ -47,7 +47,7 @@ SCOPES = (SCOPE_WORLD, SCOPE_TOWN)
 # Per-scope ceilings. The world's is generous because one person curates it;
 # a town's is mean on purpose — a plot with forty things on it is a junk pile,
 # and scarcity is what makes any of them worth placing.
-MAX_WORLD = 6000
+MAX_WORLD = 20000
 MAX_PER_TOWN = 24
 
 MIN_SCALE, MAX_SCALE = 0.25, 12.0
@@ -282,6 +282,13 @@ class DecorStore:
             query.update({"scope": SCOPE_TOWN, "owner_id": int(owner_id)})
         result = self._col.update_one(query, {"$set": changes})
         return bool(getattr(result, "modified_count", 0))
+
+    def remove_town_buildings(self, guild_id: int, town_id) -> int:
+        """Every piece built for one town, gone: what Remove Town takes with it."""
+        self._ensure_indexes()
+        result = self._col.delete_many({"guild_id": int(guild_id), "scope": SCOPE_WORLD,
+                                        "town": str(town_id)})
+        return int(getattr(result, "deleted_count", 0))
 
     def remove_many(self, guild_id: int, piece_ids: list) -> int:
         """World pieces by id, in one write. Town pieces are never touched."""

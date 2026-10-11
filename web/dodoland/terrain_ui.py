@@ -563,6 +563,7 @@ SCRIPT = r"""
         if (typeof applyLayers === 'function') applyLayers();
         if (typeof markInfluence === 'function') markInfluence();
         drawWalls();
+        if (typeof buildLife === 'function') buildLife();
         if (typeof loaded === 'function') loaded('reach');
       })
       .catch(function () { if (typeof loaded === 'function') loaded('reach'); });

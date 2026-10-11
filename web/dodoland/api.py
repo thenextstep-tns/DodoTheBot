@@ -198,10 +198,12 @@ async def api_dodoland_settle(request: web.Request):
     if body.get("remove"):
         bot.dodoland_buildings.unsettle(guild.id, user_id)
         # Their decor was placed relative to a town that is no longer on the
-        # map, so it has nowhere to be. Standing is untouched: a position and a
-        # standing have never had anything to do with each other.
+        # map, so it has nowhere to be — and every building they put on the
+        # map goes with the town it belonged to. Standing is untouched: a
+        # position and a standing have never had anything to do with each other.
         bot.dodoland_decor.clear_town(guild.id, user_id)
-        return web.json_response({"ok": True, "removed": True})
+        buildings = bot.dodoland_decor.remove_town_buildings(guild.id, user_id)
+        return web.json_response({"ok": True, "removed": True, "buildings": buildings})
 
     try:
         x, y = float(body.get("x")), float(body.get("y"))

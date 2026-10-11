@@ -470,3 +470,28 @@ nearest piece within 10 screen px — zoomed out, a flower is a pixel.
    is now laid out `WS = 16` times larger and zoomed 16 times less (`kMin/kMax`,
    `--ws` for the few fixed sizes inside it: the town dot), so pieces and halls
    are many layout pixels and the rounding is invisible.
+
+### Town card actions, forest brush, people and animals (11 Oct)
+
+* **Card rows**: an unbuilt earned building has **Build**; a placed one has
+  **Move** (the next click inside the town's area moves it) and **Delete**.
+  **Remove Town** asks first (naming how many buildings go with it) and the
+  server now deletes every piece built for that town
+  (`DecorStore.remove_town_buildings`) besides its town-scope decor.
+* **Buildings stay inside their area on every move**: `move` and `move_many`
+  refuse a town's piece outside its area (`decor_api._outside_area`); a refused
+  drag snaps back on the page (`decorPost(..., fail)`).
+* **Forest brush** (default pattern): the picked tiles (shift-click several)
+  count as one; the brush disc is filled with a staggered, jittered grid spaced
+  by their own width times `(1.15 - density)` (Density slider, 75%), each grid
+  point taken once per stroke so going over it again does not pile up; strokes
+  up to 1,600 pieces, sent in batches of 400. Pieces are drawn back to front
+  (sorted by y) so the lower tree stands in front. `MAX_WORLD` 6000 -> 20000.
+* **People & animals** (new layer, `.dllife` SVG in map cells above the
+  buildings): people walk between random spots inside each placed town's area
+  and pause; their kinds come from the town's buildings (`townart.LIFE` by
+  building shape) using the town art's own figures; the crowd is 2 to
+  `dodoland_life_max` (12) on a square-root of power. A placed zoo
+  (`dodoland_zoo_building`, menagerie) holds `dodoland_zoo_animals` (2) per
+  tier, wandering inside it. Animated only when a cell is at least 1.2 px and
+  the tab is visible. `dodoland_life_on` switches it off.
