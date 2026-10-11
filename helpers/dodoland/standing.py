@@ -253,16 +253,35 @@ def guild_standings(store, params, guild_id: int, buildings: list[dict], *,
             for metric_key, count in (counts or {}).items():
                 target[metric_key] = target.get(metric_key, 0) + int(count)
 
-    # People reached, counted per day and capped the same way an act is.
+    # People reached. **Individual connections**: by default each person once
+    # over the window (``dodoland_reach_counts`` "people"), and only somebody
+    # actually talked with — a ping alone is not a conversation
+    # (``dodoland_reach_mentions_alone``). The old count, person-days, grew
+    # every time the same raid roster was pinged again.
     reach: dict[int, int] = {}
     pairs = (pair_rows if pair_rows is not None
              else store.pair_rows(guild_id, since=since, basis=basis))
     pairs = [row for row in pairs if matches_basis(row, basis)]
+    per_day = str(params.get(guild_id, "dodoland_reach_counts")) == "days"
+    pings_reach = bool(params.get(guild_id, "dodoland_reach_mentions_alone"))
+    talked: set[tuple[int, int]] = set()
+    if not pings_reach:
+        for row in pairs:
+            if any(not str(k).startswith("mention") for k in (row.get("acts") or {})):
+                talked.add((int(row.get("a", 0)), int(row.get("b", 0))))
+    seen: set[tuple[int, int]] = set()
     for row in pairs:
-        for user_id in (int(row.get("a", 0)), int(row.get("b", 0))):
+        a, b = int(row.get("a", 0)), int(row.get("b", 0))
+        if not pings_reach and (a, b) not in talked:
+            continue
+        if not per_day:
+            if (a, b) in seen:
+                continue
+            seen.add((a, b))
+        for user_id in (a, b):
             if user_id and (wanted is None or user_id in wanted):
                 reach[user_id] = reach.get(user_id, 0) + 1
-    if partner_cap > 0:
+    if partner_cap > 0 and per_day:
         # The cap is per day; the store cannot apply it because it does not know
         # the day's shape until the whole window is read.
         span = max(1, len({row.get("day") for row in day_rows}))

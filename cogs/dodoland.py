@@ -146,6 +146,7 @@ class DodoLand(commands.Cog, name="dodoland"):
                 self.bot.dodoland.record(
                     guild_id, act.user_id, act.metric,
                     channel_id=act.channel_id, partner_id=act.partner_id,
+                    link=getattr(act, "link", True),
                 )
         except Exception as error:
             self.bot.logger.error(f"DodoLand failed to record activity: {error}")
@@ -209,6 +210,7 @@ class DodoLand(commands.Cog, name="dodoland"):
             min_chars=int(self._param(guild_id, "dodoland_min_message_chars")),
             max_mentions=int(self._param(guild_id, "dodoland_max_mentions")),
             count_self=bool(self._param(guild_id, "dodoland_count_self_acts")),
+            mass_at=int(self._param(guild_id, "dodoland_mass_ping_at")),
         )
         if not acts:
             return
@@ -226,6 +228,7 @@ class DodoLand(commands.Cog, name="dodoland"):
                 min_chars=int(self._param(guild_id, "dodoland_min_message_chars")),
                 max_mentions=int(self._param(guild_id, "dodoland_max_mentions")),
                 count_self=bool(self._param(guild_id, "dodoland_count_self_acts")),
+                mass_at=int(self._param(guild_id, "dodoland_mass_ping_at")),
             )
         self._write(guild_id, acts)
 

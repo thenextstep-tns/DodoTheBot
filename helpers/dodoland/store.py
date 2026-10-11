@@ -135,7 +135,7 @@ class ActivityStore:
     # ------------------------------------------------------------------ #
     def record(self, guild_id: int, user_id: int, metric_key: str, *,
                channel_id: int = 0, partner_id: Optional[int] = None,
-               day: Optional[str] = None, amount: int = 1) -> int:
+               day: Optional[str] = None, amount: int = 1, link: bool = True) -> int:
         """Record ``amount`` of an act. Returns how much of it scored.
 
         The act is always written to ``acts`` in full. It reaches ``scored``
@@ -165,9 +165,11 @@ class ActivityStore:
                 # A self-act never reaches here from the cog, but a backfill or a
                 # future caller might; refusing centrally is cheaper than trusting.
                 return 0
+            # ``link=False`` (a mass ping): it scores, but makes no pair row,
+            # so it is nobody's "person reached" and spends no per-pair cap.
             within_partner_cap = self._bump_pair(
                 guild_id, int(user_id), int(partner_id), metric_key, stamp, amount
-            )
+            ) if link else True
         else:
             within_partner_cap = True
 

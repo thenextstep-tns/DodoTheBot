@@ -171,11 +171,45 @@ print("scoring         town power is buildings plus reach, and it orders the boa
 
 # Reach is channel-agnostic, so it belongs to the town and not to any building.
 store2, params2 = fresh()
-store2.record(GUILD, NIK, "mention_received", channel_id=LIBRARY_CH, partner_id=FOX)
+store2.record(GUILD, NIK, "reply_received", channel_id=LIBRARY_CH, partner_id=FOX)
 res2 = standing.guild_standings(store2, params2, GUILD, [library])
 assert res2["people"][NIK]["reached"] == 1 and res2["people"][FOX]["reached"] == 1
 assert res2["people"][FOX]["power"] > 0, "a person with only ties still has a town"
 print("scoring         reach sits on the town, and ties alone still make one")
+
+# People reached is individual connections (Nik, 11 Oct): a ping alone is not a
+# conversation, the same person on many days is one person, and a mass ping
+# connects its author to nobody while still scoring for the room's buildings.
+from helpers.dodoland import intake  # noqa: E402
+
+OWL = 4004
+store3, params3 = fresh()
+store3.record(GUILD, NIK, "mention_received", channel_id=LIBRARY_CH, partner_id=OWL)
+res3 = standing.guild_standings(store3, params3, GUILD, [library])
+assert res3["people"].get(OWL, {}).get("reached", 0) == 0, "a ping alone reached somebody"
+params3.set(GUILD, "dodoland_reach_mentions_alone", True)
+assert standing.guild_standings(store3, params3, GUILD, [library])["people"][OWL]["reached"] == 1
+
+store4, params4 = fresh()
+for day in ("2026-10-01", "2026-10-02", "2026-10-03"):
+    store4.record(GUILD, NIK, "reply_received", channel_id=LIBRARY_CH, partner_id=FOX, day=day)
+assert standing.guild_standings(store4, params4, GUILD, [library])["people"][NIK]["reached"] == 1,     "the same person on three days counted three times"
+params4.set(GUILD, "dodoland_reach_counts", "days")
+assert standing.guild_standings(store4, params4, GUILD, [library])["people"][NIK]["reached"] == 3
+
+roster = " ".join(f"<@{9000 + i}>" for i in range(6))
+mass = intake.acts_from_message(NIK, "Raid tonight! " + roster, channel_id=LIBRARY_CH, mass_at=4)
+assert mass and all(not act.link for act in mass if act.partner_id), "a mass ping made connections"
+one = intake.acts_from_message(NIK, "hey <@9001> about tonight", channel_id=LIBRARY_CH, mass_at=4)
+assert all(act.link for act in one if act.partner_id), "a personal ping lost its connection"
+store5, params5 = fresh()
+for act in mass:
+    store5.record(GUILD, act.user_id, act.metric, channel_id=act.channel_id,
+                  partner_id=act.partner_id, link=act.link)
+res5 = standing.guild_standings(store5, params5, GUILD, [library])
+assert res5["people"][NIK]["reached"] == 0, "a mass ping reached people"
+assert res5["people"][NIK]["buildings"]["library"]["points"] > 0, "a mass ping stopped scoring for the room"
+print("reach           individual people, talked with; a mass ping still builds but reaches nobody")
 
 
 

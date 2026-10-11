@@ -657,3 +657,20 @@ take clicks; glows, auras, beams and sparks let clicks through, and while
 placing or painting the whole town does. Checked on Nik's live map: of 12
 houses overlapping Beanburg's box, 12 were blocked before and 10 reachable
 after (the other 2 are behind the hall's own drawing).
+
+### People reached = individual connections (11 Oct)
+
+Nik: "people reached" ballooned with every raid ping. It counted **pair rows**,
+one per person per day, and a ping made one. Now (`standing.guild_standings`):
+* `dodoland_reach_counts` "people" (default): each person once over the window;
+  "days" restores the old person-days count.
+* `dodoland_reach_mentions_alone` (off): a person only ever pinged — no reply,
+  thread or voice together — is not reached. Cleans up existing history too.
+* `dodoland_mass_ping_at` (4): from now on a message naming that many people
+  scores for the room's buildings as before, but its acts carry `link=False`, so
+  `store.record` makes no pair row: it connects nobody.
+Building points are untouched; only town power's reach part and the reached
+count change. On live data the top town goes 1,288 -> 153 people reached (place
+unchanged); a few towns move several places. Houses are `reached //
+dodoland_people_per_house` (10), so they drop too — Nik to retune (2 keeps
+about the old density).

@@ -35,6 +35,10 @@ class Act:
     user_id: int
     partner_id: Optional[int] = None
     channel_id: int = 0
+    # Whether this act links the two people (a pair row: "people reached"). A
+    # mass ping still scores for the buildings of the room it was posted in,
+    # but it is not a connection with each person named in it.
+    link: bool = True
 
 
 def mentioned_ids(content: str) -> list[int]:
@@ -69,7 +73,7 @@ def acts_from_message(author_id: int, content: str, *, channel_id: int,
                       thread_owner: Optional[int] = None,
                       newcomers: Iterable[int] = (),
                       min_chars: int = 4, max_mentions: int = 5,
-                      count_self: bool = False) -> list[Act]:
+                      count_self: bool = False, mass_at: int = 0) -> list[Act]:
     """Every act one message produces, for the author and for everyone reached.
 
     Only ``message`` and the two mention metrics come out of ``content``; the
@@ -103,14 +107,18 @@ def acts_from_message(author_id: int, content: str, *, channel_id: int,
     # against the whole message rather than per mechanism.
     reached: list[int] = []
 
-    for target in mentioned_ids(text)[: max(0, max_mentions)]:
-        if target == author_id and not count_self:
-            continue
+    named = [t for t in mentioned_ids(text) if t != author_id or count_self]
+    # A mass ping — ``mass_at`` or more people named in one message — counts for
+    # the room's buildings like any mention, but links its author to nobody:
+    # naming a raid roster is not talking to twenty people.
+    mass = mass_at > 0 and len(named) >= mass_at
+    for target in named[: max(0, max_mentions)]:
         acts.append(Act(metric="mention_given", user_id=author_id,
-                        partner_id=target, channel_id=channel_id))
+                        partner_id=target, channel_id=channel_id, link=not mass))
         acts.append(Act(metric="mention_received", user_id=target,
-                        partner_id=author_id, channel_id=channel_id))
-        reached.append(target)
+                        partner_id=author_id, channel_id=channel_id, link=not mass))
+        if not mass:
+            reached.append(target)
 
     if reply_to is not None and (int(reply_to) != author_id or count_self):
         target = int(reply_to)
