@@ -53,7 +53,7 @@ from helpers.dodoland import tiles as tile_rules
 from helpers.dodoland import townart
 from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
-from web.dodoland import terrain_ui, theme
+from web.dodoland import forest_ui, terrain_ui, theme
 
 
 def _e(value) -> str:
@@ -272,6 +272,9 @@ async def map_page(request: web.Request):
                                       str(getattr(guild, "owner_id", "") or "") == viewer)
     endpoints = {"base": base, "player": player, "landmark_mode": landmark_mode,
                  "paint": api + "/terrain/paint", "undo": api + "/terrain/undo",
+                 # Members read the forest; only admins paint it (no member route).
+                 "forest": base + "/forest/chunks",
+                 "forest_paint": "" if player else api + "/forest/paint",
                  "decor": api + ("/build" if player else "/decor"),
                  "town": api + "/town", "settle": "" if player else api + "/settle"}
 
@@ -329,7 +332,11 @@ async def map_page(request: web.Request):
         # Per layer: the screen pixels a map cell must be before it shows.
         "lod": {key: float(bot.dodoland_params.get(guild.id, f"dodoland_lod_{key}"))
                 for key in ("tiles", "environment", "objects", "buildings", "houses",
-                            "life", "influence", "walls")},
+                            "life", "influence", "walls", "forest")},
+        # How finely forests are drawn, and how many chunks of them at once.
+        "forest_detail": float(bot.dodoland_params.get(guild.id, "dodoland_forest_detail_max")),
+        "forest_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_forest_chunks_max")),
+        "forest_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_full_at")),
     }
 
     body = f"""<!doctype html>
@@ -410,8 +417,8 @@ async def map_page(request: web.Request):
     <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
     <div class="dlbrushopts" id="dlbrushopts" hidden>
-      <div class="dlseg" id="dlbrushpat"><button data-pat="forest" class="on">Forest</button><button data-pat="scatter">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>
-      <label title="Forest: how tightly the picked tiles pack. High is a canopy with no ground between trees.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
+      <div class="dlseg" id="dlbrushpat"><button data-pat="forest" class="on">Forest</button><button data-pat="scatter">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>{forest_ui.MODE}
+      <label title="Forest: how tightly the trees pack. High is a canopy with no ground between trees.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
       <label>Radius <input type="range" id="dlbrad" min="1" max="60" value="8"><output id="dlbradn">8</output></label>
       <label>Spacing <input type="range" id="dlbsp" min="1" max="40" value="6"><output id="dlbspn">6</output></label>
       <label>Size jitter <input type="range" id="dlbjit" min="0" max="60" step="5" value="15"><output id="dlbjitn">15%</output></label>
@@ -884,7 +891,7 @@ body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; borde
 /* The life layer itself stays: the houses are in it, and they show from afar. */
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
-""" + terrain_ui.CSS + """
+""" + terrain_ui.CSS + forest_ui.CSS + """
 @media (max-width: 720px) {
   .dldrawer { width: 100%; }
   .dlcard { left: 8px; right: 8px; width: auto; }
@@ -1182,6 +1189,7 @@ _SCRIPT = r"""
     // Decor is sized against the base image, which is 0 until it has loaded.
     if (typeof resizeDecor === 'function') resizeDecor();
     if (typeof terrDetail === 'function') terrDetail();
+    if (typeof forestView === 'function') forestView();
   }
 
   function escapeHtml(s) {
@@ -2424,7 +2432,7 @@ _SCRIPT = r"""
     if (ev.button !== 0 || !nat.w) return false;
     // A town being moved is placed by a plain click; a town is opened by one.
     if (armed || (ev.target.closest && ev.target.closest('.dltown'))) return false;
-    if (tool === 'brush' && armedAsset) { brushStart(ev); return true; }
+    if (tool === 'brush' && (armedAsset || forestErasing())) { brushStart(ev); return true; }
     if (tool === 'pointer') {
       // The pointer is only captured once this is a drag: captured at once,
       // the click that follows lands on the frame and nothing under it opens.
@@ -2436,6 +2444,7 @@ _SCRIPT = r"""
   }
   function toolMove(ev) {
     if (gesture === 'brush') { brushMove(ev); return; }
+    if (gesture === 'forest') { brushCursor(ev); forestStrokeMove(ev); return; }
     if (gesture === 'box') {
       if (!g0.held && Math.abs(ev.clientX - g0.x) + Math.abs(ev.clientY - g0.y) > 4) {
         g0.held = true;
@@ -2455,6 +2464,7 @@ _SCRIPT = r"""
     swallowClick = true;
     setTimeout(function () { swallowClick = false; }, 0);
     if (was === 'brush') { brushEnd(); return; }
+    if (was === 'forest') { forestStrokeEnd(); return; }
     if (was === 'box') {
       boxEl.style.display = 'none';
       var travel = Math.abs(ev.clientX - g0.x) + Math.abs(ev.clientY - g0.y);
@@ -2496,7 +2506,7 @@ _SCRIPT = r"""
   function pxPerCell() { return nat.w * view.k / Math.max(1, D.cells_w); }
   function brushCursor(ev) {
     var cur = document.getElementById('dlbrushcur');
-    if (!ev || tool !== 'brush' || !armedAsset) { cur.style.display = 'none'; return; }
+    if (!ev || tool !== 'brush' || !(armedAsset || forestErasing())) { cur.style.display = 'none'; return; }
     var f = frame.getBoundingClientRect(), d = Math.max(6, brush.r * 2 * pxPerCell());
     cur.style.left = (ev.clientX - f.left) + 'px';
     cur.style.top = (ev.clientY - f.top) + 'px';
@@ -2509,42 +2519,8 @@ _SCRIPT = r"""
     var m = toMap(ev.clientX, ev.clientY);
     return {x: m.x / 100 * D.cells_w, y: m.y / 100 * cellsH()};
   }
-  // The picked tiles' average width in cells, at the size they are placed.
-  function mixWidth() {
-    var base = parseFloat(kitScale.value) || 1, total = 0, n = 0;
-    mix.forEach(function (id) {
-      var a = assetById(id);
-      if (a && a.wc) { total += a.wc * Math.min(a.hi, Math.max(a.lo, base)); n++; }
-    });
-    return n ? total / n : 2;
-  }
-  // Forest: the brush is filled, not sprinkled. The picked tiles count as one
-  // tile and are laid on a jittered grid spaced by their own width, closer
-  // the denser, so crowns overlap into a wood rather than standing apart. A
-  // grid point is taken once per stroke, so going over the same ground again
-  // does not pile trees on trees.
-  function forestDab(cx, cy) {
-    var gap = Math.max(0.3, mixWidth() * (1.15 - brush.den));
-    // Rows are closer than columns (0.8), and the rows looked at must be found
-    // in row units: in column units they drift off the brush the further down
-    // the map it is, and below the first few dozen rows it planted nothing.
-    var r = Math.max(brush.r, gap), row = gap * 0.8, out = [];
-    for (var gy = Math.floor((cy - r) / row); gy <= Math.ceil((cy + r) / row); gy++) {
-      for (var gx = Math.floor((cx - r) / gap) - 1; gx <= Math.ceil((cx + r) / gap); gx++) {
-        // Every other row half a step over: a staggered stand, not a plantation.
-        var px = (gx + (gy % 2 ? 0.5 : 0)) * gap, py = gy * row;
-        var dx = px - cx, dy = py - cy;
-        if (dx * dx + dy * dy > r * r) continue;
-        var key = gx + ',' + gy;
-        if (stroke2.taken[key]) continue;
-        stroke2.taken[key] = true;
-        out.push({x: px + (Math.random() - 0.5) * gap * 0.7, y: py + (Math.random() - 0.5) * gap * 0.6});
-      }
-    }
-    return out;
-  }
+  // Forest is painted as a layer of its own (forest_ui.py), not dabbed as pieces.
   function dab(cx, cy) {
-    if (brush.pat === 'forest') { placeAt(forestDab(cx, cy)); return; }
     var out = [], n = brush.pat === 'cluster' ? 3 + Math.floor(Math.random() * 3) : 1;
     var reach = brush.pat === 'line' ? brush.r * 0.15 : brush.pat === 'cluster' ? brush.r * 0.5 : brush.r;
     for (var i = 0; i < n; i++) {
@@ -2574,10 +2550,17 @@ _SCRIPT = r"""
     });
   }
   function brushStart(ev) {
+    if (brush.pat === 'forest') {
+      // A painted forest: no pieces, one request when the stroke ends.
+      gesture = 'forest';
+      try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
+      forestStrokeStart(ev);
+      return;
+    }
     gesture = 'brush';
     try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
     var c = toCell(ev);
-    stroke2 = {items: [], last: c, carry: 0, previews: [], taken: {}};
+    stroke2 = {items: [], last: c, carry: 0, previews: []};
     dab(c.x, c.y);
   }
   function brushMove(ev) {
@@ -2587,7 +2570,7 @@ _SCRIPT = r"""
     if (!len) return;
     // One dab every `spacing` cells of travel, carried across moves so a slow
     // drag and a fast one leave the same trail.
-    var step = brush.pat === 'forest' ? Math.max(0.5, brush.r * 0.5) : Math.max(0.5, brush.sp);
+    var step = Math.max(0.5, brush.sp);
     var t = step - stroke2.carry;
     while (t <= len) {
       dab(from.x + dx * t / len, from.y + dy * t / len);
@@ -2630,6 +2613,7 @@ _SCRIPT = r"""
     b.onclick = function () {
       brush.pat = b.dataset.pat;
       document.querySelectorAll('#dlbrushpat button').forEach(function (o) { o.classList.toggle('on', o === b); });
+      document.getElementById('dlforestmode').hidden = brush.pat !== 'forest';
     };
   });
   function brushSlider(id, show, set) {
@@ -2721,6 +2705,7 @@ _SCRIPT = r"""
       stroke2.previews.forEach(function (el) { el.remove(); });
       stroke2 = null;
     }
+    if (gesture === 'forest') forestStrokeCancel();
     gesture = null;
     boxEl.style.display = 'none';
     if (armed) { armed = null; renderList(); }
@@ -3022,7 +3007,7 @@ _SCRIPT = r"""
   fillKitCats();
   renderKit();
 
-""" + terrain_ui.SCRIPT + r"""
+""" + terrain_ui.SCRIPT + forest_ui.SCRIPT + r"""
   redraw();
   redrawDecor();
   renderList();

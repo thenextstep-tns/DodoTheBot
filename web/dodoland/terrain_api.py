@@ -454,6 +454,81 @@ def _choices(store, bot, guild, request, world, body) -> list[int]:
     return out
 
 
+class StrokeError(ValueError):
+    pass
+
+
+def stroke_reach(body: dict, width: int, height: int) -> dict[tuple[int, int], float]:
+    """The cells a stroke covers, each with how far into the brush it is: 0 at
+    the centre, 1 at the rim. Shared by every brush that paints the grid (the
+    ground and the forest), so a radius means the same thing to all of them.
+
+    * ``mode: "brush"`` — ``points`` in cells and a ``radius``: a disc (or with
+      ``shape: "square"`` a square) dragged along the line between the points.
+    * ``mode: "rect"`` — ``rect: [x0, y0, x1, y1]``: a selection filled at once.
+    """
+    # cell -> how far into the brush it is: 0 at the centre, 1 at the rim.
+    reach: dict[tuple[int, int], float] = {}
+    mode = str(body.get("mode") or "brush")
+    if mode == "rect":
+        try:
+            x0, y0, x1, y1 = (int(v) for v in body.get("rect"))
+        except (TypeError, ValueError):
+            raise StrokeError("A selection is four numbers.")
+        x0, x1 = sorted((max(0, min(x0, x1)), min(width - 1, max(x0, x1))))
+        y0, y1 = sorted((max(0, min(y0, y1)), min(height - 1, max(y0, y1))))
+        if (x1 - x0 + 1) * (y1 - y0 + 1) > 400_000:
+            raise StrokeError("That selection is too big to fill at once.")
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                reach[(x, y)] = 0.0
+        return reach
+    try:
+        radius = max(0, min(64, int(body.get("radius") or 0)))
+    except (TypeError, ValueError):
+        raise StrokeError("That stroke could not be read.")
+    points = body.get("points") or []
+    if not isinstance(points, list) or not points:
+        raise StrokeError("A stroke needs at least one point.")
+    if len(points) > 4000:
+        raise StrokeError("That stroke is too long; it will arrive in pieces.")
+    # The brush, once: which offsets a disc of this radius covers, and how
+    # far out each one is. Round, not square — square corners read as
+    # deliberate when they are not.
+    # Round by default; square for roads, walls of hedge, anything with an
+    # edge that should run straight. "far" is the distance to the rim in
+    # the brush's own shape, so a soft edge softens a square as a square.
+    if str(body.get("shape") or "round") == "square":
+        disc = [(dx, dy, max(abs(dx), abs(dy)) / radius if radius else 0.0)
+                for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)]
+    else:
+        disc = [(dx, dy, ((dx * dx + dy * dy) ** 0.5) / radius if radius else 0.0)
+                for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)
+                if not radius or dx * dx + dy * dy <= radius * radius]
+    clean = []
+    for point in points:
+        try:
+            clean.append((int(point[0]), int(point[1])))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not clean:
+        raise StrokeError("A stroke needs at least one point.")
+    previous = clean[0]
+    for point in clean:
+        for cx, cy in _line(previous[0], previous[1], point[0], point[1]):
+            for dx, dy, far in disc:
+                x, y = cx + dx, cy + dy
+                if 0 <= x < width and 0 <= y < height:
+                    key = (x, y)
+                    if far < reach.get(key, 2.0):
+                        reach[key] = far
+        previous = point
+        if len(reach) > 400_000:
+            raise StrokeError("That stroke covers too much at once. "
+                              "Use a smaller brush or shorter strokes.")
+    return reach
+
+
 async def api_terrain_paint(request: web.Request):
     """One stroke. Two shapes and two ways of choosing what lands:
 
@@ -510,62 +585,11 @@ async def api_terrain_paint(request: web.Request):
     except (TypeError, ValueError, KeyError):
         return _bad("That stroke could not be read.")
 
-    # cell -> how far into the brush it is: 0 at the centre, 1 at the rim.
-    reach: dict[tuple[int, int], float] = {}
     mode = str(body.get("mode") or "brush")
-    if mode == "rect":
-        try:
-            x0, y0, x1, y1 = (int(v) for v in body.get("rect"))
-        except (TypeError, ValueError):
-            return _bad("A selection is four numbers.")
-        x0, x1 = sorted((max(0, min(x0, x1)), min(width - 1, max(x0, x1))))
-        y0, y1 = sorted((max(0, min(y0, y1)), min(height - 1, max(y0, y1))))
-        if (x1 - x0 + 1) * (y1 - y0 + 1) > 400_000:
-            return _bad("That selection is too big to fill at once.")
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                reach[(x, y)] = 0.0
-    else:
-        radius = max(0, min(64, int(body.get("radius") or 0)))
-        points = body.get("points") or []
-        if not isinstance(points, list) or not points:
-            return _bad("A stroke needs at least one point.")
-        if len(points) > 4000:
-            return _bad("That stroke is too long; it will arrive in pieces.")
-        # The brush, once: which offsets a disc of this radius covers, and how
-        # far out each one is. Round, not square — square corners read as
-        # deliberate when they are not.
-        # Round by default; square for roads, walls of hedge, anything with an
-        # edge that should run straight. "far" is the distance to the rim in
-        # the brush's own shape, so a soft edge softens a square as a square.
-        if str(body.get("shape") or "round") == "square":
-            disc = [(dx, dy, max(abs(dx), abs(dy)) / radius if radius else 0.0)
-                    for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)]
-        else:
-            disc = [(dx, dy, ((dx * dx + dy * dy) ** 0.5) / radius if radius else 0.0)
-                    for dy in range(-radius, radius + 1) for dx in range(-radius, radius + 1)
-                    if not radius or dx * dx + dy * dy <= radius * radius]
-        clean = []
-        for point in points:
-            try:
-                clean.append((int(point[0]), int(point[1])))
-            except (TypeError, ValueError, IndexError):
-                continue
-        if not clean:
-            return _bad("A stroke needs at least one point.")
-        previous = clean[0]
-        for point in clean:
-            for cx, cy in _line(previous[0], previous[1], point[0], point[1]):
-                for dx, dy, far in disc:
-                    x, y = cx + dx, cy + dy
-                    if 0 <= x < width and 0 <= y < height:
-                        key = (x, y)
-                        if far < reach.get(key, 2.0):
-                            reach[key] = far
-            previous = point
-            if len(reach) > 400_000:
-                return _bad("That stroke covers too much at once. "
-                            "Use a smaller brush or shorter strokes.")
+    try:
+        reach = stroke_reach(body, width, height)
+    except StrokeError as error:
+        return _bad(error)
 
     edits: dict[tuple[int, int], int] = {}
     inner = 1.0 - soft

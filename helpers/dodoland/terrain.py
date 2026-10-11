@@ -45,7 +45,9 @@ CELLS = CHUNK * CHUNK
 # Layers. Authored and derived, never the same row.
 TERRAIN = "terrain"
 BUILT = "built"
-LAYERS = (TERRAIN, BUILT)
+# Forest: which stand grows on each cell, 0 for none (helpers/dodoland/forest.py).
+COVER = "cover"
+LAYERS = (TERRAIN, BUILT, COVER)
 
 # Index 0 is "nothing has been said about this cell". A fresh world is entirely
 # unknown rather than entirely grass, so an import that half-worked is visible
@@ -337,6 +339,8 @@ class TerrainStore:
             # Copies: the cached row is shared, and callers edit the lists.
             "kinds": copy.deepcopy(row.get("kinds")) or base_kinds(TERRAIN),
             "built_kinds": copy.deepcopy(row.get("built_kinds")) or base_kinds(BUILT),
+            # What the cover layer's indices mean: the forest stands.
+            "stands": copy.deepcopy(row.get("stands")) or [{"key": "none"}],
             "source_w": int(row.get("source_w") or 0),
             "source_h": int(row.get("source_h") or 0),
             # Bumped by anything that writes the world from outside the panel
@@ -372,6 +376,12 @@ class TerrainStore:
         in place — the grid holds indices, so an entry may never move."""
         self._ensure_indexes()
         self._config.update_one({"_id": int(guild_id)}, {"$set": {"kinds": kinds}}, upsert=True)
+        self._forget(guild_id)
+
+    def set_stands(self, guild_id: int, stands: list[dict]) -> None:
+        """Store the forest stands. Append-only, like the ground's kinds."""
+        self._ensure_indexes()
+        self._config.update_one({"_id": int(guild_id)}, {"$set": {"stands": stands}}, upsert=True)
         self._forget(guild_id)
 
     def kind_for_tile(self, guild_id: int, tile: dict, hex_colour: str = "") -> int:

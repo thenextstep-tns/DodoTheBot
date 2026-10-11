@@ -774,3 +774,33 @@ brush by `0.2 x y`: fine at the top of the map, nothing below row ~50 (the map
 is 1,812 rows). Rows are now found in row units (and one extra column for the
 half-step rows). `test_dodoland_page` runs `forestDab` in node at rows 50, 900
 and 1,790.
+
+### Painted forests, step 1 (paint, erase, see the trees)
+Every brushed tree was a placed piece (a decor row, a DOM element, part of
+every map payload). A forest is now **painted, not placed**:
+* **Storage** — the terrain store's new `cover` layer (`T.COVER`): which stand
+  grows on each cell, 0 = none, same 64x64 RLE chunks as the ground. Stands
+  (`helpers/dodoland/forest.py`: mix of tile ids, density, scale, jitter, flip,
+  seed from the rest) live in the world row as `stands`, append-only like
+  `kinds`; the same settings reuse their stand. A forest across the whole test
+  map is 35 chunk rows. Nothing per tree exists anywhere.
+* **Endpoints** (`web/dodoland/forest_api.py`): `POST /api/.../forest/paint`
+  (full scope; `points`/`radius` rasterised by `terrain_api.stroke_reach`, now
+  shared with the ground brush; `erase: true` or the stand; mix tiles checked
+  with `decor_api._admin_tile`); `GET .../forest/chunks?r=` (+ member alias
+  `/me/w/forest/chunks`) returns the stands and only non-empty chunks.
+* **Drawing** (`web/dodoland/forest_ui.py`, spliced into the map script): per
+  visible chunk, trees are grown from the cells on a staggered grid spaced by
+  the stand's tree width (the old forest dab's formula), tile/size/mirror/nudge
+  from a hash of the grid point and seed, then drawn nearest-last onto one
+  canvas per chunk (z 3: above ground, below objects and towns). A few chunks
+  per frame; the furthest are let go past `dodoland_forest_chunks_max` (200).
+* **Settings**: `dodoland_lod_forest` (1.0 px/cell: not drawn further out),
+  `dodoland_forest_detail_max` (12 px/cell sharpest), `dodoland_forest_full_at`
+  (4: below it only that share of trees is drawn, seed-picked, so zooming in
+  only adds trees), `dodoland_forest_chunks_max`.
+* The Forest brush pattern now paints this layer (Paint / Erase switch); the
+  old tree-by-tree `forestDab` is gone. Scatter / Line / Cluster still place pieces.
+Next steps: undo for forest strokes; canopy in the zoomed-out picture; depth
+strips so a tree south of a house draws in front of it; turning existing
+brushed trees into painted forest; members painting in their area.

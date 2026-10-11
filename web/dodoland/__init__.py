@@ -43,6 +43,7 @@ def dodoland_routes() -> list:
         api_town_decor, api_town_toolkit, api_world_decor,
         player_asset_image,
     )
+    from web.dodoland.forest_api import api_forest_paint, forest_chunks
     from web.dodoland.terrain_api import (
         api_terrain_paint, api_terrain_undo, terrain_cells, terrain_chunks,
         terrain_defs, terrain_overview, terrain_picture, terrain_shade, terrain_world,
@@ -93,12 +94,14 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/terrain/picture", configure(terrain_picture)),
         web.get("/guild/{gid}/dodoland/terrain/shade", configure(terrain_shade)),
         web.get("/guild/{gid}/dodoland/terrain/chunks", configure(terrain_chunks)),
+        web.get("/guild/{gid}/dodoland/forest/chunks", configure(forest_chunks)),
         web.get("/guild/{gid}/dodoland/terrain/cells", configure(terrain_cells)),
         # Every placed town's area of influence, for the map's Influence layer.
         web.get("/guild/{gid}/dodoland/influence", configure(influence_layer)),
         # The roads the bot lays between connected towns (layer 2).
         web.get("/guild/{gid}/dodoland/roads", configure(roads_layer)),
         web.post("/api/guild/{gid}/dodoland/terrain/paint", full(api_terrain_paint)),
+        web.post("/api/guild/{gid}/dodoland/forest/paint", full(api_forest_paint)),
         web.post("/api/guild/{gid}/dodoland/terrain/undo", full(api_terrain_undo)),
         # Moving somebody's town is configuration while there is no player-facing
         # way for them to move it themselves.
@@ -138,6 +141,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/me/w/terrain/picture", player.require_town(world=True)(player_map.reader(terrain_picture))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/shade", player.require_town(world=True)(player_map.reader(terrain_shade))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/chunks", player.require_town(world=True)(player_map.reader(terrain_chunks))),
+        web.get("/guild/{gid}/dodoland/me/w/forest/chunks", player.require_town(world=True)(player_map.reader(forest_chunks))),
         web.get("/guild/{gid}/dodoland/me/w/terrain/cells", player.require_town(world=True)(player_map.reader(terrain_cells))),
         web.get("/guild/{gid}/dodoland/me/w/influence", player.require_town(world=True)(player_map.reader(influence_layer))),
         web.get("/guild/{gid}/dodoland/me/w/roads", player.require_town(world=True)(player_map.reader(roads_layer))),

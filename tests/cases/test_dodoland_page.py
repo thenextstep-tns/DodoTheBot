@@ -644,25 +644,5 @@ assert _open.index("var mayEdit") < _open.index("var rows = p.built.map"),     "
 assert "data-build=" in _open and "data-movebld=" in _open and "data-rename=" in _open
 print("card            edit rights are known before the building rows are drawn")
 
-# The forest brush plants wherever it is used, not only near the top of the
-# map (its rows were found in column units and drifted off the brush). Run in
-# node when there is one; the sum is the same anywhere on a map 1,812 tall.
-import shutil  # noqa: E402
-import subprocess  # noqa: E402
-import tempfile  # noqa: E402
-_node = shutil.which("node")
-if _node:
-    _js = mappage._SCRIPT
-    _fn = _js[_js.index("  function forestDab(cx, cy) {"):_js.index("  function dab(cx, cy) {")]
-    _probe = ("var stroke2; var brush = {r: 8, den: 0.75}; function mixWidth() { return 3.2; }\n" + _fn +
-              "\nconsole.log([[100, 50], [500, 900], [2000, 1790]].map(function (c) {"
-              " stroke2 = {taken: {}}; var got = forestDab(c[0], c[1]);"
-              " var near = got.every(function (q) { return Math.hypot(q.x - c[0], q.y - c[1]) < 8 + 3.2; });"
-              " return got.length + (near ? '' : '!far'); }).join(' '))")
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as _f:
-        _f.write(_probe)
-    _out = subprocess.run([_node, _f.name], capture_output=True, text=True).stdout.split()
-    assert len(_out) == 3 and all(n.isdigit() and int(n) > 20 for n in _out),         f"the forest brush plants nothing (or off the brush) somewhere on the map: {_out}"
-    print(f"brush           the forest brush plants all down the map: {' / '.join(_out)} trees per dab")
 
 print("PASS")
