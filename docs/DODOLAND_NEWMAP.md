@@ -880,3 +880,11 @@ only the picture is smoothed.
 erase, sparser density), the baked ground and its blend (jitter gone?).
 Painted-forest follow-ups: undo, canopy in the overview, depth strips,
 converting existing brushed trees, members painting in their area.
+
+### Painted forests stack with walkers (depth strips)
+Walkers walked over every painted tree: a forest chunk was one canvas at z 3.
+Now each chunk's trees are drawn in strips `dodoland_forest_strip_cells` (2)
+deep by trunk position, each strip a canvas with `z-index: depth(lowest trunk)`
+like pieces and walkers; `.dlforest` is `display: contents` so the strips stack
+among them (far-out hiding is the `.far` class, so the Layers switch still
+works). A walker is at most one strip wrong.

@@ -21,10 +21,11 @@ MODE = """
       <div class="dlseg" id="dlforestmode" title="Forest: paint a stretch of forest, or clear it. Painted forest stores no trees, so any amount of it costs the same."><button data-fm="paint" class="on">Paint forest</button><button data-fm="erase">Erase forest</button></div>"""
 
 CSS = """
-/* Painted forests: one canvas per chunk, above the ground, below objects. */
-.dlforest { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+/* Painted forests: canvases in depth strips, stacked among the pieces and
+   walkers (the layer itself must not be a stacking context). */
+.dlforest { display: contents; }
 .dlforest canvas { position: absolute; image-rendering: pixelated; pointer-events: none; }
-.dlworld.hide-objects .dlforest { display: none; }
+.dlworld.hide-objects .dlforest, .dlforest.far { display: none; }
 .dlforestpv { position: absolute; inset: 0; pointer-events: none; z-index: 21; }
 #dlforestmode[hidden] { display: none; }
 """
@@ -126,51 +127,60 @@ SCRIPT = r"""
     }
     return im.complete && im.naturalWidth ? im : null;
   }
-  // One chunk onto one canvas, anchored the way a placed piece is (its middle,
-  // 85% of the way down the drawing).
+  function forestDrop(key) {
+    var d = FOREST.drawn[key];
+    if (d) (d.els || []).forEach(function (el) { el.remove(); });
+    delete FOREST.drawn[key];
+  }
+  // One chunk's trees, anchored the way a placed piece is (its middle, 85% of
+  // the way down the drawing), drawn in **strips** a couple of cells deep by
+  // where each trunk stands. Each strip stacks by its lowest trunk exactly as
+  // a piece or a walker does (depth), so somebody walking through the wood
+  // passes behind the trees in front of them and in front of those behind.
   function forestRender(key, res) {
     var at = key.split(','), cx = +at[0], cy = +at[1];
-    var trees = forestTrees(cx, cy, FOREST.cells[key], forestKeep(res)), ready = true, sized = [];
-    var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    var trees = forestTrees(cx, cy, FOREST.cells[key], forestKeep(res)), ready = true;
+    var strip = Math.max(0.5, D.sizes.forest_strip || 2), strips = {};
     trees.forEach(function (t) {
       var im = forestImg(t.a);
       if (!im) { ready = false; return; }
-      var h = t.w * im.naturalHeight / im.naturalWidth, x0 = t.x - t.w / 2, y0 = t.y - h * 0.85;
-      sized.push({t: t, im: im, x0: x0, y0: y0, h: h});
-      bx0 = Math.min(bx0, x0); by0 = Math.min(by0, y0);
-      bx1 = Math.max(bx1, x0 + t.w); by1 = Math.max(by1, y0 + h);
+      var h = t.w * im.naturalHeight / im.naturalWidth;
+      var n = Math.floor(t.y / strip), g = strips[n];
+      if (!g) g = strips[n] = {items: [], x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, low: -Infinity};
+      var x0 = t.x - t.w / 2, y0 = t.y - h * 0.85;
+      g.items.push({t: t, im: im, x0: x0, y0: y0, h: h});
+      g.x0 = Math.min(g.x0, x0); g.y0 = Math.min(g.y0, y0);
+      g.x1 = Math.max(g.x1, x0 + t.w); g.y1 = Math.max(g.y1, y0 + h);
+      g.low = Math.max(g.low, t.y);
     });
-    var old = FOREST.drawn[key];
-    if (!sized.length) {
-      if (old) old.el.remove();
-      delete FOREST.drawn[key];
-      if (trees.length) FOREST.drawn[key] = {el: document.createElement('canvas'), res: 0, rle: null, ready: false};
-      return;
-    }
-    var bw = bx1 - bx0, bh = by1 - by0;
-    res = Math.min(res, 4096 / Math.max(bw, bh));
-    var cv = old && old.el.isConnected ? old.el : document.createElement('canvas');
-    cv.width = Math.max(1, Math.ceil(bw * res));
-    cv.height = Math.max(1, Math.ceil(bh * res));
-    var ctx = cv.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    sized.forEach(function (s) {
-      var x = (s.x0 - bx0) * res, y = (s.y0 - by0) * res, w = s.t.w * res, h = s.h * res;
-      if (s.t.f) {
-        ctx.save(); ctx.translate(x + w, y); ctx.scale(-1, 1);
-        ctx.drawImage(s.im, 0, 0, w, h); ctx.restore();
-      } else {
-        ctx.drawImage(s.im, x, y, w, h);
-      }
+    forestDrop(key);
+    var ch = cellsH(), els = [];
+    Object.keys(strips).forEach(function (n) {
+      var g = strips[n], bw = g.x1 - g.x0, bh = g.y1 - g.y0;
+      var r = Math.min(res, 4096 / Math.max(bw, bh));
+      var cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.ceil(bw * r));
+      cv.height = Math.max(1, Math.ceil(bh * r));
+      var ctx = cv.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      g.items.forEach(function (s) {
+        var x = (s.x0 - g.x0) * r, y = (s.y0 - g.y0) * r, w = s.t.w * r, h = s.h * r;
+        if (s.t.f) {
+          ctx.save(); ctx.translate(x + w, y); ctx.scale(-1, 1);
+          ctx.drawImage(s.im, 0, 0, w, h); ctx.restore();
+        } else {
+          ctx.drawImage(s.im, x, y, w, h);
+        }
+      });
+      cv.style.left = (g.x0 / D.cells_w * 100) + '%';
+      cv.style.top = (g.y0 / ch * 100) + '%';
+      cv.style.width = (bw / D.cells_w * 100) + '%';
+      cv.style.height = (bh / ch * 100) + '%';
+      cv.style.zIndex = depth(g.low / ch * 100);
+      forestLayer().appendChild(cv);
+      els.push(cv);
     });
-    var ch = cellsH();
-    cv.style.left = (bx0 / D.cells_w * 100) + '%';
-    cv.style.top = (by0 / ch * 100) + '%';
-    cv.style.width = (bw / D.cells_w * 100) + '%';
-    cv.style.height = (bh / ch * 100) + '%';
-    if (!cv.isConnected) forestLayer().appendChild(cv);
-    FOREST.drawn[key] = {el: cv, res: res, rle: FOREST.rle[key], ready: ready};
+    FOREST.drawn[key] = {els: els, res: res, rle: ready ? FOREST.rle[key] : null, ready: ready};
   }
   // The share of trees drawn at a detail: all of them from the server's
   // setting up, fewer in proportion below it (0 draws every tree always).
@@ -230,15 +240,16 @@ SCRIPT = r"""
     if (!D.cells_w || !nat.w || !D.ep.forest) return;
     var layer = forestLayer(), per = pxPerCell();
     var lod = (D.sizes.lod || {}).forest || 0;
-    if (per < lod) { layer.style.display = 'none'; return; }
-    layer.style.display = '';
+    // Hidden by a class, not an inline style, so the Layers switch still works.
+    layer.classList.toggle('far', per < lod);
+    if (per < lod) return;
     var box = forestBox(), res = forestRes(per), budget = 6, more = false;
     forestFetch(box);
     for (var cy = box[1]; cy <= box[3]; cy++) {
       for (var cx = box[0]; cx <= box[2]; cx++) {
         var key = cx + ',' + cy, d = FOREST.drawn[key];
         if (!FOREST.rle[key]) {
-          if (d && FOREST.known[key]) { d.el.remove(); delete FOREST.drawn[key]; }
+          if (d && FOREST.known[key]) forestDrop(key);
           continue;
         }
         var stale = !d || d.rle !== FOREST.rle[key] || !d.ready || (d.res < res && d.res < (D.sizes.forest_detail || 12));
@@ -254,7 +265,7 @@ SCRIPT = r"""
         var pa = a.split(','), pb = b.split(',');
         return (Math.abs(pb[0] - mx) + Math.abs(pb[1] - my)) - (Math.abs(pa[0] - mx) + Math.abs(pa[1] - my));
       });
-      keys.slice(0, keys.length - cap).forEach(function (key) { FOREST.drawn[key].el.remove(); delete FOREST.drawn[key]; });
+      keys.slice(0, keys.length - cap).forEach(forestDrop);
     }
   }
 
