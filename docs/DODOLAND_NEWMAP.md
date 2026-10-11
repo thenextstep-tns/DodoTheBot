@@ -904,3 +904,9 @@ distance, never more than half a side, so a big plaza keeps its sides).
 `dodoland_ground_smoothing` (1; 0 = the square cells exactly as before).
 2-4 ms per bordered chunk in Chrome (0.4 ms plain), once per chunk.
 Step 2 (per-stroke smoothing, sharp corners on demand) is next.
+* **Smoothing covers every kind** (Nik): water and coasts too. Leaving water
+  out showed its bug on a lake island: the lowest *land* kind (grass) filled
+  under all land, so the island's rounded corners showed grass. Now every
+  known kind ranks and fills smooth(kinds >= k), so a rounded corner shows the
+  ground actually under it; both rank orders checked in Chrome. Blends stay
+  land into land, kept off the water by the smoothed land outline.

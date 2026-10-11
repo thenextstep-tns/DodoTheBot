@@ -606,44 +606,42 @@ SCRIPT = r"""
         if (x >= m && x < m + 64 && y >= m && y < m + 64) inChunk[v] = 1;
       }
     function isLand(v) { return v && K[v] && K[v].land; }
-    // Water and anything else that is not land: exact cells. The coast keeps
-    // its squares (and its own shading); 0 is unknown ground, left for the
-    // overview underneath.
-    Object.keys(inChunk).forEach(function (k) {
-      k = +k;
-      if (!k || !K[k] || K[k].land) return;
-      var style = bakeStyle(ctx, k, res, cx * 64, cy * 64);
-      if (style === null) { ready = false; return; }
-      ctx.fillStyle = style;
-      ctx.fill(bakePath(area, A, res, m, m, 64, function (v) { return v === k; }));
-    });
-    // Land, lowest rank first. Smoothed, each kind fills the smoothed outline
-    // of itself *and everything ranked above it*, so where a corner is
-    // rounded off the kind beneath shows, not a leftover stair; kept to land,
-    // so no curve spills into the sea. Unsmoothed, each fills its own cells.
-    // Each kind's blend fades out from the edge it was drawn with.
-    var land = bakePath(area, A, res, m, m, 64, isLand);
-    var kinds = Object.keys(near).map(Number).filter(isLand).sort(function (a, b) { return a - b; });
+    function known(v) { return v && K[v]; }
+    // Every kind, lowest rank first. Smoothed, each fills the smoothed outline
+    // of itself *and everything ranked above it* — water included — so where a
+    // corner is rounded off, what shows is the ground actually beneath it (an
+    // island's rounded corner shows the lake, not some grass from elsewhere).
+    // The lowest fills all known ground. Unsmoothed, each fills its own cells.
+    // 0 is unknown ground, left for the overview underneath.
+    var knownClip = bakePath(area, A, res, m, m, 64, known);
+    var kinds = Object.keys(near).map(Number).filter(known).sort(function (a, b) { return a - b; });
+    // Where a blend may fall: land, as it is drawn (smoothed, the water's own
+    // smoothed outline is the shore), never onto the water.
+    var landClip = blend ? (smooth > 0 ? bakeSmoothPath(area, A, m, res, isLand, smooth)
+                                       : bakePath(area, A, res, m, m, 64, isLand)) : null;
+    var lowestLand = Infinity;
+    kinds.forEach(function (k) { if (K[k].land) lowestLand = Math.min(lowestLand, k); });
     kinds.forEach(function (k, i) {
       var style = bakeStyle(ctx, k, res, cx * 64, cy * 64);
       if (style === null) { ready = false; return; }
-      var test = smooth > 0 ? function (v) { return isLand(v) && v >= k; } : function (v) { return v === k; };
+      var test = smooth > 0 ? function (v) { return known(v) && v >= k; } : function (v) { return v === k; };
       ctx.save();
-      ctx.clip(land);
+      ctx.clip(knownClip);
       ctx.fillStyle = style;
       if (smooth > 0 && i === 0) ctx.fillRect(0, 0, size, size);
       else if (smooth > 0) ctx.fill(bakeSmoothPath(area, A, m, res, test, smooth), 'evenodd');
       else ctx.fill(bakePath(area, A, res, m, m, 64, test));
       ctx.restore();
-      if (!blend || i === 0) return;
-      // The blend: the drawn shape grown by half the width and blurred once,
-      // filled with the kind's texture, kept to land. Kinds ranked above are
-      // drawn after and cover what spilled onto them.
+      // The blend, land into land only: the kind's drawn shape grown by half
+      // the width and blurred once, filled with its texture, kept to land.
+      // Kinds ranked above are drawn after and cover what spilled onto them.
+      if (!blend || !K[k].land || k <= lowestLand) return;
+      var landTest = smooth > 0 ? function (v) { return isLand(v) && v >= k; } : function (v) { return v === k; };
       var shape = document.createElement('canvas');
       shape.width = shape.height = A * res;
       var sc = shape.getContext('2d');
-      var region = smooth > 0 ? bakeSmoothPath(area, A, 0, res, test, smooth)
-                              : bakePath(area, A, res, 0, 0, A, test);
+      var region = smooth > 0 ? bakeSmoothPath(area, A, 0, res, landTest, smooth)
+                              : bakePath(area, A, res, 0, 0, A, landTest);
       sc.fillStyle = '#fff'; sc.strokeStyle = '#fff';
       sc.lineWidth = width * res; sc.lineJoin = 'round';
       sc.fill(region, 'evenodd'); sc.stroke(region);
@@ -654,7 +652,7 @@ SCRIPT = r"""
       mc.drawImage(shape, -m * res, -m * res);
       mc.filter = 'none';
       mc.globalCompositeOperation = 'destination-in';
-      mc.fill(land);
+      mc.fill(landClip, 'evenodd');
       mc.globalCompositeOperation = 'source-in';
       mc.fillStyle = style;
       mc.fillRect(0, 0, size, size);
