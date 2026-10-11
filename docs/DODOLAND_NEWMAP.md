@@ -858,3 +858,25 @@ vector work on every move. Now (`terrain_ui.py`, "the close-up ground, baked"):
   `blend_svg`, `dodoland_tile_blend_steps`. Blend defaults a touch less washy:
   width 1.2 -> 0.9 cells, strength 0.9 -> 0.85. Checked in headless Chrome
   with the real bake code on real tiles.
+
+### Next up (agreed 11 Oct 2026, not started)
+**Smooth borders in the bake**, two checkable steps; the grid stays the truth,
+only the picture is smoothed.
+1. Smoothed outlines: per chunk (with neighbour margin), marching squares on
+   each kind's region -> polygon with diagonal corner cuts -> a couple of
+   Chaikin rounds (as `influence.ring_path`). Draw in rank order: lowest kind
+   fills the chunk; each higher kind k fills smooth(cells with kind >= k), so a
+   rounded-off corner shows the neighbour, not a leftover stair (three-way
+   corners approximate). Blend fades along the smoothed edge. One panel setting
+   for strength, 0 = today's square cells. Land grounds and roads first; coasts
+   left as they are.
+2. Smoothing per stroke: the terrain brush gets a Smoothing slider (0 sharp ..
+   full) written into a new small grid layer next to the ground; outline
+   vertices next to sharp cells are not cut, so plazas/markers keep corners
+   while roads curve. A "smoothing only" brush mode changes it without
+   repainting ground. Undo/redo (admin snapshots and members' cell history)
+   carry it. Unset cells use a panel default ("smooth").
+**Still to check on the live bot after a restart**: painted forests (paint /
+erase, sparser density), the baked ground and its blend (jitter gone?).
+Painted-forest follow-ups: undo, canopy in the overview, depth strips,
+converting existing brushed trees, members painting in their area.
