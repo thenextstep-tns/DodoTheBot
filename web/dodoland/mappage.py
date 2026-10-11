@@ -154,6 +154,8 @@ def _collect(bot, guild) -> dict:
             "name": town_rules.display_name(mine, owner),
             "blurb": str(mine.get("blurb") or ""),
             "walls": str(mine.get("walls") or ""),
+            # Houses moved by hand, by their number: {"3": [x, y]}.
+            "house_at": {str(k): v for k, v in (mine.get("houses") or {}).items()},
             "has_image": bool(mine.get("image")),
             "power": person["power"],
             "place": person["place"],
@@ -688,6 +690,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border-right: 1px solid var(--edge); transform: translateX(-100%);
   box-shadow: 6px 0 24px rgba(0,0,0,.28); }
 .dlkitdrawer.open { transform: translateX(0); }
+/* With a town's card open, the left-hand drawers open beside it, not under it. */
+body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; border-left: 1px solid var(--edge); }
 .dlkithint { margin: 10px 0 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft);
   line-height: 1.45; }
 /* One look for every palette in a drawer — the toolkit's and the terrain's —
@@ -815,6 +819,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   pointer-events: none; z-index: 7; overflow: visible; }
 .dlworld.hide-life .dllife > g:not(.dlhouses), .dllife.far > g:not(.dlhouses) { display: none; }
 .dlworld.hide-buildings .dllife .dlhouses { display: none; }
+/* Houses can be picked up and moved, by whoever may edit that town. */
+.dllife .dlhouses.movable .dlhouse { pointer-events: visiblePainted; cursor: grab; }
+.dllife .dlhouse.dragging { cursor: grabbing; opacity: .85; }
+.dlframe.placing .dlhouse, .dlframe.painting .dlhouse { pointer-events: none !important; }
 /* The life layer itself stays: the houses are in it, and they show from afar. */
 .dlkitempty { padding: 0 14px; color: var(--soft); font-size: 13px; }
 
@@ -1210,6 +1218,7 @@ _SCRIPT = r"""
         '<p class="cardmsg" id="dlcardmsg"></p>' +
       '</div>';
     card.hidden = false;
+    document.body.classList.add('dlcardopen');
     var editor = card.querySelector('.dledit');
     card.querySelectorAll('button').forEach(function (b) {
       b.onclick = function () {
@@ -1453,6 +1462,7 @@ _SCRIPT = r"""
   }
   function closeCard() {
     card.hidden = true; openId = null;
+    document.body.classList.remove('dlcardopen');
     markInfluence();
     world.querySelectorAll('.dltown.on').forEach(function (n) {
       n.classList.remove('on');
@@ -2619,6 +2629,11 @@ _SCRIPT = r"""
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
+  // Each house is a number (0, 1, 2…) and keeps it: its shape, its colour and
+  // which way it faces come from the town and that number alone, and so does
+  // where it stands — unless somebody has moved it, in which case the town's
+  // record says where (p.house_at). Moved houses are laid first, so the rest
+  // keep clear of them.
   function drawHouses(layer, p, fill) {
     var n = Math.min(p.houses || 0, 80), cottages = LIFE.cottages || [];
     if (!n || !cottages.length) return;
@@ -2631,30 +2646,99 @@ _SCRIPT = r"""
       var a = assetById(q.a), w = ((a && a.wc) || 8) * (q.s || 1);
       keep.push({x: q.x / 100 * cw, y: q.y / 100 * ch - w * 0.2, r: w * 0.45});
     });
-    var rand = seeded(parseInt(String(p.id).slice(-9), 10) || 7);
-    var svg = fill.ownerSVGElement, pt = svg.createSVGPoint(), out = [], tries = 0;
-    var reach = 10 + Math.sqrt(n) * 4;
-    while (out.length < n && tries < n * 60) {
-      tries++;
-      // Nearer the hall more often: a town is densest at its centre.
-      var t = rand() * Math.PI * 2, d = reach * Math.pow(rand(), 0.75) + 6;
-      pt.x = hx + Math.cos(t) * d; pt.y = hy + Math.sin(t) * d * 0.8;
-      try { if (!fill.isPointInFill(pt)) continue; } catch (e) { break; }
-      var clash = keep.some(function (k) {
-        var dx = pt.x - k.x, dy = pt.y - k.y; return dx * dx + dy * dy < k.r * k.r;
-      });
-      if (clash) continue;
-      keep.push({x: pt.x, y: pt.y, r: 2.6});
-      out.push({x: pt.x, y: pt.y, c: cottages[Math.floor(rand() * cottages.length)], f: rand() < 0.5});
+    var seed = parseInt(String(p.id).slice(-9), 10) || 7;
+    var at = p.house_at || {}, out = [];
+    for (var i = 0; i < n; i++) {
+      var look = seeded(seed * 31 + i * 7919);
+      var house = {i: i, c: cottages[Math.floor(look() * cottages.length)], f: look() < 0.5};
+      if (at[i]) {
+        house.x = at[i][0] / 100 * cw; house.y = at[i][1] / 100 * ch; house.moved = true;
+        keep.push({x: house.x, y: house.y, r: 2.6});
+      }
+      out.push(house);
     }
-    out.sort(function (a, b) { return a.y - b.y; });
+    var svg = fill.ownerSVGElement, pt = svg.createSVGPoint();
+    var reach = 10 + Math.sqrt(n) * 4;
+    out.forEach(function (house) {
+      if (house.moved) return;
+      var rand = seeded(seed + house.i * 104729);
+      for (var tries = 0; tries < 80; tries++) {
+        // Nearer the hall more often: a town is densest at its centre.
+        var t = rand() * Math.PI * 2, d = reach * Math.pow(rand(), 0.75) + 6;
+        pt.x = hx + Math.cos(t) * d; pt.y = hy + Math.sin(t) * d * 0.8;
+        try { if (!fill.isPointInFill(pt)) continue; } catch (e) { return; }
+        var clash = keep.some(function (k) {
+          var dx = pt.x - k.x, dy = pt.y - k.y; return dx * dx + dy * dy < k.r * k.r;
+        });
+        if (clash) continue;
+        house.x = pt.x; house.y = pt.y;
+        keep.push({x: pt.x, y: pt.y, r: 2.6});
+        return;
+      }
+    });
+    var shown = out.filter(function (h) { return h.x !== undefined; });
+    shown.sort(function (a, b) { return a.y - b.y; });
+    // Who may move these: an admin any town's, a member their own.
+    var movable = !D.ep.player || String(p.id) === String(D.me);
     var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('class', 'dlhouses');
-    g.innerHTML = out.map(function (h) {
-      return '<g transform="translate(' + h.x.toFixed(2) + ' ' + h.y.toFixed(2) + ') scale(' +
-        (scale * (h.f ? -1 : 1)).toFixed(4) + ' ' + scale.toFixed(4) + ')">' + h.c + '</g>';
+    g.setAttribute('class', 'dlhouses' + (movable ? ' movable' : ''));
+    g.innerHTML = shown.map(function (h) {
+      return '<g class="dlhouse" data-town="' + p.id + '" data-i="' + h.i + '" data-x="' + h.x.toFixed(2) +
+        '" data-y="' + h.y.toFixed(2) + '" data-f="' + (h.f ? 1 : 0) + '" transform="' + houseAt(h.x, h.y, h.f, scale) + '">' +
+        h.c + '</g>';
     }).join('');
     layer.insertBefore(g, layer.firstChild);
+    if (movable) g.querySelectorAll('.dlhouse').forEach(function (el) { el.addEventListener('pointerdown', grabHouse); });
+  }
+  function houseAt(x, y, flip, scale) {
+    return 'translate(' + (+x).toFixed(2) + ' ' + (+y).toFixed(2) + ') scale(' +
+      (scale * (flip ? -1 : 1)).toFixed(4) + ' ' + scale.toFixed(4) + ')';
+  }
+  // Moving a house: grab it with the pointer or the hand and put it down
+  // inside its town's area. Houses are never removed, only moved.
+  function grabHouse(ev) {
+    if (ev.button !== 0 || frame.classList.contains('placing') || frame.classList.contains('painting')) return;
+    ev.stopPropagation(); ev.preventDefault();
+    var el = ev.currentTarget, scale = 1 / (LIFE.units_per_cell || 3.4);
+    var from = {x: parseFloat(el.dataset.x), y: parseFloat(el.dataset.y)};
+    var start = {x: ev.clientX, y: ev.clientY}, now = {x: from.x, y: from.y}, travelled = 0;
+    var perCell = nat.w * view.k / terr.world.cells_w;
+    try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+    el.classList.add('dragging');
+    function move(m) {
+      travelled = Math.abs(m.clientX - start.x) + Math.abs(m.clientY - start.y);
+      now.x = from.x + (m.clientX - start.x) / perCell;
+      now.y = from.y + (m.clientY - start.y) / perCell;
+      el.setAttribute('transform', houseAt(now.x, now.y, el.dataset.f === '1', scale));
+    }
+    function up() {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('dragging');
+      swallowClick = true; setTimeout(function () { swallowClick = false; }, 0);
+      if (travelled <= 3) return;
+      var town = byId[el.dataset.town], i = el.dataset.i;
+      var x = Math.round(now.x / terr.world.cells_w * 100 * 1000) / 1000;
+      var y = Math.round(now.y / terr.world.cells_h * 100 * 1000) / 1000;
+      fetch(D.ep.town, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: el.dataset.town, house: {i: +i, x: x, y: y}})
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (!res.ok) {
+          // Outside the town's area: back where it was.
+          el.setAttribute('transform', houseAt(from.x, from.y, el.dataset.f === '1', scale));
+          hint.textContent = res.error || 'That house could not go there.';
+          return;
+        }
+        el.dataset.x = now.x.toFixed(2); el.dataset.y = now.y.toFixed(2);
+        if (town) { town.house_at = town.house_at || {}; town.house_at[i] = [x, y]; }
+        hint.textContent = 'House moved.';
+      });
+    }
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
   }
   function buildLife() {
     walkers = [];

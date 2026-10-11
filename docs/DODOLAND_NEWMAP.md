@@ -597,3 +597,21 @@ Members removing their own town now also take its buildings with it.
 Size; remembered per viewer). The server rasterises `shape: "square"` as the
 full square with the soft edge measured to its rim (Chebyshev distance); the
 cursor outline follows the shape. For roads and anything with straight edges.
+
+### Movable houses, drawers beside the card, whose pieces a town takes (11 Oct)
+
+* **Houses can be moved** (never removed): drag one with the pointer or the hand.
+  Each house is a number with its own look (seeded by town + number); moved
+  ones are stored on the town record (`TownStore.move_house`, `houses.{i}: [x, y]`,
+  map %) through `POST …/dodoland/town {house: {i, x, y}}` (admin, any town) or
+  `/me/town` (a member, their own), refused outside the town's area; a refusal
+  snaps it back. Unmoved houses keep laying themselves out round the moved ones.
+  Moving the town shifts moved houses with it; any that would land outside the
+  new area or in water return to the town's own layout (and the notice says so).
+* **Drawers beside the town card**: with a card open (`body.dlcardopen`) the
+  Terrain and Toolkit drawers open at `left: 372px`, beside it, not under it.
+* **A moving town takes only its own**: `town_move.carried` — its buildings
+  (`town == uid`) and what *its owner* placed (`by == uid`) inside its old area.
+  An admin's or another member's piece inside that area stays put, whoever is
+  doing the moving. Tested (`test_dodoland_settle`) and checked on a copy of the
+  live data.

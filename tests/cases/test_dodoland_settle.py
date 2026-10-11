@@ -75,4 +75,18 @@ assert "owner = require_owner\n" in routes, "the owner gate is not require_owner
 assert "/m/{gid}" not in routes and "/t/{gid}" not in routes,     "a capability-link route came back"
 print(f"scoping         all {len(_calls)} DodoLand routes sit behind a scope or the player gate")
 
+# A moving town takes its own buildings and its owner's pieces from its area,
+# and never anybody else's — an admin's tree inside it stays put.
+from web.dodoland import town_move  # noqa: E402
+
+pieces = [{"piece_id": "hall-tavern", "town": "7", "by": 1, "x": 90, "y": 90},   # built for town 7, far away
+          {"piece_id": "owners-tree", "by": 7, "x": 10, "y": 10},               # its owner's, inside
+          {"piece_id": "admins-tree", "by": 1, "x": 11, "y": 10},               # an admin's, inside
+          {"piece_id": "owners-far", "by": 7, "x": 80, "y": 80},                # its owner's, outside
+          {"piece_id": "old-piece", "x": 12, "y": 10}]                          # nobody's, inside
+inside = lambda piece: piece["x"] < 50  # noqa: E731
+took = {p["piece_id"] for p in town_move.carried(pieces, 7, inside)}
+assert took == {"hall-tavern", "owners-tree"}, took
+print("moving          a town takes its buildings and its owner's pieces, never anyone else's")
+
 print("PASS")

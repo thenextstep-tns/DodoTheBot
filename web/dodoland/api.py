@@ -150,6 +150,26 @@ async def api_dodoland_town(request: web.Request):
     if not user_id:
         return _bad("Which town?")
 
+    if body.get("house") is not None:
+        # One ordinary house moved by hand: inside the town's own area only.
+        import asyncio
+
+        from web.dodoland import influence_api
+        house = body.get("house") or {}
+        try:
+            index, hx, hy = int(house.get("i")), float(house.get("x")), float(house.get("y"))
+        except (TypeError, ValueError):
+            return _bad("That house move could not be read.")
+        ok = await asyncio.get_running_loop().run_in_executor(
+            None, influence_api.inside, bot, guild, str(user_id), hx, hy)
+        if not ok:
+            return _bad("A house stays inside its town's area.")
+        try:
+            bot.dodoland_towns.move_house(guild.id, user_id, index, hx, hy)
+        except town_rules.TownError as error:
+            return _bad(error)
+        return web.json_response({"ok": True})
+
     try:
         bot.dodoland_towns.save(
             guild.id, user_id,

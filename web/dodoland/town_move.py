@@ -60,6 +60,24 @@ def _nearest(target: tuple[int, int], candidates):
     return int(x), int(y)
 
 
+def carried(pieces, uid: int, in_old_area) -> list:
+    """What a town takes with it: the buildings built for it, wherever they
+    stand, and what *its owner* placed inside its old area.
+
+    Never anybody else's: a tree an admin planted, or a statue another member
+    put down, stays where it is even when it stood inside this town's area —
+    whoever is doing the moving. The test is who placed it (``by``), not where
+    it stands.
+    """
+    out = []
+    for piece in pieces:
+        built_here = str(piece.get("town") or "") == str(uid)
+        theirs = int(piece.get("by") or 0) == int(uid) and in_old_area(piece)
+        if built_here or theirs:
+            out.append(piece)
+    return out
+
+
 def move_town(bot, guild, uid: int, x: float, y: float) -> dict:
     """Settle ``uid``'s town at ``(x, y)`` (map percentages), carrying what is
     in it. Returns ``{x, y, moved: [{piece_id, x, y}], notes: [str]}``."""
@@ -108,15 +126,13 @@ def move_town(bot, guild, uid: int, x: float, y: float) -> dict:
     if old:
         influence_api.current(bot, guild)
         old_area = influence_api._CELLS.get(guild.id, {}).get(str(uid)) or set()
-        for piece in bot.dodoland_decor.world(guild.id):
-            built_here = str(piece.get("town") or "") == str(uid)
-            theirs = int(piece.get("by") or 0) == uid and _cell(piece["x"], piece["y"], w, h) in old_area
-            if built_here or theirs:
-                carry.append(piece)
+        carry = carried(bot.dodoland_decor.world(guild.id), uid,
+                        lambda piece: _cell(piece["x"], piece["y"], w, h) in old_area)
 
     spot = bot.dodoland_buildings.settle(guild.id, uid, x, y)
     moved = []
-    if not old or not carry:
+    houses = (bot.dodoland_towns.get(guild.id, uid) or {}).get("houses") or {}
+    if not old or (not carry and not houses):
         return {**spot, "moved": moved, "notes": notes}
 
     dx, dy = spot["x"] - float(old.get("x", 0)), spot["y"] - float(old.get("y", 0))
@@ -138,6 +154,21 @@ def move_town(bot, guild, uid: int, x: float, y: float) -> dict:
         bot.dodoland_decor.move(guild.id, piece["piece_id"], x=nx, y=ny)
         moved.append({"piece_id": piece["piece_id"], "x": nx, "y": ny})
 
+    # Houses moved by hand keep their place relative to the hall too; one that
+    # would stand somewhere it cannot goes back to the town's own layout.
+    if houses:
+        kept, lost = {}, 0
+        for index, (hx, hy) in houses.items():
+            tx, ty = float(hx) + dx, float(hy) + dy
+            cell = _cell(tx, ty, w, h)
+            if cell in area and ok[cell[1], cell[0]]:
+                kept[str(index)] = [round(tx, 3), round(ty, 3)]
+            else:
+                lost += 1
+        bot.dodoland_towns.set_houses(guild.id, uid, kept)
+        if lost:
+            notes.append(f"{lost} {'house' if lost == 1 else 'houses'} you had moved would have stood "
+                         "outside the new area or in water, so they went back to the town's own layout.")
     if wet:
         notes.append(f"{wet} {'thing' if wet == 1 else 'things'} would have landed in water or on a "
                      "mountain, so they were moved to the nearest open ground.")

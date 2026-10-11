@@ -143,6 +143,28 @@ class TownStore:
         )
         return self.get(guild_id, user_id)
 
+    def move_house(self, guild_id: int, user_id: int, index: int, x: float, y: float) -> None:
+        """Where one of the town's ordinary houses stands, moved by hand.
+
+        Houses are laid out by the map from the town's id; only the ones
+        somebody has moved are stored, by their number, as map percentages.
+        """
+        index = int(index)
+        if not 0 <= index < 200:
+            raise TownError("There is no such house.")
+        x, y = round(float(x), 3), round(float(y), 3)
+        if not (0 <= x <= 100 and 0 <= y <= 100):
+            raise TownError("A house stands on the map.")
+        self._ensure_indexes()
+        self._col.update_one({"guild_id": int(guild_id), "user_id": int(user_id)},
+                             {"$set": {f"houses.{index}": [x, y]}}, upsert=True)
+
+    def set_houses(self, guild_id: int, user_id: int, houses: dict) -> None:
+        """Replace every moved house at once (a town moved with its houses)."""
+        self._ensure_indexes()
+        self._col.update_one({"guild_id": int(guild_id), "user_id": int(user_id)},
+                             {"$set": {"houses": {str(k): v for k, v in houses.items()}}}, upsert=True)
+
     def save_image(self, guild_id: int, user_id: int,
                    image: Optional[dict]) -> None:
         """Store or clear a town's picture. ``None`` removes it."""
