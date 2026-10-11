@@ -744,3 +744,25 @@ that do not talk to each other), steadiness (days active of the last 30 over
 bursts), reviving a quiet room (first post after N quiet days that draws
 replies from 2+ people), back-and-forth (conversations where both sides
 reply), welcoming newcomers who then stay a week.
+
+### Second tile batch (NewTileSets, 11 Oct 2026)
+`tools/dodoland_import_newsets.py <folder> [--preview out.png]`: 298 tiles
+from 7 packs into the **existing** categories (none created; snow went to
+Dirt & sand, sand/grass/gravel patches laid on the ground went to their ground
+category as objects, like "Stone patch"). Library 1315 -> 1613 tiles.
+* Packs: ZRPG Tiles + ZRPG Beach, [LPC] Beach/Desert (only what ZRPG Beach
+  lacks: same art), [LPC] Cliffs (pillars, spires, ladder, plain ground only;
+  the faces are autotile edges), FreePack, 16oga (packed edge to edge, so cut
+  by rectangles), four painted brick textures (shrunk 512 -> 256, cell_px 64:
+  each texture spans 4x4 cells; one variant tiles seamlessly in the pattern).
+  The "Pixel Art Top Down (1)" zip is byte-identical to step 1b's: skipped.
+* One tile per drawing (split-stamp names/sources); ground keeps variants.
+* **Scale** chosen per entry against the category's existing art, checked in
+  the preview (new beside old at the same px per cell): ZRPG trees/rocks/
+  castle 40, ZRPG beach/jungle/LPC 32, ZRPG houses 36, FreePack trees 28
+  (oversized fruit/boulders/agave/coral have their own). Broad oak ~4 cells
+  wide like Emerald tree; giant oak ~7 (Summer Plains oaks are ~9).
+* Settings copied from the category's existing tiles of the same kind.
+* ZRPG's painted drop shadows (black, alpha 92) are stripped before cutting.
+* Credits: LPC/ZRPG are CC-BY-SA 3.0 / CC-BY 3.0, named in each tile's `pack`.
+  `item_imgs/tilesets/` is now actually in .gitignore (it was only untracked).
