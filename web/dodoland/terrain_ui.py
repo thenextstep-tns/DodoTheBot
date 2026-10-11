@@ -149,7 +149,7 @@ SCRIPT = r"""
     terrMsg.classList.toggle('bad', !!bad);
   }
   function terrUrl(path, query) {
-    return '/guild/' + D.gid + '/dodoland/terrain/' + path + (query || '');
+    return D.ep.base + '/terrain/' + path + (query || '');
   }
   function world_el() { return document.getElementById('dlworld'); }
 
@@ -493,7 +493,7 @@ SCRIPT = r"""
       seed: Math.floor(Math.random() * 2147483647)
     }, body);
     terrSay(saying);
-    fetch('/api/guild/' + D.gid + '/dodoland/terrain/paint', {
+    fetch(D.ep.paint, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     }).then(function (r) {
@@ -532,7 +532,7 @@ SCRIPT = r"""
     if (d) d.textContent = undo ? undo + ' to undo' : '';
   }
   function terrStep(redo) {
-    fetch('/api/guild/' + D.gid + '/dodoland/terrain/undo', {
+    fetch(D.ep.undo, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({redo: !!redo})
     }).then(function (r) { return r.json(); }).then(function (res) {
@@ -550,11 +550,11 @@ SCRIPT = r"""
   // placed feature. Its own layer in the Layers panel.
   // The first answer is asked for as the script starts, alongside the world,
   // rather than after it: they do not depend on each other.
-  var inflFirst = fetch('/guild/' + D.gid + '/dodoland/influence')
+  var inflFirst = fetch(D.ep.base + '/influence')
     .then(function (r) { return r.ok ? r.json() : {towns: []}; })
     .catch(function () { return {towns: []}; });
   function loadInfluence() {
-    var ask = inflFirst || fetch('/guild/' + D.gid + '/dodoland/influence')
+    var ask = inflFirst || fetch(D.ep.base + '/influence')
       .then(function (r) { return r.ok ? r.json() : {towns: []}; });
     inflFirst = null;
     ask
@@ -584,7 +584,7 @@ SCRIPT = r"""
   // Drawn in cell units like everything built: a packed-earth road with a
   // darker verge, and plank bridges where it crosses water.
   function loadRoads() {
-    fetch('/guild/' + D.gid + '/dodoland/roads')
+    fetch(D.ep.base + '/roads')
       .then(function (r) { return r.ok ? r.json() : {roads: []}; })
       .then(function (res) {
         var g = document.getElementById('dltroads');

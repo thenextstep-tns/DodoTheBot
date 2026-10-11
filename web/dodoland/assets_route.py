@@ -184,7 +184,7 @@ async def town_art(request: web.Request):
     if not user_id:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
 
-    flag = f"/guild/{guild.id}/dodoland/town/{user_id}/picture"
+    flag = request.get("dl_base", f"/guild/{guild.id}/dodoland") + f"/town/{user_id}/picture"
     art = await asyncio.get_running_loop().run_in_executor(
         None, lambda: draw_town(bot, guild, user_id, flag_url=flag))
     return web.Response(text=art, content_type="image/svg+xml",

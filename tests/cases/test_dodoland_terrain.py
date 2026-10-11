@@ -409,4 +409,37 @@ assert tile_rules._complete({"tile_id": "x", "passable": False})["spreads"] is F
 assert tile_rules._complete({"tile_id": "x", "passable": True})["spreads"] is True
 print("influence       shallows stop a road but not a town; unset follows roads")
 
+# A member paints only inside their own area, and their undo takes back only
+# their own stroke — never what somebody else painted over it since.
+import json as _json  # noqa: E402
+
+water = T.index_of(T.base_kinds(T.TERRAIN), "lake")
+
+
+def member(payload, area, uid=77, undo=None):
+    req = _Req(bot, payload)
+    req["uid"], req["player"] = uid, True
+    req["paint_filter"] = area.__contains__
+    call = terrain_api.api_player_terrain_undo if undo is not None else terrain_api.api_terrain_paint
+    if undo is not None:
+        req._payload = {"redo": undo}
+    return _json.loads(asyncio.run(call(req)).body.decode())
+
+
+sand = T.index_of(T.base_kinds(T.TERRAIN), "sand")
+area = {(x, y) for x in range(440, 460) for y in range(440, 460)}
+done = member({"kind": sand, "radius": 30, "points": [[450, 450]]}, area)
+assert done["ok"] and done["cells"] == len(area), done
+assert brush.at(GUILD, 439, 450) != sand and brush.at(GUILD, 450, 450) == sand,     "a member painted outside their own area"
+refused = member({"kind": sand, "radius": 2, "points": [[100, 100]]}, area)
+assert not refused["ok"], "a stroke wholly outside the member's area was accepted"
+paint({"kind": water, "radius": 0, "points": [[445, 445]]})       # an admin paints over one cell
+back = member({}, area, undo=False)
+assert back["moved"] and brush.at(GUILD, 450, 450) != sand, "the member's undo did nothing"
+assert brush.at(GUILD, 445, 445) == water, "a member's undo took back somebody else's painting"
+again = member({}, area, undo=True)
+assert again["moved"] and brush.at(GUILD, 450, 450) == sand and brush.at(GUILD, 445, 445) == water
+assert member({}, area, uid=78, undo=False)["moved"] is False, "one member undid another's stroke"
+print("members         paint inside their area; undo and redo are theirs and spare others' work")
+
 print("PASS")

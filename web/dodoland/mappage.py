@@ -250,6 +250,15 @@ async def map_page(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     viewer = str(request.get("uid") or "")
     data = await asyncio.get_running_loop().run_in_executor(None, _collect, bot, guild)
+    # The same page for a member (web/dodoland/player_map.py): it reads and
+    # writes through their own routes and offers only their own town.
+    player = bool(request.get("player"))
+    base = request.get("dl_base") or f"/guild/{guild.id}/dodoland"
+    api = (f"/api/guild/{guild.id}/dodoland/me" if player else f"/api/guild/{guild.id}/dodoland")
+    endpoints = {"base": base, "player": player,
+                 "paint": api + "/terrain/paint", "undo": api + "/terrain/undo",
+                 "decor": api + ("/build" if player else "/decor"),
+                 "town": api + "/town", "settle": "" if player else api + "/settle"}
 
     image = bot.dodoland_buildings.map_image(guild.id)
     if image:
@@ -306,7 +315,7 @@ async def map_page(request: web.Request):
 <style>{_CSS}</style>
 </head><body>
 <div class="dlbar">
-  <a class="dlback" href="/guild/{guild.id}/dodoland">&larr; DodoLand</a>
+  <a class="dlback" href="{f'/guild/{guild.id}/dodoland/me' if player else f'/guild/{guild.id}/dodoland'}">&larr; {'Your town' if player else 'DodoLand'}</a>
   <b>{_e(guild.name)}</b>
   <span class="dlcount"><b id="dlplaced">{len(placed)}</b> on the map ·
     <b id="dlwaiting">{len(unplaced)}</b> waiting ·
@@ -314,7 +323,7 @@ async def map_page(request: web.Request):
   <span class="dlspacer"></span>
   <button id="dllayers" class="dlghost">▤ Layers</button>
   <button id="dlterr" class="dlghost">🗺 Terrain</button>
-  <button id="dlkit" class="dlghost">🧰 Toolkit</button>
+  <button id="dlkit" class="dlghost"{' hidden' if player else ''}>🧰 Toolkit</button>
   <button id="dltoggle" class="dlghost">Towns list</button>
 </div>
 
@@ -407,7 +416,8 @@ async def map_page(request: web.Request):
                                  "world": data["world"],
                                  "assets": data["assets"],
                                  "cells_w": data["cells_w"],
-                                 "decorsize": decor_size, "life": life})};</script>
+                                 "decorsize": decor_size, "life": life,
+                                 "ep": endpoints})};</script>
 <script>{_SCRIPT}</script>
 </body></html>"""
     return web.Response(text=body, content_type="text/html")
@@ -1017,7 +1027,7 @@ _SCRIPT = r"""
     // never drawn, which is what lets a building be as detailed as it likes.
     if (art[person.id] === undefined) {
       art[person.id] = null;  // in flight; do not ask twice
-      fetch('/guild/' + D.gid + '/dodoland/town/' + person.id + '/art')
+      fetch(D.ep.base + '/town/' + person.id + '/art')
         .then(function (r) { return r.ok ? r.text() : ''; })
         .then(function (svg) {
           art[person.id] = svg;
@@ -1109,13 +1119,13 @@ _SCRIPT = r"""
       // this town has reached, which is the only tier it can be built at.
       // The town hall is the town: it stands where the town is placed.
       var isHall = D.sizes.hall_key && b.key === D.sizes.hall_key;
-      var tile = p.plot && !isHall ? currentTile(p, b.key) : null;
+      var tile = p.plot && !isHall && mayEdit ? currentTile(p, b.key) : null;
       var placed = tile && townPiece(p, b.key);
       return '<li class="bline' + (on ? ' focus' : '') + '"' +
         ' data-key="' + escapeHtml(b.key) + '">' +
         '<div class="btop"><span class="bnm">' + escapeHtml(b.name) + ' — <b>' +
         escapeHtml(b.title) + '</b></span>' +
-        '<button class="bico" data-rename="' + escapeHtml(b.key) + '" title="Rename it">&#9998;</button>' +
+        (mayEdit ? '<button class="bico" data-rename="' + escapeHtml(b.key) + '" title="Rename it">&#9998;</button>' : '') +
         '<span class="bpts">' + b.points.toLocaleString() + '</span>' +
         (isHall && p.plot ? '<span class="bhall" title="The town is drawn as its hall; Move moves the town">Town hall</span>' : '') +
         (tile && !placed ? '<button class="bbuild" data-build="' + escapeHtml(b.key) +
@@ -1140,6 +1150,8 @@ _SCRIPT = r"""
     // else's is an administrative act and says so, rather than quietly looking
     // like editing your own.
     var mine = D.me && String(p.id) === String(D.me);
+    // What this viewer may do to this town: an admin anything, a member their own.
+    var mayEdit = !D.ep.player || mine;
     card.innerHTML =
       '<h3>' + escapeHtml(p.name) +
         (mine ? ' <span class="yours">yours</span>' : '') + '</h3>' +
@@ -1156,13 +1168,13 @@ _SCRIPT = r"""
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
-      (p.plot ? wallSection(p) : '') +
+      (p.plot && mayEdit ? wallSection(p) : '') +
       '<div class="acts">' +
-        (mine
+        (D.ep.player ? '' : (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
-        '<button data-act="remove">Remove Town</button>' +
+        '<button data-act="remove">Remove Town</button>') +
         '<button data-act="close">Close</button></div>' +
       '<div class="dledit">' +
         '<label>Town name</label>' +
@@ -1246,7 +1258,7 @@ _SCRIPT = r"""
     };
     payload.user_id = id;
     say('Saving...');
-    fetch('/api/guild/' + D.gid + '/dodoland/town', {
+    fetch(D.ep.town, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     }).then(function (r) {
@@ -1348,7 +1360,7 @@ _SCRIPT = r"""
         var v = x.key === key ? field.value.trim() : x.name;
         if (v && v !== x.given) names[x.key] = v;
       });
-      fetch('/api/guild/' + D.gid + '/dodoland/town', {
+      fetch(D.ep.town, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: p.id, building_names: names})
       }).then(function (r) { return r.json(); }).then(function (res) {
@@ -1387,7 +1399,7 @@ _SCRIPT = r"""
       ': click inside its area. Escape to stop.';
   }
   function setWalls(p, style) {
-    fetch('/api/guild/' + D.gid + '/dodoland/town', {
+    fetch(D.ep.town, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({user_id: p.id, walls: style})
     }).then(function (r) { return r.json(); }).then(function (res) {
@@ -1436,7 +1448,8 @@ _SCRIPT = r"""
     renderList();
   }
   function place(id, point) {
-    fetch('/api/guild/' + D.gid + '/dodoland/settle', {
+    if (!D.ep.settle) return;
+    fetch(D.ep.settle, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(point
         ? {user_id: id, x: point.x, y: point.y}
@@ -1515,7 +1528,7 @@ _SCRIPT = r"""
       row.onclick = function () {
         var p = byId[row.dataset.id];
         if (p.plot) { open(p.id); }
-        else { arm(p.id); }
+        else if (!D.ep.player) { arm(p.id); }
       };
     });
   }
@@ -1571,7 +1584,7 @@ _SCRIPT = r"""
   }
 
   function assetUrl(id) {
-    return '/guild/' + D.gid + '/dodoland/asset/' + id;
+    return D.ep.base + '/asset/' + id;
   }
 
   // Hundreds of tiles in one grid is a wall, so the kit shows one category at
@@ -1797,7 +1810,7 @@ _SCRIPT = r"""
           (l.key === 'influence' ? 'The open town only, every town, or none' : 'Show or hide') + '">' +
           says + '</button>' +
           '<button data-edit="' + l.key + '" class="' + (layerState.edit === l.key ? 'on' : '') + '"' +
-          (l.edit ? '' : ' disabled') + '>edit</button></div>';
+          (l.edit && (!D.ep.player || l.key === 'ground') ? '' : ' disabled') + '>edit</button></div>';
       }).join('');
       rows.querySelectorAll('[data-eye]').forEach(function (b) {
         b.onclick = function () {
@@ -1875,7 +1888,7 @@ _SCRIPT = r"""
   }
 
   function decorPost(payload, then, fail) {
-    fetch('/api/guild/' + D.gid + '/dodoland/decor', {
+    fetch(D.ep.decor, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     }).then(function (r) {
@@ -2461,6 +2474,7 @@ _SCRIPT = r"""
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     var pick = {v: 'pointer', h: 'hand', p: 'pencil', b: 'brush'}[key];
+    if (D.ep.player && (pick === 'pencil' || pick === 'brush')) pick = null;
     if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
     if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
   });
@@ -2496,6 +2510,12 @@ _SCRIPT = r"""
     putDown();
   });
 
+  if (D.ep.player) {
+    document.querySelectorAll('.dlzoom [data-tool="pencil"], .dlzoom [data-tool="brush"]').forEach(function (b) {
+      b.hidden = true;
+    });
+    if (tool === 'pencil' || tool === 'brush') tool = 'hand';
+  }
   setTool(tool);
   kitSay('');
   // --- life: people and animals ------------------------------------------ //

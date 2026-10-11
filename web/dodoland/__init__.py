@@ -49,6 +49,7 @@ def dodoland_routes() -> list:
     )
     from web.dodoland.influence_api import influence_layer
     from web.dodoland.roads_api import roads_layer
+    from web.dodoland import player_map
     from web.dodoland.mappage import map_page
     from web.dodoland.tiles_ui import (
         api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
@@ -125,6 +126,26 @@ def dodoland_routes() -> list:
                  player.require_town(api_town_decor)),
         web.get("/guild/{gid}/dodoland/me/asset/{aid}",
                 player.require_town(player_asset_image)),
+        # --- the map, for a member ----------------------------------------- #
+        # The same page and the same readers as the admin map, behind the
+        # player gate with the world page on. A member paints inside their own
+        # town's area with player tiles, undoes only their own strokes, and
+        # builds only their own town's buildings; see web/dodoland/player_map.py.
+        web.get("/guild/{gid}/dodoland/me/map", player.require_town(world=True)(player_map.page)),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/world", player.require_town(world=True)(player_map.reader(terrain_world))),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/defs", player.require_town(world=True)(player_map.reader(terrain_defs))),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/picture", player.require_town(world=True)(player_map.reader(terrain_picture))),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/chunks", player.require_town(world=True)(player_map.reader(terrain_chunks))),
+        web.get("/guild/{gid}/dodoland/me/w/terrain/cells", player.require_town(world=True)(player_map.reader(terrain_cells))),
+        web.get("/guild/{gid}/dodoland/me/w/influence", player.require_town(world=True)(player_map.reader(influence_layer))),
+        web.get("/guild/{gid}/dodoland/me/w/roads", player.require_town(world=True)(player_map.reader(roads_layer))),
+        web.get("/guild/{gid}/dodoland/me/w/tiles/art/{vid}", player.require_town(world=True)(player_map.reader(guild_tile_art))),
+        web.get("/guild/{gid}/dodoland/me/w/asset/{aid}", player.require_town(world=True)(player_map.reader(asset_image))),
+        web.get("/guild/{gid}/dodoland/me/w/town/{uid}/art", player.require_town(world=True)(player_map.reader(town_art))),
+        web.get("/guild/{gid}/dodoland/me/w/town/{uid}/picture", player.require_town(world=True)(player_map.reader(town_picture))),
+        web.post("/api/guild/{gid}/dodoland/me/terrain/paint", player.require_town(world=True)(player_map.paint)),
+        web.post("/api/guild/{gid}/dodoland/me/terrain/undo", player.require_town(world=True)(player_map.undo)),
+        web.post("/api/guild/{gid}/dodoland/me/build", player.require_town(world=True)(player_map.build)),
         # Not under /guild/{gid}: it is the page that tells somebody which
         # guilds they have a town in, so it cannot already know one.
         web.get("/towns", player.towns_home),

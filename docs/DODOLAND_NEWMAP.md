@@ -539,3 +539,26 @@ keeps its own Escape (cancel the rename).
   `backup_before_shallow.json` in the scratchpad. Note: the Deep water tile is
   currently set to let influence spread (not set by Claude) — towns can grow
   over the open sea until that is unticked.
+
+### Members on the map: paint in their own area, their own undo (11 Oct)
+
+`web/dodoland/player_map.py`: `GET /guild/{gid}/dodoland/me/map` (player gate,
+world page on) serves the same map page with `request["player"]`; every read
+it needs has a `/me/w/...` alias (terrain world/defs/picture/chunks/cells,
+influence, roads, tile art, assets, town art/picture) through `reader()`, which
+sets `dl_base` so URLs the server hands back point at the member's routes.
+The page takes its URLs from `D.ep` (base, paint, undo, decor, town, settle).
+* **Paint**: `POST /api/.../me/terrain/paint` — the admin stroke, with tiles
+  limited to player access (`_env_tiles`) and edits filtered to the member's
+  own town's area (`paint_filter` from `influence_api._CELLS`).
+* **Undo/redo**: `POST /api/.../me/terrain/undo` — the member's own strokes
+  only (`_PUNDO/_PREDO` per guild+user), recorded cell by cell; a cell is only
+  put back if it still holds what their stroke left, so an admin's later work
+  in the same place is never taken back.
+* **Build**: `POST /api/.../me/build` — place / move / move_many / remove /
+  remove_many, narrowed to pieces with `town == uid`, same tier/one-of-each/
+  inside-the-area rules. Rename and walls go through `/me/town`.
+* The page hides the Toolkit, pencil and brush, layer editing (except Ground,
+  which opens Terrain), town placing and other towns' controls.
+* All 16 painted ground tiles now have Players access (owner can untick).
+* The member's town page links to "The map" when the world page is on.

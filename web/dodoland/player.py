@@ -422,6 +422,10 @@ async def my_town_page(request: web.Request):
     # gates self-settling only. This linked to a route that was never
     # registered, which is a 404 for anybody who switched the world on.
     links = '<a class="dlghost" href="/logout">Log out</a>'
+    # The map, for a member: their town's area to paint and build in
+    # (web/dodoland/player_map.py), when the server has the world switched on.
+    if world_page_on(bot, guild.id):
+        links = f'<a class="dlghost" href="/guild/{guild.id}/dodoland/me/map">The map</a>' + links
     return web.Response(
         text=_shell(f"{name} · {guild.name}", theme.bar(
             back=("/towns", "Your towns"), title=name,
@@ -621,6 +625,7 @@ async def api_my_town(request: web.Request):
             guild.id, uid,
             name=body.get("name"), blurb=body.get("blurb"),
             building_names=body.get("building_names"),
+            walls=body.get("walls"),
         )
         if body.get("clear_image"):
             bot.dodoland_towns.save_image(guild.id, uid, None)

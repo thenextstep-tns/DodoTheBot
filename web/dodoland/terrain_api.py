@@ -53,6 +53,11 @@ _BOOT = int(time.time())
 # of the session somebody is painting in, not of the world.
 _UNDO: dict[int, list] = {}
 _REDO: dict[int, list] = {}
+# A member's own strokes, (guild, user) -> [{cells: [(x, y, old, new)], keys}].
+# Cell by cell rather than whole chunks: a member's undo must never take back
+# somebody else's work painted into the same chunk since.
+_PUNDO: dict[tuple, list] = {}
+_PREDO: dict[tuple, list] = {}
 _HISTORY_MAX = 40
 # vid -> average colour of that tile image.
 _HEX: dict[str, str] = {}
@@ -180,6 +185,9 @@ def _env_tiles(bot, guild, request) -> list[dict]:
 
     tiles = [t for t in bot.dodoland_tiles.tiles(guild.id)
              if t["layer"] == "environment" and t["placement"] == "paint"]
+    if request.get("player"):
+        # A member paints with what the library gives players, whoever they are.
+        return [t for t in tiles if "player" in t["access"]]
     if request.get("scope") != panel_access.SCOPE_OWNER:
         tiles = [t for t in tiles if "admin" in t["access"]]
     return tiles
@@ -198,7 +206,7 @@ async def terrain_world(request: web.Request):
     tiles = _tile_index(bot, guild)
     world["kinds"] = T.sync_tile_kinds(world["kinds"], tiles)
     cats = {c["cat_id"]: c["name"] for c in bot.dodoland_tiles.categories()}
-    art = f"/guild/{guild.id}/dodoland/tiles/art/"
+    art = request.get("dl_base", f"/guild/{guild.id}/dodoland") + "/tiles/art/"
     cxs, cys = bot.dodoland_terrain.chunk_counts(guild.id)
     return web.json_response({
         "ok": True,
@@ -237,7 +245,7 @@ async def terrain_defs(request: web.Request):
     dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
     return web.Response(
         text=terrainart.pattern_defs(
-            world["kinds"], tiles, f"/guild/{guild.id}/dodoland/tiles/art/", dims,
+            world["kinds"], tiles, request.get("dl_base", f"/guild/{guild.id}/dodoland") + "/tiles/art/", dims,
             shrink=float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale"))),
         content_type="image/svg+xml",
         headers={"Cache-Control": "private, max-age=600"})
@@ -526,10 +534,18 @@ async def api_terrain_paint(request: web.Request):
             edits[(x, y)] = pcells[(y % ph) * pw + (x % pw)]
         else:
             edits[(x, y)] = choices[int(_noise(x, y, seed, 1) * len(choices))]
+    # A member paints inside their own town's area and nowhere else.
+    inside = request.get("paint_filter")
+    if inside is not None:
+        edits = {cell: kind for cell, kind in edits.items() if inside(cell)}
+        if not edits:
+            return _bad("You can paint inside your own town's area.")
     if not edits:
         return _bad("That stroke painted nothing; raise the density.")
 
     keys = sorted({(x // T.CHUNK, y // T.CHUNK) for x, y in edits})
+    if request.get("player"):
+        return await _player_stroke(request, bot, guild, store, edits, keys, world)
     # Snapshot before and after, so undo and redo are both exact rather than a
     # replay that has to get the arithmetic right a second time.
     before = store.snapshot(guild.id, keys, layer=T.TERRAIN)
@@ -574,6 +590,73 @@ async def terrain_cells(request: web.Request):
     cells = [chunks[(x // T.CHUNK, y // T.CHUNK)][(y % T.CHUNK) * T.CHUNK + (x % T.CHUNK)]
              for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
     return web.json_response({"ok": True, "x": x0, "y": y0, "w": w, "h": h, "cells": cells})
+
+
+def _cells_now(store, guild_id: int, cells) -> dict:
+    """The kind every one of these cells holds now."""
+    keys = sorted({(x // T.CHUNK, y // T.CHUNK) for x, y in cells})
+    chunks = store.chunks(guild_id, keys, layer=T.TERRAIN)
+    return {(x, y): chunks[(x // T.CHUNK, y // T.CHUNK)][(y % T.CHUNK) * T.CHUNK + (x % T.CHUNK)]
+            for x, y in cells}
+
+
+def _player_counts(key) -> dict:
+    return {"undo": len(_PUNDO.get(key) or []), "redo": len(_PREDO.get(key) or [])}
+
+
+async def _player_stroke(request, bot, guild, store, edits, keys, world):
+    """A member's stroke: painted like any other, remembered in their own history."""
+    key = (guild.id, int(request["uid"]))
+    before = _cells_now(store, guild.id, edits)
+    changed = {cell: kind for cell, kind in edits.items() if before[cell] != kind}
+    if not changed:
+        return _bad("That is already painted that way.")
+    store.paint(guild.id, changed, layer=T.TERRAIN)
+    history = _PUNDO.setdefault(key, [])
+    history.append({"cells": [(x, y, before[(x, y)], kind) for (x, y), kind in changed.items()],
+                    "keys": keys})
+    del history[:-_HISTORY_MAX]
+    _PREDO.pop(key, None)
+    invalidate(guild.id, keys)
+    return web.json_response({"ok": True, "cells": len(changed), "chunks": len(keys),
+                              "touched": [[cx, cy] for cx, cy in keys],
+                              "kinds": len(world["kinds"]), **_player_counts(key),
+                              "version": version(guild.id)})
+
+
+async def api_player_terrain_undo(request: web.Request):
+    """A member's own last stroke, back (or forward with ``{"redo": true}``).
+
+    Only their strokes, and only the cells that still hold what the stroke left:
+    a cell somebody has painted over since is theirs now, and stays as it is.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    store = bot.dodoland_terrain
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    forward = bool(body.get("redo"))
+    key = (guild.id, int(request["uid"]))
+    source, target = (_PREDO, _PUNDO) if forward else (_PUNDO, _PREDO)
+    stack = source.get(key) or []
+    if not stack:
+        return web.json_response({"ok": True, "moved": False, **_player_counts(key),
+                                  "version": version(guild.id)})
+    entry = stack.pop()
+    now = _cells_now(store, guild.id, [(x, y) for x, y, _, _ in entry["cells"]])
+    edits = {}
+    for x, y, old, new in entry["cells"]:
+        expect, put = (old, new) if forward else (new, old)
+        if now[(x, y)] == expect:
+            edits[(x, y)] = put
+    if edits:
+        store.paint(guild.id, edits, layer=T.TERRAIN)
+    target.setdefault(key, []).append(entry)
+    invalidate(guild.id, entry["keys"])
+    return web.json_response({"ok": True, "moved": True, "cells": len(edits),
+                              "touched": [[cx, cy] for cx, cy in entry["keys"]],
+                              **_player_counts(key), "version": version(guild.id)})
 
 
 async def api_terrain_undo(request: web.Request):
