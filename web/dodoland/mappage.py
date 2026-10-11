@@ -896,17 +896,17 @@ _SCRIPT = r"""
   frame.addEventListener('pointerdown', function (ev) {
     // A brush stroke is a drag and so is a pan. Whichever is armed wins, and
     // only one ever can be.
+    if (ev.button === 0 && typeof terr !== 'undefined' && terr.armed !== null && strokeStart(ev)) {
+      painting = true;
+      try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
+      return;
+    }
     // The wheel held down moves the map, always: over a piece, over a town,
-    // with any tool or brush in hand.
+    // with any tool or brush in hand (the terrain brush above is left-button).
     if (ev.button === 1) {
       ev.preventDefault();
       down = true; captured = false; moved = 0; pid = ev.pointerId;
       last = {x: ev.clientX, y: ev.clientY};
-      return;
-    }
-    if (typeof terr !== 'undefined' && terr.armed !== null && strokeStart(ev)) {
-      painting = true;
-      try { frame.setPointerCapture(ev.pointerId); } catch (e) {}
       return;
     }
     if (ev.target.closest && ev.target.closest('.dlzoom')) return;
