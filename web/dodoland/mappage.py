@@ -1265,6 +1265,7 @@ _SCRIPT = r"""
         ' people reached' +
         (p.rank ? ' · ' + escapeHtml(p.flourish_label) + ' (' + escapeHtml(p.rank) + ')' : '') +
         '</div>' +
+      breadthLine(p) +
       (p.blurb ? '<p class="blurb">' + escapeHtml(p.blurb) + '</p>' : '') +
       (p.has_image
         ? '<div class="cardflag"><img alt="" src="/guild/' + D.gid +
@@ -1432,6 +1433,18 @@ _SCRIPT = r"""
   // Locking a building in place, from its row. A member locks and unlocks
   // their own; an admin's landmark is beyond them. An admin unlocks anything
   // with the same button, whoever locked it.
+  // How widely the owner takes part, from the influence layer: the rooms
+  // that are lively for them, how many of those they wrote in, and what that
+  // does to the town's reach.
+  function breadthLine(p) {
+    var t = (D.influence || []).filter(function (x) { return String(x.id) === String(p.id); })[0];
+    var b = t && t.breadth;
+    if (!b || !b.open) return '';
+    var plus = Math.round((b.boost - 1) * 100);
+    return '<div class="sub" title="Lively rooms: channels where other people talked recently and this town’s owner can write. Taking part in more of them makes the town’s area reach further.">' +
+      'Talks in ' + b.joined + ' of ' + b.open + ' lively rooms' +
+      (plus > 0 ? ' · reach +' + plus + '%' : '') + '</div>';
+  }
   function lockButton(piece, key) {
     var landmark = piece.k, held = piece.k || piece.pk;
     var title = landmark

@@ -718,3 +718,29 @@ Live (top reach 340, 15 towns): 8.3 s total, ~3.5 s of it standings, 760 KB.
   a landmark (button disabled, server refuses).
 * Refusals: `decor.held()` -> `{id: "landmark"|"pinned"}`, checked by both the
   admin and member endpoints; the page shows pinned selections in amber.
+
+### Breadth: influence for taking part across the server
+Nik's idea: reward taking part in as many lively channels as one can.
+`helpers/dodoland/breadth.py` (pure) + `influence_api._breadth`:
+* A **lively room** for a person: a channel where >= `dodoland_breadth_others`
+  (2) *other* people wrote in the last `dodoland_breadth_days` (30), that they
+  can write in (`permissions_for(member).send_messages`), and that still exists.
+  Built from day rows' `channels.{cid}.message` (a capped day still counts
+  as written). Forum posts fold into their forum; uncached/archived posts and
+  deleted channels drop out.
+* **Breadth** = rooms they wrote >= `dodoland_breadth_min_messages` (1) in /
+  their lively rooms; 0 if they have fewer than `dodoland_breadth_min_rooms` (3).
+* For **reach only**: power x (1 + `dodoland_breadth_bonus` (1.0) x
+  breadth ^ `dodoland_breadth_curve` (1.0)). The largest boosted power sets
+  the scale, so the strongest still reaches `influence_top` and no further:
+  it reorders who gets large areas, never makes them larger (or slower).
+* The town card shows "Talks in N of M lively rooms · reach +X%" from the
+  influence payload (`towns[].breadth`).
+Live estimate (no permission filter): the top town is also the broadest (40/61,
+x1.66) so keeps the top; narrow towns lose most (6/64: 158 -> 129 cells).
+
+Ideas not built (for Nik): bridge-building (talking with people from groups
+that do not talk to each other), steadiness (days active of the last 30 over
+bursts), reviving a quiet room (first post after N quiet days that draws
+replies from 2+ people), back-and-forth (conversations where both sides
+reply), welcoming newcomers who then stay a week.

@@ -89,6 +89,64 @@ def _cost_grid(chunks: dict, grow_cost: list, blocked: set, cells_w: int, cells_
     return costs.ravel().tolist()
 
 
+def _breadth(bot, guild, plots: dict, result: dict) -> tuple[dict, dict]:
+    """Each placed town's power for reach, breadth included, and its breadth:
+    ``({town: power}, {town: {joined, open, share, boost}})``."""
+    import discord
+
+    from helpers.dodoland import breadth
+
+    params = bot.dodoland_params
+    gid = guild.id
+    powers = {str(uid): float((result["people"].get(int(uid)) or {}).get("power", 0)) for uid in plots}
+    bonus = float(params.get(gid, "dodoland_breadth_bonus"))
+    if bonus <= 0 or not plots:
+        return powers, {}
+    since = store_module.days_back(int(params.get(gid, "dodoland_breadth_days")))
+    rows, _pairs = standing.recent_rows(bot.dodoland, params, gid, since)
+    get_channel = getattr(guild, "get_channel", None)
+    get_thread = getattr(guild, "get_thread", None)
+
+    def room(cid: int):
+        # A forum's posts are one room, the forum; a channel gone is no room.
+        if get_channel is None:
+            return cid
+        channel = get_channel(cid) or (get_thread(cid) if get_thread else None)
+        if channel is None:
+            return None
+        # (A thread in an ordinary channel is already charged to its channel
+        # when it is recorded; what is left as a thread here is a forum post.)
+        if isinstance(channel, discord.Thread):
+            return int(channel.parent_id) if channel.parent_id else None
+        return int(cid)
+
+    def may_write(uid: int, where: int) -> bool:
+        if get_channel is None:
+            return True
+        member = guild.get_member(uid) if hasattr(guild, "get_member") else None
+        channel = get_channel(where)
+        if member is None or channel is None:
+            return False
+        try:
+            return bool(channel.permissions_for(member).send_messages)
+        except Exception:  # noqa: BLE001 — a room we cannot judge is not held against anyone
+            return False
+
+    rooms = breadth.talkers(rows, room=room)
+    curve = float(params.get(gid, "dodoland_breadth_curve"))
+    out = {}
+    for uid in plots:
+        got = breadth.share(int(uid), rooms,
+                            others=int(params.get(gid, "dodoland_breadth_others")),
+                            min_messages=int(params.get(gid, "dodoland_breadth_min_messages")),
+                            min_rooms=int(params.get(gid, "dodoland_breadth_min_rooms")),
+                            may_write=may_write)
+        got["boost"] = round(breadth.boost(got["share"], bonus, curve), 3)
+        powers[str(uid)] *= got["boost"]
+        out[str(uid)] = got
+    return powers, out
+
+
 def compute(bot, guild) -> dict:
     """The payload: one entry per placed town."""
     params = bot.dodoland_params
@@ -108,6 +166,10 @@ def compute(bot, guild) -> dict:
                                       bot.dodoland_buildings.buildings(guild.id), since=since,
                                       rows=rows, pair_rows=pairs)
     strongest = max((p["power"] for p in result["order"]), default=0)
+    reach_power, breadths = _breadth(bot, guild, plots, result)
+    # A town boosted past everybody's power sets the scale: the strongest town
+    # still reaches ``top``, never further.
+    strongest = max([strongest] + list(reach_power.values()))
 
     cxs, cys = bot.dodoland_terrain.chunk_counts(guild.id)
     chunks = bot.dodoland_terrain.chunks(guild.id, [(x, y) for y in range(cys) for x in range(cxs)])
@@ -124,8 +186,7 @@ def compute(bot, guild) -> dict:
     towns = []
     areas: dict[str, set] = {}
     for uid, plot in plots.items():
-        person = result["people"].get(int(uid))
-        power = person["power"] if person else 0
+        power = reach_power.get(str(uid), 0)
         budget = influence.reach(power, strongest, base, top)
         origin = (int(float(plot.get("x", 50)) / 100 * cells_w),
                   int(float(plot.get("y", 50)) / 100 * cells_h))
@@ -138,7 +199,7 @@ def compute(bot, guild) -> dict:
                       "reach": round(budget, 1), "cells": len(cells),
                       "fill": influence.fill_path(cells),
                       "line": "" if ring else influence.outline_path(cells),
-                      "ring": ring})
+                      "ring": ring, "breadth": breadths.get(str(uid))})
     _CELLS[guild.id] = areas
     return {"towns": towns, "cells_w": cells_w, "cells_h": cells_h}
 
@@ -160,7 +221,10 @@ def _key(bot, guild) -> tuple:
             tuple(sorted((k, tuple(sorted(v.items()))) for k, v in bot.dodoland_buildings.plots(guild.id).items())),
             tuple(params.get(guild.id, k) for k in ("dodoland_influence_base", "dodoland_influence_top",
                                                     "dodoland_influence_clear_forest",
-                                                    "dodoland_influence_water_cost")))
+                                                    "dodoland_influence_water_cost",
+                                                    "dodoland_breadth_bonus", "dodoland_breadth_days",
+                                                    "dodoland_breadth_others", "dodoland_breadth_min_messages",
+                                                    "dodoland_breadth_min_rooms", "dodoland_breadth_curve")))
 
 
 def current(bot, guild) -> dict:
