@@ -650,3 +650,10 @@ walkers are no longer drawn in one overlay SVG: each is its own element
 `standing()` / `stand()`), so they pass behind and in front of buildings
 properly; walkers restack every frame as they move. A hovered or open town
 lifts above its neighbours so its name stays readable.
+
+**A town catches the mouse only where it is drawn** (11 Oct): `.dltown` is
+`pointer-events: none` and only its art's painted shapes (and the zoomed-out dot)
+take clicks; glows, auras, beams and sparks let clicks through, and while
+placing or painting the whole town does. Checked on Nik's live map: of 12
+houses overlapping Beanburg's box, 12 were blocked before and 10 reachable
+after (the other 2 are behind the hall's own drawing).

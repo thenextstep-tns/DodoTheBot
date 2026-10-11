@@ -496,7 +496,8 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlframe { user-select: none; -webkit-user-select: none; }
 /* While something is armed, a town is ground like any other: the click places
    rather than opening the town. */
-.dlframe.placing .dltown, .dlframe.painting .dltown { pointer-events: none; }
+.dlframe.placing .dltown, .dlframe.painting .dltown,
+.dlframe.placing .dltown *, .dlframe.painting .dltown * { pointer-events: none !important; }
 /* Only the open town's area, unless the Layers panel asks for every one. */
 #dltinfl > g { display: none; }
 #dltinfl > g.on, .dlworld.infl-all #dltinfl > g { display: inline; }
@@ -537,6 +538,15 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   cursor: pointer; z-index: 5; }
 .dlart { width: 100%; }
 .dltown svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* A town catches the mouse only on what is drawn — the hall, its square, its
+   flag — not on the empty rectangle around it, which covered the houses
+   standing behind it. Light (glows, auras, beams, sparks) lets clicks through. */
+.dltown { pointer-events: none; }
+.dltown .dlart svg * { pointer-events: visiblePainted; }
+.dltown .dldot { pointer-events: auto; }
+.dltown .fx, .dltown .fx *, .dltown .flwash, .dltown .flring, .dltown .flring2,
+.dltown .flunder, .dltown .halo, .dltown .glow, .dltown .bglow, .dltown .baura,
+.dltown .bshadow, .dltown .bbeam, .dltown .bcrown { pointer-events: none; }
 /* Below a few dozen pixels a settlement is an illegible smudge, so it becomes a
    dot, which is what every map does as you pull away from it. */
 .dltown.tiny .dlart, .dltown.tiny .dlname { display: none; }
