@@ -187,6 +187,9 @@ def _collect(bot, guild) -> dict:
     # spans hall_cells x 120 / HALL_SPAN cells, and so does every building's.
     hall_box = (float(bot.dodoland_params.get(guild.id, "dodoland_hall_cells"))
                 * townart.WIDTH / townart.HALL_SPAN)
+    landmarks = (str(bot.dodoland_params.get(guild.id, "dodoland_town_hall")),
+                 str(bot.dodoland_params.get(guild.id, "dodoland_zoo_building")))
+    bscale = max(0.1, float(bot.dodoland_params.get(guild.id, "dodoland_building_scale")))
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
@@ -205,11 +208,12 @@ def _collect(bot, guild) -> dict:
                         "layer": t["layer"],
                         # Each variant's own width in map cells: drawings in one
                         # tile are not all the same size.
-                        "vw": {v: _tile_cells(t, dims.get(v, (0, 0))[0], shrink, hall_box)
+                        "vw": {v: _tile_cells(t, dims.get(v, (0, 0))[0], shrink, hall_box, landmarks, bscale)
                                for v in t["variants"]},
                         # Natural width in map cells: the art's own width over
                         # its px-per-cell. A piece is drawn at this times its size.
-                        "wc": _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box)
+                        "wc": _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box,
+                                          landmarks, bscale)
                         if t["variants"] else 0,
                         # Pixel art (the fixed-size packs) is drawn with hard
                         # pixels: a 6-pixel sprouts sprite smoothed up to a
@@ -220,7 +224,8 @@ def _collect(bot, guild) -> dict:
                        for t in placeable]}
 
 
-def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float) -> float:
+def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float,
+                landmarks: tuple = (), scale: float = 1.0) -> float:
     """How many map cells wide a tile is drawn at size 1.
 
     A tile's own art over its px-per-cell — except a town's generated buildings,
@@ -229,8 +234,12 @@ def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float) -> flo
     building a quarter of its true size, its tier's growth and its smoke a few
     pixels.
     """
-    if str(tile.get("source") or "").startswith("building:"):
-        return round(hall_box, 3)
+    source = str(tile.get("source") or "")
+    if source.startswith("building:"):
+        # building:<guild>:<key>:<tier>. The hall and the zoo are landmarks and
+        # keep the hall's scale; the rest are drawn at a fraction of it.
+        key = source.split(":")[2] if source.count(":") >= 3 else ""
+        return round(hall_box * (1.0 if key in landmarks else scale), 3)
     return round(art_w / tile["cell_px"] / shrink, 3)
 
 
@@ -760,6 +769,19 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 /* Armed, everything placed is ground to stamp on rather than something to grab. */
 .dlframe.placing .dlpiece { pointer-events: none; }
 .dlpiece.preview { opacity: .55; pointer-events: none; }
+/* A building's pop-up, above it, on screen. */
+.dlpop { position: absolute; display: none; z-index: 30; transform: translate(-50%, -100%);
+  min-width: 180px; max-width: 300px; padding: 9px 12px 10px; border-radius: 10px;
+  background: rgba(24, 18, 13, .94); color: #f6ead6; border: 1px solid var(--edge);
+  box-shadow: 0 6px 22px rgba(0,0,0,.4); font-size: 13px; line-height: 1.35; text-align: left; }
+.dlpop::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px;
+  background: rgba(24, 18, 13, .94); border-right: 1px solid var(--edge); border-bottom: 1px solid var(--edge);
+  transform: translateX(-50%) rotate(45deg); }
+.dlpop b { display: block; font-size: 14px; }
+.dlpop .dlpopsub { display: block; color: var(--soft); font-size: 12px; margin-top: 2px; }
+.dlpop .dlpopfed { display: block; font-size: 12px; margin-top: 6px; }
+.dlpop button { margin-top: 8px; background: none; border: 1px solid var(--edge); border-radius: 6px;
+  color: inherit; font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
 /* People and animals walk above everything built, in map cells. */
 .dllife { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 7; overflow: visible; }
@@ -826,6 +848,7 @@ _SCRIPT = r"""
     // being a name. The towns themselves scale with the world on purpose.
     world.style.setProperty('--inv', (1 / view.k).toFixed(4));
     levelOfDetail();
+    if (typeof placePop === 'function') placePop();
     if (typeof placeMarks === 'function') placeMarks();
   }
   function clamp() {
@@ -1439,6 +1462,7 @@ _SCRIPT = r"""
   frame.addEventListener('click', function (ev) {
     if (swallowClick) { swallowClick = false; return; }
     if (moved > 6 || !nat.w) return;
+    if (typeof hidePop === 'function') hidePop();
     var b = frame.getBoundingClientRect();
     if (relocating) {
       relocateTo({x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
@@ -2053,7 +2077,45 @@ _SCRIPT = r"""
   }
   // A building belongs to a town: clicking it is asking about that town.
   function showTownOf(piece) {
-    if (piece && piece.t && byId[piece.t]) open(piece.t);
+    if (!piece || !piece.t || !byId[piece.t]) return;
+    var a = assetById(piece.a);
+    if (a && a.building) { showPop(piece); return; }
+    open(piece.t);
+  }
+
+  // A building's pop-up: what it is, whose it is and what builds it, floating
+  // above the building, on screen. It follows the map as it moves and goes on
+  // the next click elsewhere, Escape or a right click.
+  var pop = document.createElement('div');
+  pop.className = 'dlpop';
+  frame.appendChild(pop);
+  var popFor = null;
+  function showPop(piece) {
+    var town = byId[piece.t], a = assetById(piece.a);
+    var b = town && a && town.built.filter(function (x) { return x.key === a.building; })[0];
+    if (!b) { pop.style.display = 'none'; popFor = null; return; }
+    var rooms = (b.rooms && b.rooms.length)
+      ? b.rooms.map(escapeHtml).join(', ') : 'No channels feed it yet.';
+    pop.innerHTML =
+      '<b>' + escapeHtml(b.name) + ' of ' + escapeHtml(town.name) + '</b>' +
+      '<span class="dlpopsub">' + escapeHtml(b.given) + ' · ' + escapeHtml(b.title) +
+      ' · tier ' + b.tier + ' · ' + b.points.toLocaleString() + ' points</span>' +
+      '<span class="dlpopfed">Fed by ' + rooms + '</span>' +
+      '<button data-poptown="' + town.id + '">' + escapeHtml(town.name) + ' &rsaquo;</button>';
+    pop.querySelector('button').onclick = function (ev) {
+      ev.stopPropagation(); hidePop(); open(town.id);
+    };
+    popFor = piece.id;
+    pop.style.display = 'block';
+    placePop();
+  }
+  function hidePop() { popFor = null; pop.style.display = 'none'; }
+  function placePop() {
+    var el = popFor && pieces[popFor];
+    if (!el) { if (popFor) hidePop(); return; }
+    var r = el.getBoundingClientRect(), f = frame.getBoundingClientRect();
+    pop.style.left = (r.left + r.width / 2 - f.left) + 'px';
+    pop.style.top = (r.top - f.top - 8) + 'px';
   }
   function shownLayer(layer) { return layerState.hidden.indexOf(layer || 'objects') < 0; }
   // The piece a click meant: the one under it, or failing that the nearest
@@ -2167,6 +2229,7 @@ _SCRIPT = r"""
           return;
         }
         if (!g0.add) selectOnly([]);
+        hidePop();
         if (openId && !inOpenArea(ev.clientX, ev.clientY)) closeCard();
         return;
       }
@@ -2407,6 +2470,7 @@ _SCRIPT = r"""
   // being moved, a town being moved, the terrain brush, a selection, a stroke
   // or a box half drawn: all of it, and back to the hand.
   function putDown() {
+    hidePop();
     armedAsset = null; mix = []; building = null; relocating = null;
     if (gesture === 'brush' && stroke2) {
       stroke2.previews.forEach(function (el) { el.remove(); });
