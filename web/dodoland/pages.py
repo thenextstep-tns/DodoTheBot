@@ -334,7 +334,11 @@ def _scale_reality(bot, guild) -> str:
 # one edit rather than two that can disagree.
 _MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
                    "dodoland_town_dot_below", "dodoland_detail_above",
-                   "dodoland_map_min_zoom", "dodoland_map_max_zoom")
+                   "dodoland_map_min_zoom", "dodoland_map_max_zoom",
+                   # When each layer shows, by zoom — beside the zoom limits.
+                   "dodoland_lod_tiles", "dodoland_lod_environment", "dodoland_lod_objects",
+                   "dodoland_lod_buildings", "dodoland_lod_houses", "dodoland_lod_life",
+                   "dodoland_lod_influence", "dodoland_lod_walls")
 _PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
                 "dodoland_self_settle", "dodoland_player_cache_seconds")
 _ELSEWHERE = set(_MAP_SCALE_KEYS) | set(_PLAYER_KEYS)

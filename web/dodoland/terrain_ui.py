@@ -328,8 +328,10 @@ SCRIPT = r"""
     // noise, and the shaded picture reads better. They fade in over the next
     // couple of pixels per cell instead of popping in at a line.
     var detail = document.getElementById('dltdetail');
-    if (detail) detail.style.opacity = Math.max(0, Math.min(1, (perCellX - 2.5) / 2)).toFixed(2);
-    if (perCellX < 2.5 && total > 0) return null;
+    var from = (D.sizes.lod || {}).tiles;
+    if (from === undefined) from = 2.5;
+    if (detail) detail.style.opacity = Math.max(0, Math.min(1, (perCellX - from) / 2)).toFixed(2);
+    if (perCellX < from && total > 0) return null;
     var x0 = (-view.x) / perCellX, x1 = (-view.x + frame.clientWidth) / perCellX;
     var perCellY = (nat.h * view.k) / ch;
     var y0 = (-view.y) / perCellY, y1 = (-view.y + frame.clientHeight) / perCellY;

@@ -324,6 +324,10 @@ async def map_page(request: web.Request):
                      if str(bot.dodoland_params.get(guild.id, "dodoland_town_style")) == "hall" else ""),
         "min_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_min_zoom")),
         "max_zoom": float(bot.dodoland_params.get(guild.id, "dodoland_map_max_zoom")),
+        # Per layer: the screen pixels a map cell must be before it shows.
+        "lod": {key: float(bot.dodoland_params.get(guild.id, f"dodoland_lod_{key}"))
+                for key in ("tiles", "environment", "objects", "buildings", "houses",
+                            "life", "influence", "walls")},
     }
 
     body = f"""<!doctype html>
@@ -833,6 +837,13 @@ body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; borde
 /* Armed, everything placed is ground to stamp on rather than something to grab. */
 .dlframe.placing .dlpiece { pointer-events: none; }
 .dlpiece.preview { opacity: .55; pointer-events: none; }
+/* Layers too far out for their detail setting. */
+.dlworld.lodoff-environment .dlpiece.L-environment,
+.dlworld.lodoff-objects .dlpiece.L-objects,
+.dlworld.lodoff-buildings .dlpiece.L-buildings,
+.dlworld.lodoff-houses .dlhouse,
+.dlworld.lodoff-influence #dltinfl,
+.dlworld.lodoff-walls #dltwalls { display: none; }
 .dlnotice { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 45;
   display: none; max-width: min(560px, calc(100% - 32px)); padding: 10px 38px 10px 14px;
   border-radius: 10px; background: rgba(40, 28, 14, .96); color: #fbecd2;
@@ -1121,8 +1132,18 @@ _SCRIPT = r"""
     }
   }
 
+  // Each layer shows from its own zoom (D.sizes.lod, px per map cell; set per
+  // server in the panel). A class on the world per layer that is too far out.
+  function layerDetail() {
+    if (!D.cells_w || !nat.w) return;
+    var perCell = nat.w * view.k / D.cells_w, lod = D.sizes.lod || {};
+    ['environment', 'objects', 'buildings', 'houses', 'influence', 'walls'].forEach(function (k) {
+      world.classList.toggle('lodoff-' + k, perCell < (lod[k] || 0));
+    });
+  }
   function levelOfDetail() {
     if (!nat.w) return;
+    layerDetail();
     // Sizes differ per town now, so the thresholds are asked per town rather
     // than once for the map. A large settlement keeps its buildings and its
     // smoke further out than a hamlet does, which is what you would expect.
@@ -2907,7 +2928,8 @@ _SCRIPT = r"""
     if (!walkers.length) return;
     var dt = Math.min(0.25, (now - (lifeLast || now)) / 1000);
     lifeLast = now;
-    var close = typeof terr !== 'undefined' && terr.world && nat.w * view.k / terr.world.cells_w >= 1.2;
+    var close = typeof terr !== 'undefined' && terr.world &&
+      nat.w * view.k / terr.world.cells_w >= ((D.sizes.lod || {}).life || 0);
     world.classList.toggle('lifefar', !close);   // hides walkers, not houses
     if (close && !document.hidden) {
       walkers.forEach(function (w) {
