@@ -24,3 +24,7 @@ WEB_PUBLIC_URL = WEB.get("public_url", f"http://{WEB_HOST}:{WEB_PORT}").rstrip("
 WEB_CLIENT_ID = str(WEB.get("client_id") or _config.get("application_id", ""))
 WEB_CLIENT_SECRET = WEB.get("client_secret", "")
 WEB_SESSION_SECRET = WEB.get("session_secret", "")
+# Search-engine ownership files served at the site root, e.g.
+# ["google4f5ce987724bd645.html"]. Only these exact names are served, so nobody
+# else can prove ownership of the panel with a token of their own.
+WEB_SITE_VERIFICATIONS = tuple(str(n) for n in WEB.get("site_verifications", []) or [])

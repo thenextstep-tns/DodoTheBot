@@ -4085,6 +4085,17 @@ async def lang_page(request: web.Request):
     return _page("Strings", _lang_html(request.app["bot"]))
 
 
+async def site_verification(request: web.Request):
+    """A search engine's ownership file (``web.site_verifications`` in
+    config.json). Unlisted names are a plain 404."""
+    from config import secrets
+
+    name = request.match_info.get("name") or ""
+    if name not in secrets.WEB_SITE_VERIFICATIONS:
+        raise web.HTTPNotFound()
+    return web.Response(text=f"google-site-verification: {name}", content_type="text/html")
+
+
 async def _record_change(request: web.Request, kind: str, target: str, old, new, line: str,
                          *, notify: bool = True) -> None:
     """Log a configuration change, and DM the owner if someone else made it.
@@ -4626,6 +4637,7 @@ def create_app(bot) -> web.Application:
     app["bot"] = bot
     app.add_routes(
         [
+            web.get(r"/{name:google[0-9a-f]+\.html}", site_verification),
             web.get("/login", login),
             web.get("/oauth/callback", oauth_callback),
             web.get("/logout", logout),
