@@ -130,4 +130,24 @@ except town_rules.TownError:
     pass
 print("walls           a town is walled in a known style or not at all")
 
+# Where walls stand: round walled towns' land as one territory. Two overlapping
+# walled towns share their outer wall and have none through the overlap; a wall
+# stops at the shore and leaves the water open.
+from helpers.dodoland import influence as _inf  # noqa: E402
+
+_A = {(x, y) for x in range(5, 25) for y in range(5, 25)}          # stone
+_B = {(x, y) for x in range(17, 37) for y in range(5, 25)}         # palisade
+_water = {(x, y) for x in range(33, 45) for y in range(0, 40)}     # the sea, east
+_wet = lambda c: not (0 <= c[0] < 45 and 0 <= c[1] < 40) or c in _water  # noqa: E731
+_owner = {c: "b" for c in _B if not _wet(c)}
+_owner.update({c: "a" for c in _A})
+_runs = _inf.wall_runs(set(_owner), lambda c: {"a": "stone", "b": "palisade"}[_owner[c]], _wet)
+_pts = [pt for _style, pts in _runs for pt in pts]
+assert {style for style, _pts2 in _runs} == {"stone", "palisade"}, _runs
+assert not [pt for pt in _pts if 17.5 < pt[0] < 24.5 and 5.5 < pt[1] < 24.5], \
+    "a wall runs through the overlap of two walled towns"
+assert max(pt[0] for pt in _pts) <= 33, "a wall went out into the water"
+assert not [pt for pt in _pts if pt[0] == 33 and 6 < pt[1] < 24], "the shore was walled off"
+print("walls           walled towns share one outer wall, and it stops at the shore")
+
 print("PASS")

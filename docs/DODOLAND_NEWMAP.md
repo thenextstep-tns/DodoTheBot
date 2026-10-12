@@ -1015,3 +1015,23 @@ terrain and forest edits (still in the audit log).
   selection's Clear stays).
 * Terrain's Select and Pattern tools are hidden for everyone; with only the
   brush left, the tool row (`#dlttools`) is hidden. The code is still there.
+
+### Walls back: shared, open at the shore, drawn raised (12 Oct 2026)
+* `dodoland_walls_option` is on again (the card's None / Palisade / Stone).
+* Where walls stand is worked out on the server with the areas
+  (`influence_api.walls`, cached on `id(_CELLS)` + the choices, sent as
+  `walls` in the influence layer): every walled town's **land** is one
+  territory, each cell owned by the biggest walled town covering it, and
+  `influence.wall_runs` walks its border keeping the edges whose outside is
+  not water or off the map. So walled towns that overlap share one outer wall
+  and none runs through the overlap (which is inside both areas, so both
+  build and paint there), and a wall stops at the shore. Runs are open paths
+  in cell units, Chaikin-smoothed with their ends kept; the style changes
+  where the owning town does. The water grid is `_WATER`, built in `compute`.
+* Drawn raised like the map art (`terrain_ui` `drawWalls`): shadow, the path
+  repeated upward as the face (stone courses / wooden stakes), the top, then
+  battlements or pointed tips; towers (`towerSvg`: round stone with merlons,
+  square wooden with a roof) along each run and at its ends, none within six
+  cells of another, nearer ones drawn last. Walls sit in the terrain SVG
+  under placed pieces; they are not depth-sorted against buildings yet.
+* Choosing walls on the card re-reads the influence layer.

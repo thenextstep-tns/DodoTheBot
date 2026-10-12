@@ -30,6 +30,10 @@ _CACHE: dict[int, tuple] = {}
 # guild -> {town id: set of cells}, made alongside the payload. What "is this
 # inside that town's area" is asked of when a building is placed.
 _CELLS: dict[int, dict[str, set]] = {}
+# Where the water is, per guild, from the same pass (a bool grid, [y, x]).
+_WATER: dict[int, object] = {}
+# The walls last worked out: guild -> (what they were made from, runs).
+_WALLS: dict[int, tuple] = {}
 _TTL = 300
 # One computation per guild at a time; which guilds are refreshing behind.
 _LOCKS: dict[int, threading.Lock] = {}
@@ -87,6 +91,60 @@ def _cost_grid(chunks: dict, grow_cost: list, blocked: set, cells_w: int, cells_
         xs, ys = zip(*blocked)
         costs[np.asarray(ys), np.asarray(xs)] = math.inf
     return costs.ravel().tolist()
+
+
+def _water_grid(chunks: dict, kinds: list, cells_w: int, cells_h: int):
+    """Which cells are water (shallow or deep): where a wall stops."""
+    import numpy as np
+
+    from helpers.dodoland import terrain_raster
+
+    grid = terrain_raster.grid(chunks, cells_w, cells_h)
+    table = np.array([bool(k.get("water")) for k in kinds] or [False])
+    return np.where((grid >= 0) & (grid < len(table)), table[np.clip(grid, 0, len(table) - 1)], False)
+
+
+def walls(bot, guild, payload: dict) -> list[dict]:
+    """The walls of every walled town, as one walled territory.
+
+    Walled towns' land is one region: overlapping walled areas share their
+    outer wall and have none between them (the overlap stays inside both, so
+    both towns build there). A wall stops at the shore: edges facing water or
+    the map's edge are left open. Each run takes the style of the town inside
+    it. Cached on the areas and the choices, so a page load costs nothing.
+    Blocking."""
+    choices = {str(uid): str(d.get("walls") or "")
+               for uid, d in (bot.dodoland_towns.all(guild.id) or {}).items()}
+    areas = _CELLS.get(guild.id) or {}
+    walled = {t: s for t, s in choices.items() if s and t in areas}
+    key = (id(areas), tuple(sorted(walled.items())))
+    hit = _WALLS.get(guild.id)
+    if hit and hit[0] == key:
+        return hit[1]
+    water = _WATER.get(guild.id)
+    w, h = payload.get("cells_w") or 0, payload.get("cells_h") or 0
+    if not walled or water is None or not w or not h:
+        _WALLS[guild.id] = (key, [])
+        return []
+
+    def wet(cell) -> bool:
+        x, y = cell
+        return not (0 <= x < w and 0 <= y < h) or bool(water[y, x])
+
+    # Strongest first: where two walled towns share land, the bigger one's wall
+    # stands there.
+    order = sorted(walled, key=lambda t: -len(areas[t]))
+    owner: dict = {}
+    for town in reversed(order):
+        for cell in areas[town]:
+            if not wet(cell):
+                owner[cell] = town
+    runs = influence.wall_runs(set(owner), lambda c: walled.get(owner.get(c, ""), ""), wet)
+    out = [{"style": style, "town": "",
+            "d": "M" + "L".join(f"{x:.2f} {y:.2f}" for x, y in pts)}
+           for style, pts in runs]
+    _WALLS[guild.id] = (key, out)
+    return out
 
 
 def _breadth(bot, guild, plots: dict, result: dict) -> tuple[dict, dict]:
@@ -182,6 +240,7 @@ def compute(bot, guild) -> dict:
                  for c, k in zip(grow_cost, kinds)]
     blocked = _blocked(bot, guild.id, cells_w, cells_h)
     costs = _cost_grid(chunks, grow_cost, blocked, cells_w, cells_h)
+    _WATER[guild.id] = _water_grid(chunks, kinds, cells_w, cells_h)
 
     towns = []
     areas: dict[str, set] = {}
@@ -294,5 +353,9 @@ def claimed_by(bot, guild, x_pct: float, y_pct: float, *, but: str = "") -> str:
 async def influence_layer(request: web.Request):
     """``GET /guild/{gid}/dodoland/influence`` — the Influence layer's data."""
     bot, guild = request.app["bot"], request["guild"]
-    payload = await asyncio.get_running_loop().run_in_executor(None, current, bot, guild)
-    return web.json_response({"ok": True, **payload})
+    def both():
+        payload = current(bot, guild)
+        return payload, walls(bot, guild, payload)
+
+    payload, wall_runs = await asyncio.get_running_loop().run_in_executor(None, both)
+    return web.json_response({"ok": True, **payload, "walls": wall_runs})

@@ -1658,7 +1658,8 @@ _SCRIPT = r"""
       card.querySelectorAll('[data-walls]').forEach(function (b) {
         b.classList.toggle('own', b.dataset.walls === style);
       });
-      if (typeof drawWalls === 'function') drawWalls();
+      // Walls are worked out with the areas (shared where walled towns meet).
+      if (typeof loadInfluence === 'function') loadInfluence();
     });
   }
 

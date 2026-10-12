@@ -246,6 +246,107 @@ def loops(cells: set[tuple[int, int]]) -> list[list[tuple[float, float]]]:
     return out
 
 
+def _edge_cells(a: tuple[int, int], b: tuple[int, int]):
+    """The cell inside and the cell outside a directed border edge (as
+    :func:`loops` orients them: the area on the walker's right)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    if dx == 1:      # a top edge
+        return (a[0], a[1]), (a[0], a[1] - 1)
+    if dy == 1:      # a right edge
+        return (a[0] - 1, a[1]), (a[0], a[1])
+    if dx == -1:     # a bottom edge
+        return (b[0], a[1] - 1), (b[0], a[1])
+    return (a[0], b[1]), (a[0] - 1, b[1])   # a left edge
+
+
+def wall_runs(region: set[tuple[int, int]], style_of: Callable[[tuple[int, int]], str],
+              open_beyond: Callable[[tuple[int, int]], bool], *, rounds: int = 2,
+              min_edges: int = 3) -> list[tuple[str, list[tuple[float, float]]]]:
+    """Where walls stand round a walled territory: ``[(style, points), ...]``.
+
+    ``region`` is every walled town's land, as one territory, so where two
+    walled areas overlap the wall runs only round the outside of both and
+    nowhere through the middle. Each border edge is walled in the style of the
+    town whose land is inside it (``style_of``), unless what is beyond it is
+    open (``open_beyond``: water, or off the map), where the wall stops — it
+    meets the shore and leaves the water open. Runs are smoothed like the
+    area's own line, their ends kept where they are.
+    """
+    if not region:
+        return []
+    import numpy as np
+
+    mask, x0, y0 = _mask(region)
+    pad = np.pad(mask, 1)
+    inner = pad[1:-1, 1:-1]
+    nxt: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for side, (dx0, dy0, dx1, dy1) in (
+            (~pad[:-2, 1:-1], (0, 0, 1, 0)),
+            (~pad[1:-1, 2:], (1, 0, 1, 1)),
+            (~pad[2:, 1:-1], (1, 1, 0, 1)),
+            (~pad[1:-1, :-2], (0, 1, 0, 0))):
+        ys, xs = np.nonzero(inner & side)
+        for x, y in zip((xs + x0).tolist(), (ys + y0).tolist()):
+            nxt.setdefault((x + dx0, y + dy0), []).append((x + dx1, y + dy1))
+    out = []
+    while nxt:
+        start = next(iter(nxt))
+        loop, here = [start], start
+        while True:
+            ways = nxt.get(here)
+            if not ways:
+                break
+            step = ways.pop()
+            if not ways:
+                del nxt[here]
+            if step == start:
+                break
+            loop.append(step)
+            here = step
+        n = len(loop)
+        if n < 4:
+            continue
+        # The style of every edge of this loop ("" where it is open).
+        styles = []
+        for i in range(n):
+            inside, outside = _edge_cells(loop[i], loop[(i + 1) % n])
+            styles.append("" if open_beyond(outside) else (style_of(inside) or ""))
+        if not any(styles):
+            continue
+        # Start the walk where the style changes, so no run is cut in two by
+        # where the loop happened to begin.
+        first = next((i for i in range(n) if styles[i] != styles[i - 1]), 0)
+        run, kind = [], None
+        for k in range(n + 1):
+            i = (first + k) % n
+            style = styles[i] if k < n else None
+            if style != kind:
+                if kind and len(run) - 1 >= min_edges:
+                    out.append((kind, _open_smooth(run, rounds)))
+                run, kind = [loop[i]], style
+            if k < n:
+                run.append(loop[(i + 1) % n])
+    return out
+
+
+def _open_smooth(points: list[tuple[int, int]], rounds: int) -> list[tuple[float, float]]:
+    """An open run rounded like :func:`_chaikin`, its two ends kept."""
+    corners = [points[0]] + [p for i, p in enumerate(points[1:-1], 1)
+                             if (p[0] - points[i - 1][0], p[1] - points[i - 1][1])
+                             != (points[i + 1][0] - p[0], points[i + 1][1] - p[1])] + [points[-1]]
+    pts = [(float(x), float(y)) for x, y in corners]
+    for _ in range(rounds):
+        if len(pts) < 3:
+            break
+        smooth = [pts[0]]
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            smooth.append((ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25))
+            smooth.append((ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75))
+        smooth.append(pts[-1])
+        pts = smooth
+    return pts
+
+
 def _chaikin(points: list[tuple[float, float]], rounds: int) -> list[tuple[float, float]]:
     for _ in range(rounds):
         smooth = []

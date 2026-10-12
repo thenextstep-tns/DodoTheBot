@@ -50,7 +50,8 @@ CSS = """
 .dltline { vector-effect: non-scaling-stroke; stroke-width: calc(1px * var(--inv, 1));
   stroke-linecap: square; }
 .dltline.wide { stroke-width: calc(3px * var(--inv, 1)); }
-.dlwall { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.dlwall, .dlwall use { fill: none; stroke-linejoin: round; stroke-linecap: butt; }
+#dltwalls defs path { fill: none; }
 .dlroad { fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .dlworld.hide-roads #dltroads { display: none; }
 .dlworld.hide-ground #dltshade { display: none; }
@@ -963,6 +964,7 @@ SCRIPT = r"""
         var g = document.getElementById('dltinfl');
         if (!g) return;
         D.influence = res.towns || [];
+        D.walls = res.walls || [];
         if (typeof refreshPop === 'function') refreshPop();
         g.innerHTML = D.influence.map(function (t) {
           // The line is the smoothed border when there is one: the stepped
@@ -1012,56 +1014,121 @@ SCRIPT = r"""
   }
 
   // --- walls ------------------------------------------------------------ //
-  // A walled town's wall runs along its area's smoothed border, so it grows
-  // with the town instead of being laid stone by stone. Drawn in cell units:
-  // a wall is as thick on the map as it would be on the ground, and it zooms
-  // like everything else built. Towers stand at intervals along it.
+  // Walls come with the areas (influence_api.walls): every walled town's land
+  // as one territory, so overlapping walled towns share an outer wall and have
+  // none between them, and a wall stops where it meets water. Each run is an
+  // open path in cell units, drawn raised like the map's own art: the path
+  // repeated upward is the wall's face (courses of stone, or stakes), the top
+  // sits on it, and towers stand along it and at its ends.
   var WALL = {
-    // Widths in cells. A town hall is about ten cells across, so a stone wall
-    // is a third of a hall thick and its towers about half a hall.
-    stone: {layers: [['#35302b', 3.4], ['#9a9186', 2.2], ['#c7bfb3', 0.9, '1.5 1.2']],
-            tower: function (x, y) {
-              return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="#8e867b" stroke="#35302b" stroke-width="0.7"/>' +
-                     '<circle cx="' + x + '" cy="' + y + '" r="1.4" fill="#5c554d"/>'; }, every: 42},
-    palisade: {layers: [['#2f1f12', 2.4], ['#86592f', 1.5, '0.75 0.3']],
-            tower: function (x, y) {
-              x = +x; y = +y;
-              return '<rect x="' + (x - 1.7) + '" y="' + (y - 1.7) + '" width="3.4" height="3.4" fill="#6b4425" stroke="#2f1f12" stroke-width="0.6"/>'; },
-            every: 54}
+    // t: thickness, h: height, in cells. A town hall is about ten cells across.
+    stone: {t: 1.5, h: 2.1, step: 0.3, shadow: 'rgba(20,16,12,.3)', edge: '#3a332c',
+            faces: ['#8a8276', '#968e82'], top: '#cbc3b6', merlon: ['#a99f92', '#d6cfc3'],
+            dash: '0.85 0.6', every: 34, tower: 'stone'},
+    palisade: {t: 0.8, h: 2.3, step: 0.3, shadow: 'rgba(20,12,6,.3)', edge: '#2b1b0f',
+               faces: ['#7a5230', '#8a5f37'], stakes: '0.42 0.1', top: '#a7784a',
+               tips: '#5a3a1f', every: 44, tower: 'wood'}
   };
+  function towerSvg(kind, x, y, s) {
+    var r = kind === 'stone' ? 1.55 : 1.25, ht = s.h + (kind === 'stone' ? 1.5 : 1.8);
+    var f = function (n) { return (+n).toFixed(2); };
+    var out = '<ellipse cx="' + f(x + 0.45) + '" cy="' + f(y + 0.3) + '" rx="' + f(r + 0.5) + '" ry="' + f(r * 0.55 + 0.3) +
+      '" fill="' + s.shadow + '"/>';
+    if (kind === 'stone') {
+      out += '<rect x="' + f(x - r) + '" y="' + f(y - ht) + '" width="' + f(2 * r) + '" height="' + f(ht) +
+        '" fill="#8e867a" stroke="' + s.edge + '" stroke-width="0.18"/>' +
+        '<ellipse cx="' + f(x) + '" cy="' + f(y) + '" rx="' + f(r) + '" ry="' + f(r * 0.5) + '" fill="#7d7569" stroke="' + s.edge + '" stroke-width="0.18"/>' +
+        '<rect x="' + f(x - r) + '" y="' + f(y - ht) + '" width="' + f(2 * r) + '" height="' + f(ht) + '" fill="#8e867a"/>' +
+        '<ellipse cx="' + f(x) + '" cy="' + f(y - ht) + '" rx="' + f(r) + '" ry="' + f(r * 0.5) + '" fill="#cfc8bc" stroke="' + s.edge + '" stroke-width="0.18"/>' +
+        '<ellipse cx="' + f(x) + '" cy="' + f(y - ht) + '" rx="' + f(r * 0.62) + '" ry="' + f(r * 0.3) + '" fill="#6f675c"/>';
+      // Merlons round the top.
+      for (var a = 0; a < 8; a++) {
+        var ang = a / 8 * Math.PI * 2, mx = x + Math.cos(ang) * r * 0.86, my = y - ht + Math.sin(ang) * r * 0.43;
+        out += '<rect x="' + f(mx - 0.28) + '" y="' + f(my - 0.55) + '" width="0.56" height="0.6" fill="#bfb7aa" stroke="' + s.edge + '" stroke-width="0.1"/>';
+      }
+      out += '<line x1="' + f(x - r) + '" y1="' + f(y - ht) + '" x2="' + f(x - r) + '" y2="' + f(y) + '" stroke="' + s.edge + '" stroke-width="0.18"/>' +
+        '<line x1="' + f(x + r) + '" y1="' + f(y - ht) + '" x2="' + f(x + r) + '" y2="' + f(y) + '" stroke="' + s.edge + '" stroke-width="0.18"/>' +
+        '<rect x="' + f(x - 0.22) + '" y="' + f(y - ht * 0.62) + '" width="0.44" height="0.8" fill="#2d2721"/>';
+    } else {
+      out += '<rect x="' + f(x - r) + '" y="' + f(y - ht) + '" width="' + f(2 * r) + '" height="' + f(ht) +
+        '" fill="#7f5532" stroke="' + s.edge + '" stroke-width="0.16"/>' +
+        '<line x1="' + f(x - r * 0.33) + '" y1="' + f(y - ht) + '" x2="' + f(x - r * 0.33) + '" y2="' + f(y) + '" stroke="#5f3d22" stroke-width="0.12"/>' +
+        '<line x1="' + f(x + r * 0.33) + '" y1="' + f(y - ht) + '" x2="' + f(x + r * 0.33) + '" y2="' + f(y) + '" stroke="#5f3d22" stroke-width="0.12"/>' +
+        '<rect x="' + f(x - r - 0.3) + '" y="' + f(y - ht - 0.35) + '" width="' + f(2 * r + 0.6) + '" height="0.5" fill="#9b6b3f" stroke="' + s.edge + '" stroke-width="0.12"/>' +
+        '<path d="M' + f(x - r - 0.45) + ' ' + f(y - ht - 0.35) + 'L' + f(x) + ' ' + f(y - ht - 2.1) + 'L' + f(x + r + 0.45) + ' ' + f(y - ht - 0.35) +
+        'Z" fill="#6b3a20" stroke="' + s.edge + '" stroke-width="0.14"/>';
+    }
+    return out;
+  }
   function drawWalls() {
     var g = document.getElementById('dltwalls');
     if (!g) return;
-    var byTown = {};
-    (D.influence || []).forEach(function (t) { byTown[t.id] = t; });
-    var out = [];
-    D.people.forEach(function (p) {
-      var style = WALL[p.walls], area = byTown[p.id];
-      if (!style || !p.plot || !area || !area.ring) return;
-      style.layers.forEach(function (layer) {
-        out.push('<path class="dlwall" data-town="' + p.id + '" d="' + area.ring + '" stroke="' + layer[0] +
-                 '" stroke-width="' + layer[1] + '"' + (layer[2] ? ' stroke-dasharray="' + layer[2] + '"' : '') + '/>');
-      });
+    var runs = D.walls || [], out = [], towers = [];
+    var use = function (id, dy, stroke, width, extra) {
+      return '<use href="#' + id + '" transform="translate(0 ' + (-dy).toFixed(2) + ')" stroke="' + stroke +
+        '" stroke-width="' + width + '"' + (extra || '') + '/>';
+    };
+    out.push('<defs>' + runs.map(function (r, i) {
+      return '<path id="dlwrun' + i + '" d="' + r.d + '"/>';
+    }).join('') + '</defs>');
+    runs.forEach(function (r, i) {
+      var s = WALL[r.style];
+      if (!s) return;
+      var id = 'dlwrun' + i, t = s.t;
+      // Its shadow, and the measured path the towers are spaced along.
+      out.push('<path class="dlwall dlwmeasure" data-run="' + i + '" d="' + r.d + '" stroke="' + s.shadow +
+               '" stroke-width="' + (t + 0.9) + '" transform="translate(0.45 0.3)"/>');
+      out.push('<g class="dlwall">');
+      out.push(use(id, 0, s.edge, (t + 0.3).toFixed(2)));
+      // The face: the path repeated upward, in courses (stone) or stakes (wood).
+      for (var k = 0, n = Math.round(s.h / s.step); k <= n; k++) {
+        var dy = k * s.step, shade = s.faces[Math.floor(dy / 0.6) % 2];
+        out.push(use(id, dy, shade, t, s.stakes ? ' stroke-dasharray="' + s.stakes + '"' : ''));
+      }
+      if (s.stakes) {
+        // Between the stakes, the dark of the gaps; then the cut tops and tips.
+        out.push(use(id, s.h, s.edge, (t + 0.25).toFixed(2)));
+        out.push(use(id, s.h, s.top, t, ' stroke-dasharray="' + s.stakes + '"'));
+        out.push(use(id, s.h + 0.3, s.tips, (t * 0.6).toFixed(2), ' stroke-dasharray="0.18 0.34"'));
+      } else {
+        out.push(use(id, s.h, s.edge, (t + 0.3).toFixed(2)));
+        out.push(use(id, s.h, s.top, t));
+        // Battlements along the wall walk.
+        out.push(use(id, s.h + 0.4, s.edge, (t + 0.1).toFixed(2), ' stroke-dasharray="' + s.dash + '"'));
+        out.push(use(id, s.h + 0.45, s.merlon[0], t, ' stroke-dasharray="' + s.dash + '"'));
+        out.push(use(id, s.h + 0.6, s.merlon[1], (t * 0.85).toFixed(2), ' stroke-dasharray="' + s.dash + '"'));
+      }
+      out.push('</g>');
     });
     g.innerHTML = out.join('');
-    // Towers, measured along the drawn path, one set per town.
-    var done = {};
-    g.querySelectorAll('.dlwall').forEach(function (path) {
-      var id = path.getAttribute('data-town');
-      if (done[id]) return;
-      done[id] = true;
-      var p = byId[id], style = WALL[p && p.walls];
-      if (!style) return;
-      var towers = [];
+    // Towers along each run and at both ends (where a wall meets the shore),
+    // drawn after every wall and the nearer (lower) ones last.
+    g.querySelectorAll('.dlwmeasure').forEach(function (path) {
+      var r = runs[+path.getAttribute('data-run')], s = WALL[r && r.style];
+      if (!s) return;
       try {
-        var length = path.getTotalLength();
-        for (var at = style.every / 2; at < length; at += style.every) {
-          var pt = path.getPointAtLength(at);
-          towers.push(style.tower(pt.x.toFixed(1), pt.y.toFixed(1)));
+        var length = path.getTotalLength(), count = Math.max(1, Math.round(length / s.every));
+        for (var k = 0; k <= count; k++) {
+          var pt = path.getPointAtLength(length * k / count);
+          towers.push({x: pt.x, y: pt.y, s: s});
         }
       } catch (e) {}
-      g.insertAdjacentHTML('beforeend', towers.join(''));
     });
+    // Where runs meet (two walls joining, short runs by a shore) their end
+    // towers would crowd together: one is enough.
+    var kept = [];
+    towers.forEach(function (w) {
+      for (var i = 0; i < kept.length; i++) {
+        var dx = kept[i].x - w.x, dy = kept[i].y - w.y;
+        if (dx * dx + dy * dy < 36) return;   // within six cells of one already standing
+      }
+      kept.push(w);
+    });
+    towers = kept;
+    towers.sort(function (a, b) { return a.y - b.y; });
+    g.insertAdjacentHTML('beforeend', towers.map(function (w) {
+      return towerSvg(w.s.tower, w.x, w.y, w.s);
+    }).join(''));
   }
 
   // --- selection actions ------------------------------------------------- //
