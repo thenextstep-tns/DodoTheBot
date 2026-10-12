@@ -1,0 +1,285 @@
+"""DodoLand's toolkit: putting something from the library on the ground.
+
+The library, the tier locks and the toolkit strip all existed for a long time
+with nothing that could place one. This is that half, and what it mostly has to
+hold down is who may put what where:
+
+* an admin dressing the **map** is not spending an unlock;
+* a member dressing their **own town** is, and the refusal lives on the server
+  rather than in the dimmed button;
+* and a member can never touch a piece that is not theirs, however they phrase
+  the request.
+"""
+import asyncio
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from fake_mongo import FakeCollection  # noqa: E402
+
+from helpers.dodoland import decor as decor_rules  # noqa: E402
+from helpers.dodoland import tiles as tile_rules  # noqa: E402
+from helpers.dodoland.decor import DecorStore  # noqa: E402
+
+GUILD, NIK, FOX = 42, 1, 2
+
+# The tile library replaced the asset library: what is placed is a tile, and
+# the decor row's ``asset_id`` holds its id.
+library = tile_rules.TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
+store = DecorStore(FakeCollection())
+BUILDINGS = [{"key": "gallery"}]
+
+free = library.add_tile(name="Campfire", cat_id="", data=b"x", content_type="image/png",
+                        guild_id=GUILD, access=["admin", "player"])
+free["asset_id"] = free["tile_id"]
+locked = library.add_tile(name="Gilded banner", cat_id="", data=b"x", content_type="image/png",
+                          access=["admin", "player"], requires={"building": "gallery", "tier": 3},
+                          resizable=True, scale_min=0.5, scale_max=2)
+locked["asset_id"] = locked["tile_id"]
+
+
+# --------------------------------------------------------------------------- #
+#  What is unlocked
+# --------------------------------------------------------------------------- #
+tiles = library.usable(GUILD, "objects", "player")
+# Somebody with nothing built still has the starter set. A toolkit where
+# nothing is available on day one gives nobody a reason to open the map twice.
+nobody = tile_rules.unlocked_for(tiles, None, BUILDINGS)
+assert free["asset_id"] in nobody and locked["asset_id"] not in nobody, nobody
+
+# Tier 3 means the third tier, which is index 2.
+almost = {"buildings": {"gallery": {"tier": 1}}}
+enough = {"buildings": {"gallery": {"tier": 2}}}
+assert locked["asset_id"] not in tile_rules.unlocked_for(tiles, almost, BUILDINGS)
+assert locked["asset_id"] in tile_rules.unlocked_for(tiles, enough, BUILDINGS)
+# A global tile locked behind a building this server does not have is not
+# locked here: it cannot be unreachable because buildings were named otherwise.
+assert locked["asset_id"] in tile_rules.unlocked_for(tiles, None, [{"key": "library"}])
+print("locks           a lock is a tier of a building, and it is off by one on purpose")
+
+
+# --------------------------------------------------------------------------- #
+#  The locks are enforced where they cannot be edited
+# --------------------------------------------------------------------------- #
+# The toolkit dims what is locked as a courtesy. This is what actually refuses
+# it, because a dimmed button is a suggestion and a request is whatever
+# somebody types.
+allowed = tile_rules.unlocked_for(tiles, None, BUILDINGS)
+try:
+    store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
+                asset_id=locked["asset_id"], x=50, y=50, allowed=allowed)
+except decor_rules.DecorError as error:
+    assert "unlocked" in str(error), error
+else:
+    raise AssertionError("a locked asset was placed by asking for it directly")
+print("locks           the server refuses a locked asset, not the browser")
+
+# An admin dressing the world is not spending an unlock: they wrote the locks.
+world = store.place(GUILD, scope=decor_rules.SCOPE_WORLD,
+                    asset_id=locked["asset_id"], x=10, y=20)
+assert world["owner_id"] == 0, world
+assert len(store.world(GUILD)) == 1
+print("scopes          an admin dresses the map without spending an unlock")
+
+
+# --------------------------------------------------------------------------- #
+#  A piece belongs to exactly one person
+# --------------------------------------------------------------------------- #
+mine = store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
+                   asset_id=free["asset_id"], x=40, y=60, allowed=allowed)
+assert mine["owner_id"] == NIK
+
+# Knowing somebody's piece id gets you nothing: the owner is a *query term*, so
+# the row is never found rather than found and then refused.
+assert not store.move(GUILD, mine["piece_id"], x=1, y=1, owner_id=FOX)
+assert not store.remove(GUILD, mine["piece_id"], owner_id=FOX)
+assert store.town(GUILD, NIK)[0]["x"] == 40.0, "somebody else moved it"
+assert store.move(GUILD, mine["piece_id"], x=12, owner_id=NIK)
+assert store.town(GUILD, NIK)[0]["x"] == 12.0
+print("ownership       another member cannot move or remove your decor")
+
+# A member cannot reach the world's decor through the town endpoint's store
+# call either, because that passes an owner and the world has none.
+assert not store.remove(GUILD, world["piece_id"], owner_id=NIK)
+assert len(store.world(GUILD)) == 1
+print("ownership       the map's own decor is not reachable as a possession")
+
+
+# --------------------------------------------------------------------------- #
+#  Limits, and cleaning up
+# --------------------------------------------------------------------------- #
+for _ in range(decor_rules.MAX_PER_TOWN - 1):
+    store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
+                asset_id=free["asset_id"], x=50, y=50, allowed=allowed)
+try:
+    store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
+                asset_id=free["asset_id"], x=50, y=50, allowed=allowed)
+except decor_rules.DecorError as error:
+    assert str(decor_rules.MAX_PER_TOWN) in str(error), error
+else:
+    raise AssertionError("a town went past its own limit")
+# One person filling their plot must not stop anybody else placing anything.
+other = store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=FOX,
+                    asset_id=free["asset_id"], x=50, y=50, allowed=allowed)
+assert other["owner_id"] == FOX
+print(f"limits          a town holds at most {decor_rules.MAX_PER_TOWN}, and the limit is per person")
+
+# An off-map position is refused rather than stored and drawn somewhere absurd.
+for bad in (-900, 900, "over there", None):
+    try:
+        store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=FOX,
+                    asset_id=free["asset_id"], x=bad, y=50, allowed=allowed)
+    except decor_rules.DecorError:
+        pass
+    else:
+        raise AssertionError(f"{bad!r} was accepted as a position")
+print("limits          a position that is not a position is refused")
+
+# Size is the tile's to decide: a fixed tile is 1x whatever is asked, a
+# resizable one is clamped to its own range — on the server, not the slider.
+fixed = store.place(GUILD, scope=decor_rules.SCOPE_WORLD, asset_id=free["asset_id"], x=5, y=5,
+                    scale=4, scale_range=tile_rules.scale_range(library.get(free["asset_id"])))
+assert fixed["scale"] == 1.0, fixed
+big = store.place(GUILD, scope=decor_rules.SCOPE_WORLD, asset_id=locked["asset_id"], x=5, y=5,
+                  scale=5, scale_range=tile_rules.scale_range(library.get(locked["asset_id"])))
+assert big["scale"] == 2.0, big
+store.move(GUILD, big["piece_id"], scale=0.1, scale_range=(0.5, 2.0))
+assert store.piece(GUILD, big["piece_id"])["scale"] == 0.5
+store.remove(GUILD, fixed["piece_id"]); store.remove(GUILD, big["piece_id"])
+print("sizes           a placement is clamped to its tile's range; fixed tiles stay 1x")
+
+# A server's own tile is invisible to every other server.
+assert library.visible(free["asset_id"], GUILD) and not library.visible(free["asset_id"], 99)
+assert library.visible(locked["asset_id"], 99), "a global tile is everybody's"
+print("scoping         a server's own tile is seen by that server only")
+
+# Deleting an asset takes every placement of it. Left behind, they render as a
+# broken image on somebody's town, which reads as their town being broken.
+dropped = store.forget_tile(free["asset_id"])
+assert dropped >= 2, dropped
+assert all(row["asset_id"] != free["asset_id"] for row in store.town(GUILD, NIK))
+assert all(row["asset_id"] != free["asset_id"] for row in store.town(GUILD, FOX))
+print(f"cleanup         removing an asset unplaces its {dropped} pieces everywhere")
+
+# Taking a town off the map takes its decor with it: the pieces were placed
+# relative to a town that is no longer anywhere.
+store.place(GUILD, scope=decor_rules.SCOPE_TOWN, owner_id=NIK,
+            asset_id=locked["asset_id"], x=50, y=50,
+            allowed={locked["asset_id"]})
+assert store.clear_town(GUILD, NIK) >= 1
+assert store.town(GUILD, NIK) == []
+assert len(store.world(GUILD)) == 1, "unsettling a town took the map's decor"
+print("cleanup         unsettling a town clears its decor and nothing else")
+
+
+# --------------------------------------------------------------------------- #
+#  Guild scoping, which every DodoLand store owes
+# --------------------------------------------------------------------------- #
+store.place(GUILD, scope=decor_rules.SCOPE_WORLD, asset_id=locked["asset_id"],
+            x=5, y=5)
+assert store.world(99) == [], "another guild's map decor leaked"
+assert store.towns(99) == {}, "another guild's town decor leaked"
+print("scoping         one guild never sees another's ground")
+
+
+# --------------------------------------------------------------------------- #
+#  The endpoints take no user id
+# --------------------------------------------------------------------------- #
+source = pathlib.Path("web/dodoland/decor_api.py").read_text(encoding="utf-8")
+player_half = source[source.index("async def api_town_decor"):]
+for forbidden in ('body.get("user_id")', "body.get('user_id')",
+                  'body.get("owner_id")', "query.get"):
+    assert forbidden not in player_half,     f"a player decor handler takes an id from the request: {forbidden}"
+# ...and every write it makes narrows on the session's own id.
+assert player_half.count("owner_id=uid") >= 3,     "a player decor write does not scope itself to the session's own town"
+print("safety          the session decides whose town is being decorated")
+
+# --------------------------------------------------------------------------- #
+#  Owned pieces, and a brush stroke as one write
+# --------------------------------------------------------------------------- #
+owned = DecorStore(FakeCollection())
+one = owned.place(9, scope="world", asset_id="tree", x=10, y=10, placed_by=77, placed_by_name="Nik")
+assert one["by"] == 77 and one["by_name"] == "Nik" and one["at"] > 0
+stroke = owned.place_many(9, [{"asset_id": "tree", "x": 11 + i, "y": 12, "scale": 9,
+                               "scale_range": (0.5, 2)} for i in range(5)], placed_by=77)
+assert len(stroke) == 5 and len(owned.world(9)) == 6
+assert all(p["by"] == 77 and p["scale"] == 2 for p in stroke), "a stroke's sizes were not clamped"
+owned.place(9, scope="town", owner_id=5, asset_id="cart", x=1, y=1)
+gone = owned.remove_many(9, [p["piece_id"] for p in stroke[:3]] + [owned.town(9, 5)[0]["piece_id"]])
+assert gone == 3, "remove_many reached past the world into a town"
+assert len(owned.world(9)) == 3 and len(owned.town(9, 5)) == 1
+print("owned           pieces remember who placed them; a stroke is one write; removal stays in the world")
+
+# Landmarks: placed as one, or made one later; found by id; unlocked again.
+marks = DecorStore(FakeCollection())
+fixed = marks.place(9, scope="world", asset_id="statue", x=50, y=50, placed_by=1, locked=True)
+plain = marks.place(9, scope="world", asset_id="tree", x=51, y=50, placed_by=1)
+assert fixed.get("locked") is True and "locked" not in plain
+assert marks.landmarks(9, [fixed["piece_id"], plain["piece_id"]]) == {fixed["piece_id"]}
+assert marks.set_landmark(9, [plain["piece_id"]], True) == 1
+assert marks.landmarks(9, [plain["piece_id"]]) == {plain["piece_id"]}
+marks.set_landmark(9, [fixed["piece_id"], plain["piece_id"]], False)
+assert marks.landmarks(9, [fixed["piece_id"], plain["piece_id"]]) == set()
+print("landmarks       placed locked or locked later, and unlocked again")
+
+# A member's own lock: on their own town's buildings, never on a landmark; an
+# admin's unlock frees both kinds.
+inn = marks.place(9, scope="world", asset_id="inn", x=52, y=50, placed_by=5)
+marks._col.update_one({"piece_id": inn["piece_id"]}, {"$set": {"town": "5"}})
+marks.set_landmark(9, [fixed["piece_id"]], True)
+assert marks.set_pinned(9, [inn["piece_id"], plain["piece_id"]], True, town="5") == 1, \
+    "a member locked a piece that is not their town's"
+assert marks.set_pinned(9, [fixed["piece_id"]], True) == 0, "a member's lock overwrote a landmark"
+assert marks.held(9, [inn["piece_id"], fixed["piece_id"], plain["piece_id"]]) == \
+    {inn["piece_id"]: "pinned", fixed["piece_id"]: "landmark"}
+marks.set_landmark(9, [inn["piece_id"], fixed["piece_id"]], False)
+assert marks.held(9, [inn["piece_id"], fixed["piece_id"]]) == {}, "an admin's unlock left a lock on"
+print("landmarks       members lock their own buildings in place; an admin unlocks anything")
+
+# The member's endpoint: lock and unlock their own; a locked one will not move
+# or go; an admin's landmark is beyond them.
+from aiohttp import web  # noqa: E402
+import json as _json  # noqa: E402
+from web.dodoland import player_map  # noqa: E402
+
+
+class _Bot:
+    dodoland_decor = marks
+
+
+class _Guild:
+    id = 9
+
+
+class _Req(dict):
+    def __init__(self, uid, body):
+        super().__init__(guild=_Guild(), uid=uid)
+        self.app = {"bot": _Bot()}
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+def member(uid, body):
+    return _json.loads(asyncio.run(player_map.build(_Req(uid, body))).body.decode())
+
+
+assert member(5, {"action": "lock", "piece_ids": [inn["piece_id"]]})["ok"]
+assert marks.held(9, [inn["piece_id"]]) == {inn["piece_id"]: "pinned"}
+refused = member(5, {"action": "remove_many", "piece_ids": [inn["piece_id"]]})
+assert not refused["ok"] and "Unlock" in refused["error"], refused
+refused = member(5, {"action": "move", "piece_id": inn["piece_id"], "x": 1, "y": 1})
+assert not refused["ok"] and "Unlock" in refused["error"], refused
+assert not member(6, {"action": "unlock", "piece_ids": [inn["piece_id"]]})["ok"], "another member unlocked it"
+assert member(5, {"action": "unlock", "piece_ids": [inn["piece_id"]]})["ok"]
+assert marks.held(9, [inn["piece_id"]]) == {}
+marks._col.update_one({"piece_id": fixed["piece_id"]}, {"$set": {"town": "5"}})
+marks.set_landmark(9, [fixed["piece_id"]], True)
+refused = member(5, {"action": "unlock", "piece_ids": [fixed["piece_id"]]})
+assert not refused["ok"] and "admins" in refused["error"], "a member unlocked an admin's landmark"
+print("landmarks       a member locks and unlocks their own; a landmark is the admins' alone")
+
+print("PASS")

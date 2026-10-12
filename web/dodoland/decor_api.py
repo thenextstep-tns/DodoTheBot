@@ -1,0 +1,404 @@
+"""
+The toolkit's endpoints: putting something from the library on the ground.
+
+Two callers, two scopes, and they are deliberately separate handlers rather
+than one with a flag.
+
+``api_world_decor`` is administrative. It dresses the **map** — forests, rivers,
+mountains, a ruin on a headland — and what it writes everybody sees in the same
+place, so it takes the panel's ``full`` scope and the tier locks do not apply
+to it. An admin placing a forest has not earned a forest; they are drawing the
+world.
+
+``api_town_decor`` belongs to a player. It dresses **their own town**, it takes
+no user id from the request (the session decides whose town it is, the same
+rule the rest of ``player.py`` follows), and the tier locks are enforced here
+rather than in the browser. The toolkit dims what is locked as a courtesy; this
+is what actually refuses it.
+
+Positions are percentages in both cases, for the same reason a town's are: of
+the base image for world decor, and of the town's own box for town decor. So
+re-uploading a redrawn map moves nothing, and moving a town takes its cart and
+its bonfire with it.
+"""
+
+from __future__ import annotations
+
+import json
+
+from aiohttp import web
+
+from helpers.dodoland import tiles as tile_rules
+from helpers.dodoland import decor as decor_rules
+from helpers.dodoland import standing
+from helpers.dodoland import store as store_module
+
+
+def _bad(error: str):
+    return web.json_response({"ok": False, "error": str(error)})
+
+
+async def _body(request: web.Request):
+    try:
+        return await request.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def _piece_range(bot, guild, piece_id) -> tuple:
+    """What an existing piece may be resized to, from the tile it came from."""
+    piece = bot.dodoland_decor.piece(guild.id, piece_id) or {}
+    return tile_rules.scale_range(bot.dodoland_tiles.visible(piece.get("asset_id"), guild.id))
+
+
+def _admin_tile(bot, guild, request, tile_id) -> dict:
+    """The tile an admin asked to place, if admins may place it here.
+
+    The bot owner may place anything visible to the server; a server admin only
+    map objects and buildings whose access includes admins.
+    """
+    from helpers import panel_access
+
+    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
+    if tile is None:
+        raise decor_rules.DecorError("That tile is not available on this server.")
+    if tile["placement"] == "paint":
+        raise decor_rules.DecorError("Ground is painted with the terrain brush, not placed.")
+    if request.get("scope") != panel_access.SCOPE_OWNER and "admin" not in tile["access"]:
+        raise decor_rules.DecorError("Server admins do not have access to that tile.")
+    return tile
+
+
+# --------------------------------------------------------------------------- #
+#  The world, dressed by an administrator
+# --------------------------------------------------------------------------- #
+async def api_world_decor(request: web.Request):
+    """Place, move or remove one piece of the map's own decor."""
+    from web.routes import _record_change
+
+    bot, guild = request.app["bot"], request["guild"]
+    body = await _body(request)
+    if body is None:
+        return _bad("That request could not be read.")
+    action = str(body.get("action") or "place")
+
+    who = int(request.get("uid") or 0)
+    member = guild.get_member(who) if who and hasattr(guild, "get_member") else None
+    who_name = (getattr(member, "display_name", "") or "") if member else ""
+    try:
+        if action in ("lock", "unlock"):
+            n = bot.dodoland_decor.set_landmark(guild.id, body.get("piece_ids") or [], action == "lock")
+            await _record_change(request, "dodoland_decor", "world", "", action,
+                                 f"DodoLand landmark {action}ed ({n})", notify=False)
+            return web.json_response({"ok": True, "changed": n})
+        if action == "pin":
+            # A town building locked in place from its card, as its owner would.
+            n = bot.dodoland_decor.set_pinned(guild.id, body.get("piece_ids") or [], True)
+            return web.json_response({"ok": True, "changed": n})
+
+        # A landmark, or anything locked in place, stays where it is until it
+        # is unlocked.
+        touched = ([body.get("piece_id")] if action in ("move", "remove") else
+                   [m.get("piece_id") for m in (body.get("moves") or []) if m] if action == "move_many" else
+                   (body.get("piece_ids") or []) if action == "remove_many" else [])
+        held = bot.dodoland_decor.held(guild.id, touched) if touched else {}
+        if "landmark" in held.values():
+            return _bad("That is a landmark. Unlock it first to move or remove it.")
+        if held:
+            return _bad("That is locked in place. Unlock it first to move or remove it.")
+
+        if action == "place_many":
+            # A brush stroke: many pieces of a few tiles, checked once per tile
+            # and written in one go.
+            raw = body.get("items") or []
+            if not isinstance(raw, list) or not raw:
+                return _bad("A stroke needs at least one piece.")
+            if len(raw) > 400:
+                return _bad("That stroke places too much at once; it will arrive in pieces.")
+            checked: dict = {}
+            items = []
+            for item in raw:
+                tid = str((item or {}).get("asset_id") or "")
+                if tid not in checked:
+                    checked[tid] = _admin_tile(bot, guild, request, tid)
+                tile = checked[tid]
+                items.append({"asset_id": tile["tile_id"], "x": item.get("x"), "y": item.get("y"),
+                              "scale": item.get("scale") or 1.0, "flip": bool(item.get("flip")),
+                              "scale_range": tile_rules.scale_range(tile),
+                              "variant": tile["variants"][0] if tile["variants"] else "",
+                              "layer": tile["layer"]})
+            rows = bot.dodoland_decor.place_many(guild.id, items, placed_by=who,
+                                                 placed_by_name=who_name,
+                                                 locked=bool(body.get("landmark")))
+            await _record_change(request, "dodoland_decor", "world", "", "placed",
+                                 f"DodoLand map decor placed ({len(rows)})", notify=False)
+            return web.json_response({"ok": True, "pieces": rows})
+
+        if action == "remove_many":
+            gone = bot.dodoland_decor.remove_many(guild.id, body.get("piece_ids") or [])
+            if gone:
+                await _record_change(request, "dodoland_decor", "world", "", "removed",
+                                     f"DodoLand map decor removed ({gone})", notify=False)
+            return web.json_response({"ok": True, "removed": gone})
+
+        if action == "move_many":
+            moved = 0
+            moves = (body.get("moves") or [])[:2000]
+            # A town's building stays inside its town's area, however it is moved.
+            refused = await _outside_area(bot, guild, moves)
+            if refused:
+                return _bad(refused)
+            for item in moves:
+                moved += bool(bot.dodoland_decor.move(
+                    guild.id, (item or {}).get("piece_id"), x=item.get("x"), y=item.get("y"),
+                    scale=item.get("scale"), flip=item.get("flip"),
+                    scale_range=_piece_range(bot, guild, item.get("piece_id"))))
+            return web.json_response({"ok": True, "changed": moved})
+
+        if action == "remove":
+            gone = bot.dodoland_decor.remove(guild.id, body.get("piece_id"))
+            if gone:
+                await _record_change(request, "dodoland_decor", "world", "", "removed",
+                                     "DodoLand map decor removed", notify=False)
+            return web.json_response({"ok": True, "removed": bool(gone)})
+
+        if action == "move":
+            refused = await _outside_area(bot, guild, [body])
+            if refused:
+                return _bad(refused)
+            changed = bot.dodoland_decor.move(
+                guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
+                scale=body.get("scale"), flip=body.get("flip"),
+                scale_range=_piece_range(bot, guild, body.get("piece_id")))
+            return web.json_response({"ok": True, "changed": bool(changed)})
+
+        tile = _admin_tile(bot, guild, request, body.get("asset_id"))
+        town = str(body.get("town") or "")
+        if town:
+            # Built for a town: it goes inside that town's area, which is the
+            # whole meaning of a town's reach.
+            import asyncio
+
+            from web.dodoland import influence_api
+            ok = await asyncio.get_running_loop().run_in_executor(
+                None, influence_api.inside, bot, guild, town, body.get("x") or 0, body.get("y") or 0)
+            if not ok:
+                return _bad("That is outside the town's area. Build inside its reach.")
+            # Only what the town has earned, at the tier it has reached in it,
+            # and one of each.
+            refused = await asyncio.get_running_loop().run_in_executor(
+                None, _town_may_build, bot, guild, town, tile)
+            if refused:
+                return _bad(refused)
+        # An admin dressing the world is not spending an unlock, so no
+        # ``allowed`` set is passed: the locks exist to pace what players may
+        # place, and the person who wrote them is not the person they pace.
+        piece = bot.dodoland_decor.place(
+            guild.id, scope=decor_rules.SCOPE_WORLD,
+            asset_id=tile["tile_id"], x=body.get("x"), y=body.get("y"),
+            scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
+            scale_range=tile_rules.scale_range(tile),
+            # A placed tile is a stamp: the thing you picked is the thing that
+            # lands. Variants are for painted ground, where a field must not
+            # repeat; tools/dodoland_split_stamps.py made every look-alike its
+            # own tile, and this keeps a stamp that gains a variant from
+            # turning into a lucky dip again.
+            variant=tile["variants"][0] if tile["variants"] else "",
+            layer=tile["layer"], placed_by=who, placed_by_name=who_name, town=town,
+            locked=bool(body.get("landmark")))
+        await _record_change(request, "dodoland_decor", "world", "", "placed",
+                             "DodoLand map decor placed", notify=False)
+        return web.json_response({"ok": True, "piece": piece})
+    except decor_rules.DecorError as error:
+        return _bad(error)
+
+
+# --------------------------------------------------------------------------- #
+#  A town, dressed by whoever owns it
+# --------------------------------------------------------------------------- #
+def _unlocked(bot, guild, user_id: int) -> set:
+    """Which assets this person has earned the right to place.
+
+    Their own standing only, so this is one person's rows rather than the whole
+    server's — the tier locks are per building and a person's own tiers are all
+    it takes to answer.
+    """
+    buildings = bot.dodoland_buildings.buildings(guild.id)
+    since = store_module.days_back(
+        int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
+    # Among everybody: a tier is a percentile (see standing.recent_standings).
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
+    return tile_rules.unlocked_for(_player_tiles(bot, guild),
+                                   result["people"].get(int(user_id)), buildings)
+
+
+async def _outside_area(bot, guild, moves: list) -> str:
+    """Why one of these moves would take a town's building out of its town's
+    area, or ``""``. Pieces that belong to no town move freely."""
+    import asyncio
+
+    from web.dodoland import influence_api
+
+    def check() -> str:
+        for item in moves:
+            if (item or {}).get("x") is None or item.get("y") is None:
+                continue
+            row = bot.dodoland_decor.piece(guild.id, str(item.get("piece_id") or ""))
+            town = str((row or {}).get("town") or "")
+            if town and not influence_api.inside(bot, guild, town, item["x"], item["y"]):
+                return "A town's building stays inside its town's area."
+        return ""
+    return await asyncio.get_running_loop().run_in_executor(None, check)
+
+
+def _tiers(bot, guild, user_id: int) -> dict[str, int]:
+    """``{building key: tier reached}`` for one person, tiers counted from 1;
+    a building they have not earned is absent."""
+    buildings = bot.dodoland_buildings.buildings(guild.id)
+    since = store_module.days_back(
+        int(bot.dodoland_params.get(guild.id, "dodoland_window_days")))
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
+    person = result["people"].get(int(user_id)) or {}
+    return {key: int(score["tier"]) + 1 for key, score in (person.get("buildings") or {}).items()
+            if score.get("tier") is not None}
+
+
+def _town_may_build(bot, guild, town_id, tile: dict) -> str:
+    """Why this town may not put this tile down, or ``""`` if it may.
+
+    A town builds its own buildings: one of each it has earned, shown at the
+    tier it has reached in it — its achievements, not a catalogue. Blocking.
+    """
+    want = (tile.get("requires") or {}).get("building") or ""
+    if tile.get("layer") != "buildings" or not want:
+        return "A town builds its own buildings; decorate it from the toolkit."
+    tier = _tiers(bot, guild, int(town_id)).get(want)
+    if not tier:
+        return "This town has not earned that building yet."
+    if int((tile.get("requires") or {}).get("tier") or 0) != tier:
+        return "A town builds at the tier it has reached, and only that one."
+    tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild.id)}
+    for piece in bot.dodoland_decor.world(guild.id):
+        if str(piece.get("town") or "") != str(town_id):
+            continue
+        if ((tiles.get(piece.get("asset_id")) or {}).get("requires") or {}).get("building") == want:
+            return "This town has that building already. Move the one it has."
+    return ""
+
+
+def _player_tiles(bot, guild) -> list[dict]:
+    """What players may place on their towns here: map objects with player
+    access. Tiles nobody but admins may use are not shown locked — a lock says
+    "you can earn this", and an admin-only mountain range is not earnable."""
+    # Map objects (layer 3) and the server's buildings (layer 4).
+    return (bot.dodoland_tiles.usable(guild.id, "objects", "player")
+            + bot.dodoland_tiles.usable(guild.id, "buildings", "player"))
+
+
+async def api_town_decor(request: web.Request):
+    """Place, move or remove one piece in your own town.
+
+    Whose town is the session's, never the request's. ``owner_id`` is passed to
+    every write so it narrows the query rather than being checked after the
+    fact: knowing another person's piece id gets you nothing.
+    """
+    import asyncio
+
+    from web.dodoland import player
+
+    bot, guild, uid = request.app["bot"], request["guild"], request["uid"]
+    body = await _body(request)
+    if body is None:
+        return _bad("That request could not be read.")
+    action = str(body.get("action") or "place")
+
+    try:
+        if action == "remove":
+            gone = bot.dodoland_decor.remove(guild.id, body.get("piece_id"),
+                                             owner_id=uid)
+            return web.json_response({"ok": True, "removed": bool(gone)})
+
+        if action == "move":
+            changed = bot.dodoland_decor.move(
+                guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
+                scale=body.get("scale"), flip=body.get("flip"), owner_id=uid,
+                scale_range=_piece_range(bot, guild, body.get("piece_id")))
+            return web.json_response({"ok": True, "changed": bool(changed)})
+
+        # Reading the library and scoring one person is blocking pymongo, and
+        # this handler runs on the bot's own event loop.
+        allowed = await asyncio.get_running_loop().run_in_executor(
+            None, _unlocked, bot, guild, uid)
+        placed = bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)
+        piece = bot.dodoland_decor.place(
+            guild.id, scope=decor_rules.SCOPE_TOWN, owner_id=uid,
+            asset_id=body.get("asset_id"), x=body.get("x"), y=body.get("y"),
+            scale=body.get("scale") or 1.0, flip=bool(body.get("flip")),
+            allowed=allowed,
+            layer=(placed or {}).get("layer", "objects"),
+            scale_range=tile_rules.scale_range(placed))
+        # The map reads decor out of the shared snapshot, so a piece nobody can
+        # see for a minute looks exactly like a piece that did not save.
+        player.invalidate(guild.id)
+        return web.json_response({"ok": True, "piece": piece})
+    except decor_rules.DecorError as error:
+        return _bad(error)
+
+
+async def api_town_toolkit(request: web.Request):
+    """What this person may place, and what they have placed already.
+
+    Locked assets are returned too, with ``locked`` set. A reward you cannot
+    see is not a reward: knowing the gilded banner exists at the third tier of
+    the Gallery is the reason to want the third tier of the Gallery.
+    """
+    import asyncio
+
+    bot, guild, uid = request.app["bot"], request["guild"], request["uid"]
+    allowed = await asyncio.get_running_loop().run_in_executor(
+        None, _unlocked, bot, guild, uid)
+    # Scenery is filtered out rather than shown locked: a lock says "you can
+    # earn this", and a mountain range is not a thing anybody earns.
+    library = _player_tiles(bot, guild)
+    placed = bot.dodoland_decor.town(guild.id, uid)
+    return web.json_response({
+        "ok": True,
+        "assets": [{"asset_id": row["tile_id"], "name": row["name"],
+                    "building": row["requires"]["building"],
+                    "min_tier": row["requires"]["tier"],
+                    "resizable": row["resizable"],
+                    "scale_min": tile_rules.scale_range(row)[0],
+                    "scale_max": tile_rules.scale_range(row)[1],
+                    "locked": row["tile_id"] not in allowed}
+                   for row in library],
+        "placed": [{"piece_id": row["piece_id"], "asset_id": row["asset_id"],
+                    "x": row.get("x"), "y": row.get("y"),
+                    "scale": row.get("scale", 1.0), "flip": bool(row.get("flip"))}
+                   for row in placed],
+        "limit": decor_rules.MAX_PER_TOWN,
+    })
+
+
+async def player_asset_image(request: web.Request):
+    """One tile's first image, for a member's own toolkit and town.
+
+    A **tile** id in the path, which is a library entry, not a person. The rule ``player.py`` keeps — never read a *user* id from a
+    request — is about whose data is being touched, and this touches nobody's.
+    It lives here rather than in ``player.py`` so that file's own guarantee
+    stays checkable by grepping it for ``match_info``.
+    """
+    bot, guild = request.app["bot"], request["guild"]
+    tile_id = request.match_info.get("aid") or ""
+    row = (bot.dodoland_tiles.first_art(tile_id)
+           if bot.dodoland_tiles.visible(tile_id, guild.id) else None)
+    if row is None:
+        return web.Response(status=404, text="Not found.", content_type="text/plain")
+    raw = row.get("data")
+    return web.Response(
+        body=bytes(raw) if raw is not None else b"",
+        content_type=str(row.get("content_type") or "image/png"),
+        # An asset id is never reused, so a long cache is safe.
+        headers={"Cache-Control": "private, max-age=604800, immutable"},
+    )
