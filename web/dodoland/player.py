@@ -100,11 +100,11 @@ def require_town(handler=None, *, world: bool = False, settle: bool = False):
     def decorator(inner):
         @wraps(inner)
         async def wrapper(request: web.Request):
-            from web.routes import _member_of, _session_user, resolve_scope
+            from web.routes import _member_of, _session_user, login_redirect, resolve_scope
 
             uid = _session_user(request)
             if uid is None:
-                raise web.HTTPFound("/login")
+                raise login_redirect(request)
             bot = request.app["bot"]
             try:
                 guild = bot.get_guild(int(request.match_info["gid"]))
@@ -311,11 +311,11 @@ async def player_guilds(bot, user_id) -> list:
 
 async def towns_home(request: web.Request):
     """Where a signed-in member lands: the towns they have, across servers."""
-    from web.routes import _session_user
+    from web.routes import _session_user, login_redirect
 
     uid = _session_user(request)
     if uid is None:
-        raise web.HTTPFound("/login")
+        raise login_redirect(request)
     bot = request.app["bot"]
     guilds = await player_guilds(bot, uid)
 

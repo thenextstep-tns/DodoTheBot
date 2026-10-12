@@ -71,6 +71,26 @@ def _session_user(request: web.Request):
     return payload.get("uid") if payload else None
 
 
+def _safe_next(value) -> str:
+    """A page on this site to return to after signing in, or "". Only a path
+    here ("/towns", "/guild/1/dodoland/me/map"): never another site, so a
+    shared link cannot be used to send someone elsewhere after they log in."""
+    value = str(value or "")
+    if (not value.startswith("/") or value.startswith("//") or chr(92) in value
+            or value.startswith("/login") or value.startswith("/oauth") or len(value) > 500):
+        return ""
+    return value
+
+
+def login_redirect(request: web.Request) -> web.HTTPFound:
+    """To the login, remembering the page that was asked for, so somebody who
+    follows a link to their town's map lands on it after signing in."""
+    from urllib.parse import quote
+
+    wanted = _safe_next(request.path_qs) if request.method == "GET" else ""
+    return web.HTTPFound("/login" + ("?next=" + quote(wanted, safe="") if wanted else ""))
+
+
 def _set_cookie(response: web.Response, name: str, value: str, *, max_age: int) -> None:
     response.set_cookie(
         name, value, max_age=max_age, httponly=True, samesite="Lax", secure=_SECURE, path="/"
@@ -89,7 +109,7 @@ def require_owner(handler):
         uid = _session_user(request)
         bot = request.app["bot"]
         if uid is None:
-            raise web.HTTPFound("/login")
+            raise login_redirect(request)
         if not bot.visibility.is_owner(uid):
             return web.Response(status=403, text="Not authorised (bot owners only).", content_type="text/plain")
         request["uid"] = uid
@@ -138,7 +158,7 @@ def require_scope(minimum: str):
         async def wrapper(request: web.Request):
             uid = _session_user(request)
             if uid is None:
-                raise web.HTTPFound("/login")
+                raise login_redirect(request)
             bot = request.app["bot"]
             try:
                 guild = bot.get_guild(int(request.match_info["gid"]))
@@ -2826,7 +2846,13 @@ def _lang_html(bot) -> str:
 async def login(request: web.Request):
     state = secrets.token_urlsafe(24)
     response = web.HTTPFound(auth.authorize_url(state))
-    _set_cookie(response, auth.STATE_COOKIE, auth.sign({"s": state}), max_age=600)
+    # The page to come back to rides in the signed state cookie, not in the
+    # URL Discord sees.
+    saved = {"s": state}
+    wanted = _safe_next(request.query.get("next"))
+    if wanted:
+        saved["n"] = wanted
+    _set_cookie(response, auth.STATE_COOKIE, auth.sign(saved), max_age=600)
     raise response
 
 
@@ -2879,8 +2905,10 @@ async def oauth_callback(request: web.Request):
 
     # Somebody with no panel access has no dashboard to land on; their reason
     # for signing in is their town.
-    response = web.HTTPFound("/" if (admin_of or bot.visibility.is_owner(uid))
-                             else "/towns")
+    # Back to the page that sent them to sign in (a shared map link), else
+    # the dashboard, or their towns if they have no panel.
+    response = web.HTTPFound(_safe_next(saved.get("n")) or
+                             ("/" if (admin_of or bot.visibility.is_owner(uid)) else "/towns"))
     _set_cookie(
         response,
         auth.SESSION_COOKIE,
@@ -2901,7 +2929,7 @@ async def dashboard(request: web.Request):
     """Everyone with any access lands here; the list is filtered to their servers."""
     uid = _session_user(request)
     if uid is None:
-        raise web.HTTPFound("/login")
+        raise login_redirect(request)
     bot = request.app["bot"]
     entries = await accessible_guilds(bot, uid)
     scope = panel_access.SCOPE_OWNER if bot.visibility.is_owner(uid) else panel_access.highest(
