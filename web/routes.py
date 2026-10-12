@@ -77,18 +77,25 @@ def _safe_next(value) -> str:
     shared link cannot be used to send someone elsewhere after they log in."""
     value = str(value or "")
     if (not value.startswith("/") or value.startswith("//") or chr(92) in value
-            or value.startswith("/login") or value.startswith("/oauth") or len(value) > 500):
+            or value.startswith("/login") or value.startswith("/oauth")
+            or value.startswith("/welcome") or len(value) > 500):
         return ""
     return value
 
 
 def login_redirect(request: web.Request) -> web.HTTPFound:
-    """To the login, remembering the page that was asked for, so somebody who
-    follows a link to their town's map lands on it after signing in."""
+    """To the welcome page, remembering the page that was asked for, so somebody
+    who follows a link to their town's map lands on it after signing in.
+
+    Never straight to Discord: an unknown site that bounces a visitor directly
+    into a Discord sign-in is exactly what a Discord phishing page does, and
+    Google Safe Browsing flagged the domain for it. The welcome page says what
+    this is and that signing in happens on discord.com, and the visitor chooses
+    to continue."""
     from urllib.parse import quote
 
     wanted = _safe_next(request.path_qs) if request.method == "GET" else ""
-    return web.HTTPFound("/login" + ("?next=" + quote(wanted, safe="") if wanted else ""))
+    return web.HTTPFound("/welcome" + ("?next=" + quote(wanted, safe="") if wanted else ""))
 
 
 def _set_cookie(response: web.Response, name: str, value: str, *, max_age: int) -> None:
@@ -2919,8 +2926,65 @@ async def oauth_callback(request: web.Request):
     raise response
 
 
+_WELCOME = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DodoTheBot · sign in</title>
+<link rel="icon" href="/static/favicon-32.png" sizes="32x32">
+<style>
+:root { color-scheme: light dark; --bg: #f6f1e7; --card: #fffaf0; --ink: #2b2118;
+  --soft: #6d5f50; --edge: #e2d6c2; --accent: #5865f2; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17130f; --card: #221c16; --ink: #f1e8da; --soft: #b5a690; --edge: #3a3027; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: var(--bg); color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 520px; width: 100%; background: var(--card); border: 1px solid var(--edge);
+  border-radius: 16px; padding: 28px 28px 22px; }
+h1 { margin: 0 0 6px; font-size: 26px; }
+p { margin: 0 0 14px; }
+.soft { color: var(--soft); font-size: 14px; }
+ul { margin: 0 0 18px; padding-left: 20px; color: var(--soft); font-size: 14px; }
+a.go { display: block; text-align: center; padding: 13px 18px; border-radius: 10px;
+  background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+a.go:hover { filter: brightness(1.08); }
+footer { margin-top: 16px; font-size: 12px; color: var(--soft); text-align: center; }
+</style></head><body>
+<main>
+  <h1>DodoTheBot</h1>
+  <p>The control panel and the DodoLand community map for the Discord servers
+  DodoTheBot is in. Members see their own town; server admins manage the bot.</p>
+  <p class="soft">You sign in with your Discord account, on Discord's own site:</p>
+  <ul>
+    <li>The button takes you to <b>discord.com</b>, where you approve the sign-in.
+      This site never sees your password.</li>
+    <li>It asks only for your Discord username and ID (the <i>identify</i>
+      permission): no email, no messages, no servers joined on your behalf.</li>
+    <li>Nothing here asks for payment, downloads or personal details.</li>
+  </ul>
+  <a class="go" href="__LOGIN__">Continue with Discord</a>
+  <footer>Run by the server admins of the communities DodoTheBot serves.</footer>
+</main>
+</body></html>"""
+
+
+async def welcome(request: web.Request):
+    """What a signed-out visitor sees first: what this site is, and that signing
+    in happens on discord.com. Nothing here redirects on its own."""
+    from urllib.parse import quote
+
+    if _session_user(request) is not None:
+        raise web.HTTPFound(_safe_next(request.query.get("next")) or "/")
+    wanted = _safe_next(request.query.get("next"))
+    target = "/login" + ("?next=" + quote(wanted, safe="") if wanted else "")
+    return web.Response(text=_WELCOME.replace("__LOGIN__", html.escape(target)),
+                        content_type="text/html")
+
+
 async def logout(request: web.Request):
-    response = web.HTTPFound("/login")
+    response = web.HTTPFound("/welcome")
     response.del_cookie(auth.SESSION_COOKIE, path="/")
     raise response
 
@@ -4638,6 +4702,7 @@ def create_app(bot) -> web.Application:
     app.add_routes(
         [
             web.get(r"/{name:google[0-9a-f]+\.html}", site_verification),
+            web.get("/welcome", welcome),
             web.get("/login", login),
             web.get("/oauth/callback", oauth_callback),
             web.get("/logout", logout),
