@@ -1017,6 +1017,9 @@ _SCRIPT = r"""
     view.k = Math.min(kMax(), Math.max(kMin(), view.k));
     clamp();
     apply();
+    // Something waiting for the map's real size (arriving at one's own town).
+    fit.done = true;
+    if (fit.then) { var then = fit.then; fit.then = null; then(); }
   }
   function zoom(f, cx, cy) {
     var n = Math.min(kMax(), Math.max(kMin(), view.k * f));
@@ -3149,5 +3152,23 @@ _SCRIPT = r"""
   // member opens it when they want it.
   if (!D.ep.player) drawer.classList.add('open');
   placeZoom();
+  // Arriving from the entrance page: "Place my town!" lands with placement
+  // ready (?place=1), and a member whose town already stands is taken to it.
+  if (D.ep.player && D.me && byId[D.me]) {
+    var arrive = new URLSearchParams(location.search), mine = byId[D.me];
+    if (mine.plot && (arrive.has('place') || arrive.has('mine'))) {
+      // Centred once the map knows its size; fit() would undo it before then.
+      var goHome = function () {
+        if (view.k < 8 / WS) view.k = Math.min(kMax(), 8 / WS);
+        view.x = frame.clientWidth / 2 - mine.plot.x / 100 * nat.w * view.k;
+        view.y = frame.clientHeight / 2 - mine.plot.y / 100 * nat.h * view.k;
+        clamp(); apply();
+      };
+      if (fit.done) goHome(); else fit.then = goHome;
+      open(D.me);
+    } else if (!mine.plot && arrive.has('place') && D.ep.settle) {
+      settleBtn.onclick();
+    }
+  }
 })();
 """

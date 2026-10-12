@@ -944,3 +944,24 @@ before) the press is not the piece's. `pieceHit` walks
 it, a town or house gets it re-dispatched (`passOn`), otherwise it bubbles on
 to the map (pan, tools). Hover outline and cursor follow the same test.
 Checked in headless Chrome with overlapping pieces, a glow and a town.
+
+### The entrance page is a three-step welcome (12 Oct 2026)
+`/guild/{gid}/dodoland/me` (`player.my_town_page`) was the whole old member
+page: standing tiles, the climb of every building, flourish, the decoration
+catalogue with its size slider, who-you-reached, a customise form. Now it is
+only: 1. name your town, 2. pick a picture (previewed as the flag at once,
+oversized refused before upload), 3. one building shown growing (`_example`:
+`dodoland_entrance_building`, blank = the town hall, else the most tiers;
+`dodoland_entrance_stages` evenly spread tiers, always first and top, drawn
+inline with `townart.building_svg` in one shared crop `_crop` from the
+measured `_TIER_REACH`), then one big button. The button: **Place my town!**
+→ `/me/map?place=1` (map arms the member's own placement) when members may
+settle and the town has no plot; **Go to my town** → `?mine=1` (map centres
+on it after `fit()` and opens its card) when it has one; **Open the map**
+plus a note when an admin places towns; **Save my town** when the map is
+closed. It saves only what changed, then navigates. The page no longer reads
+the standings snapshot at all (no `snapshot()`, no town drawing), so it is
+cheap. Every text is in `helpers/dodoland/page_texts.py` (old keys replaced),
+edited in the panel under *What members can see → Texts on the entrance
+page*. The decor toolkit API (`/me/toolkit`, `/me/decor`) still exists; only
+the page's catalogue went. `player.my_town()` stays (tests use it).

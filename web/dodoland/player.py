@@ -348,230 +348,144 @@ async def towns_home(request: web.Request):
 # --------------------------------------------------------------------------- #
 @require_town
 async def my_town_page(request: web.Request):
-    """One person's town: what stands in it, what it cost, and what is next."""
+    """The entrance to DodoLand: name your town, pick its picture, see what
+    activity does, and go and put it on the map. Nothing else — the standings,
+    the climb and the decorations live on the map, where they mean something."""
     bot, guild, uid = request.app["bot"], request["guild"], request["uid"]
-    loop = asyncio.get_running_loop()
-    town = await loop.run_in_executor(None, my_town, bot, guild, uid)
-
-    details = town["details"]
-    owner = _display(guild, bot, uid)
-    name = town_rules.display_name(details, owner)
-    person = town["person"]
-
-    # The artwork is drawn straight into the page rather than fetched. The map
-    # fetches because it draws hundreds of towns and most are never looked at;
-    # here there is exactly one and it is the thing the page is for.
-    flag_url = f"/guild/{guild.id}/dodoland/me/picture"
-    art = await loop.run_in_executor(
-        None, lambda: _draw(bot, guild, uid, flag_url))
-
     from helpers.dodoland import page_texts
 
     def t(key, **fill):
         # The server's own wording for this page (editable in the panel).
         return page_texts.say(bot.dodoland_params, guild.id, key, **fill)
 
-    if person is None:
-        standing_html = f'<p class="lead">{t("nothing_yet")}</p>'
-        tiles = ""
-    else:
-        standing_html = ""
-        flour = town["flourish"]
-        tiles = "".join(
-            f'<div class="tile"><b>{e(value)}</b><span>{label}</span></div>'
-            for label, value in (
-                (t("tile_standing"), f"{person['power']:,}"),
-                (t("tile_place", towns=town["population"]), f"#{person['place']}"),
-                (t("tile_reached"), f"{person['reached']:,}"),
-                (t("tile_flourish"), flour.get("label") or t("tile_no_flourish")),
-            ))
+    def facts():
+        details = bot.dodoland_towns.get(guild.id, uid) or {}
+        plot = bot.dodoland_buildings.plots(guild.id).get(int(uid))
+        return details, plot, _example(bot, guild)
 
-    body = f"""
-<main class="doc">
-  <section class="hero">
-    <div class="art dltown close {"fl" + str(town["flourish"].get("level", 0))
-                                  if town["flourish"].get("level") else ""}"
-         id="townart">
-      <svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">{art}</svg>
-      <div class="kitlayer" id="kitlayer"></div>
+    details, plot, example = await asyncio.get_running_loop().run_in_executor(None, facts)
+    owner = _display(guild, bot, uid)
+    name = town_rules.display_name(details, owner)
+
+    # Where the big button goes. A town not on the map yet is placed from it
+    # when members may place their own; one already standing is visited.
+    world, settle = world_page_on(bot, guild.id), self_settle_on(bot, guild.id)
+    the_map = f"/guild/{guild.id}/dodoland/me/map"
+    note = ""
+    if world and settle and not plot:
+        go, href = t("place_button"), the_map + "?place=1"
+    elif world and plot:
+        go, href = t("home_button"), the_map + "?mine=1"
+    elif world:
+        go, href = t("map_button"), the_map
+        note = f'<p class="muted small">{t("admin_places")}</p>'
+    else:
+        go, href = t("save_button"), ""
+
+    flag = (f'<img alt="" src="/guild/{guild.id}/dodoland/me/picture">'
+            if details.get("image") else '<span class="noflag">\U0001F3F3️</span>')
+    grow = ""
+    if example:
+        building, stages, box = example
+        figures = '<i class="arrow">→</i>'.join(
+            f'<figure><svg viewBox="{box}" xmlns="http://www.w3.org/2000/svg">'
+            f'<g class="dltown close">{art}</g></svg><figcaption>{e(title)}</figcaption></figure>'
+            for art, title in stages)
+        grow = f"""
+  <section class="step">
+    <span class="num">3</span>
+    <div class="stepbody">
+      <h2>{t("step_grow")}</h2>
+      <p>{t("grow_text", server=guild.name, building=("<b>" + e(building) + "</b>",))}</p>
+      <div class="grow">{figures}</div>
     </div>
-    <div class="heroinfo">
-      <h1 id="townname">{e(name)}</h1>
-      <p class="owner">{t("owner_line", owner=owner, server=guild.name)}
-        {'· <b>' + t("lit") + '</b>' if town['lit'] else '· <span class="muted">' + t("quiet") + '</span>'}</p>
-      {f'<p class="blurb" id="townblurb">{e(details.get("blurb"))}</p>'
-       if details.get("blurb") else ''}
-      {standing_html}
-      <div class="tiles">{tiles}</div>
+  </section>"""
+
+    mb = town_rules.MAX_IMAGE_BYTES // (1024 * 1024)
+    body = f"""
+<main class="doc welcome">
+  <h1>{t("welcome_title")}</h1>
+  <p class="lead">{t("welcome_lead", server=guild.name)}</p>
+
+  <section class="step">
+    <span class="num">1</span>
+    <div class="stepbody">
+      <h2>{t("step_name")}</h2>
+      <input id="tname" maxlength="{town_rules.MAX_NAME}" autocomplete="off"
+        value="{e(details.get('name') or '')}" placeholder="{t('name_placeholder', owner=owner)}">
     </div>
   </section>
 
-  {_flourish_html(town, t)}
-  {_decorate_html(guild, t)}
-  {_climb_html(town, t)}
-  {_friends_html(town, t)}
-  {_customise_html(guild, town, name, t)}
-  <p class="foot">{t("foot")}</p>
+  <section class="step">
+    <span class="num">2</span>
+    <div class="stepbody">
+      <h2>{t("step_picture")}</h2>
+      <p class="muted">{t("picture_hint", mb=mb)}</p>
+      <div class="pick">
+        <div class="flag" id="tflag">{flag}</div>
+        <label class="ghostbtn" for="tpic">{t("picture_change") if details.get("image") else t("picture_choose")}</label>
+        <input id="tpic" type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp">
+      </div>
+    </div>
+  </section>
+{grow}
+  <div class="go">
+    <button id="tgo" data-href="{e(href)}">{go}</button>
+    <p class="cardmsg" id="tmsg"></p>
+    {note}
+  </div>
 </main>
-<script>var GID = "{guild.id}";</script>
+<script>var GID = "{guild.id}", MAX_MB = {mb};</script>
 <script>{_SCRIPT}</script>"""
 
-    # No link to the world yet, and deliberately none rather than a broken one.
-    # The map page is built for an administrator — it carries the settle
-    # controls and the admin toolkit — so handing it to a member would show them
-    # buttons whose endpoints refuse them. ``dodoland_world_page`` currently
-    # gates self-settling only. This linked to a route that was never
-    # registered, which is a 404 for anybody who switched the world on.
     links = f'<a class="dlghost" href="/logout">{t("logout")}</a>'
-    # The map, for a member: their town's area to paint and build in
-    # (web/dodoland/player_map.py), when the server has the world switched on.
-    if world_page_on(bot, guild.id):
-        links = f'<a class="dlghost" href="/guild/{guild.id}/dodoland/me/map">{t("map_link")}</a>' + links
+    if world:
+        links = f'<a class="dlghost" href="{the_map}">{t("map_link")}</a>' + links
     return web.Response(
         text=_shell(f"{name} · {guild.name}", theme.bar(
-            back=("/towns", "Your towns"), title=name,
-            note=f"in {guild.name}", links=links) + body),
+            back=("/towns", "Your towns"), title="\U0001F3D8 DodoLand",
+            links=links) + body),
         content_type="text/html")
 
 
-def _decorate_html(guild, t) -> str:
-    """The toolkit, for the person whose town it is.
-
-    Deliberately empty in the markup and filled from
-    ``/api/guild/{gid}/dodoland/me/toolkit``: what somebody may place depends on
-    what they have built, so it is an answer the server has to give rather than
-    something the page can assume. Locked things come back too and are shown
-    dimmed — a reward you cannot see is not a reward, and knowing the gilded
-    banner exists at the third tier of the Gallery is the reason to want the
-    third tier of the Gallery.
-    """
-    return f"""
-<section class="card">
-  <h2>{t("decorate_title")}</h2>
-  <p class="muted">{t("decorate_intro")}</p>
-  <div class="kitgrid" id="kitgrid"><p class="muted small">Loading…</p></div>
-  <div class="acts">
-    <label class="kitsize">{t("decorate_size")}
-      <input type="range" id="kitscale" min="0.25" max="6" step="0.05" value="1">
-    </label>
-    <button id="kitflip">{t("decorate_mirror")}</button>
-    <button id="kitdel">{t("decorate_remove")}</button>
-  </div>
-  <p class="cardmsg" id="kitmsg"></p>
-</section>"""
+# How far a building at each tier reaches inside townart's 120 x 78 box, over
+# every shape (measured with getBBox): a top tier's beam of light rises far above
+# the box. The stages share one crop, the union of the tiers shown, so they stand
+# on one ground line at one scale and the growth reads as growth.
+_TIER_REACH = {1: (48, 37, 73, 70), 2: (43, 31, 80, 71), 3: (37, 24, 82, 72),
+               4: (35, -4, 89, 73), 5: (26, -9, 94, 74), 6: (25, -24, 95, 75)}
 
 
-def _flourish_html(town: dict, t) -> str:
-    """What your rank does to your town, and the fact that it does only that."""
-    shine = town["flourish"]
-    if not shine.get("level"):
-        return f"""
-<section class="card">
-  <h2>{t("flourish_title")}</h2>
-  <p class="muted">{t("flourish_none")}</p>
-</section>"""
-    return f"""
-<section class="card">
-  <h2>{t("flourish_title")}</h2>
-  <p><b>{e(shine.get('label'))}</b> — {e(shine.get('description'))}</p>
-  <p class="muted">{t("flourish_from", rank=('<b>' + e(shine.get('rank_name') or 'a rank') + '</b>',))}</p>
-</section>"""
+def _crop(tiers) -> str:
+    boxes = [_TIER_REACH[max(1, min(6, t))] for t in tiers]
+    x0, y0 = min(b[0] for b in boxes) - 2, min(b[1] for b in boxes) - 2
+    x1, y1 = max(b[2] for b in boxes) + 2, max(b[3] for b in boxes) + 2
+    return f"{x0} {y0} {x1 - x0} {y1 - y0}"
 
 
-def _climb_html(town: dict, t) -> str:
-    """Every building, what it is worth, and what the next rung costs."""
-    rows = ""
-    for b in town["buildings"]:
-        if b["tier"] is None:
-            badge = f'<span class="badge none">{t("climb_not_yet")}</span>'
-        else:
-            badge = (f'<span class="badge">{e(b["tier_title"] or "Tier")}</span>'
-                     f'<span class="muted small">tier {b["tier"] + 1}'
-                     f' of {b["tiers"]}</span>')
-        if b["next"]:
-            bar = (f'<div class="bar"><i style="width:'
-                   f'{b["next"]["progress"] * 100:.1f}%"></i></div>'
-                   '<div class="muted small">' +
-                   t("climb_more", points="{:,}".format(b["next"]["short"]),
-                     tier=("<b>" + e(b["next"]["title"]) + "</b>",)) +
-                   '</div>')
-        else:
-            bar = f'<div class="muted small">{t("climb_top")}</div>'
-        rooms = " · ".join(f"{e(n)} {p:,}" for n, p in b["rooms"])
-        acts = " · ".join(f"{e(n)} {p:,}" for n, p in b["acts"])
-        detail = ""
-        if rooms or acts:
-            detail = (f'<div class="muted small breakdown">'
-                      f'{("Rooms: " + rooms) if rooms else ""}'
-                      f'{"<br>" if rooms and acts else ""}'
-                      f'{("From: " + acts) if acts else ""}</div>')
-        renamed = ('' if b["name"] == b["given"]
-                   else f'<span class="muted small">({e(b["given"])})</span>')
-        rows += f"""
-  <li class="brow">
-    <div class="bhead"><span class="bicon">{e(b['icon'])}</span>
-      <b>{e(b['name'])}</b> {renamed} {badge}
-      <span class="pts">{b['points']:,}</span></div>
-    {bar}{detail}
-  </li>"""
-    return f"""
-<section class="card">
-  <h2>{t("climb_title")}</h2>
-  <p class="muted">{t("climb_intro")}</p>
-  <ul class="climb">{rows}</ul>
-</section>"""
+def _example(bot, guild):
+    """The building a newcomer sees growing, and the stages shown: ``(name,
+    [(svg, tier title), ...])``, or None when the server has no buildings."""
+    from helpers.dodoland import townart
 
-
-def _friends_html(town: dict, t) -> str:
-    """Who you reached. The number DodoLand is actually built around."""
-    if not town["friends"]:
-        return ""
-    chips = "".join(f'<span class="chip">{e(n)} <b>{c:,}</b></span>'
-                    for n, c in town["friends"])
-    return f"""
-<section class="card">
-  <h2>{t("reached_title")}</h2>
-  <p class="muted">{t("reached_intro", days=town['window'])}</p>
-  <div class="chips">{chips}</div>
-</section>"""
-
-
-def _customise_html(guild, town: dict, name: str, t) -> str:
-    details = town["details"]
-    fields = "".join(
-        f'<label>{e(b["given"])}</label>'
-        f'<input class="bname" data-key="{e(b["key"])}" maxlength="48" '
-        f'value="{e(b["name"])}">'
-        for b in town["buildings"] if b["tier"] is not None)
-    picture = ""
-    if details.get("image"):
-        picture = (f'<div class="cardflag"><img alt="Your town\'s picture" '
-                   f'src="/guild/{guild.id}/dodoland/me/picture"></div>')
-    return f"""
-<section class="card">
-  <h2>{t("customise_title")}</h2>
-  <p class="muted">{t("customise_intro")}</p>
-  <label>{t("label_name")}</label>
-  <input id="tname" maxlength="{town_rules.MAX_NAME}" value="{e(name)}">
-  <label>{t("label_blurb")}</label>
-  <textarea id="tblurb" maxlength="{town_rules.MAX_BLURB}">{e(details.get('blurb') or '')}</textarea>
-  <label>{t("label_picture", mb=town_rules.MAX_IMAGE_BYTES // (1024 * 1024))}</label>
-  <input id="tpic" type="file"
-    accept="image/png,image/jpeg,image/gif,image/webp">
-  {picture}
-  {('<label class="grouplabel">' + t("label_building_names") + '</label>' + fields) if fields else ''}
-  <div class="acts">
-    <button id="tsave" class="own">{t("save")}</button>
-    <button id="tclear">{t("clear_picture")}</button>
-  </div>
-  <p class="cardmsg" id="tmsg"></p>
-</section>"""
-
-
-def _draw(bot, guild, user_id: int, flag_url: str) -> str:
-    from web.dodoland.assets_route import draw_town
-
-    return draw_town(bot, guild, user_id, flag_url=flag_url)
+    buildings = [b for b in bot.dodoland_buildings.buildings(guild.id) if b.get("tiers")]
+    if not buildings:
+        return None
+    params = bot.dodoland_params
+    want = (str(params.get(guild.id, "dodoland_entrance_building") or "").strip()
+            or str(params.get(guild.id, "dodoland_town_hall") or "").strip())
+    building = (next((b for b in buildings if b["key"] == want), None)
+                or max(buildings, key=lambda b: len(b["tiers"])))
+    tiers = building["tiers"]
+    count = max(2, min(len(tiers), int(params.get(guild.id, "dodoland_entrance_stages") or 2)))
+    # Evenly spread, always the first tier and the top one.
+    picks = sorted({round(i * (len(tiers) - 1) / max(1, count - 1)) for i in range(count)})
+    colour = building.get("colour") or townart.colour_for(building["key"])
+    stages = [(townart.building_svg(building.get("shape") or "", i + 1, colour,
+                                    building.get("symbol") or "", uid=f"ex{i + 1}"),
+               str(tiers[i].get("title") or f"Tier {i + 1}"))
+              for i in picks]
+    return building.get("name") or building["key"], stages, _crop([i + 1 for i in picks])
 
 
 # --------------------------------------------------------------------------- #
@@ -708,66 +622,48 @@ h2 { margin: 0 0 8px; font-size: 19px; }
 .lead { color: var(--soft); }
 .muted { color: var(--soft); }
 .small { font-size: 13px; }
-.owner { margin: 0 0 10px; color: var(--soft); font-size: 14px; }
-.blurb { white-space: pre-wrap; margin: 0 0 12px; }
 
-.hero { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap;
-  margin-bottom: 24px; }
-/* The artwork is the page's subject, so it gets a real size rather than the
-   thumbnail it is on the map. It carries `dltown close` because that is the
-   pair of classes the shared artwork rules key off — on the map `close` is
-   toggled by zoom, and on a page showing exactly one town it is simply true. */
-.art { flex: 0 0 320px; max-width: 100%; }
-.art svg { display: block; width: 100%; height: auto; overflow: visible; }
-.heroinfo { flex: 1 1 300px; min-width: 260px; }
-
-.tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.tile { flex: 1 1 auto; min-width: 108px; padding: 10px 12px; border-radius: 10px;
-  background: var(--paper); border: 1px solid var(--edge); }
-.tile b { display: block; font-size: 20px; line-height: 1.2; }
-.tile span { font-size: 12px; color: var(--soft); }
-
-.card { background: var(--paper); border: 1px solid var(--edge);
-  border-radius: 12px; padding: 18px 20px; margin-bottom: 18px; }
-.card p { margin: 0 0 10px; }
-
-ul.climb { list-style: none; margin: 0; padding: 0; }
-.brow { padding: 12px 0; border-top: 1px solid var(--edge); }
-.brow:first-child { border-top: 0; }
-.bhead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.bicon { font-size: 17px; }
-.pts { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .75; }
-.badge { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-  padding: 2px 8px; border-radius: 999px; background: var(--lantern);
-  color: #fff; }
-.badge.none { background: none; border: 1px solid var(--edge); color: var(--soft); }
-/* Progress across the current rung, not from zero: a long climb drawn from
-   zero looks like standing still, which is the opposite of what it is. */
-.bar { height: 6px; border-radius: 999px; background: var(--deep);
-  margin: 8px 0 4px; overflow: hidden; }
-.bar i { display: block; height: 100%; background: var(--lantern); }
-.breakdown { margin-top: 4px; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip { padding: 4px 10px; border-radius: 999px; background: var(--deep);
-  border: 1px solid var(--edge); font-size: 13px; }
-
-label { display: block; font-size: 12px; color: var(--soft); margin: 12px 0 4px; }
-label.grouplabel { margin-top: 20px; font-size: 13px; color: var(--ink);
-  font-weight: 700; }
-input, textarea { width: 100%; padding: 8px 10px; font: inherit; font-size: 14px;
-  border: 1px solid var(--edge); border-radius: 8px; background: var(--deep);
+/* The entrance: three numbered steps and one button, nothing else. */
+.welcome { max-width: 640px; }
+.welcome h1 { font-size: 32px; }
+.welcome .lead { font-size: 16px; margin: 0 0 24px; }
+.step { display: flex; gap: 16px; background: var(--paper);
+  border: 1px solid var(--edge); border-radius: 14px; padding: 18px 20px;
+  margin-bottom: 14px; }
+.step .num { flex: 0 0 34px; height: 34px; border-radius: 50%;
+  background: var(--lantern); color: #fff; font-weight: 700; font-size: 17px;
+  display: grid; place-items: center; }
+.stepbody { flex: 1 1 auto; min-width: 0; }
+.stepbody p { margin: 0 0 10px; }
+input { width: 100%; padding: 11px 13px; font: inherit; font-size: 16px;
+  border: 1px solid var(--edge); border-radius: 10px; background: var(--deep);
   color: var(--ink); }
-textarea { min-height: 84px; resize: vertical; }
-.acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-.acts button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--edge);
-  background: var(--deep); color: var(--ink); font: inherit; cursor: pointer; }
-.acts button.own { background: var(--lantern); border-color: var(--lantern);
-  color: #fff; }
-.acts button:hover { filter: none; opacity: .88; }
+input:focus { outline: 2px solid var(--lantern); outline-offset: 1px; }
+.pick { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.flag { width: 96px; height: 64px; border-radius: 8px; overflow: hidden;
+  background: var(--deep); border: 1px solid var(--edge);
+  display: grid; place-items: center; }
+.flag img { width: 100%; height: 100%; object-fit: cover; }
+.noflag { font-size: 30px; opacity: .5; }
+.ghostbtn { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--edge);
+  background: var(--deep); color: var(--ink); cursor: pointer; font-size: 14px; }
+.ghostbtn:hover { border-color: var(--lantern); }
+.grow { display: flex; align-items: flex-end; gap: 4px; margin-top: 6px; }
+.grow figure { flex: 1 1 0; min-width: 0; margin: 0; text-align: center; }
+.grow svg { display: block; width: 100%; height: auto; max-height: 200px; overflow: visible; }
+.grow figcaption { font-size: 12px; color: var(--soft); margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grow .arrow { flex: 0 0 auto; font-style: normal; color: var(--soft);
+  align-self: center; font-size: 18px; }
+.go { text-align: center; margin-top: 26px; }
+.go button { padding: 15px 38px; border-radius: 999px; border: 0;
+  background: var(--lantern); color: #fff; font: inherit; font-size: 19px;
+  font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.go button:hover { filter: brightness(1.08); }
+.go button:disabled { opacity: .6; cursor: wait; }
 /* A save with no feedback is indistinguishable from no save at all, and the
    message has to appear where the button was rather than somewhere off screen. */
-.cardmsg { margin: 12px 0 0; font-size: 13px; color: var(--soft); min-height: 1em; }
+.cardmsg { margin: 12px 0 0; font-size: 14px; color: var(--soft); min-height: 1em; }
 .cardmsg.bad { color: #c0392b; font-weight: 600; }
 
 .towngrid { display: grid; gap: 12px;
@@ -781,58 +677,54 @@ textarea { min-height: 84px; resize: vertical; }
 .gicon { border-radius: 10px; }
 .gicon.ph { width: 52px; height: 52px; display: grid; place-items: center;
   background: var(--deep); font-size: 22px; }
-.foot { color: var(--soft); font-size: 13px; }
-
-/* The artwork doubles as the placement surface, so decor sits over it in the
-   same coordinate space: a percentage of the town's own box, which is what
-   lets a piece travel with the town when it is moved on the map. */
-.art { position: relative; }
-.art.placing { cursor: crosshair; }
-.kitlayer { position: absolute; inset: 0; }
-.kitpiece { position: absolute; transform: translate(-50%, -85%);
-  cursor: pointer; }
-.kitpiece.flip { transform: translate(-50%, -85%) scaleX(-1); }
-/* An outline, never a filter: a filter rasterises what it touches, and the
-   artwork under it is the one thing that must stay vector. */
-.kitpiece.on { outline: 2px solid var(--lantern); outline-offset: 2px; }
-/* touch-action stops a drag on a piece being taken as a scroll of the page. */
-.kitpiece { touch-action: none; cursor: grab; }
-.kitpiece.dragging { cursor: grabbing; opacity: .85; }
-.kitgrid { display: grid; gap: 8px; margin-top: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
-.kititem { border: 1px solid var(--edge); border-radius: 9px; padding: 6px;
-  background: var(--deep); cursor: pointer; display: flex;
-  flex-direction: column; align-items: center; gap: 4px; font: inherit;
-  color: inherit; }
-.kititem img { width: 100%; height: 44px; object-fit: contain; }
-.kititem.px img { image-rendering: pixelated; }
-.kititem span { font-size: 10px; text-align: center; line-height: 1.2;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 100%; }
-.kititem.armed { border-color: var(--lantern);
-  box-shadow: 0 0 0 2px var(--lantern) inset; }
-/* Locked things are shown, not hidden: knowing the gilded banner exists at the
-   third tier of the Gallery is the reason to want the third tier. */
-.kititem.locked { opacity: .4; cursor: not-allowed; }
-.kititem.locked span::after { content: " F512"; }
-.kitsize { flex: 1 1 140px; display: flex; align-items: center; gap: 8px;
-  margin: 0; }
-.kitsize input { flex: 1 1 auto; }
-@media (max-width: 620px) {
-  .art { flex-basis: 100%; }
+@media (max-width: 520px) {
+  .step { padding: 14px; gap: 12px; }
+  .grow .arrow { display: none; }
 }
 """
 
 _SCRIPT = r"""
 (function () {
-  var msg = document.getElementById('tmsg');
+  var msg = document.getElementById('tmsg'),
+      go = document.getElementById('tgo'),
+      nameBox = document.getElementById('tname'),
+      pic = document.getElementById('tpic'),
+      flag = document.getElementById('tflag');
+  var startName = nameBox.value, chosen = null;
   function say(text, bad) {
-    if (!msg) return;
-    msg.textContent = text;
+    msg.textContent = text || '';
     msg.classList.toggle('bad', !!bad);
   }
+
+  // The picture shows as the flag the moment it is picked, and one over the
+  // limit is refused then, not after a slow upload of it.
+  pic.onchange = function () {
+    var f = pic.files && pic.files[0];
+    if (!f) return;
+    if (f.size > MAX_MB * 1024 * 1024) {
+      chosen = null; pic.value = '';
+      say('That picture is ' + (f.size / 1048576).toFixed(1) + 'MB. The limit is ' +
+          MAX_MB + 'MB, so pick a smaller one.', true);
+      return;
+    }
+    chosen = f;
+    say('');
+    flag.innerHTML = '';
+    var img = document.createElement('img');
+    img.alt = '';
+    img.src = URL.createObjectURL(f);
+    flag.appendChild(img);
+  };
+
+  function onward() {
+    var href = go.dataset.href;
+    if (href) { window.location.href = href; return; }
+    go.disabled = false;
+    say('Saved.');
+    startName = nameBox.value; chosen = null; pic.value = '';
+  }
+
   function post(payload) {
-    say('Saving...');
     // GID is interpolated as a string: a 64-bit snowflake written as a bare
     // numeric literal loses its last digits and every request 404s.
     fetch('/api/guild/' + GID + '/dodoland/me/town', {
@@ -843,35 +735,19 @@ _SCRIPT = r"""
         return {ok: false, error: 'The server answered with ' + r.status + '.'};
       });
     }).then(function (res) {
-      if (!res.ok) { say(res.error || 'That did not work.', true); return; }
-      say('Saved. Reloading...');
-      setTimeout(function () { window.location.reload(); }, 400);
-    }).catch(function (err) { say(String(err), true); });
+      if (!res.ok) { go.disabled = false; say(res.error || 'That did not work.', true); return; }
+      onward();
+    }).catch(function (err) { go.disabled = false; say(String(err), true); });
   }
 
-  var save = document.getElementById('tsave');
-  if (save) save.onclick = function () {
-    var names = {};
-    document.querySelectorAll('.bname').forEach(function (i) {
-      names[i.dataset.key] = i.value;
-    });
-    var payload = {
-      name: document.getElementById('tname').value,
-      blurb: document.getElementById('tblurb').value,
-      building_names: names
-    };
-    var pic = document.getElementById('tpic');
-    var chosen = pic && pic.files && pic.files[0];
+  go.onclick = function () {
+    var payload = {};
+    if (nameBox.value !== startName) payload.name = nameBox.value;
+    // Nothing changed: straight on, no save to wait for.
+    if (!chosen && !('name' in payload)) { onward(); return; }
+    go.disabled = true;
+    say('Saving...');
     if (!chosen) { post(payload); return; }
-    // Caught here rather than after the upload: the commonest refusal is a
-    // picture over the limit, and finding that out after a slow upload of it
-    // is the worst possible moment.
-    if (chosen.size > 6 * 1024 * 1024) {
-      say('That picture is ' + (chosen.size / 1048576).toFixed(1) +
-          'MB. The limit is 6MB, so nothing was saved. Pick a smaller one, or ' +
-          'clear it and save the rest.', true);
-      return;
-    }
     var reader = new FileReader();
     reader.onload = function () {
       payload.image = String(reader.result).split(',').pop();
@@ -880,234 +756,8 @@ _SCRIPT = r"""
     };
     reader.readAsDataURL(chosen);
   };
-
-  var clear = document.getElementById('tclear');
-  if (clear) clear.onclick = function () { post({clear_image: true}); };
-
-  // --- the toolkit ------------------------------------------------------- //
-  // Pick something from the library, click your town to put it down. Click a
-  // piece already down to take hold of it, then size it, mirror it or remove
-  // it. Positions are a percentage of the town's own box, so a piece travels
-  // with the town when it is moved on the map and keeps its place when the
-  // town grows.
-  var kitGrid = document.getElementById('kitgrid'),
-      kitLayer = document.getElementById('kitlayer'),
-      kitMsg = document.getElementById('kitmsg'),
-      kitScale = document.getElementById('kitscale'),
-      townArt = document.getElementById('townart');
-  var kit = {assets: [], placed: [], limit: 0}, armed = null, held = null;
-
-  function kitSay(text, bad) {
-    if (!kitMsg) return;
-    kitMsg.textContent = text || '';
-    kitMsg.classList.toggle('bad', !!bad);
-  }
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
-    });
-  }
-  function assetUrl(id) {
-    return '/guild/' + GID + '/dodoland/me/asset/' + id;
-  }
-
-  // The slider offers what the tile allows; fixed-size tiles get none. The
-  // server clamps whatever arrives, so this is a courtesy, not the rule.
-  function fitScale(id) {
-    if (!kitScale) return;
-    var a = null;
-    kit.assets.forEach(function (x) { if (x.asset_id === id) a = x; });
-    var lo = a ? a.scale_min : 1, hi = a ? a.scale_max : 1;
-    kitScale.min = lo; kitScale.max = hi; kitScale.disabled = lo === hi;
-    kitScale.value = Math.min(hi, Math.max(lo, parseFloat(kitScale.value) || 1));
-  }
-
-  function renderKit() {
-    if (!kit.assets.length) {
-      kitGrid.innerHTML = '<p class="muted small">Nothing in the library for towns yet. ' +
-        'Admins choose which tiles players have access to.</p>';
-      return;
-    }
-    kitGrid.innerHTML = kit.assets.map(function (a) {
-      // Locked things are shown rather than hidden: knowing a thing exists is
-      // the reason to want the tier that unlocks it.
-      return '<button class="kititem' + (a.locked ? ' locked' : '') + (a.resizable ? '' : ' px') +
-        (armed === a.asset_id ? ' armed' : '') + '" data-a="' + a.asset_id +
-        '"' + (a.locked ? ' disabled' : '') + '>' +
-        '<img alt="" loading="lazy" src="' + assetUrl(a.asset_id) + '">' +
-        '<span>' + esc(a.name) + '</span></button>';
-    }).join('');
-    kitGrid.querySelectorAll('.kititem').forEach(function (el) {
-      el.onclick = function () {
-        if (el.classList.contains('locked')) return;
-        armed = (armed === el.dataset.a) ? null : el.dataset.a;
-        held = null;
-        fitScale(armed);
-        townArt.classList.toggle('placing', !!armed);
-        kitSay(armed ? 'Now click your town to put it down.' : '');
-        renderKit();
-      };
-    });
-  }
-
-  function renderPlaced() {
-    kitLayer.innerHTML = kit.placed.map(function (p) {
-      return '<img class="kitpiece' + (p.flip ? ' flip' : '') +
-        (held === p.piece_id ? ' on' : '') + '" data-p="' + p.piece_id +
-        '" alt="" src="' + assetUrl(p.asset_id) + '" style="left:' + p.x +
-        '%;top:' + p.y + '%;width:' + (11 * p.scale) + '%">';
-    }).join('');
-    kitLayer.querySelectorAll('.kitpiece').forEach(function (el) {
-      var p = byPiece(el.dataset.p);
-      if (!p) return;
-      // Drag and select from one gesture. A piece that only listened for
-      // `click` could be picked up and never moved, which is not much of a
-      // toolkit.
-      el.addEventListener('pointerdown', function (ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        var box = townArt.getBoundingClientRect();
-        var start = {x: ev.clientX, y: ev.clientY};
-        var from = {x: p.x, y: p.y};
-        var travelled = 0;
-        try { el.setPointerCapture(ev.pointerId); } catch (e) {}
-        el.classList.add('dragging');
-
-        function onMove(move) {
-          var dx = move.clientX - start.x, dy = move.clientY - start.y;
-          travelled = Math.abs(dx) + Math.abs(dy);
-          if (travelled <= 3) return;
-          // A percentage of the town's own box, which is what the position
-          // means, so a piece keeps its place when the town is moved or grows.
-          p.x = from.x + (dx / box.width) * 100;
-          p.y = from.y + (dy / box.height) * 100;
-          el.style.left = p.x + '%';
-          el.style.top = p.y + '%';
-        }
-
-        function onUp() {
-          el.removeEventListener('pointermove', onMove);
-          el.removeEventListener('pointerup', onUp);
-          el.removeEventListener('pointercancel', onUp);
-          el.classList.remove('dragging');
-          try { el.releasePointerCapture(ev.pointerId); } catch (e) {}
-          if (travelled <= 3) {
-            held = (held === p.piece_id) ? null : p.piece_id;
-            armed = null;
-            townArt.classList.remove('placing');
-            if (held) { fitScale(p.asset_id); kitScale.value = p.scale; kitSay('Held.'); }
-            else { kitSay(''); }
-            renderPlaced();
-            renderKit();
-            return;
-          }
-          held = p.piece_id;
-          renderPlaced();
-          kitPost({action: 'move', piece_id: p.piece_id,
-                   x: Math.round(p.x * 1000) / 1000,
-                   y: Math.round(p.y * 1000) / 1000},
-                  function () { kitSay('Moved.'); });
-        }
-
-        el.addEventListener('pointermove', onMove);
-        el.addEventListener('pointerup', onUp);
-        el.addEventListener('pointercancel', onUp);
-      });
-    });
-    kitLayer.classList.toggle('busy', kit.placed.length > 0);
-  }
-
-  function byPiece(id) {
-    for (var i = 0; i < kit.placed.length; i++) {
-      if (kit.placed[i].piece_id === id) return kit.placed[i];
-    }
-    return null;
-  }
-
-  function kitPost(payload, then) {
-    fetch('/api/guild/' + GID + '/dodoland/me/decor', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    }).then(function (r) {
-      return r.json().catch(function () {
-        return {ok: false, error: 'The server answered with ' + r.status + '.'};
-      });
-    }).then(function (res) {
-      if (!res.ok) { kitSay(res.error || 'That did not work.', true); return; }
-      then(res);
-    }).catch(function (err) { kitSay(String(err), true); });
-  }
-
-  if (townArt) townArt.onclick = function (ev) {
-    if (!armed) {
-      // Nothing armed and nothing under the pointer: let go of whatever was
-      // held, or Remove keeps pointing at a piece nobody is looking at.
-      if (held) { held = null; kitSay(''); renderPlaced(); }
-      return;
-    }
-    var b = townArt.getBoundingClientRect();
-    kitPost({action: 'place', asset_id: armed,
-             x: ((ev.clientX - b.left) / b.width) * 100,
-             y: ((ev.clientY - b.top) / b.height) * 100,
-             scale: parseFloat(kitScale.value) || 1},
-      function (res) {
-        kit.placed.push({piece_id: res.piece.piece_id,
-                         asset_id: res.piece.asset_id, x: res.piece.x,
-                         y: res.piece.y, scale: res.piece.scale,
-                         flip: !!res.piece.flip});
-        renderPlaced();
-        kitSay('Placed. ' + kit.placed.length + ' of ' + kit.limit + '.');
-      });
-  };
-
-  if (kitScale) kitScale.oninput = function () {
-    var p = byPiece(held);
-    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
-    p.scale = parseFloat(kitScale.value) || 1;
-    // The width only. Re-rendering the layer on every step of a slider throws
-    // the element out from under the pointer.
-    var el = kitLayer.querySelector('[data-p="' + p.piece_id + '"]');
-    if (el) el.style.width = (11 * p.scale) + '%';
-  };
-  if (kitScale) kitScale.onchange = function () {
-    var p = byPiece(held);
-    if (!p) return;
-    kitPost({action: 'move', piece_id: p.piece_id, scale: p.scale},
-            function () { kitSay('Resized.'); });
-  };
-  var flipBtn = document.getElementById('kitflip');
-  if (flipBtn) flipBtn.onclick = function () {
-    var p = byPiece(held);
-    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
-    p.flip = !p.flip;
-    renderPlaced();
-    kitPost({action: 'move', piece_id: p.piece_id, flip: p.flip},
-            function () { kitSay('Mirrored.'); });
-  };
-  var delBtn = document.getElementById('kitdel');
-  if (delBtn) delBtn.onclick = function () {
-    var p = byPiece(held);
-    if (!p) { kitSay('Click a piece you have placed first.', true); return; }
-    kitPost({action: 'remove', piece_id: p.piece_id}, function () {
-      kit.placed = kit.placed.filter(function (q) {
-        return q.piece_id !== p.piece_id;
-      });
-      held = null;
-      renderPlaced();
-      kitSay('Removed.');
-    });
-  };
-
-  // What may be placed depends on what has been built, so the server answers
-  // it rather than the page assuming.
-  fetch('/api/guild/' + GID + '/dodoland/me/toolkit')
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (!res.ok) { kitSay('The toolkit could not be loaded.', true); return; }
-      kit = res;
-      renderKit();
-      renderPlaced();
-    })
-    .catch(function () { kitSay('The toolkit could not be loaded.', true); });
+  nameBox.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') go.click();
+  });
 })();
 """

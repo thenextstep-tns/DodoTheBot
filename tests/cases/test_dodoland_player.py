@@ -192,35 +192,44 @@ body = response.text
 assert response.status == 200
 print(f"page            renders, {len(body):,} bytes")
 
+# The entrance is three steps and one button: name, picture, how it grows, and
+# off to the map. Nothing a newcomer has to read past to get there.
 for needle, why in (
-    ("The Grand Library", "a building"),
-    ("The Menagerie", "a building nothing has been built in yet"),
-    ("Desk", "the tier reached"),
-    ("Athenaeum", "the tier above, which is the point of the page"),
-    ("more to reach", "what the next rung costs"),
-    ("#help", "which room the points came from"),
-    ("town standing", "the standing tile"),
-    ("people reached", "reach, which is what DodoLand counts"),
-    ("Flourish", "what a trial rank does to a town"),
-    ("Customise", "the part that belongs to its owner"),
+    ("Welcome to DodoLand", "the heading"),
+    ('id="tname"', "the name field"),
+    ('id="tpic"', "the picture picker"),
+    ("Watch it grow", "what activity does"),
+    ("Place my town!", "the way onto the map"),
 ):
-    assert needle in body, f"the town page is missing {why} ({needle!r})"
-print("page            standing, the climb, the next rung and the editor are all there")
+    assert needle in body, f"the entrance is missing {why} ({needle!r})"
+for needle, why in (
+    ("kitgrid", "the decoration catalogue"),
+    ("kitscale", "the size slider"),
+    ("The climb", "the whole building list"),
+    ("town standing", "the standing tiles"),
+):
+    assert needle not in body, f"the entrance still shows {why} ({needle!r})"
+print("page            name, picture, how it grows and one button; no catalogue, slider or list")
 
-# Every building the server has, not only the ones already standing: what is not
-# in your town yet and what it would cost is the most useful row on the page.
-assert "not yet" in body, "a building nobody has reached is hidden rather than shown"
-print("page            unbuilt buildings are shown, with what they would take")
+# One building, shown growing from its first tier to its top one: the server's
+# building with the most tiers, since it has no town hall.
+assert "The Grand Library" in body and "Desk" in body and "Athenaeum" in body
+assert "The Forge" not in body, "more than the one example building is shown"
+assert body.count('<g class="dltown close">') == 2, "not one drawing per stage shown"
+print("page            one example building, first tier to top, drawn close-up")
 
-# The artwork is drawn into the page, not fetched. There is exactly one town
-# here and it is what the page is for, so a second request for it is a flash of
-# nothing for no reason.
-assert "<svg viewBox=\"0 0 120 78\"" in body, "the town is not drawn on the page"
-assert "/art" not in body, "the town page is fetching artwork it could have drawn"
-# ...and it is wrapped in the pair of classes the shared artwork rules key off,
-# or the inhabitants stand still and the flourishes never appear.
-assert re.search(r'class="art dltown close', body), "the artwork is not marked close-up"
-print("page            the town is drawn inline, close-up, with its life running")
+# The button: a town not on the map yet is placed from it; with settling off an
+# admin places it, so it only opens the map; with the map closed it only saves.
+assert "/dodoland/me/map?place=1" in body
+bot.dodoland_params.set(GUILD_ID, "dodoland_self_settle", False)
+closed = build(NIK).text
+assert "Open the map" in closed and "?place=1" not in closed
+bot.dodoland_params.set(GUILD_ID, "dodoland_world_page", False)
+shut = build(NIK).text
+assert "Save my town" in shut and "/me/map" not in shut
+bot.dodoland_params.set(GUILD_ID, "dodoland_world_page", True)
+bot.dodoland_params.set(GUILD_ID, "dodoland_self_settle", True)
+print("page            the button places, opens the map or saves, as the server allows")
 
 # Snowflakes reach JavaScript as strings. As a bare numeric literal a 64-bit id
 # loses its last digits and every request 404s. This has caused an outage.
@@ -228,8 +237,8 @@ assert f'var GID = "{GUILD_ID}"' in body, "the guild id is not a string in JS"
 print("page            the guild id reaches JavaScript as a string")
 
 # A save with no feedback is indistinguishable from no save.
-assert 'id="tmsg"' in body and ".cardmsg.bad" in body,     "a refused save has nowhere to say so"
-assert "6 * 1024 * 1024" in body, "an oversized picture is not caught before the upload"
+assert 'id="tmsg"' in body and ".cardmsg.bad" in body, "a refused save has nowhere to say so"
+assert "MAX_MB * 1024 * 1024" in body, "an oversized picture is not caught before the upload"
 print("page            saves report where the button was, oversized pictures early")
 
 # Every animation the page references has to be defined, and every keyframe it
@@ -241,12 +250,11 @@ assert not (names - defined), f"animations with no keyframes: {sorted(names - de
 assert not (defined - names), f"keyframes nothing uses: {sorted(defined - names)}"
 print(f"page            all {len(names)} animations are both defined and used")
 
-# Somebody with nothing counted still gets a page, and a tent rather than an
-# error. Being new is not a failure state.
+# Somebody with nothing counted gets the same welcome. Being new is not a
+# failure state.
 fresh = build(ROSA).text
-assert "Nothing has been counted for you yet" in fresh
-assert "The Grand Library" in fresh, "a newcomer is not shown what there is to build"
-print("page            a newcomer gets a tent and the whole climb, not an error")
+assert "Welcome to DodoLand" in fresh and "Rosa&#x27;s town" in fresh
+print("page            a newcomer gets the same welcome, their name suggested")
 
 
 # --------------------------------------------------------------------------- #
@@ -278,9 +286,9 @@ print("writes          an id in the body is ignored; the session decides the tow
 
 player.invalidate(GUILD_ID)
 named = build(NIK).text
-assert "Beanburg" in named and "The Drunken Archive" in named
-assert "The Grand Library" in named, "the building's given name is no longer shown"
-print("writes          a renamed town and a renamed building both show, beside the given name")
+assert 'value="Beanburg"' in named, "the saved name is not in the name field"
+assert bot.dodoland_towns.get(GUILD_ID, NIK)["building_names"]["library"] == "The Drunken Archive"
+print("writes          a renamed town comes back in its field; building names still save")
 
 # Naming is authored and moves no number: the same standing before and after.
 before = player.my_town(bot, guild, NIK)["person"]["power"]

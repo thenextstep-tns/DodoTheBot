@@ -340,7 +340,8 @@ _MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
                    "dodoland_lod_buildings", "dodoland_lod_houses", "dodoland_lod_life",
                    "dodoland_lod_influence", "dodoland_lod_walls", "dodoland_lod_forest")
 _PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
-                "dodoland_self_settle", "dodoland_player_cache_seconds")
+                "dodoland_self_settle", "dodoland_player_cache_seconds",
+                "dodoland_entrance_building", "dodoland_entrance_stages")
 def _text_keys() -> tuple:
     from helpers.dodoland import page_texts
 
@@ -544,9 +545,10 @@ def _players_html(bot, guild) -> str:
   {where}
   {state}
   <div class="params">{rows}</div>
-  <h3>Texts on a member's town page</h3>
-  <p class="muted small">Every heading, explanation, label and button a member
-  reads on their own town page. Each starts with the wording it has always had;
+  <h3>Texts on the entrance page</h3>
+  <p class="muted small">Every heading, explanation and button a member reads on
+  the entrance page, where they name their town, pick its picture and go to the
+  map. Each starts with the page's own wording;
   blank brings the default back. Words in braces, like <code>{{days}}</code>, are
   filled in by the page.</p>
   <div class="params">{texts}</div>
