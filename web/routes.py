@@ -2953,19 +2953,18 @@ a.go:hover { filter: brightness(1.08); }
 footer { margin-top: 16px; font-size: 12px; color: var(--soft); text-align: center; }
 </style></head><body>
 <main>
-  <h1>DodoTheBot</h1>
-  <p>The control panel and the DodoLand community map for the Discord servers
-  DodoTheBot is in. Members see their own town; server admins manage the bot.</p>
+  <h1>Hi! You found the Dodo app!</h1>
+  <p>If you're an admin of the server Dodo is in, you can edit a lot of settings here. If you're a user, you will find the community map if it's unlocked for your server.</p>
   <p class="soft">You sign in with your Discord account, on Discord's own site:</p>
   <ul>
     <li>The button takes you to <b>discord.com</b>, where you approve the sign-in.
-      This site never sees your password.</li>
+      This site never sees your password or asks for it.</li>
     <li>It asks only for your Discord username and ID (the <i>identify</i>
       permission): no email, no messages, no servers joined on your behalf.</li>
     <li>Nothing here asks for payment, downloads or personal details.</li>
   </ul>
   <a class="go" href="__LOGIN__">Continue with Discord</a>
-  <footer>Run by the server admins of the communities DodoTheBot serves.</footer>
+  <footer>Run by @ladushkin (Fox) and server admins of the communities Dodo is part of</footer>
 </main>
 </body></html>"""
 
