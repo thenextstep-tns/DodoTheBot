@@ -133,6 +133,13 @@ class DecorStore:
             **({"owner_id": int(owner_id)} if scope == SCOPE_TOWN else {}),
         }))
 
+    def town_count(self, guild_id: int, town: str) -> int:
+        """How many world pieces belong to one town: its buildings and what its
+        owner has put around it."""
+        self._ensure_indexes()
+        return int(self._col.count_documents({
+            "guild_id": int(guild_id), "scope": SCOPE_WORLD, "town": str(town)[:24]}))
+
     # ------------------------------------------------------------------ #
     #  Writes
     # ------------------------------------------------------------------ #
@@ -184,7 +191,8 @@ class DecorStore:
         return row
 
     def place_many(self, guild_id: int, items: list[dict], *, placed_by: int = 0,
-                   placed_by_name: str = "", locked: bool = False) -> list[dict]:
+                   placed_by_name: str = "", locked: bool = False,
+                   town: str = "") -> list[dict]:
         """Many world pieces in one write — a brush stroke.
 
         Each item is ``{asset_id, x, y, scale, flip, variant, layer,
@@ -205,9 +213,11 @@ class DecorStore:
                           variant=item.get("variant") or "", layer=item.get("layer") or "objects",
                           placed_by=placed_by, placed_by_name=placed_by_name)
                 for item in items]
-        if locked:
-            for row in rows:
+        for row in rows:
+            if locked:
                 row["locked"] = True
+            if town:
+                row["town"] = str(town)[:24]   # a member's own, around their town
         self._col.insert_many([dict(row) for row in rows])
         return rows
 

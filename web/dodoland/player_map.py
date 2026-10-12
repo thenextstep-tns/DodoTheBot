@@ -16,7 +16,10 @@ narrow what it offers and accepts:
   what they painted (``terrain_api.api_player_terrain_undo``);
 * **building** is :func:`build` — their own town's buildings only, at the tier
   they have reached, one of each, inside their area. The same rules the admin
-  Build button follows (``decor_api._town_may_build``).
+  Build button follows (``decor_api._town_may_build``);
+* **decorating** is :func:`build` too — anything from the library with player
+  access that they have unlocked, inside their own area, up to
+  ``dodoland_member_pieces`` pieces, with the pencil or the brush.
 
 The handlers never read a user id from the request: whose town it is comes from
 the session, through the gate, as everywhere on the player side.
@@ -25,8 +28,14 @@ the session, through the gate, as everywhere on the player side.
 from __future__ import annotations
 
 import asyncio
+import time
 
 from aiohttp import web
+
+# What a member has unlocked, for a minute: working it out reads their standing,
+# and a pencil click each second should not do that each time.
+_UNLOCKED: dict = {}
+_UNLOCKED_S = 60.0
 
 
 def _base(request: web.Request) -> str:
@@ -88,6 +97,87 @@ async def undo(request: web.Request):
 
 def _bad(error) -> web.Response:
     return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
+def _unlocked(bot, guild, uid) -> set:
+    from web.dodoland import decor_api
+
+    key = (guild.id, int(uid))
+    hit = _UNLOCKED.get(key)
+    if hit and time.time() - hit[0] < _UNLOCKED_S:
+        return hit[1]
+    allowed = decor_api._unlocked(bot, guild, int(uid))
+    _UNLOCKED[key] = (time.time(), allowed)
+    return allowed
+
+
+def _decor_tile(bot, guild, uid, tile_id):
+    """The tile, if a member may decorate with it; else why not. Blocking."""
+    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
+    if tile is None:
+        return None, "That is not in this server's library."
+    if "player" not in tile["access"] or tile["placement"] != "place":
+        return None, "Members cannot place that one; it is for admins."
+    if tile["tile_id"] not in _unlocked(bot, guild, uid):
+        need = tile.get("requires") or {}
+        return None, (f"That unlocks at tier {need.get('tier')} of the {need.get('building')}."
+                      if need.get("building") else "That one is not unlocked yet.")
+    return tile, ""
+
+
+def _inside(area: set, world: dict, x, y) -> bool:
+    try:
+        cx = int(float(x) / 100 * world["cells_w"])
+        cy = int(float(y) / 100 * world["cells_h"])
+    except (TypeError, ValueError):
+        return False
+    return (cx, cy) in area
+
+
+def _decorate(bot, guild, uid, member, body, many: bool):
+    """Put a member's own decoration down: one piece, or a brush stroke.
+    Blocking. Returns ``(response payload, error)``."""
+    from helpers.dodoland import tiles as tile_rules
+
+    mine = str(uid)
+    area = _area(bot, guild, uid)
+    if not area:
+        return None, "Your town is not on the map yet. Place it first."
+    world = bot.dodoland_terrain.world(guild.id)
+    room = (int(bot.dodoland_params.get(guild.id, "dodoland_member_pieces"))
+            - bot.dodoland_decor.town_count(guild.id, mine))
+    if room <= 0:
+        return None, "Your town has as much placed as a member may place. Remove something first."
+    raw = (body.get("items") or []) if many else [body]
+    if not isinstance(raw, list) or not raw:
+        return None, "A stroke needs at least one piece."
+    tiles: dict = {}
+    items = []
+    for item in raw[:400]:
+        tid = str((item or {}).get("asset_id") or "")
+        if tid not in tiles:
+            tiles[tid] = _decor_tile(bot, guild, uid, tid)
+        tile, why = tiles[tid]
+        if tile is None:
+            return None, why
+        # Only inside the town's own area. A stroke that spills over its edge
+        # keeps what landed inside.
+        if not _inside(area, world, item.get("x"), item.get("y")):
+            continue
+        items.append({"asset_id": tile["tile_id"], "x": item.get("x"), "y": item.get("y"),
+                      "scale": item.get("scale") or 1.0, "flip": bool(item.get("flip")),
+                      "scale_range": tile_rules.scale_range(tile),
+                      "variant": tile["variants"][0] if tile["variants"] else "",
+                      "layer": tile["layer"]})
+    if not items:
+        return None, "That is outside your town's area. Decorate inside its reach."
+    items = items[:room]
+    rows = bot.dodoland_decor.place_many(
+        guild.id, items, placed_by=int(uid),
+        placed_by_name=getattr(member, "display_name", "") or "", town=mine)
+    if many:
+        return {"ok": True, "pieces": rows}, ""
+    return {"ok": True, "piece": rows[0]}, ""
 
 
 async def build(request: web.Request):
@@ -156,11 +246,20 @@ async def build(request: web.Request):
             gone = bot.dodoland_decor.remove_many(guild.id, ids)
             return web.json_response({"ok": True, "removed": gone})
 
+        if action == "place_many":
+            done, why = await loop.run_in_executor(
+                None, _decorate, bot, guild, uid, request.get("member"), body, True)
+            return web.json_response(done) if done else _bad(why)
         if action != "place":
-            return _bad("Members build, move and remove their own town's buildings.")
+            return _bad("Members place, move and remove their own town's things.")
         tile = bot.dodoland_tiles.visible(body.get("asset_id"), guild.id)
         if tile is None:
-            return _bad("That building is not on this server.")
+            return _bad("That is not in this server's library.")
+        if not (tile.get("layer") == "buildings" and (tile.get("requires") or {}).get("building")):
+            # Not one of the town's own buildings: a decoration from the toolkit.
+            done, why = await loop.run_in_executor(
+                None, _decorate, bot, guild, uid, request.get("member"), body, False)
+            return web.json_response(done) if done else _bad(why)
         ok = await loop.run_in_executor(None, influence_api.inside, bot, guild, mine,
                                         body.get("x") or 0, body.get("y") or 0)
         if not ok:

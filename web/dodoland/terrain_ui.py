@@ -966,6 +966,7 @@ SCRIPT = r"""
         var g = document.getElementById('dltinfl');
         if (!g) return;
         D.influence = res.towns || [];
+        if (typeof refreshPop === 'function') refreshPop();
         g.innerHTML = D.influence.map(function (t) {
           // The line is the smoothed border when there is one: the stepped
           // cell edges read as a staircase from any distance.

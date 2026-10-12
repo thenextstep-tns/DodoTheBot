@@ -278,6 +278,19 @@ def inside(bot, guild, town_id, x_pct: float, y_pct: float) -> bool:
     return (x, y) in cells
 
 
+def claimed_by(bot, guild, x_pct: float, y_pct: float, *, but: str = "") -> str:
+    """Whose area a map position lies in, other than ``but``'s, or ``""``.
+    Blocking. A town is founded on open ground: never inside somebody else's
+    reach, though it may grow into it later."""
+    payload = current(bot, guild)
+    x = int(float(x_pct) / 100 * payload["cells_w"])
+    y = int(float(y_pct) / 100 * payload["cells_h"])
+    for town, cells in (_CELLS.get(guild.id) or {}).items():
+        if town != str(but) and (x, y) in cells:
+            return town
+    return ""
+
+
 async def influence_layer(request: web.Request):
     """``GET /guild/{gid}/dodoland/influence`` — the Influence layer's data."""
     bot, guild = request.app["bot"], request["guild"]

@@ -38,6 +38,21 @@ MAX_IMAGE_BYTES = 6 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
 
 
+def sniff_image(data: bytes) -> str:
+    """The picture's real type from its first bytes, or ``""``. What a browser
+    says a file is comes from its name, and a name is anything anybody types."""
+    head = bytes(data[:12])
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
 class TownError(ValueError):
     """A rejected town edit, with a message meant for the panel."""
 
@@ -166,26 +181,43 @@ class TownStore:
                              {"$set": {"houses": {str(k): v for k, v in houses.items()}}}, upsert=True)
 
     def save_image(self, guild_id: int, user_id: int,
-                   image: Optional[dict]) -> None:
-        """Store or clear a town's picture. ``None`` removes it."""
+                   image: Optional[dict], *, max_bytes: Optional[int] = None) -> None:
+        """Store or clear a town's picture. ``None`` removes it.
+
+        ``max_bytes`` is the server's own limit (``dodoland_picture_max_kb``);
+        :data:`MAX_IMAGE_BYTES` is only the ceiling it can never pass. The type
+        stored is the one read from the file, never the one claimed for it."""
         self._ensure_indexes()
         query = {"guild_id": int(guild_id), "user_id": int(user_id)}
         if image is None:
             self._col.update_one(query, {"$unset": {"image": ""}}, upsert=True)
             return
-        content_type = str(image.get("content_type") or "").lower()
-        if content_type not in ALLOWED_IMAGE_TYPES:
-            raise TownError("A town picture must be a PNG, JPEG, GIF or WebP.")
         data = image.get("data") or b""
         if not data:
             raise TownError("That file is empty.")
-        if len(data) > MAX_IMAGE_BYTES:
-            raise TownError(f"A picture must be under "
-                            f"{MAX_IMAGE_BYTES // (1024 * 1024)}MB.")
+        content_type = sniff_image(data)
+        if content_type not in ALLOWED_IMAGE_TYPES:
+            raise TownError("A town picture must be a PNG, JPEG, GIF or WebP.")
+        limit = min(MAX_IMAGE_BYTES, int(max_bytes)) if max_bytes else MAX_IMAGE_BYTES
+        if len(data) > limit:
+            raise TownError(f"A picture must be under {size_label(limit)}.")
         self._col.update_one(
             query, {"$set": {"image": {"data": data, "content_type": content_type}}},
             upsert=True,
         )
+
+
+def size_label(limit: int) -> str:
+    """A byte limit as people say it: 1MB, 512KB, 1.5MB."""
+    if limit >= 1024 * 1024:
+        return f"{limit / (1024 * 1024):g}MB"
+    return f"{max(1, limit // 1024)}KB"
+
+
+def picture_limit(params, guild_id: int) -> int:
+    """This server's largest town picture, in bytes (never past the ceiling)."""
+    kb = int(params.get(guild_id, "dodoland_picture_max_kb") or 0)
+    return min(MAX_IMAGE_BYTES, kb * 1024) if kb > 0 else MAX_IMAGE_BYTES
 
 
 def display_name(details: dict, fallback: str) -> str:

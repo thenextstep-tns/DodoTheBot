@@ -341,7 +341,9 @@ _MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
                    "dodoland_lod_influence", "dodoland_lod_walls", "dodoland_lod_forest")
 _PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
                 "dodoland_self_settle", "dodoland_player_cache_seconds",
-                "dodoland_entrance_building", "dodoland_entrance_stages")
+                "dodoland_entrance_building", "dodoland_entrance_stages",
+                "dodoland_member_pieces", "dodoland_picture_max_kb",
+                "dodoland_population_per_cell")
 def _text_keys() -> tuple:
     from helpers.dodoland import page_texts
 

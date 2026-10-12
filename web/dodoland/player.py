@@ -401,7 +401,8 @@ async def my_town_page(request: web.Request):
     </div>
   </section>"""
 
-    mb = town_rules.MAX_IMAGE_BYTES // (1024 * 1024)
+    limit = town_rules.picture_limit(bot.dodoland_params, guild.id)
+    mb = town_rules.size_label(limit)
     body = f"""
 <main class="doc welcome">
   <h1>{t("welcome_title")}</h1>
@@ -435,7 +436,7 @@ async def my_town_page(request: web.Request):
     {note}
   </div>
 </main>
-<script>var GID = "{guild.id}", MAX_MB = {mb};</script>
+<script>var GID = "{guild.id}", MAX_BYTES = {limit}, MAX_LABEL = "{mb}";</script>
 <script>{_SCRIPT}</script>"""
 
     links = f'<a class="dlghost" href="/logout">{t("logout")}</a>'
@@ -560,6 +561,7 @@ async def api_my_town(request: web.Request):
             bot.dodoland_towns.save_image(
                 guild.id, uid,
                 {"data": blob, "content_type": str(body.get("content_type") or "")},
+                max_bytes=town_rules.picture_limit(bot.dodoland_params, guild.id),
             )
     except town_rules.TownError as error:
         return _bad(error)
@@ -590,6 +592,18 @@ async def api_my_settle(request: web.Request):
         x, y = float(body.get("x")), float(body.get("y"))
     except (TypeError, ValueError):
         return _bad("A town needs a position.")
+    # Founded on open ground: never inside another town's area. It may grow
+    # into one later; it may not be dropped into one.
+    from web.dodoland import influence_api
+    other = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: influence_api.claimed_by(bot, guild, x, y, but=str(uid)))
+    if other:
+        member = guild.get_member(int(other)) if other.isdigit() else None
+        whose = (town_rules.display_name(bot.dodoland_towns.get(guild.id, int(other)) or {},
+                                         member.display_name if member else "another town")
+                 if other.isdigit() else "another town")
+        return _bad(f"That is inside {whose}'s area. Put your town on open ground; "
+                    "it can grow into its neighbours later.")
     # Everything in the town moves with it (web/dodoland/town_move.py).
     from web.dodoland import town_move
     spot = await asyncio.get_running_loop().run_in_executor(
@@ -698,13 +712,21 @@ _SCRIPT = r"""
 
   // The picture shows as the flag the moment it is picked, and one over the
   // limit is refused then, not after a slow upload of it.
+  var KINDS = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   pic.onchange = function () {
     var f = pic.files && pic.files[0];
     if (!f) return;
-    if (f.size > MAX_MB * 1024 * 1024) {
+    var ext = /\.(png|jpe?g|gif|webp)$/i.test(f.name);
+    if (KINDS.indexOf(f.type) < 0 || !ext) {
       chosen = null; pic.value = '';
-      say('That picture is ' + (f.size / 1048576).toFixed(1) + 'MB. The limit is ' +
-          MAX_MB + 'MB, so pick a smaller one.', true);
+      say('That is not a picture this takes. Use a PNG, JPG, GIF or WebP.', true);
+      return;
+    }
+    if (f.size > MAX_BYTES) {
+      chosen = null; pic.value = '';
+      say('That picture is ' + (f.size > 1048576 ? (f.size / 1048576).toFixed(1) + 'MB'
+          : Math.round(f.size / 1024) + 'KB') + '. The limit is ' + MAX_LABEL +
+          ', so pick a smaller one.', true);
       return;
     }
     chosen = f;

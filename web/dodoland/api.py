@@ -188,6 +188,7 @@ async def api_dodoland_town(request: web.Request):
             bot.dodoland_towns.save_image(
                 guild.id, user_id,
                 {"data": blob, "content_type": str(body.get("content_type") or "")},
+                max_bytes=town_rules.picture_limit(bot.dodoland_params, guild.id),
             )
     except town_rules.TownError as error:
         return _bad(error)

@@ -27,7 +27,7 @@ TEXTS = [
     ("name_placeholder", "Step 1: the empty name field", "{owner}'s town", ("owner",)),
     ("step_picture", "Step 2: heading", "Pick a picture", ()),
     ("picture_hint", "Step 2: explanation",
-     "It flies as your town's flag. PNG, JPG, GIF or WebP, under {mb}MB.", ("mb",)),
+     "It flies as your town's flag. PNG, JPG, GIF or WebP, under {mb}.", ("mb",)),
     ("picture_choose", "Step 2: button when there is no picture yet", "Choose a picture", ()),
     ("picture_change", "Step 2: button when there is one", "Change picture", ()),
     ("step_grow", "Step 3: heading", "Watch it grow", ()),

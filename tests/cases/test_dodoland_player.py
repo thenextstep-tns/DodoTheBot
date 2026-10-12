@@ -238,7 +238,7 @@ print("page            the guild id reaches JavaScript as a string")
 
 # A save with no feedback is indistinguishable from no save.
 assert 'id="tmsg"' in body and ".cardmsg.bad" in body, "a refused save has nowhere to say so"
-assert "MAX_MB * 1024 * 1024" in body, "an oversized picture is not caught before the upload"
+assert "f.size > MAX_BYTES" in body and "MAX_BYTES = 1048576" in body, "an oversized picture is not caught before the upload"
 print("page            saves report where the button was, oversized pictures early")
 
 # Every animation the page references has to be defined, and every keyframe it
@@ -320,6 +320,68 @@ settle(NIK, {"x": 30.0, "y": 40.0, "user_id": FOX})
 plots = bot.dodoland_buildings.plots(GUILD_ID)
 assert NIK in plots and FOX not in plots,     "settling with an id in the body placed somebody else's town"
 print("settling        a member places their own town and nobody else's")
+
+# A town is founded on open ground: never inside another town's area (it may
+# grow into one later). Its own area is open ground to it.
+from web.dodoland import influence_api as _IA  # noqa: E402
+
+_real_current = _IA.current
+_IA.current = lambda bot, guild: {"cells_w": 100, "cells_h": 100, "towns": []}
+_IA._CELLS[GUILD_ID] = {str(FOX): {(60, 60)}, str(NIK): {(30, 40)}}
+refused = settle(NIK, {"x": 60.5, "y": 60.5})
+assert not _json.loads(refused.body.decode())["ok"], "a town was dropped inside another town's area"
+assert "area" in _json.loads(refused.body.decode())["error"]
+assert bot.dodoland_buildings.plots(GUILD_ID)[NIK]["x"] == 30.0, "the refused move moved it anyway"
+assert _json.loads(settle(NIK, {"x": 30.5, "y": 40.5}).body.decode())["ok"], "its own area was refused"
+print("settling        never inside another town's area; its own area is fine")
+
+# Members decorate their own area from the toolkit: what members may place and
+# have unlocked, inside their area, up to the server's limit.
+from web.dodoland import player_map as _PM  # noqa: E402
+
+_cat = bot.dodoland_tiles.add_category("Flowers")
+_tulip = bot.dodoland_tiles.add_tile(name="Tulip", cat_id=_cat["cat_id"], data=b"<svg/>",
+                                     content_type="image/svg+xml", guild_id=GUILD_ID,
+                                     layer="objects", placement="place", access=["admin", "player"])
+_rock = bot.dodoland_tiles.add_tile(name="Boulder", cat_id=_cat["cat_id"], data=b"<svg/>",
+                                    content_type="image/svg+xml", guild_id=GUILD_ID,
+                                    layer="objects", placement="place", access=["admin"])
+bot.dodoland_terrain.set_world(GUILD_ID, cells_w=100, cells_h=100)
+_real_area = _PM._area
+_PM._area = lambda bot, guild, uid: {(30, 40), (31, 40)} if uid == NIK else set()
+
+
+def kit(uid, body):
+    request = JsonRequest({"bot": bot}, body)
+    request["guild"], request["uid"], request["member"] = guild, uid, guild.get_member(uid)
+    return _json.loads(asyncio.run(_PM.build(request)).body.decode())
+
+
+_w = bot.dodoland_terrain.world(GUILD_ID)
+_at = lambda cx, cy: ((cx + .5) / _w["cells_w"] * 100, (cy + .5) / _w["cells_h"] * 100)  # noqa: E731
+_x, _y = _at(30, 40)
+done = kit(NIK, {"action": "place", "asset_id": _tulip["tile_id"], "x": _x, "y": _y})
+assert done["ok"] and done["piece"]["town"] == str(NIK), done
+_ox, _oy = _at(70, 70)
+refused = kit(NIK, {"action": "place", "asset_id": _tulip["tile_id"], "x": _ox, "y": _oy})
+assert not refused["ok"] and "area" in refused["error"], refused
+refused = kit(NIK, {"action": "place", "asset_id": _rock["tile_id"], "x": _x, "y": _y})
+assert not refused["ok"] and "admins" in refused["error"], "a member placed an admin-only tile"
+refused = kit(FOX, {"action": "place", "asset_id": _tulip["tile_id"], "x": _x, "y": _y})
+assert not refused["ok"], "a member with no town on the map decorated"
+stroke = kit(NIK, {"action": "place_many", "items": [
+    {"asset_id": _tulip["tile_id"], "x": _x, "y": _y},
+    {"asset_id": _tulip["tile_id"], "x": _ox, "y": _oy}]})
+assert stroke["ok"] and len(stroke["pieces"]) == 1, "a brush stroke kept what spilled outside the area"
+bot.dodoland_params.set(GUILD_ID, "dodoland_member_pieces", 2)
+refused = kit(NIK, {"action": "place", "asset_id": _tulip["tile_id"], "x": _x, "y": _y})
+assert not refused["ok"] and "Remove something" in refused["error"], "the member limit was not kept"
+moved = kit(NIK, {"action": "remove", "piece_id": done["piece"]["piece_id"]})
+assert moved["ok"] and moved["removed"] == 1, "a member could not take their own decoration up"
+_PM._area = _real_area
+_IA.current = _real_current
+_IA._CELLS.pop(GUILD_ID, None)
+print("toolkit         members decorate inside their own area, with player tiles, up to the limit")
 
 
 # --------------------------------------------------------------------------- #

@@ -965,3 +965,30 @@ cheap. Every text is in `helpers/dodoland/page_texts.py` (old keys replaced),
 edited in the panel under *What members can see → Texts on the entrance
 page*. The decor toolkit API (`/me/toolkit`, `/me/decor`) still exists; only
 the page's catalogue went. `player.my_town()` stays (tests use it).
+
+### Members: founding rule, toolkit, picture limits, population (12 Oct 2026)
+* **Founded on open ground.** `player.api_my_settle` refuses a spot inside any
+  other town's area (`influence_api.claimed_by(..., but=uid)`); its own area
+  is fine, and it may grow into neighbours later. The map shows the refusal as
+  a notice and stays armed. Admin placement is not restricted.
+* **Member toolkit.** The Toolkit button shows for members. Their kit is every
+  placed tile with *player* access (`assets[].pl`), dimmed with a reason where
+  not unlocked (`lk`, `why`, from `tile_rules.unlocked_for` on the viewer's
+  standing). `player_map.build` takes `place` / `place_many` of non-building
+  tiles through `_decorate`: player access, unlocked (`_unlocked`, cached 60s),
+  inside their own area (a brush stroke keeps what landed inside), and under
+  `dodoland_member_pieces` (default 150, counting their buildings;
+  `DecorStore.town_count`). Pieces are stored with `town = uid`, so the
+  existing move/remove/lock rules and town moves carry them. On the page
+  `mayTouch(p)` stops members selecting anything but their own unlocked pieces;
+  the Landmark button, the who-placed filter and the Forest brush are admin-only.
+* **The toolkit showing behind a card** was CSS: `body.dlcardopen` moved the
+  drawers right by 372px, which un-hid a *closed* drawer narrower than that.
+  Now only an open drawer moves, and a closed one is `visibility: hidden`.
+* **Pictures.** `towns.sniff_image` reads the type from the bytes (PNG, JPEG,
+  GIF, WebP) and stores that, not the claimed type; `dodoland_picture_max_kb`
+  (default 1024) via `towns.picture_limit`, on both the member and admin save
+  paths; the pages check type, extension and size before uploading.
+* **Population** on a town card: the tiles its area covers (`influence` towns
+  `cells`) × `dodoland_population_per_cell` (default 1); filled in when the
+  areas arrive (`refreshPop`).

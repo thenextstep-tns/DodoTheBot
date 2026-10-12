@@ -230,8 +230,12 @@ def _collect(bot, guild) -> dict:
                         # thumbnail was a smudge, which read as "low resolution".
                         "px": not t["resizable"],
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
+                        # Members may place it (when they have unlocked it).
+                        "pl": "player" in t["access"],
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
-                       for t in placeable]}
+                       for t in placeable],
+            # Not sent to the page: what a member's toolkit is unlocked from.
+            "standings": result["people"], "defs": buildings}
 
 
 def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float,
@@ -272,7 +276,21 @@ async def map_page(request: web.Request):
         data = dict(data)
         data["people"] = [p for p in data["people"] if p["plot"] or p["id"] == viewer]
         used = {d["a"] for d in data["world"]}
-        data["assets"] = [a for a in data["assets"] if a.get("building") or a["id"] in used]
+        # Their toolkit: what members may place, dimmed where they have not
+        # unlocked it yet (a reward you cannot see is not a reward).
+        person = data["standings"].get(int(viewer)) if viewer.isdigit() else None
+        unlocked = tile_rules.unlocked_for(
+            [{"tile_id": a["id"], "requires": {"building": a["building"], "tier": a["tier"]}}
+             for a in data["assets"] if a["pl"]], person, data["defs"])
+        names = {b["key"]: b.get("name") or b["key"] for b in data["defs"]}
+
+        def why(a):
+            return f"Unlocks at tier {a['tier']} of {names.get(a['building'], a['building'])}"
+        data["assets"] = [dict(a, lk=a["id"] not in unlocked,
+                               **({"why": why(a)} if a["id"] not in unlocked else {}))
+                          if a["pl"] else a
+                          for a in data["assets"]
+                          if a.get("building") or a["id"] in used or a["pl"]]
         from web.dodoland import player as player_rules
         may_settle = player_rules.self_settle_on(bot, guild.id)
     else:
@@ -361,6 +379,10 @@ async def map_page(request: web.Request):
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),
+        # A town's picture: the server's own limit, in bytes.
+        "picture_max": town_rules.picture_limit(bot.dodoland_params, guild.id),
+        # Population on a town's card: the tiles its area covers, times this.
+        "pop_per_cell": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_population_per_cell"))),
         "straighten": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_straighten"))),
         # The coast's dark land edge and surf, drawn in the bake from the
         # smoothed shore at the strength the close-up shading has.
@@ -383,7 +405,7 @@ async def map_page(request: web.Request):
        open; the server's name in the middle; looking-around on the right. -->
   <div class="dlbarside">
     <button id="dlterr" class="dlghost">🗺 Terrain</button>
-    <button id="dlkit" class="dlghost"{' hidden' if player else ''}>🧰 Toolkit</button>
+    <button id="dlkit" class="dlghost">🧰 Toolkit</button>
     <button id="dlsettle" class="dlghost own" hidden>🏠 Place my town</button>
   </div>
   <b class="dltitle">{_e(guild.name)}</b>
@@ -451,7 +473,7 @@ async def map_page(request: web.Request):
     <p class="dlkithint" id="dlkithint">Pick something, then use the pencil to put it
     down one at a time or the brush to scatter it. Shift-click several to brush a mix.</p>
     <div class="dlbrushopts" id="dlbrushopts" hidden>
-      <div class="dlseg" id="dlbrushpat"><button data-pat="forest" class="on">Forest</button><button data-pat="scatter">Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>{forest_ui.MODE}
+      <div class="dlseg" id="dlbrushpat">{'' if player else '<button data-pat="forest" class="on">Forest</button>'}<button data-pat="scatter"{' class="on"' if player else ''}>Scatter</button><button data-pat="line">Line</button><button data-pat="cluster">Cluster</button></div>{'' if player else forest_ui.MODE}
       <label title="Forest: how tightly the trees pack. 100% stands them about crown to crown; lower lets ground show between them. The spacing at each end is set in the panel.">Density <input type="range" id="dlbden" min="20" max="100" step="5" value="75"><output id="dlbdenn">75%</output></label>
       <label>Radius <input type="range" id="dlbrad" min="1" max="60" value="8"><output id="dlbradn">8</output></label>
       <label>Spacing <input type="range" id="dlbsp" min="1" max="40" value="6"><output id="dlbspn">6</output></label>
@@ -463,7 +485,7 @@ async def map_page(request: web.Request):
   </div>
   <div class="dlkitpane" id="dlkitplaced" hidden>
     <div class="dlplacedhead">
-      <select id="dlplacedwho" class="dlsel"><option value="me">Placed by me</option><option value="all">Everyone's</option></select>
+      <select id="dlplacedwho" class="dlsel"{' hidden' if player else ''}><option value="me">Placed by me</option><option value="all">Everyone's</option></select>
       <span id="dlplacedn" class="muted"></span>
     </div>
     <div class="dlplacedlist" id="dlplacedlist"></div>
@@ -472,7 +494,7 @@ async def map_page(request: web.Request):
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
       step="0.05" value="1"></label>
     <button class="dlghost" id="dlkitflip">Mirror</button>
-    <button class="dlghost" id="dlkitlock" title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it. On something already locked (a landmark, or a building its owner locked in place) it unlocks it.">&#128274; Landmark</button>
+    <button class="dlghost" id="dlkitlock"{' hidden' if player else ''} title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it. On something already locked (a landmark, or a building its owner locked in place) it unlocks it.">&#128274; Landmark</button>
     <button class="dlghost" id="dlkitdel">Remove</button>
   </div>
   <p class="dlkitmsg" id="dlkitmsg"></p>
@@ -773,8 +795,14 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   border-right: 1px solid var(--edge); transform: translateX(-100%);
   box-shadow: 6px 0 24px rgba(0,0,0,.28); }
 .dlkitdrawer.open { transform: translateX(0); }
-/* With a town's card open, the left-hand drawers open beside it, not under it. */
-body.dlcardopen .dlkitdrawer, body.dlcardopen .dlterrdrawer { left: 372px; border-left: 1px solid var(--edge); }
+/* With a town's card open, the left-hand drawers open beside it, not under it.
+   Only an open one: a closed drawer is tucked away by translateX(-100%), which
+   is its own width, and moved 372px right a closed drawer narrower than that
+   still showed beside the card. */
+body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 372px; border-left: 1px solid var(--edge); }
+/* Closed is gone, not merely slid aside: nothing of it can show or be clicked. */
+.dlkitdrawer:not(.open), .dlterrdrawer:not(.open) { visibility: hidden;
+  transition: transform .2s, visibility 0s .2s; }
 .dlkithint { margin: 10px 0 0; padding: 0 14px 8px; font-size: 12px; color: var(--soft);
   line-height: 1.45; }
 /* One look for every palette in a drawer — the toolkit's and the terrain's —
@@ -1312,6 +1340,7 @@ _SCRIPT = r"""
       '<div class="sub">' + escapeHtml(p.owner) + ' · #' + p.place + ' · ' +
         p.power.toLocaleString() + ' standing · ' + p.reached.toLocaleString() +
         ' people reached' +
+        '<span id="dlpopn">' + popText(p) + '</span>' +
         (p.rank ? ' · ' + escapeHtml(p.flourish_label) + ' (' + escapeHtml(p.rank) + ')' : '') +
         '</div>' +
       breadthLine(p) +
@@ -1383,14 +1412,18 @@ _SCRIPT = r"""
             building_names: names
           };
           if (!chosen) { saveTown(id, payload); return; }
-          if (chosen.size > 6 * 1024 * 1024) {
-            var box = document.getElementById('dlcardmsg');
+          var box = document.getElementById('dlcardmsg');
+          if (['image/png', 'image/jpeg', 'image/gif', 'image/webp'].indexOf(chosen.type) < 0 ||
+              !/\.(png|jpe?g|gif|webp)$/i.test(chosen.name)) {
+            if (box) { box.classList.add('bad'); box.textContent = 'That is not a picture this takes. Use a PNG, JPG, GIF or WebP.'; }
+            return;
+          }
+          if (chosen.size > D.sizes.picture_max) {
             if (box) {
               box.classList.add('bad');
-              box.textContent = 'That picture is ' +
-                (chosen.size / 1048576).toFixed(1) + 'MB. The limit is 6MB, so ' +
-                'nothing was saved. Pick a smaller one, or clear it and save ' +
-                'the rest.';
+              box.textContent = 'That picture is ' + Math.round(chosen.size / 1024) +
+                'KB. The limit is ' + Math.round(D.sizes.picture_max / 1024) + 'KB, so ' +
+                'nothing was saved. Pick a smaller one, or clear it and save the rest.';
             }
             return;
           }
@@ -1487,6 +1520,20 @@ _SCRIPT = r"""
   // How widely the owner takes part, from the influence layer: the rooms
   // that are lively for them, how many of those they wrote in, and what that
   // does to the town's reach.
+  // Population: the tiles the town's area covers, so it grows with its reach.
+  function population(p) {
+    var t = (D.influence || []).filter(function (x) { return String(x.id) === String(p.id); })[0];
+    return t && t.cells ? Math.round(t.cells * (D.sizes.pop_per_cell || 0)) : 0;
+  }
+  function popText(p) {
+    var n = population(p);
+    return n ? ' · population <b>' + n.toLocaleString() + '</b>' : '';
+  }
+  // The areas arrive after the page (and after a card opened from ?mine=1).
+  function refreshPop() {
+    var el = document.getElementById('dlpopn');
+    if (el && openId && byId[openId]) el.innerHTML = popText(byId[openId]);
+  }
   function breadthLine(p) {
     var t = (D.influence || []).filter(function (x) { return String(x.id) === String(p.id); })[0];
     var b = t && t.breadth;
@@ -1686,7 +1733,12 @@ _SCRIPT = r"""
         ? {user_id: id, x: point.x, y: point.y}
         : {user_id: id, remove: true})
     }).then(function (r) { return r.json(); }).then(function (res) {
-      if (!res.ok) { hint.textContent = res.error || 'That did not work.'; return; }
+      if (!res.ok) {
+        // Said where it is seen, and still armed: the next click tries again.
+        hint.textContent = res.error || 'That did not work.';
+        notify([res.error || 'That did not work.']);
+        return;
+      }
       byId[id].plot = point ? {x: res.x, y: res.y} : null;
       armed = null;
       frame.classList.remove('placing');
@@ -1837,8 +1889,16 @@ _SCRIPT = r"""
   // Buildings are never in the toolkit: a town builds its own, from its card,
   // at the tier it has earned. The toolkit is for dressing the world.
   function kitAssets() {
+    // A member decorates with what members may place, on any layer; their
+    // buildings go up from their town's card.
+    if (D.ep.player) return D.assets.filter(function (a) { return a.pl && a.layer !== 'buildings'; });
     var layer = editLayer() === 'buildings' ? 'objects' : editLayer();
     return D.assets.filter(function (a) { return a.layer === layer; });
+  }
+  // What this viewer may pick up: an admin anything, a member their own town's
+  // things that nobody has locked.
+  function mayTouch(p) {
+    return !D.ep.player || (!!p && String(p.t || '') === String(D.me) && !p.k);
   }
   function fillKitCats() {
     if (!kitCat) return;
@@ -1880,14 +1940,16 @@ _SCRIPT = r"""
     kitGrid.innerHTML = kitAssets().filter(function (a) {
       return shown === null || (a.cat || 'Uncategorised') === shown;
     }).map(function (a) {
-      return '<button class="dlkititem' + (a.px ? ' px' : '') +
-        (mix.indexOf(a.id) >= 0 || armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '">' +
+      return '<button class="dlkititem' + (a.px ? ' px' : '') + (a.lk ? ' locked' : '') +
+        (mix.indexOf(a.id) >= 0 || armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '"' +
+        (a.lk ? ' title="' + escapeHtml(a.why || 'Not unlocked yet') + '"' : '') + '>' +
         '<img alt="" loading="lazy" src="' + assetUrl(a.id) + '">' +
         '<span>' + escapeHtml(a.name) + '</span></button>';
     }).join('');
     kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {
       el.onclick = function (ev) {
         var id = el.dataset.asset;
+        if (el.classList.contains('locked')) { kitSay(el.title + '.'); return; }
         building = null;
         if (ev.shiftKey && armedAsset) {
           // A mix for the brush: every stroke picks among these at random.
@@ -2404,6 +2466,8 @@ _SCRIPT = r"""
   function selIds() { return Object.keys(sel); }
   function selectOnly(ids) { sel = {}; ids.forEach(function (id) { sel[id] = true; }); selChanged(); }
   function selChanged() {
+    // A member selects only their own things; the rest of the map is to look at.
+    if (D.ep.player) Object.keys(sel).forEach(function (id) { if (!mayTouch(pieceById(id))) delete sel[id]; });
     var ids = selIds();
     heldPiece = ids.length ? ids[ids.length - 1] : null;
     world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) {
@@ -2436,6 +2500,7 @@ _SCRIPT = r"""
     // The hand on a piece that is not selected is still the hand: the map pans,
     // and a click without a drag selects it (pieceClick).
     if (tool === 'hand' && !selected) return;
+    if (!mayTouch(piece)) return;   // somebody else's: the map pans as usual
     ev.stopPropagation(); ev.preventDefault();
     if (tool === 'pointer') {
       if (ev.shiftKey) {
@@ -2630,7 +2695,8 @@ _SCRIPT = r"""
   }
 
   // --- the brush ---------------------------------------------------------- //
-  var brush = {pat: 'forest', r: 8, sp: 6, jit: 0.15, flip: true, den: 0.75};
+  // Members scatter; painting forests is an admin's (no member route).
+  var brush = {pat: D.ep.forest_paint ? 'forest' : 'scatter', r: 8, sp: 6, jit: 0.15, flip: true, den: 0.75};
   var STROKE_MAX = 1600;
   var stroke2 = null;   // {items, last, carry, previews}
   function cellsH() {
@@ -2734,7 +2800,7 @@ _SCRIPT = r"""
           D.world.push({id: row.piece_id, a: row.asset_id, v: row.variant || '', l: row.layer || 'objects',
                         x: row.x, y: row.y, s: row.scale, f: !!row.flip,
                         by: String(row.by || ''), bn: row.by_name || '', at: row.at || 0,
-                        k: !!row.locked});
+                        t: row.town || '', k: !!row.locked});
         });
         placed += res.pieces.length;
         next();
@@ -2747,7 +2813,7 @@ _SCRIPT = r"""
     b.onclick = function () {
       brush.pat = b.dataset.pat;
       document.querySelectorAll('#dlbrushpat button').forEach(function (o) { o.classList.toggle('on', o === b); });
-      document.getElementById('dlforestmode').hidden = brush.pat !== 'forest';
+      var fm = document.getElementById('dlforestmode'); if (fm) fm.hidden = brush.pat !== 'forest';
     };
   });
   function brushSlider(id, show, set) {
@@ -2766,7 +2832,9 @@ _SCRIPT = r"""
     var pane = document.getElementById('dlkitplaced');
     if (!pane || pane.hidden) return;
     var mine = placedWho.value === 'me';
-    var rows = D.world.filter(function (p) { return !mine || (p.by && p.by === D.me); });
+    var rows = D.world.filter(function (p) {
+      return D.ep.player ? mayTouch(p) : (!mine || (p.by && p.by === D.me));
+    });
     rows.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
     document.getElementById('dlplacedn').textContent = rows.length + (rows.length === 1 ? ' piece' : ' pieces');
     var shown = rows.slice(0, 300);

@@ -504,7 +504,7 @@ print("card            a save reports its result inside the card")
 
 # The commonest refusal is a picture over the limit, so it is caught before the
 # upload rather than after it.
-assert "6 * 1024 * 1024" in map_body, "an oversized picture is not caught early"
+assert "chosen.size > D.sizes.picture_max" in map_body, "an oversized picture is not caught early"
 print("card            an oversized picture is refused with its actual size")
 
 # A dot is a town's only visible part when zoomed out, and it has to be
@@ -565,12 +565,36 @@ print("life            people and animals are drawn whenever the buildings are")
 # anywhere. The bytes are still withheld; their existence is not.
 bot.dodoland_towns.save(GUILD_ID, 1, name="Beanburg")
 bot.dodoland_towns.save_image(GUILD_ID, 1,
-                              {"data": b"x" * 64, "content_type": "image/png"})
+                              {"data": b"\x89PNG\r\n\x1a\n" + b"x" * 64, "content_type": "image/png"})
 _row = bot.dodoland_towns.all(GUILD_ID)[1]
 assert _row.get("name") == "Beanburg", _row
 assert _row.get("image"), "an uploaded picture is invisible to the map"
 assert "data" not in _row["image"], "the map is paying for the picture bytes"
 print("towns           a picture's existence survives the projection, its bytes do not")
+
+# A picture is what its bytes say, not what its name or the browser claims, and
+# no bigger than the server allows.
+from helpers.dodoland import towns as _towns  # noqa: E402
+
+for _bad_pic, _why in ((b"<svg onload=alert(1)>" + b"x" * 64, "a script dressed as a PNG"),
+                       (b"x" * 64, "bytes that are no picture at all")):
+    try:
+        bot.dodoland_towns.save_image(GUILD_ID, 1, {"data": _bad_pic, "content_type": "image/png"})
+        raise AssertionError(f"{_why} was stored")
+    except _towns.TownError:
+        pass
+_gif = b"GIF89a" + b"x" * 64
+bot.dodoland_towns.save_image(GUILD_ID, 1, {"data": _gif, "content_type": "image/png"})
+assert bot.dodoland_towns.get(GUILD_ID, 1)["image"]["content_type"] == "image/gif", \
+    "the claimed type was stored instead of the real one"
+try:
+    bot.dodoland_towns.save_image(GUILD_ID, 1, {"data": _gif + b"x" * 2048, "content_type": "image/gif"},
+                                  max_bytes=1024)
+    raise AssertionError("a picture over the server's limit was stored")
+except _towns.TownError as _error:
+    assert "1KB" in str(_error), _error
+assert _towns.picture_limit(bot.dodoland_params, GUILD_ID) == 1024 * 1024, "the default is not 1MB"
+print("towns           a picture is sniffed from its bytes and held to the server's limit (1MB)")
 
 
 
