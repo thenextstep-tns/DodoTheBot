@@ -81,6 +81,8 @@ CSS = """
 .dltpanel { padding: 8px 14px; border-top: 1px solid var(--edge); font-size: 12px;
   color: var(--soft); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .dltpanel[hidden] { display: none; }
+/* Select and Pattern are hidden for everyone; only the brush is left. */
+#dlttools[hidden] { display: none; }
 .dltmsg { margin: 0; padding: 4px 14px 12px; font-size: 12px; color: var(--soft); }
 .dltmsg.bad { color: #e0735f; font-weight: 600; }
 .dltswatch { width: 100%; height: 48px; border-radius: 6px; }
@@ -92,10 +94,10 @@ DRAWER = """
     <b>Terrain</b>
     <button class="dlghost" id="dltclose">&times;</button>
   </div>
-  <div class="dlseg" id="dlttools">
+  <div class="dlseg" id="dlttools" hidden>
     <button data-tool="brush" class="on">Brush</button>
-    <button data-tool="select">Select</button>
-    <button data-tool="pattern">Pattern</button>
+    <button data-tool="select" hidden>Select</button>
+    <button data-tool="pattern" hidden>Pattern</button>
   </div>
   <p class="dlkithint" id="dlthint"></p>
   <select class="dlsel" id="dltcat"></select>
@@ -220,11 +222,6 @@ SCRIPT = r"""
         '<img alt="" loading="lazy" style="image-rendering:pixelated" src="' + t.thumb + '">' +
         '<span>' + escapeHtml(t.name) + (t.passable ? '' : ' ⛔') + '</span></button>';
     });
-    // The eraser: back to "nothing said about this cell".
-    cards.unshift('<button class="dlkititem' + (terr.erase ? ' armed' : '') +
-      '" data-erase="1" title="Erase back to unset ground">' +
-      '<div class="dltswatch" style="background:repeating-conic-gradient(#8884 0 25%,transparent 0 50%) 0 0/12px 12px"></div>' +
-      '<span>Eraser</span></button>');
     box.innerHTML = cards.join('');
     box.querySelectorAll('.dlkititem').forEach(function (el) {
       el.onclick = function (ev) {

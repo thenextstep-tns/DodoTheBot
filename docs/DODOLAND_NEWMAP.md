@@ -1007,3 +1007,11 @@ re-scoring with `guild_standings`. Test: `test_dodoland_rows_cache.py`.
 
 Map work no longer DMs the owner: `_record_change(..., notify=False)` for decor,
 terrain and forest edits (still in the audit log).
+
+### Hidden for now (12 Oct 2026)
+* Town walls on the card: behind `dodoland_walls_option` (default off,
+  `D.sizes.walls`); walls already chosen are kept and still drawn.
+* The terrain palette's Eraser card is gone (the internal erase used by a
+  selection's Clear stays).
+* Terrain's Select and Pattern tools are hidden for everyone; with only the
+  brush left, the tool row (`#dlttools`) is hidden. The code is still there.

@@ -379,6 +379,8 @@ async def map_page(request: web.Request):
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),
+        # The walls choice on a town's card (dodoland_walls_option).
+        "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
         # A town's picture: the server's own limit, in bytes.
         "picture_max": town_rules.picture_limit(bot.dodoland_params, guild.id),
         # Population on a town's card: the tiles its area covers, times this.
@@ -1354,7 +1356,7 @@ _SCRIPT = r"""
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
-      (p.plot && mayEdit ? wallSection(p) : '') +
+      (p.plot && mayEdit && D.sizes.walls ? wallSection(p) : '') +
       '<div class="acts">' +
         (D.ep.player ? (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
