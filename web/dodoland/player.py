@@ -365,22 +365,25 @@ async def my_town_page(request: web.Request):
     art = await loop.run_in_executor(
         None, lambda: _draw(bot, guild, uid, flag_url))
 
+    from helpers.dodoland import page_texts
+
+    def t(key, **fill):
+        # The server's own wording for this page (editable in the panel).
+        return page_texts.say(bot.dodoland_params, guild.id, key, **fill)
+
     if person is None:
-        standing_html = (
-            '<p class="lead">Nothing has been counted for you yet, so your town '
-            'is a single tent — which is still somewhere. It fills in on its '
-            'own as you talk to people.</p>')
+        standing_html = f'<p class="lead">{t("nothing_yet")}</p>'
         tiles = ""
     else:
         standing_html = ""
         flour = town["flourish"]
         tiles = "".join(
-            f'<div class="tile"><b>{e(value)}</b><span>{e(label)}</span></div>'
+            f'<div class="tile"><b>{e(value)}</b><span>{label}</span></div>'
             for label, value in (
-                ("town standing", f"{person['power']:,}"),
-                (f"of {town['population']} towns", f"#{person['place']}"),
-                ("people reached", f"{person['reached']:,}"),
-                ("flourish", flour.get("label") or "None"),
+                (t("tile_standing"), f"{person['power']:,}"),
+                (t("tile_place", towns=town["population"]), f"#{person['place']}"),
+                (t("tile_reached"), f"{person['reached']:,}"),
+                (t("tile_flourish"), flour.get("label") or t("tile_no_flourish")),
             ))
 
     body = f"""
@@ -394,8 +397,8 @@ async def my_town_page(request: web.Request):
     </div>
     <div class="heroinfo">
       <h1 id="townname">{e(name)}</h1>
-      <p class="owner">{e(owner)}'s town in {e(guild.name)}
-        {'· <b>lit</b>' if town['lit'] else '· <span class="muted">quiet lately</span>'}</p>
+      <p class="owner">{t("owner_line", owner=owner, server=guild.name)}
+        {'· <b>' + t("lit") + '</b>' if town['lit'] else '· <span class="muted">' + t("quiet") + '</span>'}</p>
       {f'<p class="blurb" id="townblurb">{e(details.get("blurb"))}</p>'
        if details.get("blurb") else ''}
       {standing_html}
@@ -403,14 +406,12 @@ async def my_town_page(request: web.Request):
     </div>
   </section>
 
-  {_flourish_html(town)}
-  {_decorate_html(guild)}
-  {_climb_html(town)}
-  {_friends_html(town)}
-  {_customise_html(guild, town, name)}
-  <p class="foot">Standing is earned and cannot be typed in. Everything on this
-  page you can edit is authored: naming your town, describing it and picturing
-  it move no number at all, and never will.</p>
+  {_flourish_html(town, t)}
+  {_decorate_html(guild, t)}
+  {_climb_html(town, t)}
+  {_friends_html(town, t)}
+  {_customise_html(guild, town, name, t)}
+  <p class="foot">{t("foot")}</p>
 </main>
 <script>var GID = "{guild.id}";</script>
 <script>{_SCRIPT}</script>"""
@@ -421,11 +422,11 @@ async def my_town_page(request: web.Request):
     # buttons whose endpoints refuse them. ``dodoland_world_page`` currently
     # gates self-settling only. This linked to a route that was never
     # registered, which is a 404 for anybody who switched the world on.
-    links = '<a class="dlghost" href="/logout">Log out</a>'
+    links = f'<a class="dlghost" href="/logout">{t("logout")}</a>'
     # The map, for a member: their town's area to paint and build in
     # (web/dodoland/player_map.py), when the server has the world switched on.
     if world_page_on(bot, guild.id):
-        links = f'<a class="dlghost" href="/guild/{guild.id}/dodoland/me/map">The map</a>' + links
+        links = f'<a class="dlghost" href="/guild/{guild.id}/dodoland/me/map">{t("map_link")}</a>' + links
     return web.Response(
         text=_shell(f"{name} · {guild.name}", theme.bar(
             back=("/towns", "Your towns"), title=name,
@@ -433,7 +434,7 @@ async def my_town_page(request: web.Request):
         content_type="text/html")
 
 
-def _decorate_html(guild) -> str:
+def _decorate_html(guild, t) -> str:
     """The toolkit, for the person whose town it is.
 
     Deliberately empty in the markup and filled from
@@ -446,50 +447,43 @@ def _decorate_html(guild) -> str:
     """
     return f"""
 <section class="card">
-  <h2>Decorate</h2>
-  <p class="muted">Things you have earned the right to put around your town.
-  Pick one, then click your town above to put it down; click a piece you have
-  placed to pick it up again.</p>
+  <h2>{t("decorate_title")}</h2>
+  <p class="muted">{t("decorate_intro")}</p>
   <div class="kitgrid" id="kitgrid"><p class="muted small">Loading…</p></div>
   <div class="acts">
-    <label class="kitsize">Size
+    <label class="kitsize">{t("decorate_size")}
       <input type="range" id="kitscale" min="0.25" max="6" step="0.05" value="1">
     </label>
-    <button id="kitflip">Mirror</button>
-    <button id="kitdel">Remove</button>
+    <button id="kitflip">{t("decorate_mirror")}</button>
+    <button id="kitdel">{t("decorate_remove")}</button>
   </div>
   <p class="cardmsg" id="kitmsg"></p>
 </section>"""
 
 
-def _flourish_html(town: dict) -> str:
+def _flourish_html(town: dict, t) -> str:
     """What your rank does to your town, and the fact that it does only that."""
     shine = town["flourish"]
     if not shine.get("level"):
-        return ("""
+        return f"""
 <section class="card">
-  <h2>Flourish</h2>
-  <p class="muted">No flourish yet. Flourish is the one thing on this map that
-  cannot be earned by being sociable — it comes from the trial ladder, and it is
-  purely how your town <i>looks</i>. Every building here is reachable without
-  it.</p>
-</section>""")
+  <h2>{t("flourish_title")}</h2>
+  <p class="muted">{t("flourish_none")}</p>
+</section>"""
     return f"""
 <section class="card">
-  <h2>Flourish</h2>
+  <h2>{t("flourish_title")}</h2>
   <p><b>{e(shine.get('label'))}</b> — {e(shine.get('description'))}</p>
-  <p class="muted">From your trial rank, <b>{e(shine.get('rank_name') or 'a rank')}</b>.
-  Rank buys the effect and never a tier: it changes how your town looks and
-  nothing about what stands in it.</p>
+  <p class="muted">{t("flourish_from", rank=('<b>' + e(shine.get('rank_name') or 'a rank') + '</b>',))}</p>
 </section>"""
 
 
-def _climb_html(town: dict) -> str:
+def _climb_html(town: dict, t) -> str:
     """Every building, what it is worth, and what the next rung costs."""
     rows = ""
     for b in town["buildings"]:
         if b["tier"] is None:
-            badge = '<span class="badge none">not yet</span>'
+            badge = f'<span class="badge none">{t("climb_not_yet")}</span>'
         else:
             badge = (f'<span class="badge">{e(b["tier_title"] or "Tier")}</span>'
                      f'<span class="muted small">tier {b["tier"] + 1}'
@@ -497,10 +491,12 @@ def _climb_html(town: dict) -> str:
         if b["next"]:
             bar = (f'<div class="bar"><i style="width:'
                    f'{b["next"]["progress"] * 100:.1f}%"></i></div>'
-                   f'<div class="muted small">{b["next"]["short"]:,} more to reach '
-                   f'<b>{e(b["next"]["title"])}</b></div>')
+                   '<div class="muted small">' +
+                   t("climb_more", points="{:,}".format(b["next"]["short"]),
+                     tier=("<b>" + e(b["next"]["title"]) + "</b>",)) +
+                   '</div>')
         else:
-            bar = '<div class="muted small">Nothing above this one.</div>'
+            bar = f'<div class="muted small">{t("climb_top")}</div>'
         rooms = " · ".join(f"{e(n)} {p:,}" for n, p in b["rooms"])
         acts = " · ".join(f"{e(n)} {p:,}" for n, p in b["acts"])
         detail = ""
@@ -520,15 +516,13 @@ def _climb_html(town: dict) -> str:
   </li>"""
     return f"""
 <section class="card">
-  <h2>The climb</h2>
-  <p class="muted">Every building this server has, whether or not you have
-  reached it. Thresholds are a percentile of what everybody else has actually
-  scored, so they move as the server does — this is where yours sit today.</p>
+  <h2>{t("climb_title")}</h2>
+  <p class="muted">{t("climb_intro")}</p>
   <ul class="climb">{rows}</ul>
 </section>"""
 
 
-def _friends_html(town: dict) -> str:
+def _friends_html(town: dict, t) -> str:
     """Who you reached. The number DodoLand is actually built around."""
     if not town["friends"]:
         return ""
@@ -536,16 +530,13 @@ def _friends_html(town: dict) -> str:
                     for n, c in town["friends"])
     return f"""
 <section class="card">
-  <h2>Who you reached</h2>
-  <p class="muted">Reach, not volume: what counts is how many different people
-  you reached and who reached back, capped per person per day so nobody can be
-  farmed. These are the people you have shared the most days with, over the last
-  {town['window']} days.</p>
+  <h2>{t("reached_title")}</h2>
+  <p class="muted">{t("reached_intro", days=town['window'])}</p>
   <div class="chips">{chips}</div>
 </section>"""
 
 
-def _customise_html(guild, town: dict, name: str) -> str:
+def _customise_html(guild, town: dict, name: str, t) -> str:
     details = town["details"]
     fields = "".join(
         f'<label>{e(b["given"])}</label>'
@@ -558,22 +549,20 @@ def _customise_html(guild, town: dict, name: str) -> str:
                    f'src="/guild/{guild.id}/dodoland/me/picture"></div>')
     return f"""
 <section class="card">
-  <h2>Customise</h2>
-  <p class="muted">Yours to write. A picture flies as a flag over whatever you
-  have built highest.</p>
-  <label>Town name</label>
+  <h2>{t("customise_title")}</h2>
+  <p class="muted">{t("customise_intro")}</p>
+  <label>{t("label_name")}</label>
   <input id="tname" maxlength="{town_rules.MAX_NAME}" value="{e(name)}">
-  <label>Description</label>
+  <label>{t("label_blurb")}</label>
   <textarea id="tblurb" maxlength="{town_rules.MAX_BLURB}">{e(details.get('blurb') or '')}</textarea>
-  <label>Picture or GIF (under
-    {town_rules.MAX_IMAGE_BYTES // (1024 * 1024)}MB)</label>
+  <label>{t("label_picture", mb=town_rules.MAX_IMAGE_BYTES // (1024 * 1024))}</label>
   <input id="tpic" type="file"
     accept="image/png,image/jpeg,image/gif,image/webp">
   {picture}
-  {('<label class="grouplabel">Building names</label>' + fields) if fields else ''}
+  {('<label class="grouplabel">' + t("label_building_names") + '</label>' + fields) if fields else ''}
   <div class="acts">
-    <button id="tsave" class="own">Save</button>
-    <button id="tclear">Remove picture</button>
+    <button id="tsave" class="own">{t("save")}</button>
+    <button id="tclear">{t("clear_picture")}</button>
   </div>
   <p class="cardmsg" id="tmsg"></p>
 </section>"""

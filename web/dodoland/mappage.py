@@ -263,6 +263,20 @@ async def map_page(request: web.Request):
     # The same page for a member (web/dodoland/player_map.py): it reads and
     # writes through their own routes and offers only their own town.
     player = bool(request.get("player"))
+    if player:
+        # Only the towns on the map, and their own: not the standing of every
+        # member of the server (which nobody browsing the map should be handed,
+        # and which was most of the page). Only the tiles the map draws —
+        # what is placed, and the town buildings at any tier — not the
+        # admins' toolkit library.
+        data = dict(data)
+        data["people"] = [p for p in data["people"] if p["plot"] or p["id"] == viewer]
+        used = {d["a"] for d in data["world"]}
+        data["assets"] = [a for a in data["assets"] if a.get("building") or a["id"] in used]
+        from web.dodoland import player as player_rules
+        may_settle = player_rules.self_settle_on(bot, guild.id)
+    else:
+        may_settle = True
     base = request.get("dl_base") or f"/guild/{guild.id}/dodoland"
     api = (f"/api/guild/{guild.id}/dodoland/me" if player else f"/api/guild/{guild.id}/dodoland")
     # Landmark mode is the map's own setting-up tool: for the bot owner and the
@@ -276,7 +290,9 @@ async def map_page(request: web.Request):
                  "forest": base + "/forest/chunks",
                  "forest_paint": "" if player else api + "/forest/paint",
                  "decor": api + ("/build" if player else "/decor"),
-                 "town": api + "/town", "settle": "" if player else api + "/settle"}
+                 "town": api + "/town",
+                 # A member places and moves their own town when the server lets them.
+                 "settle": api + "/settle" if may_settle else ""}
 
     image = bot.dodoland_buildings.map_image(guild.id)
     if image:
@@ -368,6 +384,7 @@ async def map_page(request: web.Request):
   <div class="dlbarside">
     <button id="dlterr" class="dlghost">🗺 Terrain</button>
     <button id="dlkit" class="dlghost"{' hidden' if player else ''}>🧰 Toolkit</button>
+    <button id="dlsettle" class="dlghost own" hidden>🏠 Place my town</button>
   </div>
   <b class="dltitle">{_e(guild.name)}</b>
   <div class="dlbarside right">
@@ -1231,6 +1248,10 @@ _SCRIPT = r"""
     // own. Decided before the rows are drawn — decided after, it was still
     // unset when they were, and every row lost its rename, Build, Move and Delete.
     var mayEdit = !D.ep.player || (D.me && String(p.id) === String(D.me));
+    // One thing open at a time: a town's card puts the toolkit and the
+    // terrain drawer away (the towns list stays; towns are opened from it).
+    if (kitDrawer.classList.contains('open')) closeKit();
+    if (typeof terrClose === 'function') terrClose();
     world.querySelectorAll('.dltown').forEach(function (n) {
       n.classList.toggle('on', n.dataset.id === id);
     });
@@ -1293,15 +1314,17 @@ _SCRIPT = r"""
       breadthLine(p) +
       (p.blurb ? '<p class="blurb">' + escapeHtml(p.blurb) + '</p>' : '') +
       (p.has_image
-        ? '<div class="cardflag"><img alt="" src="/guild/' + D.gid +
-          '/dodoland/town/' + p.id + '/picture"></div>'
+        // Through this page's own base (a member's map reads its own routes),
+        // and a card-sized copy rather than the original upload.
+        ? '<div class="cardflag"><img alt="" decoding="async" src="' + D.ep.base +
+          '/town/' + p.id + '/picture?w=640"></div>'
         : '') +
       '<ul>' + rows + '</ul>' +
       (p.plot ? '<div class="sub" style="margin-top:10px">At ' +
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
       (p.plot && mayEdit ? wallSection(p) : '') +
       '<div class="acts">' +
-        (D.ep.player ? '' : (mine
+        (D.ep.player ? (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
@@ -1623,6 +1646,22 @@ _SCRIPT = r"""
     hint.textContent = 'Click the map to place ' + byId[id].name;
     renderList();
   }
+  // A member's own town: placed or moved from the top bar, when the server
+  // lets members choose where their town stands.
+  var settleBtn = document.getElementById('dlsettle');
+  function settleLabel() {
+    var me = D.me && byId[D.me];
+    settleBtn.hidden = !(D.ep.player && D.ep.settle && me);
+    if (me) settleBtn.textContent = me.plot ? '🏠 Move my town' : '🏠 Place my town';
+  }
+  settleBtn.onclick = function () {
+    if (!D.me || !byId[D.me]) return;
+    if (armed === D.me) { putDown(); return; }
+    closeDrawers();
+    arm(D.me);
+    hint.textContent = (byId[D.me].plot ? 'Click where your town should move to' : 'Click where your town should stand') +
+      '. Escape to stop.';
+  };
   // A notice the map cannot hide: top centre, above the drawers, until it is
   // dismissed or a while has passed.
   var notice = document.createElement('div');
@@ -1664,7 +1703,7 @@ _SCRIPT = r"""
         D.world = D.world.filter(function (q) { return q.t !== String(id); });
         redrawDecor();
       }
-      redraw(); renderList();
+      redraw(); renderList(); settleLabel();
       // A town's area is its own overlay, worked out from where the town is:
       // moved or removed, the old area has to go with it — and its roads.
       if (typeof loadInfluence === 'function') loadInfluence();
@@ -1711,7 +1750,9 @@ _SCRIPT = r"""
     var hit = D.people.filter(function (p) {
       return !q || p.name.toLowerCase().indexOf(q) >= 0;
     });
-    var waiting = hit.filter(function (p) { return !p.plot; });
+    // Who is not on the map is the admins' business (they place towns from
+    // it); a member's list is the towns there are to visit.
+    var waiting = D.ep.player ? [] : hit.filter(function (p) { return !p.plot; });
     var placed = hit.filter(function (p) { return p.plot; });
     function group(title, rows) {
       if (!rows.length) return '';
@@ -2822,7 +2863,9 @@ _SCRIPT = r"""
     });
     if (tool === 'pencil' || tool === 'brush') tool = 'hand';
   }
-  setTool(tool);
+  // The tool remembered from last time, without opening the toolkit: a page
+  // that opens with a drawer nobody asked for looks like the click did it.
+  setTool(tool, true);
   kitSay('');
   // --- life: people and animals ------------------------------------------ //
   // People walk inside their town's area of influence, going from one spot in
@@ -3101,7 +3144,10 @@ _SCRIPT = r"""
   redraw();
   redrawDecor();
   renderList();
-  drawer.classList.add('open');
+  settleLabel();
+  // The towns list opens with the map for admins, who place towns from it; a
+  // member opens it when they want it.
+  if (!D.ep.player) drawer.classList.add('open');
   placeZoom();
 })();
 """

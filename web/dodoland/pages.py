@@ -341,7 +341,13 @@ _MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
                    "dodoland_lod_influence", "dodoland_lod_walls", "dodoland_lod_forest")
 _PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
                 "dodoland_self_settle", "dodoland_player_cache_seconds")
-_ELSEWHERE = set(_MAP_SCALE_KEYS) | set(_PLAYER_KEYS)
+def _text_keys() -> tuple:
+    from helpers.dodoland import page_texts
+
+    return tuple(page_texts.PREFIX + key for key, *_ in page_texts.TEXTS)
+
+
+_ELSEWHERE = set(_MAP_SCALE_KEYS) | set(_PLAYER_KEYS) | set(_text_keys())
 
 
 def _map_scale_rows(bot, guild) -> str:
@@ -495,6 +501,17 @@ def _players_html(bot, guild) -> str:
     {_param_input(entry, guild)}
   </div>"""
 
+    texts = ""
+    for key in _text_keys():
+        spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)
+        entry = {**spec, "value": bot.dodoland_params.get(guild.id, key)}
+        texts += f"""
+  <div class="paramrow wide">
+    <div><b>{_e(spec['label'].replace('Member page: ', ''))}</b>
+      <div class="muted small">{_e(spec['description'])}</div></div>
+    {_param_input(entry, guild)}
+  </div>"""
+
     base = str(bot.dodoland_params.get(guild.id, "dodoland_public_base_url") or "").rstrip("/")
     where = (f'<p class="muted small">Members reach it at '
              f'<code>{_e(base)}/towns</code>, signing in with Discord. They see '
@@ -527,6 +544,12 @@ def _players_html(bot, guild) -> str:
   {where}
   {state}
   <div class="params">{rows}</div>
+  <h3>Texts on a member's town page</h3>
+  <p class="muted small">Every heading, explanation, label and button a member
+  reads on their own town page. Each starts with the wording it has always had;
+  blank brings the default back. Words in braces, like <code>{{days}}</code>, are
+  filled in by the page.</p>
+  <div class="params">{texts}</div>
   <p class="muted small">A member can never move a number. Naming a town,
   describing it and picturing it are authored and change nothing; standing is
   earned and cannot be typed in. Their page reads the same scorer this one

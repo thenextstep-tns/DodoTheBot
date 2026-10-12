@@ -395,7 +395,14 @@ def _metric_parameters() -> list[dict]:
     return out
 
 
-DODOLAND_PARAMETERS: list[dict] = _BASE_PARAMETERS + _metric_parameters()
+def _text_parameters() -> list[dict]:
+    """Every text on a member's town page (helpers/dodoland/page_texts.py)."""
+    from helpers.dodoland import page_texts
+
+    return page_texts.specs()
+
+
+DODOLAND_PARAMETERS: list[dict] = _BASE_PARAMETERS + _metric_parameters() + _text_parameters()
 
 
 def manager() -> ParamManager:

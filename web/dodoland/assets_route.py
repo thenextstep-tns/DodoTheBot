@@ -46,6 +46,42 @@ async def asset_image(request: web.Request):
     )
 
 
+# (guild, user, original size, width) -> (webp bytes, type). Small: a card each.
+_THUMBS: dict[tuple, tuple[bytes, str]] = {}
+
+
+async def _thumbnail(guild_id: int, user_id: int, data: bytes, width: int) -> tuple[bytes, str]:
+    """``data`` no wider than ``width``, as WebP, made once per picture."""
+    import asyncio
+    import io
+
+    key = (int(guild_id), int(user_id), len(data), int(width))
+    if key in _THUMBS:
+        return _THUMBS[key]
+
+    def shrink():
+        from PIL import Image
+
+        try:
+            image = Image.open(io.BytesIO(data))
+            image.load()
+        except Exception:  # noqa: BLE001 - not a picture we can read: send it as it is
+            return data, "application/octet-stream"
+        if image.width > width:
+            image = image.resize((width, max(1, round(image.height * width / image.width))), Image.LANCZOS)
+        out = io.BytesIO()
+        image.convert("RGBA" if image.mode in ("RGBA", "LA", "P") else "RGB").save(out, "WEBP", quality=85)
+        return out.getvalue(), "image/webp"
+
+    made = await asyncio.get_running_loop().run_in_executor(None, shrink)
+    if made[1] == "application/octet-stream":
+        return data, "image/png"
+    if len(_THUMBS) > 500:
+        _THUMBS.clear()
+    _THUMBS[key] = made
+    return made
+
+
 async def town_picture(request: web.Request):
     """A town's own picture or GIF, if its owner set one."""
     bot, guild = request.app["bot"], request["guild"]
@@ -58,9 +94,19 @@ async def town_picture(request: web.Request):
     if not image:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = image.get("data")
+    body = bytes(raw) if raw is not None else b""
+    kind = str(image.get("content_type") or "image/png")
+    # ``?w=`` asks for a copy that wide at most (a card, not a poster): an
+    # owner's photo can be megabytes. A GIF is sent as it is, to keep moving.
+    try:
+        want = max(0, min(2048, int(request.query.get("w") or 0)))
+    except ValueError:
+        want = 0
+    if want and body and "gif" not in kind:
+        body, kind = await _thumbnail(guild.id, user_id, body, want)
     return web.Response(
-        body=bytes(raw) if raw is not None else b"",
-        content_type=str(image.get("content_type") or "image/png"),
+        body=body,
+        content_type=kind,
         # Short: unlike an asset, a town picture is replaced in place by its
         # owner, so a long cache would show them yesterday's.
         headers={"Cache-Control": "private, max-age=60"},

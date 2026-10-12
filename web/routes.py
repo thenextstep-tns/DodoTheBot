@@ -4616,7 +4616,10 @@ def create_app(bot) -> web.Application:
     # asset, a rank badge — is larger than that, and every one of them looked
     # like a button that did nothing. The individual size limits still apply in
     # the handlers, where they can say what went wrong.
-    app = web.Application(client_max_size=16 * 1024 * 1024)
+    from web import timing
+
+    # Slow requests are logged (web/timing.py), so a slow panel can be traced.
+    app = web.Application(client_max_size=16 * 1024 * 1024, middlewares=[timing.timing])
     app["bot"] = bot
     app.add_routes(
         [
