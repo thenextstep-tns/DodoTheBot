@@ -12,6 +12,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 from typing import Optional
 
@@ -23,6 +24,9 @@ from config.secrets import (
     WEB_PUBLIC_URL,
     WEB_SESSION_SECRET,
 )
+
+# The bot's own log (logs/dodo.log).
+_log = logging.getLogger("dodo")
 
 DISCORD_API = "https://discord.com/api"
 OAUTH_SCOPE = "identify"
@@ -118,6 +122,10 @@ async def exchange_code(code: str) -> Optional[dict]:
     async with aiohttp.ClientSession() as session:
         async with session.post(f"{DISCORD_API}/oauth2/token", data=data, headers=headers) as resp:
             if resp.status != 200:
+                # Discord says why (invalid_grant: a code used twice or expired;
+                # invalid_request: a redirect_uri it does not have registered).
+                _log.warning("Discord refused the OAuth code (%s, redirect %s): %s",
+                             resp.status, data["redirect_uri"], (await resp.text())[:300])
                 return None
             token = await resp.json()
         access = token.get("access_token")
