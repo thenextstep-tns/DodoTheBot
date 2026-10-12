@@ -992,3 +992,18 @@ the page's catalogue went. `player.my_town()` stays (tests use it).
 * **Population** on a town card: the tiles its area covers (`influence` towns
   `cells`) × `dodoland_population_per_cell` (default 1); filled in when the
   areas arrive (`refreshPop`).
+
+### Slowness after the tunnel: the activity read (12 Oct 2026)
+The panel now runs on the laptop, so every read of the activity window (~20,000
+rows from Atlas) crosses the internet, ~4s. The profile of `/me/w/town/{id}/art`
+was all pymongo. `standing.recent_rows` cached it for 60s, but on expiry the
+next caller waited for the read, and a map asking for a dozen town drawings at
+once made a dozen reads. Now: single-flight per key (`_lock_for`), and past
+`dodoland_rows_cache_s` the old rows are served for up to
+`dodoland_rows_stale_s` (default 1800) while one background thread re-reads
+(`_refresh_rows`). The map page (`_collect`), the member snapshot and the
+influence layer now use `recent_standings` (shared, read-only) instead of
+re-scoring with `guild_standings`. Test: `test_dodoland_rows_cache.py`.
+
+Map work no longer DMs the owner: `_record_change(..., notify=False)` for decor,
+terrain and forest edits (still in the audit log).

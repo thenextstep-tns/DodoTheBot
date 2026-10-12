@@ -26,6 +26,7 @@ where), so it sits on the town rather than inside any one building.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Iterable, Optional
 
@@ -173,18 +174,69 @@ def recent_rows(store, params, guild_id: int, since: Optional[str]) -> tuple[lis
     read once and kept for ``dodoland_rows_cache_s``. **Read-only**: the lists
     are shared between callers. The settings page reads its own, uncached, so a
     tuning change previews at once.
+
+    Past that, the old rows are still served — up to
+    ``dodoland_rows_stale_s`` — while **one** background read replaces them, so
+    no page waits on the read once the map has been opened. With nothing cached
+    the callers that arrive together wait on one read rather than each making
+    their own: a map asks for a dozen town drawings at once, and a dozen
+    20,000-row reads over the internet was the multi-second stall.
     """
     ttl = float(params.get(guild_id, "dodoland_rows_cache_s"))
+    stale = max(ttl, float(params.get(guild_id, "dodoland_rows_stale_s")))
     key = (int(guild_id), str(since or ""))
     hit = _RECENT.get(key)
-    if hit and ttl > 0 and time.monotonic() - hit[0] < ttl:
-        return hit[1], hit[2]
+    if hit and ttl > 0:
+        age = time.monotonic() - hit[0]
+        if age < ttl:
+            return hit[1], hit[2]
+        if age < stale:
+            _refresh_rows(store, guild_id, since, key)
+            return hit[1], hit[2]
+    with _lock_for(key):
+        hit = _RECENT.get(key)
+        if hit and ttl > 0 and time.monotonic() - hit[0] < ttl:
+            return hit[1], hit[2]   # read by whoever held the lock first
+        return _read_rows(store, guild_id, since, key)
+
+
+_LOCKS: dict[tuple, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+_REFRESHING: set = set()
+
+
+def _lock_for(key) -> threading.Lock:
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, threading.Lock())
+
+
+def _read_rows(store, guild_id, since, key) -> tuple[list, list]:
     rows = store.rows(guild_id, since=since)
     pairs = store.pair_rows(guild_id, since=since)
     if len(_RECENT) > 32:
         _RECENT.clear()
     _RECENT[key] = (time.monotonic(), rows, pairs)
     return rows, pairs
+
+
+def _refresh_rows(store, guild_id, since, key) -> None:
+    """Replace stale rows in the background, once at a time per key."""
+    with _LOCKS_GUARD:
+        if key in _REFRESHING:
+            return
+        _REFRESHING.add(key)
+
+    def run():
+        try:
+            with _lock_for(key):
+                _read_rows(store, guild_id, since, key)
+        except Exception:  # noqa: BLE001 - the stale rows stay; the next call retries
+            pass
+        finally:
+            with _LOCKS_GUARD:
+                _REFRESHING.discard(key)
+
+    threading.Thread(target=run, name="dodoland-rows", daemon=True).start()
 
 
 # (guild, since, the rows object, buildings) -> standings over everybody

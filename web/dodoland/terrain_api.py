@@ -605,7 +605,7 @@ async def api_terrain_paint(request: web.Request):
 
     invalidate(guild.id, keys)
     await _record_change(request, "dodoland_terrain", mode, "",
-                         f"{len(edits)} cells", "DodoLand terrain painted")
+                         f"{len(edits)} cells", "DodoLand terrain painted", notify=False)
     return web.json_response({"ok": True, "cells": len(edits), "chunks": len(keys),
                               "touched": [[cx, cy] for cx, cy in keys],
                               "kinds": len(world["kinds"]),

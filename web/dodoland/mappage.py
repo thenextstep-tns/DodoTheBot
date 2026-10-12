@@ -97,9 +97,9 @@ def _collect(bot, guild) -> dict:
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
     rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
-    result = standing.guild_standings(bot.dodoland, bot.dodoland_params, guild.id,
-                                      buildings, since=since, rows=rows,
-                                      pair_rows=pairs)
+    # Shared with every other reader of the same rows (cached, read-only).
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
     glow = flourish_rules.flourish_map(bot, guild.id)
     plots = bot.dodoland_buildings.plots(guild.id)
     lit = {int(row.get("user_id", 0)) for row in rows

@@ -82,7 +82,7 @@ async def api_forest_paint(request: web.Request):
     store.paint(guild.id, edits, layer=T.COVER)
     _VERSION[int(guild.id)] = _VERSION.get(int(guild.id), 0) + 1
     await _record_change(request, "dodoland_forest", "erase" if index == forest.NONE else "paint",
-                         "", f"{len(edits)} cells", "DodoLand forest painted")
+                         "", f"{len(edits)} cells", "DodoLand forest painted", notify=False)
     return web.json_response({"ok": True, "cells": len(edits), "stand": index,
                               "touched": [[cx, cy] for cx, cy in keys],
                               "version": version(guild.id)})

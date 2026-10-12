@@ -89,7 +89,7 @@ async def api_world_decor(request: web.Request):
         if action in ("lock", "unlock"):
             n = bot.dodoland_decor.set_landmark(guild.id, body.get("piece_ids") or [], action == "lock")
             await _record_change(request, "dodoland_decor", "world", "", action,
-                                 f"DodoLand landmark {action}ed ({n})")
+                                 f"DodoLand landmark {action}ed ({n})", notify=False)
             return web.json_response({"ok": True, "changed": n})
         if action == "pin":
             # A town building locked in place from its card, as its owner would.
@@ -131,14 +131,14 @@ async def api_world_decor(request: web.Request):
                                                  placed_by_name=who_name,
                                                  locked=bool(body.get("landmark")))
             await _record_change(request, "dodoland_decor", "world", "", "placed",
-                                 f"DodoLand map decor placed ({len(rows)})")
+                                 f"DodoLand map decor placed ({len(rows)})", notify=False)
             return web.json_response({"ok": True, "pieces": rows})
 
         if action == "remove_many":
             gone = bot.dodoland_decor.remove_many(guild.id, body.get("piece_ids") or [])
             if gone:
                 await _record_change(request, "dodoland_decor", "world", "", "removed",
-                                     f"DodoLand map decor removed ({gone})")
+                                     f"DodoLand map decor removed ({gone})", notify=False)
             return web.json_response({"ok": True, "removed": gone})
 
         if action == "move_many":
@@ -159,7 +159,7 @@ async def api_world_decor(request: web.Request):
             gone = bot.dodoland_decor.remove(guild.id, body.get("piece_id"))
             if gone:
                 await _record_change(request, "dodoland_decor", "world", "", "removed",
-                                     "DodoLand map decor removed")
+                                     "DodoLand map decor removed", notify=False)
             return web.json_response({"ok": True, "removed": bool(gone)})
 
         if action == "move":
@@ -207,7 +207,7 @@ async def api_world_decor(request: web.Request):
             layer=tile["layer"], placed_by=who, placed_by_name=who_name, town=town,
             locked=bool(body.get("landmark")))
         await _record_change(request, "dodoland_decor", "world", "", "placed",
-                             "DodoLand map decor placed")
+                             "DodoLand map decor placed", notify=False)
         return web.json_response({"ok": True, "piece": piece})
     except decor_rules.DecorError as error:
         return _bad(error)

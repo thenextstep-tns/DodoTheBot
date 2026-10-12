@@ -4085,11 +4085,14 @@ async def lang_page(request: web.Request):
     return _page("Strings", _lang_html(request.app["bot"]))
 
 
-async def _record_change(request: web.Request, kind: str, target: str, old, new, line: str) -> None:
+async def _record_change(request: web.Request, kind: str, target: str, old, new, line: str,
+                         *, notify: bool = True) -> None:
     """Log a configuration change, and DM the owner if someone else made it.
 
     Everything is logged, owner included, so the history is complete; only
-    non-owner changes are worth a DM. Never raises — the write it describes has
+    non-owner changes are worth a DM, and only configuration ones: ``notify``
+    is off for working on the map (placing things, painting ground), which is
+    using the map, not reconfiguring the server. Never raises — the write it describes has
     already happened, and a failed log must not turn a successful save into an
     error.
     """
@@ -4106,7 +4109,7 @@ async def _record_change(request: web.Request, kind: str, target: str, old, new,
             getattr(actor, "display_name", None) or (str(uid) if uid else "unknown"),
             kind, target, old, new, is_owner=is_owner,
         )
-        if not is_owner:
+        if notify and not is_owner:
             bot.audit_notify.record(guild, actor, line)
     except Exception:  # noqa: BLE001
         pass

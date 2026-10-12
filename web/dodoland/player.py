@@ -174,9 +174,9 @@ def snapshot(bot, guild) -> dict:
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
     rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
-    result = standing.guild_standings(bot.dodoland, bot.dodoland_params, guild.id,
-                                      buildings, since=since, rows=rows,
-                                      pair_rows=pairs)
+    # Shared with every other reader of the same rows (cached, read-only).
+    result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
+                                       buildings, since)
     partners: dict[int, dict[int, int]] = {}
     for row in pairs:
         a, b, n = int(row.get("a", 0)), int(row.get("b", 0)), int(row.get("n", 0) or 1)

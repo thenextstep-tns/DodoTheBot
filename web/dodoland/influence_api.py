@@ -162,9 +162,9 @@ def compute(bot, guild) -> dict:
 
     since = store_module.days_back(int(params.get(guild.id, "dodoland_window_days")))
     rows, pairs = standing.recent_rows(bot.dodoland, params, guild.id, since)
-    result = standing.guild_standings(bot.dodoland, params, guild.id,
-                                      bot.dodoland_buildings.buildings(guild.id), since=since,
-                                      rows=rows, pair_rows=pairs)
+    # Shared with every other reader of the same rows (cached, read-only).
+    result = standing.recent_standings(bot.dodoland, params, guild.id,
+                                       bot.dodoland_buildings.buildings(guild.id), since)
     strongest = max((p["power"] for p in result["order"]), default=0)
     reach_power, breadths = _breadth(bot, guild, plots, result)
     # A town boosted past everybody's power sets the scale: the strongest town
