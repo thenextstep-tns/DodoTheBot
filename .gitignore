@@ -166,3 +166,6 @@ dodoland_textures.html
 # Third-party tile packs: several forbid redistribution. Imported into the
 # tile library by tools/dodoland_import_*.py, never committed.
 item_imgs/tilesets/
+
+# The panel profiling switch (web/timing.py): present means on.
+logs/profile_web
