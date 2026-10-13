@@ -71,6 +71,13 @@ def _session_user(request: web.Request):
     return payload.get("uid") if payload else None
 
 
+def _dodoland_scope() -> str:
+    """Who sees the DodoLand menu item: the scope its routes take."""
+    from web import dodoland
+
+    return panel_access.SCOPE_OWNER if dodoland.OWNER_ONLY else panel_access.SCOPE_CONFIG
+
+
 def _safe_next(value) -> str:
     """A page on this site to return to after signing in, or "". Only a path
     here ("/towns", "/guild/1/dodoland/me/map"): never another site, so a
@@ -315,7 +322,8 @@ def _guild_nav(guild, scope: str, current: str) -> str:
              ("reactions", "🐈 Reactions", panel_access.SCOPE_CONFIG),
              # DodoLand shows every member's standing, so it stays admin-scoped
              # until any of it is meant to be seen by the people it ranks.
-             ("dodoland", "🏘 DodoLand", panel_access.SCOPE_CONFIG),
+             # The bot owner's alone while web/dodoland.OWNER_ONLY is set.
+             ("dodoland", "🏘 DodoLand", _dodoland_scope()),
              # Tabletop is stats-scoped because players (not just admins) need it;
              # which campaigns they actually see is decided per campaign.
              ("tabletop", "🎲 Tabletop", panel_access.SCOPE_STATS),

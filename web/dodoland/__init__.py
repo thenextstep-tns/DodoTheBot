@@ -26,6 +26,15 @@ from __future__ import annotations
 
 from aiohttp import web
 
+# **The admin side is the bot owner's alone for now.** While the map is being
+# built, one wrong click by a server admin could wipe a world (terrain, decor,
+# every town's place), so every ``configure``/``full`` route below takes the
+# bot owner's scope instead: a server's owner and admins get the same 404 as
+# somebody with no access at all, and the DodoLand menu item is hidden from
+# them (web/routes.py). Members' own pages (``player``) are unaffected: they
+# only ever touch the member's own town. Set False to give the panel scopes back.
+OWNER_ONLY = True
+
 
 def dodoland_routes() -> list:
     """Route table for the DodoLand pages."""
@@ -60,8 +69,8 @@ def dodoland_routes() -> list:
 
     # Reading the page means reading everybody's standing, so it takes the same
     # scope the settings page does rather than the softer stats scope.
-    configure = require_scope(panel_access.SCOPE_CONFIG)
-    full = require_scope(panel_access.SCOPE_FULL)
+    configure = require_scope(panel_access.SCOPE_OWNER if OWNER_ONLY else panel_access.SCOPE_CONFIG)
+    full = require_scope(panel_access.SCOPE_OWNER if OWNER_ONLY else panel_access.SCOPE_FULL)
     # The tile library belongs to no one server, so it is not under
     # /guild/{gid} and takes the bot owner's gate rather than a panel scope.
     owner = require_owner

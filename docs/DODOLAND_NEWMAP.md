@@ -1137,3 +1137,13 @@ hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
   `dodoland_uploaded_building_sizes` ("menagerie=0.6, tavern=1.2") sizes single
   buildings on top of the overall size; each placed piece still has its own
   Size slider.
+
+### Admin side locked to the bot owner (13 Oct 2026)
+`web/dodoland/__init__.py` `OWNER_ONLY = True`: every `configure`/`full`
+DodoLand route (the page, the map, every reader and every write: settings,
+buildings, terrain, forest, decor, towns, settle, backfill) takes the bot
+owner's scope, so a server's owner and its admins get 404; the DodoLand menu
+item follows it (`routes._dodoland_scope`). The tile library was already the
+owner's. Members' own pages (`/dodoland/me…`, `/towns`) are unchanged. There
+are no DodoLand Discord commands. To give the panel scopes back, set it False.
+Test: `test_dodoland_owner_only.py` (all 28 admin routes, through the real gate).
