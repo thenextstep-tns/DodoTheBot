@@ -524,6 +524,24 @@ async def api_my_town(request: web.Request):
     except (ValueError, json.JSONDecodeError):
         return _bad("That request could not be read.")
 
+    if body.get("gate_add") is not None or body.get("gate_remove") is not None:
+        # A gate in the town's own wall, snapped to it (influence_api.gate_edit).
+        import asyncio
+
+        from web.dodoland import influence_api
+        try:
+            add = body.get("gate_add")
+            remove = body.get("gate_remove")
+            add = (float(add["x"]), float(add["y"])) if add is not None else None
+            remove = (float(remove["x"]), float(remove["y"])) if remove is not None else None
+        except (TypeError, ValueError, KeyError):
+            return _bad("That gate could not be read.")
+        why = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: influence_api.gate_edit(bot, guild, str(uid), add=add, remove=remove))
+        if why:
+            return _bad(why)
+        return web.json_response({"ok": True})
+
     if body.get("house") is not None:
         # One ordinary house moved by hand: inside the town's own area only.
         import asyncio

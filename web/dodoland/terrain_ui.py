@@ -965,6 +965,7 @@ SCRIPT = r"""
         if (!g) return;
         D.influence = res.towns || [];
         D.walls = res.walls || [];
+        D.gates = res.gates || [];
         if (typeof refreshPop === 'function') refreshPop();
         g.innerHTML = D.influence.map(function (t) {
           // The line is the smoothed border when there is one: the stepped
@@ -1100,6 +1101,34 @@ SCRIPT = r"""
       }
       out.push('</g>');
     });
+    // Gateways: the opening between two runs, raised like the wall, with a
+    // dark arch (stone) or a pair of plank doors (wood).
+    (D.gates || []).forEach(function (gt) {
+      var s = WALL[gt.style];
+      if (!s) return;
+      var ax = gt.a[0], ay = gt.a[1], bx = gt.b[0], by = gt.b[1], h = s.h + 0.4;
+      var f = function (n) { return (+n).toFixed(2); };
+      var lerp = function (t) { return [ax + (bx - ax) * t, ay + (by - ay) * t]; };
+      var face = 'M' + f(ax) + ' ' + f(ay) + 'L' + f(bx) + ' ' + f(by) + 'L' + f(bx) + ' ' + f(by - h) +
+                 'L' + f(ax) + ' ' + f(ay - h) + 'Z';
+      out.push('<path d="' + face + '" fill="' + s.faces[0] + '" stroke="' + s.edge + '" stroke-width="0.18"/>');
+      var l = lerp(0.22), r = lerp(0.78), top = Math.min(l[1], r[1]) - h * 0.72;
+      if (gt.style === 'stone') {
+        out.push('<path d="M' + f(l[0]) + ' ' + f(l[1]) + 'L' + f(l[0]) + ' ' + f(top + 0.6) +
+                 'Q' + f((l[0] + r[0]) / 2) + ' ' + f(top - 0.7) + ' ' + f(r[0]) + ' ' + f(top + 0.6) +
+                 'L' + f(r[0]) + ' ' + f(r[1]) + 'Z" fill="#2a241e"/>');
+      } else {
+        var m = lerp(0.5);
+        out.push('<path d="M' + f(l[0]) + ' ' + f(l[1]) + 'L' + f(l[0]) + ' ' + f(top) + 'L' + f(r[0]) + ' ' + f(top) +
+                 'L' + f(r[0]) + ' ' + f(r[1]) + 'Z" fill="#6b4425" stroke="' + s.edge + '" stroke-width="0.14"/>' +
+                 '<line x1="' + f(m[0]) + '" y1="' + f(top) + '" x2="' + f(m[0]) + '" y2="' + f(m[1]) +
+                 '" stroke="' + s.edge + '" stroke-width="0.18"/>');
+      }
+      out.push('<path d="M' + f(ax) + ' ' + f(ay - h) + 'L' + f(bx) + ' ' + f(by - h) + '" stroke="' + s.edge +
+               '" stroke-width="' + (s.t + 0.3).toFixed(2) + '" fill="none"/>' +
+               '<path d="M' + f(ax) + ' ' + f(ay - h) + 'L' + f(bx) + ' ' + f(by - h) + '" stroke="' + s.top +
+               '" stroke-width="' + s.t + '" fill="none"/>');
+    });
     g.innerHTML = out.join('');
     // Towers along each run and at both ends (where a wall meets the shore),
     // drawn after every wall and the nearer (lower) ones last.
@@ -1116,7 +1145,13 @@ SCRIPT = r"""
     });
     // Where runs meet (two walls joining, short runs by a shore) their end
     // towers would crowd together: one is enough.
-    var kept = [];
+    // A gate stands between two towers, always.
+    // Set back along the wall, so the opening between them stays open.
+    var kept = (D.gates || []).filter(function (gt) { return WALL[gt.style]; }).reduce(function (all, gt) {
+      var dx = gt.b[0] - gt.a[0], dy = gt.b[1] - gt.a[1], n = Math.sqrt(dx * dx + dy * dy) || 1, k = 1.3 / n;
+      return all.concat([{x: gt.a[0] - dx * k, y: gt.a[1] - dy * k, s: WALL[gt.style]},
+                         {x: gt.b[0] + dx * k, y: gt.b[1] + dy * k, s: WALL[gt.style]}]);
+    }, []);
     towers.forEach(function (w) {
       for (var i = 0; i < kept.length; i++) {
         var dx = kept[i].x - w.x, dy = kept[i].y - w.y;

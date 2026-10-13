@@ -95,6 +95,11 @@ async def api_world_decor(request: web.Request):
             # A town building locked in place from its card, as its owner would.
             n = bot.dodoland_decor.set_pinned(guild.id, body.get("piece_ids") or [], True)
             return web.json_response({"ok": True, "changed": n})
+        if action == "stack":
+            # Flat, standing or on top: how pieces draw against each other.
+            n = bot.dodoland_decor.set_stack(guild.id, body.get("piece_ids") or [],
+                                             str(body.get("stack") or ""))
+            return web.json_response({"ok": True, "changed": n})
 
         # A landmark, or anything locked in place, stays where it is until it
         # is unlocked.

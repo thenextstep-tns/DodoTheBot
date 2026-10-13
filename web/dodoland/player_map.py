@@ -217,6 +217,13 @@ async def build(request: web.Request):
             n = bot.dodoland_decor.set_pinned(guild.id, ids, action == "lock", town=mine)
             return web.json_response({"ok": True, "changed": n})
 
+        if action == "stack":
+            ids = [str(i) for i in (body.get("piece_ids") or [])[:2000]]
+            if not ids or any(own(i) is None for i in ids):
+                return _bad("You can only stack your own town's things.")
+            n = bot.dodoland_decor.set_stack(guild.id, ids, str(body.get("stack") or ""), town=mine)
+            return web.json_response({"ok": True, "changed": n})
+
         def unpinned(ids) -> bool:
             return not bot.dodoland_decor.held(guild.id, ids)
 

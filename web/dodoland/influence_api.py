@@ -104,7 +104,102 @@ def _water_grid(chunks: dict, kinds: list, cells_w: int, cells_h: int):
     return np.where((grid >= 0) & (grid < len(table)), table[np.clip(grid, 0, len(table) - 1)], False)
 
 
-def walls(bot, guild, payload: dict) -> list[dict]:
+def walls(bot, guild, payload: dict) -> tuple[list[dict], list[dict]]:
+    """The walls, cut where their towns have gates: ``(runs, gates)``.
+    A gate is ``{a, b, style, town}``, the two ends of the opening. Blocking."""
+    runs = _raw_walls(bot, guild, payload)
+    details = bot.dodoland_towns.all(guild.id) or {}
+    gates = {str(uid): d.get("gates") or [] for uid, d in details.items()}
+    width = float(bot.dodoland_params.get(guild.id, "dodoland_gate_width"))
+    return cut_gates(runs, gates, payload.get("cells_w") or 0, payload.get("cells_h") or 0, width)
+
+
+def cut_gates(runs: list[dict], gates: dict, w: int, h: int, width: float) -> tuple[list, list]:
+    """Cut each town's wall runs where its gates are (map percentages), and say
+    where each opening is: ``(runs as paths, [{a, b, style, town}])``."""
+    half = max(0.5, float(width) / 2)
+    out_runs, out_gates = [], []
+    for run in runs:
+        marks = [(gx / 100 * w, gy / 100 * h) for gx, gy in gates.get(str(run["town"])) or []]
+        pts = run["pts"]
+        if not marks:
+            out_runs.append({"style": run["style"], "town": run["town"], "d": _d(pts)})
+            continue
+        near = [any((x - gx) ** 2 + (y - gy) ** 2 < half * half for gx, gy in marks) for x, y in pts]
+        piece, before = [], None
+        for (x, y), cut in zip(pts, near):
+            if cut:
+                if piece:
+                    before = piece[-1]
+                    if len(piece) >= 2:
+                        out_runs.append({"style": run["style"], "town": run["town"], "d": _d(piece)})
+                    piece = []
+                continue
+            if not piece and before is not None:
+                out_gates.append({"a": [round(before[0], 2), round(before[1], 2)],
+                                  "b": [round(x, 2), round(y, 2)],
+                                  "style": run["style"], "town": run["town"]})
+                before = None
+            piece.append((x, y))
+        if len(piece) >= 2:
+            out_runs.append({"style": run["style"], "town": run["town"], "d": _d(piece)})
+    return out_runs, out_gates
+
+
+def _d(pts) -> str:
+    return "M" + "L".join(f"{x:.2f} {y:.2f}" for x, y in pts)
+
+
+def gate_edit(bot, guild, town: str, *, add=None, remove=None) -> str:
+    """Put a gate in a town's wall, or take one out, at the map position
+    clicked (percentages). Snapped to the nearest point of the town's own
+    wall. Returns why not, or ``""``. Blocking."""
+    payload = current(bot, guild)
+    w, h = payload.get("cells_w") or 0, payload.get("cells_h") or 0
+    if not w or not h:
+        return "There is no map yet."
+    details = bot.dodoland_towns.get(guild.id, int(town)) or {}
+    gates = [list(g) for g in details.get("gates") or []]
+    reach = 5.0   # how far from the wall a click may be, in cells
+    if remove is not None:
+        cx, cy = float(remove[0]) / 100 * w, float(remove[1]) / 100 * h
+        dist = [((g[0] / 100 * w - cx) ** 2 + (g[1] / 100 * h - cy) ** 2, i) for i, g in enumerate(gates)]
+        if not dist or min(dist)[0] > reach * reach:
+            return "Click on one of your town's gates to take it out."
+        gates.pop(min(dist)[1])
+        bot.dodoland_towns.set_gates(guild.id, int(town), gates)
+        return ""
+    if not details.get("walls"):
+        return "Choose walls for the town first."
+    if len(gates) >= town_rules_max_gates():
+        return f"A town has at most {town_rules_max_gates()} gates."
+    cx, cy = float(add[0]) / 100 * w, float(add[1]) / 100 * h
+    best = None
+    for run in _raw_walls(bot, guild, payload):
+        if run["town"] != str(town):
+            continue
+        for x, y in run["pts"]:
+            d = (x - cx) ** 2 + (y - cy) ** 2
+            if best is None or d < best[0]:
+                best = (d, x, y)
+    if best is None or best[0] > reach * reach:
+        return "Click on your town's own wall to put a gate in it."
+    width = float(bot.dodoland_params.get(guild.id, "dodoland_gate_width"))
+    for g in gates:
+        if (g[0] / 100 * w - best[1]) ** 2 + (g[1] / 100 * h - best[2]) ** 2 < width * width:
+            return "There is a gate there already."
+    gates.append([best[1] / w * 100, best[2] / h * 100])
+    bot.dodoland_towns.set_gates(guild.id, int(town), gates)
+    return ""
+
+
+def town_rules_max_gates() -> int:
+    from helpers.dodoland import towns as town_rules
+
+    return town_rules.MAX_GATES
+
+
+def _raw_walls(bot, guild, payload: dict) -> list[dict]:
     """The walls of every walled town, as one walled territory.
 
     Walled towns' land is one region: overlapping walled areas share their
@@ -139,10 +234,9 @@ def walls(bot, guild, payload: dict) -> list[dict]:
         for cell in areas[town]:
             if not wet(cell):
                 owner[cell] = town
-    runs = influence.wall_runs(set(owner), lambda c: walled.get(owner.get(c, ""), ""), wet)
-    out = [{"style": style, "town": "",
-            "d": "M" + "L".join(f"{x:.2f} {y:.2f}" for x, y in pts)}
-           for style, pts in runs]
+    # Runs split where the owning town changes; each takes that town's style.
+    runs = influence.wall_runs(set(owner), lambda c: owner.get(c, ""), wet)
+    out = [{"style": walled[town], "town": town, "pts": pts} for town, pts in runs if town in walled]
     _WALLS[guild.id] = (key, out)
     return out
 
@@ -238,7 +332,10 @@ def compute(bot, guild) -> dict:
     # Water the tile lets a town spread over (shallows) costs more than land.
     grow_cost = [c * water_cost if c is not None and k.get("water") else c
                  for c, k in zip(grow_cost, kinds)]
-    blocked = _blocked(bot, guild.id, cells_w, cells_h)
+    # Areas follow the painted ground; placed things break them only when the
+    # server asks for it (dodoland_influence_pieces_block).
+    blocked = (_blocked(bot, guild.id, cells_w, cells_h)
+               if params.get(guild.id, "dodoland_influence_pieces_block") else set())
     costs = _cost_grid(chunks, grow_cost, blocked, cells_w, cells_h)
     _WATER[guild.id] = _water_grid(chunks, kinds, cells_w, cells_h)
 
@@ -357,5 +454,5 @@ async def influence_layer(request: web.Request):
         payload = current(bot, guild)
         return payload, walls(bot, guild, payload)
 
-    payload, wall_runs = await asyncio.get_running_loop().run_in_executor(None, both)
-    return web.json_response({"ok": True, **payload, "walls": wall_runs})
+    payload, (wall_runs, gates) = await asyncio.get_running_loop().run_in_executor(None, both)
+    return web.json_response({"ok": True, **payload, "walls": wall_runs, "gates": gates})

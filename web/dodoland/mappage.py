@@ -154,6 +154,7 @@ def _collect(bot, guild) -> dict:
             "name": town_rules.display_name(mine, owner),
             "blurb": str(mine.get("blurb") or ""),
             "walls": str(mine.get("walls") or ""),
+            "gates": len(mine.get("gates") or []),
             # Houses moved by hand, by their number: {"3": [x, y]}.
             "house_at": {str(k): v for k, v in (mine.get("houses") or {}).items()},
             "has_image": bool(mine.get("image")),
@@ -211,6 +212,8 @@ def _collect(bot, guild) -> dict:
                        "k": bool(d.get("locked")),
                        # Locked in place by its owner (or from its card).
                        "pk": bool(d.get("pinned")),
+                       # How it stacks: flat, stand, top, or its layer's way.
+                       "st": str(d.get("stack") or ""),
                        "at": int(d.get("at") or 0)} for d in world_decor],
             # The toolkit is the tile library's map objects and buildings that
             # admins have access to here. Ground is painted, not placed.
@@ -496,6 +499,7 @@ async def map_page(request: web.Request):
     <label>Size <input type="range" id="dlkitscale" min="0.25" max="6"
       step="0.05" value="1"></label>
     <button class="dlghost" id="dlkitflip">Mirror</button>
+    <span class="dlstack" id="dlstack" title="How the selection draws against what is around it"><button data-st="flat" title="Under everything that stands: ponds, paths, rugs">Flat</button><button data-st="stand" title="In front of what stands behind it">Standing</button><button data-st="top" title="Over everything">On top</button></span>
     <button class="dlghost" id="dlkitlock"{' hidden' if player else ''} title="A landmark: nobody moves or removes it until an admin unlocks it, no town carries it off, and members cannot paint the ground under it. On something already locked (a landmark, or a building its owner locked in place) it unlocks it.">&#128274; Landmark</button>
     <button class="dlghost" id="dlkitdel">Remove</button>
   </div>
@@ -821,6 +825,11 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dlkititem img { width: 100%; height: 52px; object-fit: contain; }
 /* Pixel art keeps its pixels, in the kit and on the map. */
 .dlkititem.px img, .dlpiece.px img { image-rendering: pixelated; }
+.dlstack { display: inline-flex; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+.dlstack button { background: var(--deep); color: var(--soft); border: 0; border-right: 1px solid var(--edge);
+  padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.dlstack button:last-child { border-right: 0; }
+.dlstack button.on { background: var(--paper); color: var(--ink); box-shadow: inset 0 -2px 0 var(--lantern); }
 .dlkititem span { font-size: 10px; text-align: center; line-height: 1.2; color: var(--soft);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 /* Selected: a thin ring, not a slab — the picture is the point. */
@@ -1008,6 +1017,15 @@ _SCRIPT = r"""
   // One rule for every piece, town hall, house and walker, from where it stands
   // (its y, in percent of the map). Flat ground features stay underneath.
   function depth(yPct) { return 100 + Math.round(Math.max(0, Math.min(100, yPct)) * 100); }
+  // How a piece stacks: flat under everything standing (the environment
+  // layer's way), standing by where it stands (everything else's), or on top
+  // of all of it. A piece can be set to any of the three (Flat / Standing /
+  // On top in the toolkit), which is how a pond goes under a tree beside it.
+  function stackOf(p) { return p.st || ((p.l || 'objects') === 'environment' ? 'flat' : 'stand'); }
+  function stackZ(el, p) {
+    var st = stackOf(p);
+    el.style.zIndex = st === 'flat' ? '2' : st === 'top' ? String(10200 + depth(p.y)) : String(depth(p.y));
+  }
   world.style.setProperty('--ws', WS);
   function kMin() { return D.sizes.min_zoom / WS; }
   function kMax() { return D.sizes.max_zoom / WS; }
@@ -1358,7 +1376,8 @@ _SCRIPT = r"""
         p.plot.x.toFixed(1) + ', ' + p.plot.y.toFixed(1) + '</div>' : '') +
       (p.plot && mayEdit && D.sizes.walls ? wallSection(p) : '') +
       '<div class="acts">' +
-        (D.ep.player ? (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
+        (D.ep.player ? (mine ? '<button data-act="edit" class="own">Customise your town</button>' : '') +
+          (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
           ? '<button data-act="edit" class="own">Customise your town</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
@@ -1389,6 +1408,14 @@ _SCRIPT = r"""
         if (b.dataset.delbld) { deleteBuilding(p, b.dataset.delbld); return; }
         if (b.dataset.lockbld) { lockBuilding(p, b.dataset.lockbld); return; }
         if (b.dataset.walls !== undefined) { setWalls(p, b.dataset.walls); return; }
+        if (b.dataset.gate) {
+          gating = {id: id, op: b.dataset.gate};
+          frame.classList.add('placing');
+          hint.textContent = b.dataset.gate === 'add'
+            ? 'Click the wall where the gate should go. Escape to stop.'
+            : 'Click the gate to take out. Escape to stop.';
+          return;
+        }
         if (act === 'close') { closeCard(); }
         else if (act === 'move') { arm(id); closeCard(); }
         else if (act === 'remove') {
@@ -1587,8 +1614,13 @@ _SCRIPT = r"""
     var walls = [['', 'None'], ['palisade', 'Palisade'], ['stone', 'Stone']].map(function (w) {
       return '<button data-walls="' + w[0] + '" class="' + ((p.walls || '') === w[0] ? 'own' : '') + '">' + w[1] + '</button>';
     }).join('');
+    var gates = p.walls
+      ? '<div class="acts"><button data-gate="add" title="Then click the wall where the gate goes">Add a gate</button>' +
+        (p.gates ? '<button data-gate="remove" title="Then click the gate to take out">Remove a gate</button>' : '') +
+        '</div>' + (p.gates ? '<span class="sub">' + p.gates + (p.gates === 1 ? ' gate' : ' gates') + '</span>' : '')
+      : '';
     return '<div class="dlbuild"><div class="dlwallrow"><span class="sub">Walls round its area</span>' +
-      '<div class="acts">' + walls + '</div></div></div>';
+      '<div class="acts">' + walls + '</div>' + gates + '</div></div>';
   }
   // Renaming in place: the row's name becomes a field; Enter or leaving it
   // saves, Escape puts it back. Naming is free and moves no number.
@@ -1647,6 +1679,27 @@ _SCRIPT = r"""
     frame.classList.add('placing');
     hint.textContent = 'Building ' + a.name.split(' · ')[0] + ' for ' + p.name +
       ': click inside its area. Escape to stop.';
+  }
+  // A gate in a town's wall: the click is snapped to the town's own wall on
+  // the server, which cuts the wall there and draws a gateway.
+  var gating = null;
+  function gateAt(g, at) {
+    var body = {user_id: g.id};
+    body[g.op === 'add' ? 'gate_add' : 'gate_remove'] = at;
+    fetch(D.ep.town, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify(body)})
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { hint.textContent = res.error || 'That did not work.'; notify([res.error || 'That did not work.']); return; }
+        var p = byId[g.id];
+        if (p) p.gates = Math.max(0, (p.gates || 0) + (g.op === 'add' ? 1 : -1));
+        gating = null;
+        frame.classList.remove('placing');
+        hint.textContent = g.op === 'add' ? 'Gate built.' : 'Gate taken out.';
+        if (p && openId === g.id) open(g.id);
+        if (typeof loadInfluence === 'function') loadInfluence();
+      })
+      .catch(function (err) { hint.textContent = String(err); });
   }
   function setWalls(p, style) {
     fetch(D.ep.town, {
@@ -1776,6 +1829,11 @@ _SCRIPT = r"""
     if (relocating) {
       relocateTo({x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
                   y: ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100});
+      return;
+    }
+    if (gating) {
+      gateAt(gating, {x: ((ev.clientX - b.left - view.x) / (nat.w * view.k)) * 100,
+                      y: ((ev.clientY - b.top - view.y) / (nat.h * view.k)) * 100});
       return;
     }
     var at = {
@@ -2063,7 +2121,7 @@ _SCRIPT = r"""
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
-    if ((piece.l || 'objects') !== 'environment') el.style.zIndex = depth(piece.y);
+    stackZ(el, piece);
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
     el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
@@ -2424,6 +2482,28 @@ _SCRIPT = r"""
     openKit();
   };
   document.getElementById('dlkitclose').onclick = closeKit;
+  // Flat / Standing / On top, for everything selected.
+  function stackButtons() {
+    var ids = selIds(), first = ids.length && pieceById(ids[0]);
+    document.querySelectorAll('#dlstack button').forEach(function (b) {
+      b.classList.toggle('on', !!first && stackOf(first) === b.dataset.st);
+      b.disabled = !ids.length;
+    });
+  }
+  document.querySelectorAll('#dlstack button').forEach(function (b) {
+    b.onclick = function () {
+      var ids = selIds();
+      if (!ids.length) { kitSay('Select something first.', true); return; }
+      decorPost({action: 'stack', piece_ids: ids, stack: b.dataset.st}, function () {
+        ids.forEach(function (id) {
+          var p = pieceById(id);
+          if (p) { p.st = b.dataset.st; var node = pieces[id]; if (node) stackZ(node, p); }
+        });
+        stackButtons();
+        kitSay({flat: 'Lies flat now.', stand: 'Stands by where it is.', top: 'On top of everything.'}[b.dataset.st]);
+      });
+    };
+  });
 
   // --- the toolbox ------------------------------------------------------- //
   // Four tools, one mechanic each:
@@ -2471,6 +2551,7 @@ _SCRIPT = r"""
   function selChanged() {
     // A member selects only their own things; the rest of the map is to look at.
     if (D.ep.player) Object.keys(sel).forEach(function (id) { if (!mayTouch(pieceById(id))) delete sel[id]; });
+    if (typeof stackButtons === 'function') stackButtons();
     var ids = selIds();
     heldPiece = ids.length ? ids[ids.length - 1] : null;
     world.querySelectorAll('.dlpiece:not(.ghost)').forEach(function (n) {
@@ -2597,7 +2678,7 @@ _SCRIPT = r"""
         var node = pieces[g.p.id];
         if (node) {
           node.style.left = g.p.x + '%'; node.style.top = g.p.y + '%';
-          if ((g.p.l || 'objects') !== 'environment') node.style.zIndex = depth(g.p.y);
+          stackZ(node, g.p);
         }
       });
       placeMarks();
@@ -2894,7 +2975,6 @@ _SCRIPT = r"""
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     var pick = {v: 'pointer', h: 'hand', p: 'pencil', b: 'brush'}[key];
-    if (D.ep.player && (pick === 'pencil' || pick === 'brush')) pick = null;
     if (pick && D.assets.length) { setTool(pick); ev.preventDefault(); return; }
     if ((key === 'delete' || key === 'backspace') && selIds().length) { ev.preventDefault(); removeSelection(); return; }
   });
@@ -2905,7 +2985,7 @@ _SCRIPT = r"""
   // or a box half drawn: all of it, and back to the hand.
   function putDown() {
     hidePop();
-    armedAsset = null; mix = []; building = null; relocating = null;
+    armedAsset = null; mix = []; building = null; relocating = null; gating = null;
     if (gesture === 'brush' && stroke2) {
       stroke2.previews.forEach(function (el) { el.remove(); });
       stroke2 = null;

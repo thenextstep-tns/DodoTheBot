@@ -48,6 +48,8 @@ SCOPES = (SCOPE_WORLD, SCOPE_TOWN)
 # a town's is mean on purpose — a plot with forty things on it is a junk pile,
 # and scarcity is what makes any of them worth placing.
 MAX_WORLD = 20000
+# How a piece stacks against the others ("" is its layer's own way).
+STACKS = ("", "flat", "stand", "top")
 MAX_PER_TOWN = 24
 
 MIN_SCALE, MAX_SCALE = 0.25, 12.0
@@ -267,6 +269,20 @@ class DecorStore:
         return {row["source"] for row in self._col.find(
             {"guild_id": int(guild_id), "scope": SCOPE_WORLD}, {"source": 1})
             if row.get("source")}
+
+    def set_stack(self, guild_id: int, piece_ids: list, stack: str, *, town: str = "") -> int:
+        """How pieces stack: ``flat`` (under everything standing), ``stand``
+        (in front of what stands behind it, by where it stands), ``top`` (over
+        everything), or ``""`` for its layer's own way. ``town`` narrows it to
+        that town's pieces (a member's own). Returns how many changed."""
+        if stack not in STACKS:
+            raise DecorError("Stacking is flat, standing or on top.")
+        self._ensure_indexes()
+        query = {"guild_id": int(guild_id), "piece_id": {"$in": [str(i) for i in piece_ids][:2000]}}
+        if town:
+            query["town"] = str(town)[:24]
+        result = self._col.update_many(query, {"$set": {"stack": stack}})
+        return int(getattr(result, "modified_count", 0))
 
     def move(self, guild_id: int, piece_id: str, *, x: Any = None, y: Any = None,
              scale: Any = None, flip: Any = None,

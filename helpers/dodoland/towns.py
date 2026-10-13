@@ -70,6 +70,8 @@ def _text(value: Any, limit: int, field: str, *, required: bool = False) -> str:
 
 # How a town may be walled. Drawn along its area of influence.
 WALLS = ("", "palisade", "stone")
+# Openings in a town's wall, at most this many.
+MAX_GATES = 12
 
 
 class TownStore:
@@ -157,6 +159,20 @@ class TownStore:
             {"$set": changes}, upsert=True,
         )
         return self.get(guild_id, user_id)
+
+    def set_gates(self, guild_id: int, user_id: int, gates: list) -> list:
+        """Where the town's wall has gates, as map percentages ``[[x, y], ...]``.
+        The caller has already put each one on the town's wall."""
+        cleaned = []
+        for gate in list(gates or [])[:MAX_GATES]:
+            x, y = round(float(gate[0]), 3), round(float(gate[1]), 3)
+            if not (0 <= x <= 100 and 0 <= y <= 100):
+                raise TownError("A gate stands on the map.")
+            cleaned.append([x, y])
+        self._ensure_indexes()
+        self._col.update_one({"guild_id": int(guild_id), "user_id": int(user_id)},
+                             {"$set": {"gates": cleaned}}, upsert=True)
+        return cleaned
 
     def move_house(self, guild_id: int, user_id: int, index: int, x: float, y: float) -> None:
         """Where one of the town's ordinary houses stands, moved by hand.

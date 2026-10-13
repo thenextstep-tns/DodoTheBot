@@ -1035,3 +1035,27 @@ terrain and forest edits (still in the audit log).
   cells of another, nearer ones drawn last. Walls sit in the terrain SVG
   under placed pieces; they are not depth-sorted against buildings yet.
 * Choosing walls on the card re-reads the influence layer.
+
+### Gates, stacking, unbroken areas, members customise (13 Oct 2026)
+* **Areas ignore placed things** unless `dodoland_influence_pieces_block` is on
+  (default off): `compute` passes no blocked cells, so a cottage or pond no
+  longer punches a hole in a town's area. Roads still go round pieces.
+* **Gates.** The card's walls section has *Add a gate* / *Remove a gate*; the
+  next map click (`gating`, `gateAt`) posts `gate_add` / `gate_remove` to the
+  town endpoint (admin `api.py`, member `player.api_my_town`), which calls
+  `influence_api.gate_edit`: snapped to the nearest point of the town's own
+  wall (`_raw_walls`, within 5 cells), at most `towns.MAX_GATES` (12), not on
+  top of another; stored as `gates: [[x%, y%]]` (`TownStore.set_gates`).
+  `walls()` = `_raw_walls` then `cut_gates` (radius `dodoland_gate_width` / 2,
+  default 4 cells), which also returns each opening's ends; the page draws a
+  gateway (arch or plank doors, raised) and always two towers, set back 1.3
+  cells along the wall. The response now has `walls` and `gates`.
+* **Stacking per piece** (`stack`: flat / stand / top, "" = layer default:
+  environment flat, else standing): `DecorStore.set_stack`, action `stack` on
+  the admin decor endpoint and the member build endpoint (own pieces only).
+  Toolkit foot: *Flat · Standing · On top* for the selection; `stackZ` is the
+  one z-order rule (flat 2, standing `depth(y)`, top 10200 + depth). Fixes a
+  pond drawn over a tree. A per-tile default is not built yet.
+* **Members customise** their own town from its card (*Customise your town*,
+  the same editor, saving through their own route), and get the pencil/brush
+  shortcuts now they have the toolkit.
