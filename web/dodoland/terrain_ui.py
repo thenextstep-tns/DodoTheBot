@@ -566,6 +566,109 @@ SCRIPT = r"""
     });
     return path;
   }
+  // --- smart ground -------------------------------------------------------- //
+  // A smart ground (a tile with an `auto` set: tools/dodoland_import_autotiles.py)
+  // is drawn cell by cell from its four neighbours: its centre (or, now and
+  // then, a variation) inside; at a border the edge or corner tile of its
+  // 3 x 3 set; a cell on its own, the single tile. A shape the 3 x 3 has no
+  // tile for (a strip one cell wide, its end) is put together from quarters:
+  // each quarter of the cell from the tile for the two sides it touches.
+  // No smoothing and no blending: the tiles' own edges are the transition.
+  function autoHash(x, y) {
+    var h = (x * 374761393 + y * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  // What a cell shows, as pieces [{v, sx, sy, sw, sh, dx, dy, dw, dh}] in
+  // fractions of the picture and of the cell. A tile spans N x N cells
+  // (dodoland_autotile_cells), so inside the ground is one continuous texture,
+  // seamed only every N cells. Along each axis a cell is a border on one side
+  // (it shows the outer 1/N band of that side's edge tile, where its fringe
+  // is), on both (a strip: its two halves show both outer bands), or inside
+  // (the band where it falls in the world's N-grid). n, e, s, w: is the same
+  // ground on that side.
+  function autoTile(n, e, s, w, gx, gy, set, share, N) {
+    var E = set.edges, c = set.center;
+    if (!n && !e && !s && !w) return [{v: set.single || c[0], sx: 0, sy: 0, sw: 1, sh: 1, dx: 0, dy: 0, dw: 1, dh: 1}];
+    var band = 1 / N, mx = ((gx % N) + N) % N, my = ((gy % N) + N) % N;
+    // Along one axis: the parts of the cell, each [state, source start, dest start, dest size].
+    function axis(lo, hi, at) {
+      if (!lo && !hi) return [['lo', 0, 0, 0.5], ['hi', 1 - band, 0.5, 0.5]];
+      if (!lo) return [['lo', 0, 0, 1]];
+      if (!hi) return [['hi', 1 - band, 0, 1]];
+      return [['in', at * band, 0, 1]];
+    }
+    var inside = n && e && s && w, centre = c[0];
+    if (inside && c.length > 1) {
+      // A variation now and then, a whole tile of it: chosen per N x N block.
+      var bx = Math.floor(gx / N), by = Math.floor(gy / N);
+      if (autoHash(bx, by) < share) centre = c[1 + Math.floor(autoHash(by + 7919, bx + 104729) * (c.length - 1))];
+    }
+    var name = {lolo: 'top_left', loin: 'top_center', lohi: 'top_right',
+                inlo: 'mid_left', inhi: 'mid_right',
+                hilo: 'bottom_left', hiin: 'bottom_center', hihi: 'bottom_right'};
+    var out = [];
+    axis(n, s, my).forEach(function (v) {
+      axis(w, e, mx).forEach(function (h) {
+        var key = v[0] + h[0];
+        out.push({v: key === 'inin' ? centre : E[name[key]], sx: h[1], sy: v[1], sw: band, sh: band,
+                  dx: h[2], dy: v[2], dw: h[3], dh: v[3]});
+      });
+    });
+    return out;
+  }
+  // What the rest of the bake sees: under a smart ground's border cell, the
+  // ordinary ground beside it (so it runs on under the edge tiles' clear
+  // margins); under its insides, nothing.
+  function autoUnder(cells, A, K) {
+    var out = new Uint16Array(cells);
+    for (var y = 0; y < A; y++) for (var x = 0; x < A; x++) {
+      var i = y * A + x, v = cells[i];
+      if (!K[v] || !K[v].auto) continue;
+      var near = [y > 0 ? cells[i - A] : 0, x < A - 1 ? cells[i + 1] : 0,
+                  y < A - 1 ? cells[i + A] : 0, x > 0 ? cells[i - 1] : 0];
+      out[i] = 0;
+      for (var j = 0; j < 4; j++) if (K[near[j]] && !K[near[j]].auto) { out[i] = near[j]; break; }
+    }
+    return out;
+  }
+  // Draw every smart ground of a chunk's area onto its canvas, lowest first.
+  // A lower one carries on one cell under a higher one's border, so where two
+  // meet the higher's clear edge shows the lower, not a gap. False while a
+  // picture is still loading.
+  function autoDraw(ctx, cells, A, m, res, gx0, gy0) {
+    var K = bake.kinds, ok = true, share = D.sizes.autotile_variation || 0, seen = {};
+    var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
+    var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+    for (var i = 0; i < A * A; i++) if (K[cells[i]] && K[cells[i]].auto) seen[cells[i]] = 1;
+    ctx.imageSmoothingEnabled = true;
+    Object.keys(seen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
+      var set = K[k].auto, here = new Uint8Array(A * A);
+      for (var i = 0; i < A * A; i++) if (cells[i] === k) here[i] = 1;
+      for (var y = 0; y < A; y++) for (var x = 0; x < A; x++) {
+        var j = y * A + x, v = cells[j];
+        if (here[j] || !K[v] || !K[v].auto || v < k) continue;
+        if ((x > 0 && cells[j - 1] === k) || (x < A - 1 && cells[j + 1] === k) ||
+            (y > 0 && cells[j - A] === k) || (y < A - 1 && cells[j + A] === k)) here[j] = 2;
+      }
+      function same(x, y) { return x < 0 || y < 0 || x >= A || y >= A || here[y * A + x] > 0; }
+      for (var y = m - 1; y <= m + 64 && y < A; y++) for (var x = m - 1; x <= m + 64 && x < A; x++) {
+        if (y < 0 || x < 0 || !here[y * A + x]) continue;
+        var pick = autoTile(same(x, y - 1), same(x + 1, y), same(x, y + 1), same(x - 1, y), gx0 + x, gy0 + y, set, share, N);
+        for (var q = 0; q < pick.length; q++) {
+          var im = bakeImg(pick[q].v), pc = pick[q];
+          if (!im) { ok = false; continue; }
+          // Read from a hair inside the picture's own edges: the tiles carry a
+          // thin frame there, which drawn edge to edge is a grid on the map.
+          var iw = im.naturalWidth * (1 - 2 * inset), ih = im.naturalHeight * (1 - 2 * inset);
+          var ox = im.naturalWidth * inset, oy = im.naturalHeight * inset;
+          ctx.drawImage(im, ox + pc.sx * iw, oy + pc.sy * ih, pc.sw * iw, pc.sh * ih,
+                        x * res + pc.dx * res, y * res + pc.dy * res, pc.dw * res, pc.dh * res);
+        }
+      }
+    });
+    return ok;
+  }
   function bakeChunk(key, res) {
     var at = key.split(','), cx = +at[0], cy = +at[1];
     var K = bake.kinds, width = D.sizes.blend_width || 0, strength = D.sizes.blend_strength || 0;
@@ -581,6 +684,11 @@ SCRIPT = r"""
                      coast ? Math.ceil(coastW * 2.4) + 1 : 0, 1);
     var A = 64 + 2 * m, big = A * res, size = 64 * res, ready = true;
     var area = bakeArea(cx, cy, m);
+    // Smart ground is drawn last, tile by tile (autoDraw); the bake below sees
+    // only what lies under it (autoUnder).
+    var cellsAll = area, hasAuto = false;
+    for (var q = 0; q < A * A; q++) if (K[area[q]] && K[area[q]].auto) { hasAuto = true; break; }
+    if (hasAuto) area = autoUnder(cellsAll, A, K);
     var near = {};
     for (var i = 0; i < A * A; i++) near[area[i]] = 1;
     function known(v) { return v && K[v]; }
@@ -660,6 +768,7 @@ SCRIPT = r"""
       ctx.drawImage(soft(function (c) { c.drawImage(landMask, 0, 0); }, coastW * 0.5, waterMask, '#fff'), 0, 0);
       ctx.globalAlpha = 1;
     }
+    if (hasAuto && !autoDraw(ctx, cellsAll, A, m, res, cx * 64 - m, cy * 64 - m)) ready = false;
     var out = document.createElement('canvas');
     out.width = out.height = size;
     out.getContext('2d').drawImage(cv, m * res, m * res, size, size, 0, 0, size, size);

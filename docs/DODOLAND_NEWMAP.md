@@ -1070,3 +1070,29 @@ The tile keeps id, category, layer, access, resizing. Done for
 **Map art · Castles** (7 hi-res pixel castles from `DodoArt/art_batches/mapart/
 hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
 `?v=<first variant>` for the same reason.
+
+### Smart ground: tilesets that pick their own edges (13 Oct 2026)
+* **Import:** `tools/dodoland_import_autotiles.py <folder> [--write]` takes every
+  `*_tileset` folder (its `128x128` files: 01-09 the 3x3, 10-13 extra centres,
+  14 the single tile) and makes one paintable environment tile per set in the
+  **Smart ground** category (new: these draw differently from every other
+  ground). Pictures are stored centre first; the tile row's `autotile` field
+  (`{center: [vids], edges: {top_left...bottom_right}, single}`) says which is
+  which. Re-running replaces a set's pictures on the same tile. Lake water and
+  shallow sea water are closed ground that towns spread over (water: walls stop
+  there); lava and the abyss are closed; the rest open. 21 sets imported from
+  `DodoArt/art_batches/tilesets`.
+* **Drawing** (`terrain_ui`, in `bakeChunk`): `terrain_rle` sends `auto` per
+  smart kind (and a plain layout from its centres only). The ordinary bake sees
+  under a smart cell the ordinary ground beside it (`autoUnder`), so it runs on
+  under the edge tiles' clear margins; then `autoDraw` draws smart grounds
+  lowest kind first, each carried one cell under a higher one's border.
+  `autoTile(n, e, s, w)` per cell: centre (or a variation, per N x N block,
+  `dodoland_autotile_variation` 0.25), edge or corner from the 3x3, the single
+  tile alone; strips and their ends from the outer bands of both edges. A tile
+  spans `dodoland_autotile_cells` (2) cells: inside follows the world N-grid,
+  a border shows the outer 1/N band of its edge tile. `dodoland_autotile_inset`
+  (0.03) trims the pictures' own frame, which otherwise reads as a grid. No
+  smoothing or blending for smart ground. Test: `test_dodoland_autotile.py`.
+* Which smart ground is on top where two meet is the kind order (the one first
+  painted in this world is lowest). Not tweakable yet.

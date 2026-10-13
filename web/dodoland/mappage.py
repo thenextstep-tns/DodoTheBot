@@ -382,6 +382,10 @@ async def map_page(request: web.Request):
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),
+        # Smart ground: how many cells one tile spans, and how often a variation shows.
+        "autotile_cells": max(1, min(8, int(bot.dodoland_params.get(guild.id, "dodoland_autotile_cells")))),
+        "autotile_inset": max(0.0, min(0.2, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_inset")))),
+        "autotile_variation": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_variation")))),
         # The walls choice on a town's card (dodoland_walls_option).
         "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
         # A town's picture: the server's own limit, in bytes.

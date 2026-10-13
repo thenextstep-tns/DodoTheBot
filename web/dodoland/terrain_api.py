@@ -378,10 +378,18 @@ async def terrain_rle(request: web.Request):
     out_kinds = []
     for kind in kinds:
         tile = tiles.get(kind.get("tile_id"))
+        auto = (tile or {}).get("autotile")
+        if auto:
+            # Smart ground: drawn cell by cell from its neighbours (the page's
+            # autoTile); its plain texture, for anything that needs one, is
+            # its centres only, never its edges.
+            tile = {**tile, "variants": list(auto.get("center") or [])}
         out_kinds.append({
             "fill": terrainart.kind_fill(kind, colours),
             "layout": terrainart.pattern_layout(str(kind.get("key") or ""), tile, dims, shrink) if tile else None,
-            "land": bool(kind) and not kind.get("water") and str(kind.get("key") or "") != "unknown"})
+            "land": bool(kind) and not kind.get("water") and str(kind.get("key") or "") != "unknown",
+            **({"auto": {"center": list(auto.get("center") or []), "edges": dict(auto.get("edges") or {}),
+                         "single": str(auto.get("single") or "")}} if auto else {})})
     return web.json_response(
         {"ok": True, "version": version(guild.id), "kinds": out_kinds,
          "art": request.get("dl_base", f"/guild/{guild.id}/dodoland") + "/tiles/art/",

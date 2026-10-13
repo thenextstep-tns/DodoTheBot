@@ -263,6 +263,9 @@ def _complete(row: dict) -> dict:
     row["passable"] = bool(row.get("passable", True))
     row["spreads"] = bool(row["passable"] if row.get("spreads") is None else row["spreads"])
     row["resizable"] = bool(row.get("resizable", False))
+    # Smart ground (tools/dodoland_import_autotiles.py): which picture is the
+    # centre, each edge and corner, and the single tile. None for any other.
+    row["autotile"] = row.get("autotile") or None
     for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
         try:
             value = float(row.get(key, default))
