@@ -244,7 +244,7 @@ def _collect(bot, guild) -> dict:
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
                        for t in placeable],
             # Not sent to the page: what a member's toolkit is unlocked from.
-            "standings": result["people"], "defs": buildings}
+            "standings": result["people"], "defs": buildings, "upload": upload}
 
 
 def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bscale: float) -> dict:
@@ -265,6 +265,7 @@ def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bsc
         return {}
     sizes = bot.dodoland_tiles.art_sizes(t["uploaded"] for t in mine)
     grow = max(0.1, float(params.get(guild.id, "dodoland_uploaded_building_scale")))
+    each = building_sizes(params.get(guild.id, "dodoland_uploaded_building_sizes"))
     by_key: dict = {}
     for t in mine:
         by_key.setdefault(t["requires"]["building"], []).append(t)
@@ -275,12 +276,64 @@ def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bsc
         if not w or not h:
             continue
         box = hall_box * (1.0 if key in landmarks else bscale)
-        px_per_cell = (w * h) ** 0.5 / (0.6 * box * grow)
+        px_per_cell = (w * h) ** 0.5 / (0.6 * box * grow * each.get(key, 1.0))
         for t in group:
             tw = sizes.get(t["uploaded"], (0, 0))[0]
             if tw:
                 out[t["tile_id"]] = (t["uploaded"], round(tw / px_per_cell, 3))
     return out
+
+
+def building_sizes(text) -> dict:
+    """``"menagerie=0.6, tavern=1.2"`` -> ``{"menagerie": 0.6, "tavern": 1.2}``;
+    anything unreadable is left out."""
+    out = {}
+    for part in str(text or "").replace(";", ",").split(","):
+        key, _, value = part.partition("=")
+        try:
+            size = float(value)
+        except ValueError:
+            continue
+        if key.strip() and size > 0:
+            out[key.strip()] = min(10.0, size)
+    return out
+
+
+def pictured_towns(bot, guild, people: list, world: list, tiles: list, upload: dict) -> None:
+    """With uploaded building art: what draws each town instead of its
+    generated hall, set on the person as ``hall_art`` (the town hall's own
+    uploaded picture, at the tier the town has reached) or ``hall_piece`` (its
+    own painted building placed nearest its centre, within
+    ``dodoland_uploaded_hall_reach`` cells). Neither: the generated hall stays."""
+    if not upload:
+        return
+    from helpers.dodoland import building_tiles
+
+    params = bot.dodoland_params
+    hall_key = str(params.get(guild.id, "dodoland_town_hall") or "")
+    reach = max(0.0, float(params.get(guild.id, "dodoland_uploaded_hall_reach")))
+    size = bot.dodoland_terrain.world(guild.id)
+    cw, ch = max(1, size["cells_w"] or 1), max(1, size["cells_h"] or 1)
+    by_source = {t.get("source"): t for t in tiles}
+    for person in people:
+        plot = person.get("plot")
+        if not plot:
+            continue
+        tier = next((b["tier"] for b in person["built"] if b["key"] == hall_key), 1)
+        hall = by_source.get(building_tiles._source(guild.id, hall_key, tier))
+        if hall and hall["tile_id"] in upload:
+            vid, cells = upload[hall["tile_id"]]
+            person["hall_art"] = {"a": hall["tile_id"], "v": vid, "wc": cells}
+            continue
+        best = None
+        for piece in world:
+            if piece.get("t") != person["id"] or piece.get("a") not in upload:
+                continue
+            d = (((piece["x"] - plot["x"]) / 100 * cw) ** 2 + ((piece["y"] - plot["y"]) / 100 * ch) ** 2) ** 0.5
+            if d <= reach and (best is None or d < best[0]):
+                best = (d, piece["id"])
+        if best:
+            person["hall_piece"] = best[1]
 
 
 def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float,
@@ -309,6 +362,10 @@ async def map_page(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     viewer = str(request.get("uid") or "")
     data = await asyncio.get_running_loop().run_in_executor(None, _collect, bot, guild)
+    # With uploaded building art, a painted picture with the flag stands for
+    # the town instead of its generated hall.
+    pictured_towns(bot, guild, data["people"], data["world"],
+                   bot.dodoland_tiles.tiles(guild.id), data.get("upload") or {})
     # The same page for a member (web/dodoland/player_map.py): it reads and
     # writes through their own routes and offers only their own town.
     player = bool(request.get("player"))
@@ -659,6 +716,20 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dltown { position: absolute; transform: translate(-50%, -100%);
   cursor: pointer; z-index: 5; }
 .dlart { width: 100%; }
+/* Uploaded art: the town drawn by a painted picture, or by one of its own
+   painted buildings (then nothing of its own is drawn but its name). */
+.dltown.pictured .dlart { position: relative; }
+.dltown.pictured .dlart img { display: block; width: 100%; height: auto; pointer-events: auto; }
+.dltown.bypiece .dlart { display: none; }
+/* The town's flag, flying from the top of the picture it is on. */
+.dlflag { position: absolute; left: 50%; top: 0; width: 22%; aspect-ratio: 1 / 1.35;
+  transform: translate(-3%, -62%); pointer-events: none; }
+.dlflag i { position: absolute; left: 0; bottom: 0; width: 5%; min-width: 1px; height: 100%;
+  background: #3b2a1c; border-radius: 1px; }
+.dlflag i::before { content: ""; position: absolute; left: -60%; top: -4%; width: 220%;
+  aspect-ratio: 1; border-radius: 50%; background: #c99a3a; }
+.dlflag img { position: absolute; left: 5%; top: 4%; width: 95%; height: auto;
+  border: 1px solid #2b1d12; box-shadow: 1px 1px 0 rgba(0,0,0,.25); }
 .dltown svg { display: block; width: 100%; height: auto; overflow: visible; }
 /* A town catches the mouse only on what is drawn — the hall, its square, its
    flag — not on the empty rectangle around it, which covered the houses
@@ -1232,6 +1303,16 @@ _SCRIPT = r"""
     el.innerHTML = '<span class="dldot"></span>' +
       '<div class="dlart"></div>' +
       '<div class="dlname">' + escapeHtml(person.name) + '</div>';
+    // Uploaded art: the town is its hall's painted picture (hall_art), or one
+    // of its own painted buildings carries its flag (hall_piece); no generated hall.
+    if (person.hall_art) {
+      el.classList.add('pictured');
+      if (D.cells_w) el.style.width = (person.hall_art.wc / D.cells_w * 100) + '%';
+      el.querySelector('.dlart').innerHTML = '<img alt="" src="' + assetUrl(person.hall_art.a) +
+        '?v=' + person.hall_art.v + '">' + flagHtml(person);
+    } else if (person.hall_piece) {
+      el.classList.add('pictured', 'bypiece');
+    }
     el.addEventListener('click', function (ev) {
       ev.stopPropagation();
       if (moved > 6) return;
@@ -1252,7 +1333,16 @@ _SCRIPT = r"""
     return el;
   }
 
+  // A town's flag on a picture: a pole and the town's own picture as cloth.
+  function flagHtml(person) {
+    if (!person || !person.has_image) return '';
+    return '<div class="dlflag"><i></i><img alt="" src="' + D.ep.base + '/town/' + person.id +
+      '/picture?w=320"></div>';
+  }
+  var hallPieces = {};
+  D.people.forEach(function (p) { if (p.hall_piece) hallPieces[p.hall_piece] = p; });
   function needArt(person, el) {
+    if (person.hall_art || person.hall_piece) return;
     // Fetched once per town, then kept. A town that is never approached is
     // never drawn, which is what lets a building be as detailed as it likes.
     if (art[person.id] === undefined) {
@@ -2180,7 +2270,8 @@ _SCRIPT = r"""
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
     el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
-      (pieceVariant(piece) ? '?v=' + pieceVariant(piece) : '') + '">';
+      (pieceVariant(piece) ? '?v=' + pieceVariant(piece) : '') + '">' +
+      (hallPieces[piece.id] ? flagHtml(hallPieces[piece.id]) : '');
 
     // Dragging, and clicking, from one gesture. The frame owns panning and
     // takes pointer capture as soon as a drag starts, so a piece that only

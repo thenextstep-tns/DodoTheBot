@@ -1126,3 +1126,14 @@ hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
   tile's own pictures (admin `?v=`, member `/me/asset/<tile>/<vid>`: the
   member side reads no query). The entrance page's growing building uses the
   uploaded tiers when every stage shown has one.
+* **Towns drawn by painted pictures (13 Oct, later):** with uploaded art,
+  `mappage.pictured_towns` gives each town `hall_art` (the town hall
+  building's uploaded picture at the town's tier) or else `hall_piece` (its own
+  painted building nearest its plot, within `dodoland_uploaded_hall_reach`, 6
+  cells); the page then draws no generated hall (`.dltown.pictured/.bypiece`)
+  and flies the town's flag (`flagHtml`, `.dlflag`) from the top of that
+  picture. Neither: the generated hall stays. Town Hall has no uploaded art on
+  ESO For Dodos, so towns take their nearest painted building.
+  `dodoland_uploaded_building_sizes` ("menagerie=0.6, tavern=1.2") sizes single
+  buildings on top of the overall size; each placed piece still has its own
+  Size slider.

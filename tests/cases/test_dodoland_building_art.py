@@ -76,4 +76,33 @@ assert library.art(again[6]["uploaded"]) is not None, "the uploaded picture's by
 assert again[6]["variants"] != [again[6]["uploaded"]], "the uploaded picture replaced the generated one"
 print("art             rebuilding the generated drawings never touches the uploaded ones")
 
+# One building bigger or smaller than the rest.
+assert mappage.building_sizes("menagerie=0.6, tavern = 1.2; bad=x, =3") == {"menagerie": 0.6, "tavern": 1.2}
+bot.dodoland_params.set(G, "dodoland_uploaded_building_scale", 1.0)
+bot.dodoland_params.set(G, "dodoland_uploaded_building_sizes", "tavern=0.5")
+half = mappage.uploaded_art(bot, guild, library.tiles(G), 10.0, (), 0.5)
+assert abs(half[t6][1] - art[t6][1] / 2) < 0.01, "a building's own size was not applied"
+print("art             a single building can be sized on its own")
+
+# A town is drawn by a painted picture with its flag: its own painted building
+# nearest its centre, within reach; otherwise the generated hall stays.
+class _Terrain:
+    def world(self, gid):
+        return {"cells_w": 100, "cells_h": 100}
+
+
+bot.dodoland_terrain = _Terrain()
+upload = mappage.uploaded_art(bot, guild, library.tiles(G), 10.0, (), 0.5)
+people = [{"id": "1", "plot": {"x": 50.0, "y": 50.0}, "built": []},
+          {"id": "2", "plot": {"x": 10.0, "y": 10.0}, "built": []}]
+world = [{"id": "far", "a": t6, "t": "1", "x": 58.0, "y": 50.0},
+         {"id": "near", "a": t1, "t": "1", "x": 51.0, "y": 50.5},
+         {"id": "other", "a": t6, "t": "9", "x": 50.0, "y": 50.0},
+         {"id": "away", "a": t6, "t": "2", "x": 40.0, "y": 40.0}]
+mappage.pictured_towns(bot, guild, people, world, library.tiles(G), upload)
+assert people[0].get("hall_piece") == "near", people[0]
+assert "hall_piece" not in people[1] and "hall_art" not in people[1], "a building out of reach drew the town"
+mappage.pictured_towns(bot, guild, [dict(people[0])], world, library.tiles(G), {})
+print("art             a town is drawn by its nearest own painted building, or keeps its hall")
+
 print("PASS")

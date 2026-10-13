@@ -342,6 +342,7 @@ _MAP_SCALE_KEYS = ("dodoland_town_width_pct", "dodoland_town_growth",
 _PLAYER_KEYS = ("dodoland_town_pages", "dodoland_world_page",
                 "dodoland_self_settle", "dodoland_player_cache_seconds",
                 "dodoland_building_art", "dodoland_uploaded_building_scale",
+                "dodoland_uploaded_building_sizes", "dodoland_uploaded_hall_reach",
                 "dodoland_entrance_building", "dodoland_entrance_stages",
                 "dodoland_member_pieces", "dodoland_picture_max_kb",
                 "dodoland_population_per_cell")
