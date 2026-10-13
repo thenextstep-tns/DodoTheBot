@@ -5,6 +5,7 @@ the generated ones.
     py tools/dodoland_import_building_art.py <guild id> <folder>            # report
     py tools/dodoland_import_building_art.py <guild id> <folder> --write    # upload
     ... --map museum=library                                                 # a folder for a building
+    ... --only town_hall                                                     # just that folder
 
 The folder holds one sub-folder per building, each with ``tier_<n>_*.png`` at
 full resolution (any ``64x64`` sub-folder is ignored). A sub-folder is matched
@@ -30,7 +31,7 @@ FOLDERS = {
     "red_fortress": "barracks", "theater_opera": "playhouse", "zoo": "menagerie",
     "hall_of_wonders": "gallery", "portrait_hall": "portraits", "endless_feast": "bakery",
     "clockwork_workshop": "workshop", "sanctuary": "sanctuary", "undercroft": "undercroft",
-    "dodo_monument": "statue",
+    "dodo_monument": "statue", "town_hall": "moot",
 }
 
 
@@ -49,6 +50,7 @@ def main() -> None:
     parser.add_argument("folder", type=pathlib.Path)
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--map", action="append", default=[], help="folder=building key")
+    parser.add_argument("--only", action="append", default=[], help="import just this sub-folder (repeatable)")
     args = parser.parse_args()
 
     from PIL import Image
@@ -67,6 +69,8 @@ def main() -> None:
 
     plan = []
     for sub in sorted(p for p in args.folder.iterdir() if p.is_dir()):
+        if args.only and sub.name not in args.only:
+            continue
         key = mapping.get(sub.name)
         if not key:
             print(f"  {sub.name}: no building is set for it; left out (use --map {sub.name}=<key>)")
@@ -92,7 +96,7 @@ def main() -> None:
         print(f"  {sub.name} -> {keys[key].get('name') or key}: " + ", ".join(row) +
               (f"; tiers {extra} have no building tier" if extra else ""))
     unpainted = sorted(set(keys) - {mapping.get(s.name) for s in args.folder.iterdir() if s.is_dir()})
-    if unpainted:
+    if unpainted and not args.only:
         print(f"  no pictures for: {', '.join(keys[k].get('name') or k for k in unpainted)} (they keep their generated art)")
     print(f"{len(plan)} pictures to upload")
     if not args.write:
