@@ -632,18 +632,78 @@ SCRIPT = r"""
     }
     return out;
   }
+  // A tile's picture made ready to draw, once: trimmed of its frame, and made
+  // seamless along 'x', 'y' or both ('xy'): the picture blended over itself
+  // shifted by half, so repeated it has no seam. Null until it has loaded.
+  function autoProc(vid, mode, inset) {
+    var key = vid + '|' + mode + '|' + inset;
+    bake.autoImgs = bake.autoImgs || {};
+    if (bake.autoImgs[key]) return bake.autoImgs[key];
+    var im = bakeImg(vid);
+    if (!im) return null;
+    var w = Math.max(1, Math.round(im.naturalWidth * (1 - 2 * inset))), h = Math.max(1, Math.round(im.naturalHeight * (1 - 2 * inset)));
+    function blank() { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    var cv = blank();
+    cv.getContext('2d').drawImage(im, im.naturalWidth * inset, im.naturalHeight * inset, w, h, 0, 0, w, h);
+    function pass(src, horizontal) {
+      var out = blank(), oc = out.getContext('2d');
+      // The picture shifted by half, wrapped round: its seam is in the middle.
+      if (horizontal) { oc.drawImage(src, -w / 2, 0); oc.drawImage(src, w / 2, 0); }
+      else { oc.drawImage(src, 0, -h / 2); oc.drawImage(src, 0, h / 2); }
+      // The picture itself over it, fading out towards its own edges.
+      var top = blank(), tc = top.getContext('2d');
+      tc.drawImage(src, 0, 0);
+      var g = horizontal ? tc.createLinearGradient(0, 0, w, 0) : tc.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.3, '#000'); g.addColorStop(0.7, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      tc.globalCompositeOperation = 'destination-in'; tc.fillStyle = g; tc.fillRect(0, 0, w, h);
+      oc.drawImage(top, 0, 0);
+      return out;
+    }
+    if (mode.indexOf('x') >= 0) cv = pass(cv, true);
+    if (mode.indexOf('y') >= 0) cv = pass(cv, false);
+    bake.autoImgs[key] = cv;
+    return cv;
+  }
+  // A variation, faded out towards its edges so it melts into the ground.
+  function autoSoft(vid, inset) {
+    var key = vid + '|soft|' + inset;
+    bake.autoImgs = bake.autoImgs || {};
+    if (bake.autoImgs[key]) return bake.autoImgs[key];
+    var src = autoProc(vid, '', inset);
+    if (!src) return null;
+    var cv = document.createElement('canvas'); cv.width = src.width; cv.height = src.height;
+    var c = cv.getContext('2d'), r = Math.min(src.width, src.height) / 2;
+    c.drawImage(src, 0, 0);
+    var g = c.createRadialGradient(src.width / 2, src.height / 2, r * 0.45, src.width / 2, src.height / 2, r);
+    g.addColorStop(0, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.globalCompositeOperation = 'destination-in'; c.fillStyle = g; c.fillRect(0, 0, src.width, src.height);
+    bake.autoImgs[key] = cv;
+    return cv;
+  }
   // Draw every smart ground of a chunk's area onto its canvas, lowest first.
-  // A lower one carries on one cell under a higher one's border, so where two
-  // meet the higher's clear edge shows the lower, not a gap. False while a
+  // Each in three layers: its tiles (edges and corners where it borders, the
+  // centre inside), a seamless texture made from its centre with its
+  // variations faded in, and between them a mask that is whole inside and
+  // fades out across the border cells (dodoland_autotile_blend). The texture
+  // goes over the tiles through the mask, only where the tiles are opaque, so
+  // the inside has no seams and a border keeps its fringe and melts inwards.
+  // A lower ground carries on (as plain inside) one cell under a higher one's
+  // border, so the higher's clear edge shows it, not a gap. False while a
   // picture is still loading.
   function autoDraw(ctx, cells, A, m, res, gx0, gy0) {
     var K = bake.kinds, ok = true, share = D.sizes.autotile_variation || 0, seen = {};
     var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
     var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+    var soften = Math.max(0, D.sizes.autotile_blend == null ? 0.5 : D.sizes.autotile_blend);
+    var big = A * res;
+    function canvas() { var c = document.createElement('canvas'); c.width = c.height = big; return c; }
     for (var i = 0; i < A * A; i++) if (K[cells[i]] && K[cells[i]].auto) seen[cells[i]] = 1;
-    ctx.imageSmoothingEnabled = true;
     Object.keys(seen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
-      var set = K[k].auto, here = new Uint8Array(A * A);
+      var set = K[k].auto, here = new Uint8Array(A * A), role = {};
+      set.center.forEach(function (v) { role[v] = 'xy'; });
+      [['top_center', 'x'], ['bottom_center', 'x'], ['mid_left', 'y'], ['mid_right', 'y']].forEach(function (r) {
+        role[set.edges[r[0]]] = r[1];
+      });
       for (var i = 0; i < A * A; i++) if (cells[i] === k) here[i] = 1;
       for (var y = 0; y < A; y++) for (var x = 0; x < A; x++) {
         var j = y * A + x, v = cells[j];
@@ -652,20 +712,56 @@ SCRIPT = r"""
             (y > 0 && cells[j - A] === k) || (y < A - 1 && cells[j + A] === k)) here[j] = 2;
       }
       function same(x, y) { return x < 0 || y < 0 || x >= A || y >= A || here[y * A + x] > 0; }
-      for (var y = m - 1; y <= m + 64 && y < A; y++) for (var x = m - 1; x <= m + 64 && x < A; x++) {
-        if (y < 0 || x < 0 || !here[y * A + x]) continue;
-        var pick = autoTile(same(x, y - 1), same(x + 1, y), same(x, y + 1), same(x - 1, y), gx0 + x, gy0 + y, set, share, N);
+      var tiles = canvas(), tc = tiles.getContext('2d'), inner = canvas(), ic = inner.getContext('2d');
+      tc.imageSmoothingEnabled = true; ic.fillStyle = '#fff';
+      var y0 = Math.max(0, m - 3), y1 = Math.min(A - 1, m + 66);
+      for (var y = y0; y <= y1; y++) for (var x = y0; x <= y1; x++) {
+        var at = y * A + x;
+        if (!here[at]) continue;
+        var n = same(x, y - 1), e = same(x + 1, y), s = same(x, y + 1), w = same(x - 1, y);
+        // Under a higher ground's border it is plain inside: no fringe of its own.
+        var inside = here[at] === 2 || (n && e && s && w);
+        if (inside) ic.fillRect(x * res, y * res, res, res);
+        var pick = inside ? autoTile(1, 1, 1, 1, gx0 + x, gy0 + y, set, 0, N)
+                          : autoTile(n, e, s, w, gx0 + x, gy0 + y, set, share, N);
         for (var q = 0; q < pick.length; q++) {
-          var im = bakeImg(pick[q].v), pc = pick[q];
+          var pc = pick[q], im = autoProc(pc.v, role[pc.v] || '', inset);
           if (!im) { ok = false; continue; }
-          // Read from a hair inside the picture's own edges: the tiles carry a
-          // thin frame there, which drawn edge to edge is a grid on the map.
-          var iw = im.naturalWidth * (1 - 2 * inset), ih = im.naturalHeight * (1 - 2 * inset);
-          var ox = im.naturalWidth * inset, oy = im.naturalHeight * inset;
-          ctx.drawImage(im, ox + pc.sx * iw, oy + pc.sy * ih, pc.sw * iw, pc.sh * ih,
-                        x * res + pc.dx * res, y * res + pc.dy * res, pc.dw * res, pc.dh * res);
+          tc.drawImage(im, pc.sx * im.width, pc.sy * im.height, pc.sw * im.width, pc.sh * im.height,
+                       x * res + pc.dx * res, y * res + pc.dy * res, pc.dw * res, pc.dh * res);
         }
       }
+      // The seamless texture, laid from the world's origin, N cells a tile.
+      var base = autoProc(set.center[0], 'xy', inset);
+      if (!base) { ok = false; ctx.drawImage(tiles, 0, 0); return; }
+      var span = N * res, block = document.createElement('canvas');
+      block.width = block.height = Math.max(1, Math.round(span));
+      var bk = block.getContext('2d'); bk.imageSmoothingEnabled = true;
+      bk.drawImage(base, 0, 0, block.width, block.height);
+      var tex = canvas(), xc = tex.getContext('2d'), pat = xc.createPattern(block, 'repeat');
+      var ox = -(((gx0 * res) % span) + span) % span, oy = -(((gy0 * res) % span) + span) % span;
+      if (pat.setTransform) pat.setTransform(new DOMMatrix([1, 0, 0, 1, ox, oy]));
+      xc.fillStyle = pat; xc.fillRect(0, 0, big, big);
+      // Its variations, a whole block now and then, faded into it.
+      if (set.center.length > 1 && share > 0) {
+        for (var by = Math.floor(gy0 / N); by <= Math.floor((gy0 + A - 1) / N); by++)
+          for (var bx = Math.floor(gx0 / N); bx <= Math.floor((gx0 + A - 1) / N); bx++) {
+            if (autoHash(bx, by) >= share) continue;
+            var cxl = bx * N + Math.floor(N / 2) - gx0, cyl = by * N + Math.floor(N / 2) - gy0;
+            if (cxl < 0 || cyl < 0 || cxl >= A || cyl >= A || !here[cyl * A + cxl]) continue;
+            var vid = set.center[1 + Math.floor(autoHash(by + 7919, bx + 104729) * (set.center.length - 1))];
+            var soft = autoSoft(vid, inset);
+            if (!soft) { ok = false; continue; }
+            xc.drawImage(soft, (bx * N - gx0) * res - span * 0.15, (by * N - gy0) * res - span * 0.15, span * 1.3, span * 1.3);
+          }
+      }
+      // The mask: whole inside, fading out across the border cells.
+      var mask = canvas(), mc = mask.getContext('2d');
+      if (BLUR_OK && soften > 0) mc.filter = 'blur(' + Math.max(0.5, soften * res).toFixed(1) + 'px)';
+      mc.drawImage(inner, 0, 0);
+      xc.globalCompositeOperation = 'destination-in'; xc.drawImage(mask, 0, 0);
+      tc.globalCompositeOperation = 'source-atop'; tc.drawImage(tex, 0, 0);
+      ctx.drawImage(tiles, 0, 0);
     });
     return ok;
   }
@@ -679,7 +775,7 @@ SCRIPT = r"""
     // Everything is drawn on a canvas a margin larger than the chunk, so a
     // curve, a blend or the coast's shading carries over the chunk line just
     // as the neighbour draws it; the chunk is cut out at the end.
-    var m = Math.max(blend ? Math.ceil(width) + 1 : 0,
+    var m = Math.max(4, blend ? Math.ceil(width) + 1 : 0,
                      smooth > 0 ? Math.ceil(2 * (D.sizes.straighten || 1.5)) + 2 : 0,
                      coast ? Math.ceil(coastW * 2.4) + 1 : 0, 1);
     var A = 64 + 2 * m, big = A * res, size = 64 * res, ready = true;

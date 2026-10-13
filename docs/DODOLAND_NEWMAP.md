@@ -1096,3 +1096,14 @@ hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
   smoothing or blending for smart ground. Test: `test_dodoland_autotile.py`.
 * Which smart ground is on top where two meet is the kind order (the one first
   painted in this world is lowest). Not tweakable yet.
+* **Blended, no grid (13 Oct, later):** `autoDraw` now draws each smart ground
+  in three layers: its tiles (`autoProc`: trimmed and made seamless along their
+  axis by the half-shift blend: centres both ways, top/bottom edges along x,
+  side edges along y), a seamless texture from its centre laid from the world
+  origin with variations faded in per N x N block (`autoSoft`), and a mask,
+  whole inside, blurred across the border cells by `dodoland_autotile_blend`
+  (0.5 cells). The texture goes over the tiles through the mask, only where the
+  tiles are opaque. A lower ground under a higher one's border is now drawn as
+  plain inside, so its own fringe no longer shows through the higher's clear
+  edge (the "grass did not change when wheat went next to it" bug). Bake margin
+  at least 4 cells so the blend carries over chunk lines.
