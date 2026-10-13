@@ -31,7 +31,7 @@ FOLDERS = {
     "red_fortress": "barracks", "theater_opera": "playhouse", "zoo": "menagerie",
     "hall_of_wonders": "gallery", "portrait_hall": "portraits", "endless_feast": "bakery",
     "clockwork_workshop": "workshop", "sanctuary": "sanctuary", "undercroft": "undercroft",
-    "dodo_monument": "statue", "town_hall": "moot",
+    "dodo_monument": "statue", "town_hall": "moot", "wayshrine": "wayshrine",
 }
 
 
