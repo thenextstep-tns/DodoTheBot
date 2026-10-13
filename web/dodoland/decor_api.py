@@ -396,8 +396,15 @@ async def player_asset_image(request: web.Request):
     """
     bot, guild = request.app["bot"], request["guild"]
     tile_id = request.match_info.get("aid") or ""
-    row = (bot.dodoland_tiles.first_art(tile_id)
-           if bot.dodoland_tiles.visible(tile_id, guild.id) else None)
+    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
+    # ``…/asset/<tile>/<picture>``: one of the tile's own pictures (an uploaded
+    # building's too), only its own. In the path, never the query: nothing on
+    # the member side reads a query, so nothing there can be handed an id.
+    want = request.match_info.get("vid") or ""
+    row = None
+    if tile is not None:
+        row = (bot.dodoland_tiles.art(want) if want and (want in tile["variants"] or want == tile.get("uploaded"))
+               else bot.dodoland_tiles.first_art(tile_id))
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = row.get("data")

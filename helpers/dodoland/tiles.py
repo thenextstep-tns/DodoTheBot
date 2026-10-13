@@ -266,6 +266,9 @@ def _complete(row: dict) -> dict:
     # Smart ground (tools/dodoland_import_autotiles.py): which picture is the
     # centre, each edge and corner, and the single tile. None for any other.
     row["autotile"] = row.get("autotile") or None
+    # A town building's uploaded picture (tools/dodoland_import_building_art.py),
+    # kept apart from its generated variants so rebuilding those never drops it.
+    row["uploaded"] = str(row.get("uploaded") or "")
     for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
         try:
             value = float(row.get(key, default))

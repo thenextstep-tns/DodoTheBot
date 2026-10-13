@@ -129,6 +129,8 @@ def dodoland_routes() -> list:
                  player.require_town(api_town_decor)),
         web.get("/guild/{gid}/dodoland/me/asset/{aid}",
                 player.require_town(player_asset_image)),
+        web.get("/guild/{gid}/dodoland/me/asset/{aid}/{vid}",
+                player.require_town(player_asset_image)),
         # --- the map, for a member ----------------------------------------- #
         # The same page and the same readers as the admin map, behind the
         # player gate with the world page on. A member paints inside their own

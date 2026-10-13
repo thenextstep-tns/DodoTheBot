@@ -388,9 +388,10 @@ async def my_town_page(request: web.Request):
     if example:
         building, stages, box = example
         figures = '<i class="arrow">→</i>'.join(
-            f'<figure><svg viewBox="{box}" xmlns="http://www.w3.org/2000/svg">'
-            f'<g class="dltown close">{art}</g></svg><figcaption>{e(title)}</figcaption></figure>'
-            for art, title in stages)
+            (f'<figure class="pic">{art}<figcaption>{e(title)}</figcaption></figure>' if picture else
+             f'<figure><svg viewBox="{box}" xmlns="http://www.w3.org/2000/svg">'
+             f'<g class="dltown close">{art}</g></svg><figcaption>{e(title)}</figcaption></figure>')
+            for art, title, picture in stages)
         grow = f"""
   <section class="step">
     <span class="num">3</span>
@@ -482,10 +483,24 @@ def _example(bot, guild):
     # Evenly spread, always the first tier and the top one.
     picks = sorted({round(i * (len(tiers) - 1) / max(1, count - 1)) for i in range(count)})
     colour = building.get("colour") or townart.colour_for(building["key"])
-    stages = [(townart.building_svg(building.get("shape") or "", i + 1, colour,
-                                    building.get("symbol") or "", uid=f"ex{i + 1}"),
-               str(tiers[i].get("title") or f"Tier {i + 1}"))
-              for i in picks]
+    # The uploaded pictures when the server draws its buildings with them, and
+    # only when every stage shown has one: a mix of the two would not read as
+    # one building growing.
+    pictures = {}
+    if str(params.get(guild.id, "dodoland_building_art") or "") == "uploaded":
+        from helpers.dodoland import building_tiles
+        for i in picks:
+            tile = bot.dodoland_tiles.by_source(building_tiles._source(guild.id, building["key"], i + 1))
+            if tile and tile.get("uploaded"):
+                pictures[i] = (f'<img alt="" src="/guild/{guild.id}/dodoland/me/asset/'
+                               f'{tile["tile_id"]}/{tile["uploaded"]}">')
+    if len(pictures) == len(picks):
+        stages = [(pictures[i], str(tiers[i].get("title") or f"Tier {i + 1}"), True) for i in picks]
+    else:
+        stages = [(townart.building_svg(building.get("shape") or "", i + 1, colour,
+                                        building.get("symbol") or "", uid=f"ex{i + 1}"),
+                   str(tiers[i].get("title") or f"Tier {i + 1}"), False)
+                  for i in picks]
     return building.get("name") or building["key"], stages, _crop([i + 1 for i in picks])
 
 
@@ -683,6 +698,10 @@ input:focus { outline: 2px solid var(--lantern); outline-offset: 1px; }
 .grow { display: flex; align-items: flex-end; gap: 4px; margin-top: 6px; }
 .grow figure { flex: 1 1 0; min-width: 0; margin: 0; text-align: center; }
 .grow svg { display: block; width: 100%; height: auto; max-height: 200px; overflow: visible; }
+/* An uploaded picture per stage: on one ground line, the top tier biggest. */
+.grow figure.pic { display: flex; flex-direction: column; justify-content: flex-end; }
+.grow figure.pic img { display: block; max-width: 100%; max-height: 200px; margin: 0 auto;
+  object-fit: contain; image-rendering: pixelated; }
 .grow figcaption { font-size: 12px; color: var(--soft); margin-top: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grow .arrow { flex: 0 0 auto; font-style: normal; color: var(--soft);

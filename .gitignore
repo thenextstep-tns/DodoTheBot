@@ -169,3 +169,6 @@ item_imgs/tilesets/
 
 # The panel profiling switch (web/timing.py): present means on.
 logs/profile_web
+
+# Redrawn tile batches made by .agent/workflows/pixelate-map-art.md
+art_batches/

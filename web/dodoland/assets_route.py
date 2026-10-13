@@ -32,7 +32,7 @@ async def asset_image(request: web.Request):
     # ``?v=`` asks for one of the tile's own variants, and only one of its own.
     row = None
     if tile is not None:
-        row = (bot.dodoland_tiles.art(want) if want in tile["variants"]
+        row = (bot.dodoland_tiles.art(want) if want and (want in tile["variants"] or want == tile.get("uploaded"))
                else bot.dodoland_tiles.first_art(tile_id))
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")

@@ -198,6 +198,11 @@ def _collect(bot, guild) -> dict:
     landmarks = (str(bot.dodoland_params.get(guild.id, "dodoland_town_hall")),
                  str(bot.dodoland_params.get(guild.id, "dodoland_zoo_building")))
     bscale = max(0.1, float(bot.dodoland_params.get(guild.id, "dodoland_building_scale")))
+    # Uploaded building pictures, when the server draws with them: each tier's
+    # own picture in place of its generated drawing, wherever one was uploaded.
+    upload = uploaded_art(bot, guild, placeable, hall_box, landmarks, bscale)
+    world_decor = [dict(d, variant=upload[d["asset_id"]][0]) if d.get("asset_id") in upload else d
+                   for d in world_decor]
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
@@ -221,13 +226,14 @@ def _collect(bot, guild) -> dict:
                         "layer": t["layer"],
                         # Each variant's own width in map cells: drawings in one
                         # tile are not all the same size.
-                        "vw": {v: _tile_cells(t, dims.get(v, (0, 0))[0], shrink, hall_box, landmarks, bscale)
-                               for v in t["variants"]},
+                        "vw": ({upload[t["tile_id"]][0]: upload[t["tile_id"]][1]} if t["tile_id"] in upload else
+                               {v: _tile_cells(t, dims.get(v, (0, 0))[0], shrink, hall_box, landmarks, bscale)
+                                for v in t["variants"]}),
                         # Natural width in map cells: the art's own width over
                         # its px-per-cell. A piece is drawn at this times its size.
-                        "wc": _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box,
-                                          landmarks, bscale)
-                        if t["variants"] else 0,
+                        "wc": (upload[t["tile_id"]][1] if t["tile_id"] in upload else
+                               _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box,
+                                           landmarks, bscale) if t["variants"] else 0),
                         # Pixel art (the fixed-size packs) is drawn with hard
                         # pixels: a 6-pixel sprouts sprite smoothed up to a
                         # thumbnail was a smudge, which read as "low resolution".
@@ -239,6 +245,42 @@ def _collect(bot, guild) -> dict:
                        for t in placeable],
             # Not sent to the page: what a member's toolkit is unlocked from.
             "standings": result["people"], "defs": buildings}
+
+
+def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bscale: float) -> dict:
+    """``{tile_id: (uploaded picture id, width in map cells)}`` for the town
+    building tiles that have an uploaded picture, when the server draws its
+    buildings with them (``dodoland_building_art``); empty otherwise.
+
+    Sized per building: its highest uploaded tier is as big (by the square root
+    of its area) as about 60% of its generated drawing's box, which is how much
+    of that box a top-tier generated building fills, times
+    ``dodoland_uploaded_building_scale``; every lower tier keeps its size
+    relative to it, so the building still grows tier by tier."""
+    params = bot.dodoland_params
+    if str(params.get(guild.id, "dodoland_building_art") or "") != "uploaded":
+        return {}
+    mine = [t for t in tiles if t.get("uploaded") and str(t.get("source") or "").startswith("building:")]
+    if not mine:
+        return {}
+    sizes = bot.dodoland_tiles.art_sizes(t["uploaded"] for t in mine)
+    grow = max(0.1, float(params.get(guild.id, "dodoland_uploaded_building_scale")))
+    by_key: dict = {}
+    for t in mine:
+        by_key.setdefault(t["requires"]["building"], []).append(t)
+    out = {}
+    for key, group in by_key.items():
+        top = max(group, key=lambda t: int(t["requires"]["tier"] or 0))
+        w, h = sizes.get(top["uploaded"], (0, 0))
+        if not w or not h:
+            continue
+        box = hall_box * (1.0 if key in landmarks else bscale)
+        px_per_cell = (w * h) ** 0.5 / (0.6 * box * grow)
+        for t in group:
+            tw = sizes.get(t["uploaded"], (0, 0))[0]
+            if tw:
+                out[t["tile_id"]] = (t["uploaded"], round(tw / px_per_cell, 3))
+    return out
 
 
 def _tile_cells(tile: dict, art_w: float, shrink: float, hall_box: float,
@@ -2042,6 +2084,12 @@ _SCRIPT = r"""
     });
   }
 
+  // The picture a piece shows: its own, unless its tile now offers only one
+  // other (a building drawn with its uploaded picture, placed before or just now).
+  function pieceVariant(piece) {
+    var a = typeof assetById === 'function' ? assetById(piece.a) : null, keys = a && a.vw ? Object.keys(a.vw) : [];
+    return (piece.v && keys.length === 1 && !(piece.v in a.vw)) ? keys[0] : piece.v;
+  }
   function pieceWidth(piece) {
     // A percentage of the base image, so decor shrinks with the coastline the
     // same way a town does. `nat.w` is 0 until the map image has loaded, and
@@ -2132,7 +2180,7 @@ _SCRIPT = r"""
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
     el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
-      (piece.v ? '?v=' + piece.v : '') + '">';
+      (pieceVariant(piece) ? '?v=' + pieceVariant(piece) : '') + '">';
 
     // Dragging, and clicking, from one gesture. The frame owns panning and
     // takes pointer capture as soon as a drag starts, so a piece that only

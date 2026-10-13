@@ -1107,3 +1107,22 @@ hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
   plain inside, so its own fringe no longer shows through the higher's clear
   edge (the "grass did not change when wheat went next to it" bug). Bake margin
   at least 4 cells so the blend carries over chunk lines.
+
+### Uploaded building art beside the generated (13 Oct 2026)
+* `tools/dodoland_import_building_art.py <guild> <folder> [--write] [--map folder=key]`
+  stores each `tier_<n>_*.png` (full resolution; `64x64` ignored) on that
+  building tier's tile as `uploaded` (its own art row, not in `variants`, so
+  `building_tiles.sync` rebuilding the generated drawing never drops it).
+  `FOLDERS` maps the DodoArt/buildings folders to building keys. 78 uploaded for
+  ESO For Dodos (13 buildings x 6). `museum` matches no building (left out);
+  Town Hall (moot) and The Wayshrine have none and keep generated art.
+* **Building artwork** (`dodoland_building_art`: generated / uploaded, in *What
+  members can see*) picks what the map draws. `mappage.uploaded_art` gives each
+  uploaded tile `(vid, width in cells)`: per building, the top tier's sqrt(area)
+  = 60% of its generated box x `dodoland_uploaded_building_scale` (1.0), lower
+  tiers in proportion. In uploaded mode the asset's `vw`/`wc` and every placed
+  piece's `v` use the uploaded picture (`pieceVariant` covers pieces placed
+  during the session). The tile image routes serve `uploaded` as one of the
+  tile's own pictures (admin `?v=`, member `/me/asset/<tile>/<vid>`: the
+  member side reads no query). The entrance page's growing building uses the
+  uploaded tiers when every stage shown has one.
