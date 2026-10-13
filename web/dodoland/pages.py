@@ -494,8 +494,10 @@ def _players_html(bot, guild) -> str:
     from web.routes import _param_input
 
     rows = ""
-    for key in (player.TOWN_PAGES, player.WORLD_PAGE, player.SELF_SETTLE,
-                "dodoland_player_cache_seconds"):
+    # Every setting listed for this section, and only from that list: settings
+    # added to it were left out of the general list and drawn nowhere at all
+    # while this drew a fixed four.
+    for key in _PLAYER_KEYS:
         spec = next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == key)
         entry = {**spec, "value": bot.dodoland_params.get(guild.id, key)}
         rows += f"""

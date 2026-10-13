@@ -40,4 +40,39 @@ params.set(G, page_texts.PREFIX + "name_placeholder", "{owner} Town")
 assert page_texts.say(params, G, "name_placeholder", owner="<Nik>") == "&lt;Nik&gt; Town"
 print("texts           markers are filled in, and nothing typed in can inject markup")
 
+# Every setting meant for the members' section is drawn there. Settings added
+# to its list were taken out of the general one and, while it drew a fixed four,
+# shown nowhere at all (Building artwork among them).
+from web.dodoland import pages  # noqa: E402
+
+
+class _Bot:
+    dodoland_params = params
+
+
+class _Visibility:
+    def cog_enabled(self, *a):
+        return True
+
+
+_Bot.visibility = _Visibility()
+
+
+class _Guild:
+    id = G
+    name = "Dodos"
+    channels = []
+    roles = []
+
+    def get_channel(self, cid):
+        return None
+
+
+html_out = pages._players_html(_Bot(), _Guild())
+missing = [k for k in pages._PLAYER_KEYS
+           if next(p for p in dodo_params.DODOLAND_PARAMETERS if p["key"] == k)["label"] not in html_out]
+assert not missing, f"members' settings drawn nowhere: {missing}"
+assert "Building artwork" in html_out
+print("panel           every members' setting is in its section, Building artwork included")
+
 print("PASS")
