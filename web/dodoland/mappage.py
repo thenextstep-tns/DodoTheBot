@@ -2004,7 +2004,9 @@ _SCRIPT = r"""
       return '<button class="dlkititem' + (a.px ? ' px' : '') + (a.lk ? ' locked' : '') +
         (mix.indexOf(a.id) >= 0 || armedAsset === a.id ? ' armed' : '') + '" data-asset="' + a.id + '"' +
         (a.lk ? ' title="' + escapeHtml(a.why || 'Not unlocked yet') + '"' : '') + '>' +
-        '<img alt="" loading="lazy" src="' + assetUrl(a.id) + '">' +
+        // With its first picture's id: a redrawn tile gets a new address, so
+        // no browser keeps the old picture it cached for a week.
+        '<img alt="" loading="lazy" src="' + assetUrl(a.id) + (a.vw && Object.keys(a.vw)[0] ? '?v=' + Object.keys(a.vw)[0] : '') + '">' +
         '<span>' + escapeHtml(a.name) + '</span></button>';
     }).join('');
     kitGrid.querySelectorAll('.dlkititem').forEach(function (el) {

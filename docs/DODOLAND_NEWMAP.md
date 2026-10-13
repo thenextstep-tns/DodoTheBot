@@ -1059,3 +1059,14 @@ terrain and forest edits (still in the audit log).
 * **Members customise** their own town from its card (*Customise your town*,
   the same editor, saving through their own route), and get the pencil/brush
   shortcuts now they have the toolkit.
+
+### Redrawn art replaces a category's pictures (13 Oct 2026)
+`tools/dodoland_replace_tile_art.py "<category>" <folder> [--write]`: each PNG
+(named after the tile, `castles-1.png` = "Castles 1") becomes the tile's only
+picture, as a new variant (new address, so no stale cache); placed pieces are
+moved to it; `cell_px` is scaled so it is drawn the same width as before
+(`--cell-px N` overrides); old pictures go to `logs/tile_art_backup/<cat>-<time>/`.
+The tile keeps id, category, layer, access, resizing. Done for
+**Map art · Castles** (7 hi-res pixel castles from `DodoArt/art_batches/mapart/
+hires/castles`; nothing was placed yet). The toolkit's thumbnails now carry
+`?v=<first variant>` for the same reason.
