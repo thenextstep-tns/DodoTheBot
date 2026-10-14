@@ -90,6 +90,34 @@ class Racing(commands.Cog, name="racing"):
         await self._countdown_message(race_message, context.author, 45, 32400, giga=True)
         await self._run_full_race(context, race_message, context.author, 45, f"{context.author}'s gigarace")
 
+    @commands.hybrid_command(name="resumegigarace", description="Resume a gigarace whose countdown was cut off.", hidden=True)
+    @checks.is_owner()
+    async def resumegigarace(self, context: Context, message: str, start_at: str) -> None:
+        """Pick an existing gigarace sign-up back up after the bot went down.
+
+        ``message`` is the sign-up's link or id (looked up in the announcement
+        channel); ``start_at`` is either ``HH:MM`` on this machine's clock (the
+        next such time) or a plain number of seconds. Only edits the existing
+        message, so nobody is pinged again and the 🐁 reactions stay.
+        """
+        message_id = int(message.rstrip("/").rsplit("/", 1)[-1])
+        announcement_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "ANNOUNCEMENT_CHANNEL"))
+        race_message = await announcement_channel.fetch_message(message_id)
+
+        if ":" in start_at:
+            hours, minutes = (int(part) for part in start_at.split(":"))
+            now = time.localtime()
+            target = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hours, minutes, 0, 0, 0, -1))
+            if target <= time.time():
+                target += 86400
+            time_left = int(target - time.time())
+        else:
+            time_left = int(start_at)
+
+        await context.send(f"Resuming the gigarace: {time_left} seconds left ({time_left // 3600}h {time_left % 3600 // 60}m).")
+        await self._countdown_message(race_message, context.author, 45, time_left, giga=True)
+        await self._run_full_race(context, race_message, context.author, 45, f"{context.author}'s gigarace")
+
     async def _run_full_race(self, context, race_message, race_starter, track_length, race_name) -> None:
         """Shared race pipeline used by both ``race`` and ``gigarace``."""
         await asyncio.sleep(1)
