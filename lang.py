@@ -706,6 +706,7 @@ RACING_GIGA_ANNOUNCE = (
     "{lights}\n"
     " 1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold"
 )
+RACING_GIGA_THREAD_NAME = "{date} Gigarace Post-race Conference Room"
 RACING_GIGA_LIGHT_ON = "🔴"
 RACING_GIGA_LIGHT_OFF = "⚫"
 RACING_NO_JOIN = "No one joined the race. Race cancelled."

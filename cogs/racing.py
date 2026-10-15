@@ -5,10 +5,12 @@ relationships, handle mouse adoption, and browse relationships.
 """
 
 import asyncio
+import logging
 import math
 import random
 import time
 from collections import defaultdict
+from datetime import datetime
 
 from openai import OpenAI
 
@@ -20,7 +22,9 @@ import config_py
 import lang
 from helpers import checks, messages
 
-_PROXY_BASE_URL = "https://api.proxyapi.ru/openai/v1"
+logger = logging.getLogger("dodo")
+
+_PROXY_BASE_URL ="https://api.proxyapi.ru/openai/v1"
 
 MOUSE = "\U0001F401"
 CHEESE = "\U0001F9C0"
@@ -31,6 +35,43 @@ MAP = "🗺️"
 
 _GIGA_SIGNUP_SECONDS = 9 * 3600  # a gigarace starts nine hours after it's announced
 _GIGA_LIGHTS = 5  # one goes out per hour over the last five hours
+_ADOPT_EMOJIS = ("👍", "👎")
+
+# Discord's hard limits; going over makes the whole edit or send fail.
+_MESSAGE_LIMIT = 2000
+_EMBED_DESCRIPTION_LIMIT = 4096
+_EMBED_FOOTER_LIMIT = 2048
+_EMBED_TOTAL_LIMIT = 6000
+
+
+def _dlen(text: str) -> int:
+    """Length as Discord may count it: in UTF-16 units, where an emoji like 🐁 is two."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _fit(text: str, limit: int) -> str:
+    """``text`` cut to fit ``limit`` (Discord-counted), marking the cut."""
+    if _dlen(text) <= limit:
+        return text
+    while _dlen(text) > limit - 1:  # leave room for the ellipsis; strictly shrinks every pass
+        text = text[: len(text) - max(1, (_dlen(text) - (limit - 1)) // 2)]
+    return text + "…"
+
+
+def _chunk_lines(lines: list, limit: int) -> list:
+    """Join ``lines`` into as few texts as possible, each within ``limit`` (Discord-counted)."""
+    chunks, current = [], ""
+    for line in lines:
+        line = _fit(line, limit)
+        candidate = f"{current}\n{line}" if current else line
+        if current and _dlen(candidate) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 class Racing(commands.Cog, name="racing"):
@@ -92,7 +133,9 @@ class Racing(commands.Cog, name="racing"):
         race_message = await announcement_channel.send(self._gigarace_content(start, _GIGA_LIGHTS))
         await race_message.add_reaction(MOUSE)
         await self._gigarace_countdown(race_message, start)
-        await self._run_full_race(context, race_message, context.author, 45, f"{context.author}'s gigarace")
+        await self._run_full_race(
+            context, race_message, context.author, 45, f"{context.author}'s gigarace", conference_room=True
+        )
 
     @commands.hybrid_command(name="resumegigarace", description="Resume a gigarace whose countdown was cut off.", hidden=True)
     @checks.is_owner()
@@ -131,9 +174,12 @@ class Racing(commands.Cog, name="racing"):
         await self._gigarace_countdown(race_message, start)
         # The race pipeline only needs ``send`` and ``guild`` from its context, which the
         # channel itself has — so the summary and adoption prompts go to the racers.
-        await self._run_full_race(race_channel, race_message, context.author, 45, f"{context.author}'s gigarace")
+        await self._run_full_race(
+            race_channel, race_message, context.author, 45, f"{context.author}'s gigarace", conference_room=True
+        )
 
-    async def _run_full_race(self, context, race_message, race_starter, track_length, race_name) -> None:
+    async def _run_full_race(self, context, race_message, race_starter, track_length, race_name, *,
+                             conference_room: bool = False) -> None:
         """Shared race pipeline used by both ``race`` and ``gigarace``."""
         await asyncio.sleep(1)
         race_message = await race_message.channel.fetch_message(race_message.id)
@@ -168,7 +214,17 @@ class Racing(commands.Cog, name="racing"):
         await self.send_race_summary(context, race_starter, mice, race_results)
         self.save_race_results(race_name, race_starter, mice, race_results)
         await self.update_relationships(context, race_results, mice)
-        await self.adoption_check(context, mice)
+        if conference_room:
+            # A gigarace's adoptions get their own thread under the sign-up, and
+            # time for people to notice the ping.
+            await self.adoption_check(
+                context, mice, list(race_results),
+                race_message=race_message,
+                thread_name=lang.RACING_GIGA_THREAD_NAME.format(date=datetime.now().strftime("%d %B %Y").lstrip("0")),
+                window=self.bot.params.get(context.guild.id if context.guild else None, "gigarace_adoption_window"),
+            )
+        else:
+            await self.adoption_check(context, mice, list(race_results))
 
     # --------------------------------------------------------------------- #
     #  Sign-up message handling
@@ -250,11 +306,19 @@ class Racing(commands.Cog, name="racing"):
         return assigned
 
     async def send_lineup_embed(self, race_message, context, mice) -> None:
-        """Show the starting line-up embed."""
-        embed = discord.Embed(title=lang.RACING_LINEUP_TITLE, description=lang.RACING_LINEUP_DESCRIPTION, color=0xFF0000)
+        """Show the starting line-up embed.
+
+        One description line per racer, not one field: an embed takes at most 25
+        fields, and a gigarace can draw more racers than that.
+        """
+        lines = []
         for user_id, mouse_info in mice.items():
-            user = context.guild.get_member(user_id)
-            embed.add_field(name=f"{user.display_name}'s {mouse_info['name']} ({mouse_info['class']})", value="")
+            member = context.guild.get_member(user_id)
+            # A racer who left the server since reacting is still in the race.
+            name = member.display_name if member else f"<@{user_id}>"
+            lines.append(f"**{name}'s {mouse_info['name']}** ({mouse_info['class']})")
+        description = _fit(lang.RACING_LINEUP_DESCRIPTION + "\n".join(lines), _EMBED_DESCRIPTION_LIMIT)
+        embed = discord.Embed(title=lang.RACING_LINEUP_TITLE, description=description, color=0xFF0000)
         await race_message.edit(embed=embed, content="")
 
     async def run_race_lights(self, race_message, race_starter, track_length, mice) -> None:
@@ -596,19 +660,36 @@ class Racing(commands.Cog, name="racing"):
 
     async def update_race_progress(self, race_message, race_starter, mouse_users, user_mouse_names_classes,
                                    positions, track_length, debug_log, event_text, move_counter) -> None:
-        """Redraw the track embed with everyone's position and recent actions."""
-        race_lines = [
-            f"{user.mention}'s {user_mouse_names_classes[user.id]['name']} \n"
-            f":triangular_flag_on_post: "
-            f"{''.join('-' if i != positions[user.id] else MOUSE for i in range(track_length))} :checkered_flag:"
-            for user in mouse_users
-        ]
-        embed = discord.Embed(
-            title=lang.RACING_PROGRESS_TITLE,
-            description=f"{race_starter.mention}'s race:\nMove {move_counter}\n" + "\n".join(race_lines),
-            color=0x00FF00,
+        """Redraw the track embed with everyone's position and recent actions.
+
+        Kept inside Discord's embed limits however many racers there are: with
+        a big field the owner's mention is dropped from each line first, and the
+        footer keeps only as many of the newest log lines as still fit.
+        """
+        def track(user):
+            return f"🚩 {''.join('-' if i != positions[user.id] else MOUSE for i in range(track_length))} 🏁"
+
+        header = f"{race_starter.mention}'s race:\nMove {move_counter}\n"
+        description = header + "\n".join(
+            f"{user.mention}'s {user_mouse_names_classes[user.id]['name']}\n{track(user)}" for user in mouse_users
         )
-        embed.set_footer(text="\n".join(debug_log[-10:]))
+        if _dlen(description) > _EMBED_DESCRIPTION_LIMIT:
+            description = header + "\n".join(
+                f"{user_mouse_names_classes[user.id]['name']}\n{track(user)}" for user in mouse_users
+            )
+        description = _fit(description, _EMBED_DESCRIPTION_LIMIT)
+
+        footer_budget = min(
+            _EMBED_FOOTER_LIMIT, _EMBED_TOTAL_LIMIT - _dlen(lang.RACING_PROGRESS_TITLE) - _dlen(description)
+        )
+        footer_lines = []
+        for line in reversed(debug_log[-10:]):
+            if _dlen("\n".join([line, *footer_lines])) > footer_budget:
+                break
+            footer_lines.insert(0, line)
+
+        embed = discord.Embed(title=lang.RACING_PROGRESS_TITLE, description=description, color=0x00FF00)
+        embed.set_footer(text="\n".join(footer_lines))
         await race_message.edit(embed=embed, content=event_text)
 
     # --------------------------------------------------------------------- #
@@ -625,10 +706,18 @@ class Racing(commands.Cog, name="racing"):
 
     async def send_race_summary(self, context, race_starter, mice, race_results) -> None:
         """Post the plain-text results summary."""
-        summary = lang.RACING_SUMMARY_HEADER
+        # Split across messages at line breaks: a big field outgrows Discord's
+        # 2000-character message limit. Names show but nobody is pinged — the
+        # only pings after a race are the adoption prompts.
+        chunk = lang.RACING_SUMMARY_HEADER
         for user, result in race_results.items():
-            summary += lang.RACING_SUMMARY_LINE.format(mention=user.mention, mouse=mice[user.id]["name"], points=result["points"])
-        await context.send(summary)
+            line = lang.RACING_SUMMARY_LINE.format(mention=user.mention, mouse=mice[user.id]["name"], points=result["points"])
+            if _dlen(chunk) + _dlen(line) > _MESSAGE_LIMIT:
+                await context.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                chunk = ""
+            chunk += line
+        if chunk:
+            await context.send(chunk, allowed_mentions=discord.AllowedMentions.none())
 
     def save_race_results(self, race_name, race_starter, mice, race_results) -> None:
         """Persist the race outcome to the database."""
@@ -656,14 +745,20 @@ class Racing(commands.Cog, name="racing"):
         """Relay an in-character LLM message (used by the adoption prompts)."""
         if self.client is None:
             return
-        completion = self.client.chat.completions.create(
-            model="gpt-4o",
-            temperature=1,
-            messages=[
-                {"role": "system", "content": "You return the message in the form of direct speech playing your role:"},
-                {"role": "user", "content": message},
-            ],
-        )
+        try:
+            # In a worker thread: the client blocks, and the bot must keep answering Discord meanwhile.
+            completion = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model="gpt-4o",
+                temperature=1,
+                messages=[
+                    {"role": "system", "content": "You return the message in the form of direct speech playing your role:"},
+                    {"role": "user", "content": message},
+                ],
+            )
+        except Exception:  # noqa: BLE001 — flavour text only; a proxy hiccup mustn't end the race's aftermath
+            logger.exception("mousechat failed")
+            return
         content = completion.choices[0].message.content
         for chunk in range(0, len(content), 1990):
             await context.send(content[chunk : chunk + 1990])
@@ -705,54 +800,122 @@ class Racing(commands.Cog, name="racing"):
             config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"Relationship": rel_list}})
             message_lines.append(lang.RACING_RELATIONSHIP_LINE.format(mention=user.mention, points=points_gained, mouse=mouse_name))
 
-        if message_lines:
-            embed = messages.embed(
-                "\n".join(message_lines), title=lang.RACING_RELATIONSHIP_TITLE, color=config_py.main_color
-            )
+        # As many embeds as it takes: a big field outgrows one embed, and nobody's line may be cut.
+        for chunk in _chunk_lines(message_lines, _EMBED_DESCRIPTION_LIMIT):
+            embed = messages.embed(chunk, title=lang.RACING_RELATIONSHIP_TITLE, color=config_py.main_color)
             await context.send(embed=embed)
 
-    async def adoption_check(self, context, user_mouse_names_classes) -> None:
-        """After a race, prompt adoption for any mouse that crossed the threshold."""
+    async def adoption_check(self, context, user_mouse_names_classes, racers, *,
+                             race_message=None, thread_name=None, window: float = 20.0) -> None:
+        """After a race, ask every racer whose mouse crossed the threshold to (re)adopt it.
+
+        Each qualifier gets their own message. All of them are sent first and then
+        answered in parallel, each with ``window`` seconds, so a slow answer never
+        holds up — or times out — anyone else. With ``thread_name`` the prompts go
+        to a thread under ``race_message`` instead of ``context``.
+        """
+        candidates = self._adoption_candidates(user_mouse_names_classes, racers)
+        if not candidates:
+            return
+        where = context
+        if thread_name and race_message is not None:
+            where = await self._conference_room(race_message, thread_name) or context
+
+        prompts = []
+        for user, mouse_name, verb in candidates:
+            try:
+                chat = (
+                    lang.RACING_ADOPT_MOUSECHAT.format(mouse=mouse_name, name=user.name)
+                    if verb == "adopt"
+                    else lang.RACING_READOPT_MOUSECHAT.format(mouse=mouse_name)
+                )
+                await self.mousechat(where, message=chat)
+                adopt_msg = await where.send(lang.RACING_ADOPT_PROMPT.format(mention=user.mention, verb=verb, mouse=mouse_name))
+                for emoji in _ADOPT_EMOJIS:
+                    await adopt_msg.add_reaction(emoji)
+                prompts.append((adopt_msg, user, mouse_name, verb))
+            except discord.HTTPException:
+                logger.exception("Couldn't send the adoption prompt for %s to %s", mouse_name, user.id)
+
+        results = await asyncio.gather(
+            *(self._await_adoption(msg, user, mouse_name, verb, window) for msg, user, mouse_name, verb in prompts),
+            return_exceptions=True,
+        )
+        for (_, user, mouse_name, _), result in zip(prompts, results):
+            if isinstance(result, BaseException):
+                logger.error("Adoption of %s by %s failed", mouse_name, user.id, exc_info=result)
+
+    def _adoption_candidates(self, user_mouse_names_classes, racers) -> list:
+        """``(user, mouse_name, verb)`` for every racer who may adopt or re-adopt their mouse now."""
         threshold = config_py.MOUSE_ADOPTION_RANK
-        for user_id, info in user_mouse_names_classes.items():
-            user = self.bot.get_user(user_id)
-            mouse_name = info["name"]
+        candidates = []
+        for user in racers:
+            if getattr(user, "bot", False) or user.id not in user_mouse_names_classes:
+                continue
+            mouse_name = user_mouse_names_classes[user.id]["name"]
             mouse_doc = config_py.user_mice.find_one({"name": mouse_name})
+            if not mouse_doc:
+                continue
             rel_list = mouse_doc.get("Relationship", [])
-            user_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == user_id), 0)
+            user_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == user.id), 0)
+            if user_points < threshold:
+                continue
+            owner = mouse_doc.get("adopted_by")
+            if not owner:
+                candidates.append((user, mouse_name, "adopt"))
+            elif owner != user.id:
+                owner_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == owner), 0)
+                if owner_points < threshold:
+                    candidates.append((user, mouse_name, "readopt"))
+        return candidates
 
-            if user_points >= threshold and not mouse_doc.get("adopted_by"):
-                await self.mousechat(context, message=lang.RACING_ADOPT_MOUSECHAT.format(mouse=mouse_name, name=user.name))
-                await self._adoption_prompt(context, user, mouse_name, decline_penalty=500, verb="adopt")
+    async def _conference_room(self, race_message, thread_name):
+        """The thread under ``race_message`` (made now if it has none yet), or None if it can't be had."""
+        thread = race_message.guild.get_thread(race_message.id) if race_message.guild else None
+        if thread is not None:
+            return thread
+        try:
+            return await race_message.create_thread(name=thread_name[:100], auto_archive_duration=1440)
+        except discord.HTTPException:
+            # Most likely the message already has a thread the cache doesn't know about.
+            try:
+                return await self.bot.fetch_channel(race_message.id)
+            except discord.HTTPException:
+                logger.exception("Couldn't make or find the post-race thread; asking in the race channel instead")
+                return None
 
-            elif user_points >= threshold and mouse_doc.get("adopted_by") and mouse_doc.get("adopted_by") != user_id:
-                current_owner = mouse_doc["adopted_by"]
-                current_owner_points = next((e["relationship_points"] for e in rel_list if e["user_id"] == current_owner), 0)
-                if current_owner_points < threshold:
-                    await self.mousechat(context, message=lang.RACING_READOPT_MOUSECHAT.format(mouse=mouse_name))
-                    await self._adoption_prompt(context, user, mouse_name, decline_penalty=500, verb="readopt")
+    async def _await_adoption(self, adopt_msg, user, mouse_name, verb, window, decline_penalty: int = 500) -> None:
+        """Wait up to ``window`` seconds for ``user``'s 👍/👎 on ``adopt_msg`` and act on it.
 
-    async def _adoption_prompt(self, context, user, mouse_name, *, decline_penalty, verb) -> None:
-        """Ask ``user`` to (re)adopt ``mouse_name`` via 👍/👎 in the command channel."""
-        adopt_msg = await context.send(lang.RACING_ADOPT_PROMPT.format(mention=user.mention, verb=verb, mouse=mouse_name))
-        emoji, _ = await messages.wait_for_reaction(self.bot, adopt_msg, ["👍", "👎"], member=user, timeout=20.0)
-        if emoji is None:
+        Listens on ``raw_reaction_add`` so the answer still lands after the prompt
+        has dropped out of the message cache.
+        """
+        def check(payload):
+            return (
+                payload.message_id == adopt_msg.id
+                and payload.user_id == user.id
+                and str(payload.emoji) in _ADOPT_EMOJIS
+            )
+
+        try:
+            payload = await self.bot.wait_for("raw_reaction_add", timeout=window, check=check)
+        except asyncio.TimeoutError:
             await adopt_msg.clear_reactions()
             return
-        if emoji == "👍":
+        if str(payload.emoji) == "👍":
             config_py.user_mice.update_one({"name": mouse_name}, {"$set": {"adopted_by": user.id}})
             success = (
                 lang.RACING_ADOPT_SUCCESS.format(mouse=mouse_name)
                 if verb == "adopt"
                 else lang.RACING_READOPT_SUCCESS.format(mouse=mouse_name)
             )
-            await context.send(success)
+            await adopt_msg.reply(success)
         else:
             config_py.user_mice.update_one(
                 {"name": mouse_name, "Relationship.user_id": user.id},
                 {"$inc": {"Relationship.$.relationship_points": -decline_penalty}},
             )
-            await context.send(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
+            await adopt_msg.reply(lang.RACING_ADOPT_DECLINE.format(mouse=mouse_name))
         await adopt_msg.clear_reactions()
 
     @commands.hybrid_command(name="relationships", description="Show your relationships with mice.")

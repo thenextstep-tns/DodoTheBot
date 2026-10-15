@@ -136,6 +136,8 @@ PARAMETERS: list[dict] = [
     # --- racing (skeevaton races) ---
     {"key": "race_reaction_window", "cog": "racing", "type": "float", "default": 2.0,
      "label": "Reaction window (s)", "description": "Seconds players get to click a cheese/wine/bomb/starry-eyes/map event mid-race."},
+    {"key": "gigarace_adoption_window", "cog": "racing", "type": "float", "default": 3600.0,
+     "label": "Gigarace adoption window (s)", "description": "How long each racer has to answer their adoption prompt in the post-race thread."},
     # --- pumpkin (pull minigame in bot.py + team deathmatch) ---
     {"key": "pumpkin_role_id", "cog": "pumpkin", "type": "role", "default": 1430471888412475413,
      "label": "Pumpkin role", "description": "The 'covered in guts' / collector role."},
