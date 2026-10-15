@@ -16,6 +16,7 @@ from discord.ext.commands import Context
 import config_py
 import lang
 from helpers import database as db
+from helpers import messages
 
 _MAX_DISTANCE = 5.0  # metres at the ideal 45° angle
 _PUZZLE_TIMEOUT = 5
@@ -130,6 +131,63 @@ class Throw(commands.Cog, name="throw"):
                 new_target_power=round(new_target_power, 2),
             ) + "\n" + lang.THROW_PRECISION.format(precision=round(precision * 100, 1), gain=round(gain, 2))
         await puzzle_message.edit(content=content)
+
+    @commands.hybrid_command(name="throwstats", description="Your throwing record, and the all-time throwing records.")
+    async def throwstats(self, context: Context, member: discord.Member = None) -> None:
+        """Show ``member``'s (or the caller's) throw stats next to the world records.
+
+        Mentions sit inside the embed, so nobody named in it is pinged.
+        """
+        member = member or context.author
+        throws = config_py.throws
+
+        thrown = throws.count_documents({"thrower_id": member.id})
+        been_thrown = throws.count_documents({"target_id": member.id})
+        longest = throws.find_one({"thrower_id": member.id}, sort=[("distance", -1)])
+        favourite = next(throws.aggregate([
+            {"$match": {"thrower_id": member.id}},
+            {"$group": {"_id": "$target_id", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 1},
+        ]), None)
+        most_throws = next(throws.aggregate([
+            {"$group": {"_id": "$thrower_id", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 1},
+        ]), None)
+        record = throws.find_one({}, sort=[("distance", -1)])
+
+        none = lang.THROWSTATS_NONE
+        lines = [
+            lang.THROWSTATS_THROWN.format(count=thrown),
+            lang.THROWSTATS_BEEN_THROWN.format(count=been_thrown),
+            lang.THROWSTATS_LONGEST.format(
+                throw=lang.THROWSTATS_THROW.format(distance=round(longest["distance"], 2), target=f"<@{longest['target_id']}>")
+                if longest else none
+            ),
+            lang.THROWSTATS_FAVOURITE.format(
+                partner=lang.THROWSTATS_PARTNER.format(target=f"<@{favourite['_id']}>", count=favourite["count"])
+                if favourite else none
+            ),
+            "",
+            lang.THROWSTATS_WR_TITLE,
+            lang.THROWSTATS_WR_MOST.format(
+                record=lang.THROWSTATS_WR_MOST_RECORD.format(thrower=f"<@{most_throws['_id']}>", count=most_throws["count"])
+                if most_throws else none
+            ),
+            lang.THROWSTATS_WR_LONGEST.format(
+                record=lang.THROWSTATS_WR_LONGEST_RECORD.format(
+                    thrower=f"<@{record['thrower_id']}>",
+                    target=lang.THROWSTATS_THEMSELVES if record["target_id"] == record["thrower_id"] else f"<@{record['target_id']}>",
+                    distance=round(record["distance"], 2),
+                )
+                if record else none
+            ),
+        ]
+        embed = messages.embed(
+            "\n".join(lines), title=lang.THROWSTATS_TITLE.format(name=member.display_name), color=config_py.main_color
+        )
+        await context.send(embed=embed)
 
     async def _countdown(self, puzzle_message: discord.Message, puzzle: str) -> None:
         """Tick the puzzle message's countdown once per second until cancelled."""
