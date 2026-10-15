@@ -704,7 +704,6 @@ RACING_GIGA_ANNOUNCE = (
     "🏁 Start: {start} ({relative})\n"
     "React with 🐁 to add your skeevaton to the race roster.\n"
     "{lights}\n"
-    "-# One light goes out every hour for the last five hours.\n"
     " 1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold"
 )
 RACING_GIGA_LIGHT_ON = "🔴"
