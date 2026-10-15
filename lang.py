@@ -699,16 +699,16 @@ RACING_COUNTDOWN = (
     "{mention} started the race of {track_length} laps! You have {remaining} seconds to react and add your "
     "skeevaton to the race roster.\nReact with 🐁 to join the race."
 )
-RACING_GIGA_START = (
-    "THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have 9 hours (32400 seconds) to react and add your "
-    "skeevaton to the race roster.\nReact with 🐁 to join the race.\n"
-    " 1st place - 100 000 gold \n 2nd place - 50 000 gold \n 3rd place - 10 000 gold  "
+RACING_GIGA_ANNOUNCE = (
+    "THE **GIGARACE** HAS JUST BEEN ANNOUNCED!\n"
+    "🏁 Start: {start} ({relative})\n"
+    "React with 🐁 to add your skeevaton to the race roster.\n"
+    "{lights}\n"
+    "-# One light goes out every hour for the last five hours.\n"
+    " 1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold"
 )
-RACING_GIGA_COUNTDOWN = (
-    "THE **GIGARACE** HAS JUST BEEN ANNOUNCED! You have {remaining} seconds to react and add "
-    "your skeevaton to the race roster.\nReact with 🐁 to join the race.\n "
-    "1st place - 100 000 gold\n 2nd place - 50 000 gold\n 3rd place - 10 000 gold "
-)
+RACING_GIGA_LIGHT_ON = "🔴"
+RACING_GIGA_LIGHT_OFF = "⚫"
 RACING_NO_JOIN = "No one joined the race. Race cancelled."
 RACING_NO_MICE = (
     "There isn't a single skeevaton with a valid class in the pen, so there's nothing to race. "

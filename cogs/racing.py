@@ -29,6 +29,9 @@ BOMB = "\U0001F4A3"
 STAR = "✨"
 MAP = "🗺️"
 
+_GIGA_SIGNUP_SECONDS = 9 * 3600  # a gigarace starts nine hours after it's announced
+_GIGA_LIGHTS = 5  # one goes out per hour over the last five hours
+
 
 class Racing(commands.Cog, name="racing"):
     """The skeevaton racing minigame."""
@@ -76,7 +79,7 @@ class Racing(commands.Cog, name="racing"):
         )
         track_length = random.randint(15, 45)
         await race_message.add_reaction(MOUSE)
-        await self._countdown_message(race_message, context.author, track_length, countdown, giga=False)
+        await self._countdown_message(race_message, context.author, track_length, countdown)
         await self._run_full_race(context, race_message, context.author, track_length, f"{context.author}'s race")
 
     @commands.hybrid_command(name="gigarace", description="Challenge your guildies to a gigarace!")
@@ -85,9 +88,10 @@ class Racing(commands.Cog, name="racing"):
     async def gigarace(self, context: Context) -> None:
         """Start a gigarace announced in the announcement channel with a 9h countdown."""
         announcement_channel = self.bot.get_channel(self.bot.guild_setting(context.guild, "ANNOUNCEMENT_CHANNEL"))
-        race_message = await announcement_channel.send(lang.RACING_GIGA_START)
+        start = int(time.time()) + _GIGA_SIGNUP_SECONDS
+        race_message = await announcement_channel.send(self._gigarace_content(start, _GIGA_LIGHTS))
         await race_message.add_reaction(MOUSE)
-        await self._countdown_message(race_message, context.author, 45, 32400, giga=True)
+        await self._gigarace_countdown(race_message, start)
         await self._run_full_race(context, race_message, context.author, 45, f"{context.author}'s gigarace")
 
     @commands.hybrid_command(name="resumegigarace", description="Resume a gigarace whose countdown was cut off.", hidden=True)
@@ -116,12 +120,15 @@ class Racing(commands.Cog, name="racing"):
             target = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hours, minutes, 0, 0, 0, -1))
             if target <= time.time():
                 target += 86400
-            time_left = int(target - time.time())
+            start = int(target)
         else:
-            time_left = int(start_at)
+            start = int(time.time()) + int(start_at)
 
-        await context.send(f"Resuming the gigarace: {time_left} seconds left ({time_left // 3600}h {time_left % 3600 // 60}m).")
-        await self._countdown_message(race_message, context.author, 45, time_left, giga=True)
+        time_left = start - int(time.time())
+        await context.send(
+            f"Resuming the gigarace: starts <t:{start}:F>, {time_left // 3600}h {time_left % 3600 // 60}m from now."
+        )
+        await self._gigarace_countdown(race_message, start)
         # The race pipeline only needs ``send`` and ``guild`` from its context, which the
         # channel itself has — so the summary and adoption prompts go to the racers.
         await self._run_full_race(race_channel, race_message, context.author, 45, f"{context.author}'s gigarace")
@@ -166,20 +173,45 @@ class Racing(commands.Cog, name="racing"):
     # --------------------------------------------------------------------- #
     #  Sign-up message handling
     # --------------------------------------------------------------------- #
-    async def _countdown_message(self, race_message, race_starter, track_length, time_left, *, giga: bool) -> None:
-        """Tick the sign-up message's countdown until it runs out."""
+    async def _countdown_message(self, race_message, race_starter, track_length, time_left) -> None:
+        """Tick the sign-up message's countdown once a second until it runs out."""
         end_time = time.time() + time_left
-        interval = 100 if giga else 1
         while time.time() < end_time:
             remaining = int(end_time - time.time())
-            if giga:
-                content = lang.RACING_GIGA_COUNTDOWN.format(remaining=remaining)
-            else:
-                content = lang.RACING_COUNTDOWN.format(
-                    mention=race_starter.mention, track_length=track_length, remaining=remaining
-                )
+            content = lang.RACING_COUNTDOWN.format(
+                mention=race_starter.mention, track_length=track_length, remaining=remaining
+            )
             await race_message.edit(content=content)
-            await asyncio.sleep(interval)
+            await asyncio.sleep(1)
+
+    @staticmethod
+    def _gigarace_lights_lit(start: int, now: float) -> int:
+        """How many of the five lights are still on: one goes out 5, 4, 3, 2 and 1 hours before ``start``."""
+        return sum(1 for hours in range(1, _GIGA_LIGHTS + 1) if start - now > hours * 3600)
+
+    @staticmethod
+    def _gigarace_content(start: int, lit: int) -> str:
+        """The sign-up text: start as a Discord timestamp (shown in each reader's own timezone) and the lights."""
+        return lang.RACING_GIGA_ANNOUNCE.format(
+            start=f"<t:{start}:F>",
+            relative=f"<t:{start}:R>",
+            lights=lang.RACING_GIGA_LIGHT_ON * lit + lang.RACING_GIGA_LIGHT_OFF * (_GIGA_LIGHTS - lit),
+        )
+
+    async def _gigarace_countdown(self, race_message, start: int) -> None:
+        """Keep the sign-up's lights right until ``start`` (a unix time).
+
+        Discord ticks the relative timestamp by itself, so the message is only
+        edited when a light goes out. Edits never ping.
+        """
+        shown = None
+        while time.time() < start:
+            lit = self._gigarace_lights_lit(start, time.time())
+            if lit != shown:
+                await race_message.edit(content=self._gigarace_content(start, lit))
+                shown = lit
+            next_change = start - lit * 3600 if lit else start
+            await asyncio.sleep(max(1.0, next_change - time.time()))
 
     async def get_reaction_users(self, race_message, emoji) -> list:
         """Return every non-bot user who reacted to ``race_message`` with ``emoji``.
