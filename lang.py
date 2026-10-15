@@ -288,6 +288,12 @@ THROW_RESULT = (
     "{thrower}'s power increased to {new_thrower_power}!\n"
     "{member}'s power decreased to {new_target_power}."
 )
+THROW_PRECISION = "Precision: {precision}% (+{gain} power)"
+THROW_HEAD_LANDING = (
+    "{member} went straight up... and landed 0.0 meters away, RIGHT ON {thrower}'S HEAD!\n"
+    "{thrower}'s power dropped to {new_thrower_power}.\n"
+    "{member} feels EMPOWERED! Their power rose to {new_target_power}."
+)
 THROW_FUNNY_PART1 = [
     "{member} was launched with tremendous force!",
     "{member} was thrown into the great unknown!",

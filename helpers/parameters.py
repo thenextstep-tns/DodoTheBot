@@ -112,6 +112,17 @@ PARAMETERS: list[dict] = [
      "label": "Mouse sweetrolls", "description": "Sweetrolls each puller gets if the mouse eats the cheese."},
     {"key": "mouse_adoption_rank", "cog": "cheese", "type": "int", "default": 250,
      "label": "Adoption rank", "description": "Relationship points with a mouse before adoption is offered (shared with racing)."},
+    # --- throw ---
+    {"key": "throw_max_gain", "cog": "throw", "type": "float", "default": 1.0,
+     "label": "Max power gain", "description": "Power the thrower gains for a perfectly solved puzzle (100% precision)."},
+    {"key": "throw_gain_steepness", "cog": "throw", "type": "float", "default": 8.0,
+     "label": "Gain steepness", "description": "Gain = max × precision^this. Higher drops off faster; 8 gives ~0.25 at 84% precision."},
+    {"key": "throw_gain_step", "cog": "throw", "type": "float", "default": 0.05,
+     "label": "Gain step", "description": "The gain is rounded to a multiple of this."},
+    {"key": "throw_target_loss_ratio", "cog": "throw", "type": "float", "default": 0.2,
+     "label": "Target loss ratio", "description": "The thrown member loses this share of the thrower's gain (0.2 = a fifth)."},
+    {"key": "throw_head_landing_power", "cog": "throw", "type": "float", "default": 0.1,
+     "label": "Head landing power", "description": "A 90° throw lands on the thrower's head: thrower loses this, the target gains it."},
     # --- racing (skeevaton races) ---
     {"key": "race_reaction_window", "cog": "racing", "type": "float", "default": 2.0,
      "label": "Reaction window (s)", "description": "Seconds players get to click a cheese/wine/bomb/starry-eyes/map event mid-race."},

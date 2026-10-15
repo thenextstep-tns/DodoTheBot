@@ -19,7 +19,6 @@ from helpers import database as db
 
 _MAX_DISTANCE = 5.0  # metres at the ideal 45° angle
 _PUZZLE_TIMEOUT = 5
-_POWER_STEP = 0.05
 
 
 class Throw(commands.Cog, name="throw"):
@@ -69,25 +68,57 @@ class Throw(commands.Cog, name="throw"):
         await asyncio.sleep(random.randint(3, 5))
 
         landing = total_force * random.uniform(0.8, 1.2)
-        config_py.throws.insert_one(
-            {"thrower_id": context.author.id, "target_id": member.id, "distance": landing, "date": datetime.utcnow()}
-        )
+        precision = max(0.0, 1 - abs(user_answer - correct_answer) / correct_answer)
+        guild_id = context.guild.id if context.guild else None
+        param = lambda key: self.bot.params.get(guild_id, key)  # noqa: E731
+        # Straight up and straight back down: the target lands on the thrower's head.
+        head_landing = angle >= 90
 
-        new_thrower_power = thrower_power + _POWER_STEP
-        new_target_power = max(0, target_power - _POWER_STEP)
+        if head_landing:
+            swing = param("throw_head_landing_power")
+            gain = -swing
+            new_thrower_power = max(0, thrower_power - swing)
+            new_target_power = target_power + swing
+        else:
+            step = param("throw_gain_step")
+            gain = round(round(param("throw_max_gain") * precision ** param("throw_gain_steepness") / step) * step, 4)
+            new_thrower_power = thrower_power + gain
+            new_target_power = max(0, target_power - gain * param("throw_target_loss_ratio"))
         db.upsert(config_py.user_power, context.author.id, {"power": new_thrower_power})
         db.upsert(config_py.user_power, member.id, {"power": new_target_power})
 
-        await puzzle_message.edit(
-            content=lang.THROW_RESULT.format(
+        config_py.throws.insert_one({
+            "thrower_id": context.author.id,
+            "target_id": member.id,
+            "guild_id": guild_id,
+            "answer": user_answer,
+            "correct_answer": correct_answer,
+            "precision": precision,
+            "angle": angle,
+            "distance": landing,
+            "head_landing": head_landing,
+            "thrower_power_change": new_thrower_power - thrower_power,
+            "target_power_change": new_target_power - target_power,
+            "date": datetime.utcnow(),
+        })
+
+        if head_landing:
+            content = lang.THROW_HEAD_LANDING.format(
+                member=member.mention,
+                thrower=context.author.mention,
+                new_thrower_power=round(new_thrower_power, 2),
+                new_target_power=round(new_target_power, 2),
+            )
+        else:
+            content = lang.THROW_RESULT.format(
                 member=member.mention,
                 distance=round(landing, 2),
                 funny=self._funny_description(member),
                 thrower=context.author.mention,
                 new_thrower_power=round(new_thrower_power, 2),
                 new_target_power=round(new_target_power, 2),
-            )
-        )
+            ) + "\n" + lang.THROW_PRECISION.format(precision=round(precision * 100, 1), gain=round(gain, 2))
+        await puzzle_message.edit(content=content)
 
     async def _countdown(self, puzzle_message: discord.Message, num1: int, num2: int, num3: int) -> None:
         """Tick the puzzle message's countdown once per second until cancelled."""
