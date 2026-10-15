@@ -288,6 +288,20 @@ THROW_RESULT = (
     "{thrower}'s power increased to {new_thrower_power}!\n"
     "{member}'s power decreased to {new_target_power}."
 )
+THROW_SELF_JUMPING = (
+    "The correct answer was {answer}!\n"
+    "You grab yourself firmly and attempt to throw yourself at an angle of {angle} degrees... "
+    "but it turns out that's just jumping."
+)
+THROW_SELF_RESULT = (
+    "You jump {distance} meters. Well done, champion! 🏅\n"
+    "You're feeling slightly awkward, but a bit happier than you were before."
+)
+THROW_STILL_WADDLING = (
+    "Hold up, wait a minute, you threw {member} {distance} meters away! "
+    "They are still waddling back to you and will be there in {seconds} seconds! "
+    "Try throwing someone else meanwhile!"
+)
 THROWSTATS_TITLE = "🤾 {name}'s throwing record"
 THROWSTATS_THROWN = "**Members thrown:** {count}"
 THROWSTATS_BEEN_THROWN = "**Times thrown:** {count}"
@@ -302,7 +316,7 @@ THROWSTATS_WR_LONGEST = "**Longest throw:** {record}"
 THROWSTATS_WR_LONGEST_RECORD = "{distance} m, {thrower} threw {target}"
 THROWSTATS_THEMSELVES = "themselves"
 THROWSTATS_NONE = "none yet"
-THROW_PRECISION ="Precision: {precision}% (+{gain} power)"
+THROW_PRECISION = "Precision: {precision}% (+{gain} power)"
 THROW_HEAD_LANDING = (
     "{member} went straight up... and landed 0.0 meters away, RIGHT ON {thrower}'S HEAD!\n"
     "{thrower}'s power dropped to {new_thrower_power}.\n"

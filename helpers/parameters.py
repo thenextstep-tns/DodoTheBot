@@ -129,6 +129,8 @@ PARAMETERS: list[dict] = [
      "label": "Gain step", "description": "The gain is rounded to a multiple of this."},
     {"key": "throw_target_loss_ratio", "cog": "throw", "type": "float", "default": 0.2,
      "label": "Target loss ratio", "description": "The thrown member loses this share of the thrower's gain (0.2 = a fifth)."},
+    {"key": "throw_waddle_speed", "cog": "throw", "type": "float", "default": 1.0,
+     "label": "Waddle speed (m/s)", "description": "How fast a thrown member walks back; you can't throw them again until they're back."},
     {"key": "throw_head_landing_power", "cog": "throw", "type": "float", "default": 0.1,
      "label": "Head landing power", "description": "A 90° throw lands on the thrower's head: thrower loses this, the target gains it."},
     # --- racing (skeevaton races) ---

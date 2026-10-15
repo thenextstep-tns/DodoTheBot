@@ -33,6 +33,22 @@ class Throw(commands.Cog, name="throw"):
         """Charge a throw via a timed puzzle, then launch ``member``."""
         guild_id = context.guild.id if context.guild else None
         param = lambda key: self.bot.params.get(guild_id, key)  # noqa: E731
+        self_throw = member.id == context.author.id
+
+        # Whoever you threw last is still waddling back from wherever they landed.
+        if not self_throw:
+            last = config_py.throws.find_one(
+                {"thrower_id": context.author.id, "target_id": member.id}, sort=[("date", -1)]
+            )
+            if last:
+                walk_time = last["distance"] / param("throw_waddle_speed")
+                waited = (datetime.utcnow() - last["date"]).total_seconds()
+                if waited < walk_time:
+                    await context.send(lang.THROW_STILL_WADDLING.format(
+                        member=member.mention, distance=round(last["distance"], 2), seconds=math.ceil(walk_time - waited)
+                    ))
+                    return
+
         thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
         target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
 
@@ -68,11 +84,13 @@ class Throw(commands.Cog, name="throw"):
 
         total_force = distance * thrower_power
 
-        await puzzle_message.edit(
-            content=lang.THROW_THROWING.format(
+        if self_throw:
+            in_air = lang.THROW_SELF_JUMPING.format(answer=correct_answer, angle=round(angle, 2))
+        else:
+            in_air = lang.THROW_THROWING.format(
                 answer=correct_answer, member=member.mention, angle=round(angle, 2), gif="https://tenor.com/bkIHP.gif"
             )
-        )
+        await puzzle_message.edit(content=in_air)
         await asyncio.sleep(random.randint(3, 5))
 
         landing = total_force * random.uniform(0.8, 1.2)
@@ -81,9 +99,13 @@ class Throw(commands.Cog, name="throw"):
         target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
         precision = max(0.0, 1 - abs(user_answer - correct_answer) / correct_answer)
         # Straight up and straight back down: the target lands on the thrower's head.
-        head_landing = angle >= 90
+        head_landing = angle >= 90 and not self_throw
 
-        if head_landing:
+        if self_throw:
+            # Throwing yourself is just jumping: no power changes hands.
+            gain = 0.0
+            new_thrower_power = new_target_power = thrower_power
+        elif head_landing:
             swing = param("throw_head_landing_power")
             gain = -swing
             new_thrower_power = max(0, thrower_power - swing)
@@ -95,8 +117,9 @@ class Throw(commands.Cog, name="throw"):
             gain = round(round(raw_gain / step) * step, 4)
             new_thrower_power = thrower_power + gain
             new_target_power = max(0, target_power - gain * param("throw_target_loss_ratio"))
-        db.upsert(config_py.user_power, context.author.id, {"power": new_thrower_power})
-        db.upsert(config_py.user_power, member.id, {"power": new_target_power})
+        if not self_throw:
+            db.upsert(config_py.user_power, context.author.id, {"power": new_thrower_power})
+            db.upsert(config_py.user_power, member.id, {"power": new_target_power})
 
         config_py.throws.insert_one({
             "thrower_id": context.author.id,
@@ -109,12 +132,15 @@ class Throw(commands.Cog, name="throw"):
             "angle": angle,
             "distance": landing,
             "head_landing": head_landing,
+            "self_throw": self_throw,
             "thrower_power_change": new_thrower_power - thrower_power,
             "target_power_change": new_target_power - target_power,
             "date": datetime.utcnow(),
         })
 
-        if head_landing:
+        if self_throw:
+            content = lang.THROW_SELF_RESULT.format(distance=round(landing, 2))
+        elif head_landing:
             content = lang.THROW_HEAD_LANDING.format(
                 member=member.mention,
                 thrower=context.author.mention,
