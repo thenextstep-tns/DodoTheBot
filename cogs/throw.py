@@ -14,12 +14,13 @@ from discord.ext import commands
 from discord.ext.commands import Context
 
 import config_py
-import lang
 from helpers import database as db
 from helpers import messages
-from helpers.parameters import PARAMETERS
+from helpers.hotload import fresh_lang, register_missing
 
-_DEFAULTS = {spec["key"]: spec["default"] for spec in PARAMETERS}
+# Texts as they are on disk now, so new ones work after just `reload throw`.
+lang = fresh_lang()
+
 _MAX_DISTANCE = 5.0  # metres at the ideal 45° angle
 _PUZZLE_TIMEOUT = 5
 
@@ -32,13 +33,13 @@ def _span(value, fallback) -> tuple:
     return low, high
 
 
-def _pick(param, key: str) -> int:
+def _pick(param, defaults: dict, key: str) -> int:
     """A random number from the "min, max" range setting ``key`` (its default if the setting is malformed)."""
-    low, high = _span(param(key), _DEFAULTS[key])
+    low, high = _span(param(key), defaults[key])
     return random.randint(low, high)
 
 
-def _build_puzzle(power: float, param) -> tuple:
+def _build_puzzle(power: float, param, defaults: dict) -> tuple:
     """``(tier, text, answer)`` for a thrower with ``power``. Harder as power grows,
     but always something that feels fair to estimate in a few seconds:
 
@@ -49,8 +50,8 @@ def _build_puzzle(power: float, param) -> tuple:
       up to ``throw_max_factors`` numbers
     """
     if power < param("throw_tier_sums_until"):
-        low, high = _span(param("throw_sum_terms"), _DEFAULTS["throw_sum_terms"])
-        numbers = [_pick(param, "throw_sum_numbers") for _ in range(random.randint(max(2, low), max(2, high)))]
+        low, high = _span(param("throw_sum_terms"), defaults["throw_sum_terms"])
+        numbers = [_pick(param, defaults, "throw_sum_numbers") for _ in range(random.randint(max(2, low), max(2, high)))]
         # Precision needs a positive answer: reroll the signs a few times, then add everything.
         for _ in range(10):
             signs = [random.choice((1, -1)) for _ in numbers[1:]]
@@ -62,11 +63,11 @@ def _build_puzzle(power: float, param) -> tuple:
         return "sums", text, numbers[0] + sum(s * n for s, n in zip(signs, numbers[1:]))
 
     if power < param("throw_tier_mixed_until"):
-        a, b, c = _pick(param, "throw_mixed_numbers"), _pick(param, "throw_mixed_multipliers"), _pick(param, "throw_mixed_added")
+        a, b, c = _pick(param, defaults, "throw_mixed_numbers"), _pick(param, defaults, "throw_mixed_multipliers"), _pick(param, defaults, "throw_mixed_added")
         text = f"{a} * {b} + {c}" if random.random() < 0.5 else f"{c} + {a} * {b}"
         return "mixed", text, a * b + c
 
-    factors = [_pick(param, key) for key in ("throw_product_first", "throw_product_second", "throw_product_third")]
+    factors = [_pick(param, defaults, key) for key in ("throw_product_first", "throw_product_second", "throw_product_third")]
     tier = "product"
     if power >= param("throw_tier_product_until"):
         tier = "big_product"
@@ -81,6 +82,10 @@ class Throw(commands.Cog, name="throw"):
 
     def __init__(self, bot):
         self.bot = bot
+
+    def _defaults(self) -> dict:
+        """Each throw setting's built-in default, from the running registry."""
+        return {spec["key"]: spec["default"] for spec in self.bot.params.specs_for_cog("throw")}
 
     @commands.hybrid_command(name="throw", description="Throw another member a physics-derived distance.")
     async def throw(self, context: Context, member: discord.Member) -> None:
@@ -106,7 +111,7 @@ class Throw(commands.Cog, name="throw"):
         thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
         target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
 
-        puzzle_tier, puzzle, correct_answer = _build_puzzle(thrower_power, param)
+        puzzle_tier, puzzle, correct_answer = _build_puzzle(thrower_power, param, self._defaults())
 
         puzzle_message = await context.send(lang.THROW_PUZZLE.format(timeout=_PUZZLE_TIMEOUT, puzzle=puzzle))
         countdown = asyncio.create_task(self._countdown(puzzle_message, puzzle))
@@ -295,4 +300,6 @@ class Throw(commands.Cog, name="throw"):
 
 
 async def setup(bot):
+    # Settings added since the bot started work after just `reload throw`.
+    register_missing(bot, "throw")
     await bot.add_cog(Throw(bot))
