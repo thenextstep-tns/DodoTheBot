@@ -1,6 +1,6 @@
 """
 Throw cog — ``throw`` launches another member a physics-derived distance after
-the thrower solves a timed multiplication puzzle. Throwers gain power, targets
+the thrower solves a timed arithmetic puzzle that grows with their power. Throwers gain power, targets
 lose it, and each throw is logged. Text lives in ``lang``.
 """
 
@@ -17,9 +17,63 @@ import config_py
 import lang
 from helpers import database as db
 from helpers import messages
+from helpers.parameters import PARAMETERS
 
+_DEFAULTS = {spec["key"]: spec["default"] for spec in PARAMETERS}
 _MAX_DISTANCE = 5.0  # metres at the ideal 45° angle
 _PUZZLE_TIMEOUT = 5
+
+
+def _span(value, fallback) -> tuple:
+    """A ``(low, high)`` range from a "min, max" list setting; ``fallback`` if it isn't two numbers."""
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        value = fallback
+    low, high = sorted(int(v) for v in value[:2])
+    return low, high
+
+
+def _pick(param, key: str) -> int:
+    """A random number from the "min, max" range setting ``key`` (its default if the setting is malformed)."""
+    low, high = _span(param(key), _DEFAULTS[key])
+    return random.randint(low, high)
+
+
+def _build_puzzle(power: float, param) -> tuple:
+    """``(tier, text, answer)`` for a thrower with ``power``. Harder as power grows,
+    but always something that feels fair to estimate in a few seconds:
+
+    - below ``throw_tier_sums_until``: 2–3 numbers added and subtracted
+    - below ``throw_tier_mixed_until``: one multiplication and one addition
+    - below ``throw_tier_product_until``: three numbers multiplied
+    - above that: one more number to multiply per ``throw_power_per_factor``,
+      up to ``throw_max_factors`` numbers
+    """
+    if power < param("throw_tier_sums_until"):
+        low, high = _span(param("throw_sum_terms"), _DEFAULTS["throw_sum_terms"])
+        numbers = [_pick(param, "throw_sum_numbers") for _ in range(random.randint(max(2, low), max(2, high)))]
+        # Precision needs a positive answer: reroll the signs a few times, then add everything.
+        for _ in range(10):
+            signs = [random.choice((1, -1)) for _ in numbers[1:]]
+            if numbers[0] + sum(s * n for s, n in zip(signs, numbers[1:])) > 0:
+                break
+        else:
+            signs = [1] * len(signs)
+        text = str(numbers[0]) + "".join(f" {'+' if s > 0 else '-'} {n}" for s, n in zip(signs, numbers[1:]))
+        return "sums", text, numbers[0] + sum(s * n for s, n in zip(signs, numbers[1:]))
+
+    if power < param("throw_tier_mixed_until"):
+        a, b, c = _pick(param, "throw_mixed_numbers"), _pick(param, "throw_mixed_multipliers"), _pick(param, "throw_mixed_added")
+        text = f"{a} * {b} + {c}" if random.random() < 0.5 else f"{c} + {a} * {b}"
+        return "mixed", text, a * b + c
+
+    factors = [_pick(param, key) for key in ("throw_product_first", "throw_product_second", "throw_product_third")]
+    tier = "product"
+    if power >= param("throw_tier_product_until"):
+        tier = "big_product"
+        extra = 1 + int((power - param("throw_tier_product_until")) // max(param("throw_power_per_factor"), 0.01))
+        extra = min(extra, max(0, param("throw_max_factors") - len(factors)))
+        factors += [random.randint(param("throw_extra_factor_min"), param("throw_extra_factor_max")) for _ in range(extra)]
+    return tier, " * ".join(str(f) for f in factors), math.prod(factors)
 
 
 class Throw(commands.Cog, name="throw"):
@@ -52,14 +106,7 @@ class Throw(commands.Cog, name="throw"):
         thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
         target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
 
-        # Stronger throwers get more numbers to multiply: one extra per
-        # ``throw_power_per_factor`` above 1 power, up to ``throw_max_factors``.
-        factors = [random.randint(3, 12), random.randint(53, 95), random.randint(2, 8)]
-        extra = int(max(0.0, thrower_power - 1) // param("throw_power_per_factor"))
-        extra = min(extra, max(0, param("throw_max_factors") - len(factors)))
-        factors += [random.randint(param("throw_extra_factor_min"), param("throw_extra_factor_max")) for _ in range(extra)]
-        correct_answer = math.prod(factors)
-        puzzle = " * ".join(str(factor) for factor in factors)
+        puzzle_tier, puzzle, correct_answer = _build_puzzle(thrower_power, param)
 
         puzzle_message = await context.send(lang.THROW_PUZZLE.format(timeout=_PUZZLE_TIMEOUT, puzzle=puzzle))
         countdown = asyncio.create_task(self._countdown(puzzle_message, puzzle))
@@ -125,7 +172,8 @@ class Throw(commands.Cog, name="throw"):
             "thrower_id": context.author.id,
             "target_id": member.id,
             "guild_id": guild_id,
-            "factors": factors,
+            "puzzle": puzzle,
+            "puzzle_tier": puzzle_tier,
             "answer": user_answer,
             "correct_answer": correct_answer,
             "precision": precision,
