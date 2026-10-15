@@ -115,8 +115,8 @@ PARAMETERS: list[dict] = [
     # --- throw ---
     {"key": "throw_max_gain", "cog": "throw", "type": "float", "default": 1.0,
      "label": "Max power gain", "description": "Power the thrower gains for a perfectly solved puzzle (100% precision)."},
-    {"key": "throw_gain_steepness", "cog": "throw", "type": "float", "default": 8.0,
-     "label": "Gain steepness", "description": "Gain = max × precision^this. Higher drops off faster; 8 gives ~0.25 at 84% precision."},
+    {"key": "throw_gain_falloff", "cog": "throw", "type": "float", "default": 0.19,
+     "label": "Gain falloff", "description": "Gain = max ÷ (1 + (1 − precision) ÷ this). Smaller drops off faster; 0.19 gives 0.25 at 44% precision (the median of past throws)."},
     {"key": "throw_gain_step", "cog": "throw", "type": "float", "default": 0.05,
      "label": "Gain step", "description": "The gain is rounded to a multiple of this."},
     {"key": "throw_target_loss_ratio", "cog": "throw", "type": "float", "default": 0.2,

@@ -81,7 +81,9 @@ class Throw(commands.Cog, name="throw"):
             new_target_power = target_power + swing
         else:
             step = param("throw_gain_step")
-            gain = round(round(param("throw_max_gain") * precision ** param("throw_gain_steepness") / step) * step, 4)
+            # Steep near a perfect answer, then a long flat tail: most answers are way off.
+            raw_gain = param("throw_max_gain") / (1 + (1 - precision) / param("throw_gain_falloff"))
+            gain = round(round(raw_gain / step) * step, 4)
             new_thrower_power = thrower_power + gain
             new_target_power = max(0, target_power - gain * param("throw_target_loss_ratio"))
         db.upsert(config_py.user_power, context.author.id, {"power": new_thrower_power})
