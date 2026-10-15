@@ -35,6 +35,7 @@ MAP = "🗺️"
 
 _GIGA_SIGNUP_SECONDS = 9 * 3600  # a gigarace starts nine hours after it's announced
 _GIGA_LIGHTS = 5  # one goes out per hour over the last five hours
+_GIGA_TICK = 60.0  # the countdown re-checks the clock at least this often (seconds)
 _ADOPT_EMOJIS = ("👍", "👎")
 
 # Discord's hard limits; going over makes the whole edit or send fail.
@@ -167,9 +168,11 @@ class Racing(commands.Cog, name="racing"):
         else:
             start = int(time.time()) + int(start_at)
 
+        replaced = self._cancel_other_countdowns(race_message.id)
         time_left = start - int(time.time())
         await context.send(
-            f"Resuming the gigarace: starts <t:{start}:F>, {time_left // 3600}h {time_left % 3600 // 60}m from now."
+            f"Resuming the gigarace: starts <t:{start}:F>, {time_left // 3600}h {time_left % 3600 // 60}m from now. "
+            f"(Stopped {replaced} countdown(s) that were still running for it.)"
         )
         await self._gigarace_countdown(race_message, start)
         # The race pipeline only needs ``send`` and ``guild`` from its context, which the
@@ -264,10 +267,40 @@ class Racing(commands.Cog, name="racing"):
         while time.time() < start:
             lit = self._gigarace_lights_lit(start, time.time())
             if lit != shown:
-                await race_message.edit(content=self._gigarace_content(start, lit))
-                shown = lit
+                try:
+                    await race_message.edit(content=self._gigarace_content(start, lit))
+                    shown = lit
+                except Exception:  # noqa: BLE001 — a failed edit is retried next tick, never ends the countdown
+                    logger.exception("Gigarace lights edit failed; retrying in a minute")
+            # Wake at least once a minute and re-read the wall clock, rather than
+            # trusting one hours-long sleep to land on time.
             next_change = start - lit * 3600 if lit else start
-            await asyncio.sleep(max(1.0, next_change - time.time()))
+            await asyncio.sleep(min(_GIGA_TICK, max(1.0, next_change - time.time())))
+
+    @staticmethod
+    def _cancel_other_countdowns(message_id: int) -> int:
+        """Cancel any other running countdown for the sign-up ``message_id``; return how many.
+
+        Two countdowns on one sign-up would start two races at once. This finds
+        them by walking each task's await chain for a ``_gigarace_countdown``
+        frame, so it also catches one started by an older copy of this cog.
+        """
+        current = asyncio.current_task()
+        cancelled = 0
+        for task in asyncio.all_tasks():
+            if task is current or task.done():
+                continue
+            coro = task.get_coro()
+            while coro is not None:
+                frame = getattr(coro, "cr_frame", None)
+                if frame is not None and frame.f_code.co_name == "_gigarace_countdown":
+                    msg = frame.f_locals.get("race_message")
+                    if getattr(msg, "id", None) == message_id:
+                        task.cancel()
+                        cancelled += 1
+                    break
+                coro = getattr(coro, "cr_await", None)
+        return cancelled
 
     async def get_reaction_users(self, race_message, emoji) -> list:
         """Return every non-bot user who reacted to ``race_message`` with ``emoji``.
