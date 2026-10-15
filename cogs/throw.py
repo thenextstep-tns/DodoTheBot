@@ -30,13 +30,22 @@ class Throw(commands.Cog, name="throw"):
     @commands.hybrid_command(name="throw", description="Throw another member a physics-derived distance.")
     async def throw(self, context: Context, member: discord.Member) -> None:
         """Charge a throw via a timed puzzle, then launch ``member``."""
-        num1, num2, num3 = random.randint(3, 12), random.randint(53, 95), random.randint(2, 8)
-        correct_answer = num1 * num2 * num3
+        guild_id = context.guild.id if context.guild else None
+        param = lambda key: self.bot.params.get(guild_id, key)  # noqa: E731
+        thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
+        target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
 
-        puzzle_message = await context.send(
-            lang.THROW_PUZZLE.format(timeout=_PUZZLE_TIMEOUT, num1=num1, num2=num2, num3=num3)
-        )
-        countdown = asyncio.create_task(self._countdown(puzzle_message, num1, num2, num3))
+        # Stronger throwers get more numbers to multiply: one extra per
+        # ``throw_power_per_factor`` above 1 power, up to ``throw_max_factors``.
+        factors = [random.randint(3, 12), random.randint(53, 95), random.randint(2, 8)]
+        extra = int(max(0.0, thrower_power - 1) // param("throw_power_per_factor"))
+        extra = min(extra, max(0, param("throw_max_factors") - len(factors)))
+        factors += [random.randint(param("throw_extra_factor_min"), param("throw_extra_factor_max")) for _ in range(extra)]
+        correct_answer = math.prod(factors)
+        puzzle = " * ".join(str(factor) for factor in factors)
+
+        puzzle_message = await context.send(lang.THROW_PUZZLE.format(timeout=_PUZZLE_TIMEOUT, puzzle=puzzle))
+        countdown = asyncio.create_task(self._countdown(puzzle_message, puzzle))
 
         def check(msg):
             return msg.author == context.author and msg.channel == context.channel and msg.content.isdigit()
@@ -56,8 +65,6 @@ class Throw(commands.Cog, name="throw"):
             angle = max(0, 45 - (correct_answer - user_answer) / correct_answer * 45)
         distance = _MAX_DISTANCE * math.sin(2 * math.radians(angle))
 
-        thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
-        target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
         total_force = distance * thrower_power
 
         await puzzle_message.edit(
@@ -68,9 +75,10 @@ class Throw(commands.Cog, name="throw"):
         await asyncio.sleep(random.randint(3, 5))
 
         landing = total_force * random.uniform(0.8, 1.2)
+        # Re-read: another throw may have moved either power while this one was in the air.
+        thrower_power = db.get_or_default(config_py.user_power, context.author.id, "power", 1.0)
+        target_power = db.get_or_default(config_py.user_power, member.id, "power", 1.0)
         precision = max(0.0, 1 - abs(user_answer - correct_answer) / correct_answer)
-        guild_id = context.guild.id if context.guild else None
-        param = lambda key: self.bot.params.get(guild_id, key)  # noqa: E731
         # Straight up and straight back down: the target lands on the thrower's head.
         head_landing = angle >= 90
 
@@ -93,6 +101,7 @@ class Throw(commands.Cog, name="throw"):
             "thrower_id": context.author.id,
             "target_id": member.id,
             "guild_id": guild_id,
+            "factors": factors,
             "answer": user_answer,
             "correct_answer": correct_answer,
             "precision": precision,
@@ -122,13 +131,11 @@ class Throw(commands.Cog, name="throw"):
             ) + "\n" + lang.THROW_PRECISION.format(precision=round(precision * 100, 1), gain=round(gain, 2))
         await puzzle_message.edit(content=content)
 
-    async def _countdown(self, puzzle_message: discord.Message, num1: int, num2: int, num3: int) -> None:
+    async def _countdown(self, puzzle_message: discord.Message, puzzle: str) -> None:
         """Tick the puzzle message's countdown once per second until cancelled."""
         try:
             for remaining in range(_PUZZLE_TIMEOUT, 0, -1):
-                await puzzle_message.edit(
-                    content=lang.THROW_COUNTDOWN.format(num1=num1, num2=num2, num3=num3, remaining=remaining)
-                )
+                await puzzle_message.edit(content=lang.THROW_COUNTDOWN.format(puzzle=puzzle, remaining=remaining))
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass

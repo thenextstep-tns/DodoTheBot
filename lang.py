@@ -279,8 +279,8 @@ FUN_IMAGINE_THINKING = ":thinking: Give me a few seconds please, I'm gonna do my
 # --------------------------------------------------------------------------- #
 #  Throw cog
 # --------------------------------------------------------------------------- #
-THROW_PUZZLE = "To charge your throw, solve this puzzle within {timeout} seconds: {num1} * {num2} * {num3}"
-THROW_COUNTDOWN = "To charge your throw, solve this puzzle: {num1} * {num2} * {num3}\nTime left: {remaining} seconds"
+THROW_PUZZLE = "To charge your throw, solve this puzzle within {timeout} seconds: {puzzle}"
+THROW_COUNTDOWN = "To charge your throw, solve this puzzle: {puzzle}\nTime left: {remaining} seconds"
 THROW_TIMEOUT = "{mention}, you took too long!"
 THROW_THROWING = "The correct answer was {answer}!\nTHROWING {member} AT AN ANGLE OF {angle} degrees...\n{gif}"
 THROW_RESULT = (
