@@ -176,6 +176,11 @@ class Throw(commands.Cog, name="throw"):
             {"$sort": {"count": -1}},
             {"$limit": 1},
         ]), None)
+        # Only throws since precision started being saved count towards the average.
+        precision = next(throws.aggregate([
+            {"$match": {"thrower_id": member.id, "precision": {"$exists": True}}},
+            {"$group": {"_id": None, "average": {"$avg": "$precision"}, "count": {"$sum": 1}}},
+        ]), None)
         most_throws = next(throws.aggregate([
             {"$group": {"_id": "$thrower_id", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
@@ -190,6 +195,12 @@ class Throw(commands.Cog, name="throw"):
             lang.THROWSTATS_LONGEST.format(
                 throw=lang.THROWSTATS_THROW.format(distance=round(longest["distance"], 2), target=f"<@{longest['target_id']}>")
                 if longest else none
+            ),
+            lang.THROWSTATS_PRECISION.format(
+                precision=lang.THROWSTATS_PRECISION_VALUE.format(
+                    average=round(precision["average"] * 100, 1), count=precision["count"]
+                )
+                if precision else none
             ),
             lang.THROWSTATS_FAVOURITE.format(
                 partner=lang.THROWSTATS_PARTNER.format(target=f"<@{favourite['_id']}>", count=favourite["count"])
