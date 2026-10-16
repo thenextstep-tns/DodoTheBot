@@ -1263,3 +1263,32 @@ single `light_radius`/`light_colour` reads as one light at (0.5, 0.25);
 saving points sets `light_radius` to 0. The map sends `gl` (the points for the
 picture it draws) and `al: false`; `drawNight` places each point on the piece's
 picture, mirrored with a flipped piece and scaled with it.
+
+### Night fixes, twilight colours, editor shows found lights (16 Oct 2026)
+- Shared JS `web/dodoland/nightlights.py` (`findLights`, `skyAt`, `hexRgb`,
+  `PIECE_FOOT`), included by the map and the lights editor: both find and draw
+  lights the same way.
+- "Daytime rectangles" were town name labels cutting their box out of the night
+  while invisible (opacity 0 until hovered). Names are cut only while showing
+  (computed opacity), redrawn on hover and on the names button.
+- Pools of hand-placed lights fall on the ground at the piece's foot (0.85 of
+  its height; a town lot's ground line), as the old single light did; the core
+  stays where the light was put.
+- Lights found inside pictures fade with the picture's on-screen width
+  (`dodoland_night_detail_from`/`_to`, 12-40 px); lit far-off town dots glow.
+- findLights merges lights closer than `dodoland_window_merge` (0.08 of width)
+  and keeps the strongest `dodoland_window_most` (6): a painting had 67.
+- Dusk/dawn: `dodoland_dusk_colours` (pink, purple, violet, night blue),
+  `dodoland_dawn_colours` (night, violet, warm orange), `dodoland_twilight_tint`,
+  `_spread` (sun's side lags: west pinker at dusk, east oranger at dawn, as a
+  horizontal gradient), `_hours`. Replaces `dodoland_dusk_colour`.
+- Drawn towns: each `.lot[data-building]` takes its tier tile's lights through
+  `getScreenCTM` (tile picture coords -> lot coords: x*120-60, y*78-64); a tier
+  with auto off cuts its lot's box out of the town's found-light mask. Assets
+  carry `gd`/`wd` (drawn lights/width) for tiers shown as paintings. Pictured
+  halls take the hall tile's `gl`.
+- Editor: panel colours (readable list in both themes, grouped by category,
+  Town buildings first), dragging works (the pressed dot is no longer rebuilt
+  under the pointer), found lights shown as dashed rings with "Light them on
+  the map" (= auto_lights) and "Make them mine" (turns them into own lights,
+  auto off; clicking a ring does the same), Night/Dusk/Dawn/Day previews.

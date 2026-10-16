@@ -54,7 +54,7 @@ from helpers.dodoland import terrainart
 from helpers.dodoland import townart
 from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
-from web.dodoland import forest_ui, terrain_ui, theme
+from web.dodoland import forest_ui, nightlights, terrain_ui, theme
 
 
 def _e(value) -> str:
@@ -247,6 +247,13 @@ def _collect(bot, guild) -> dict:
                         # draws: the uploaded painting's own, or its own pictures'.
                         **({"gl": t["uploaded_lights"] if t["tile_id"] in upload else t["lights"]}
                            if (t["uploaded_lights"] if t["tile_id"] in upload else t["lights"]) else {}),
+                        # Shown as its uploaded painting, a tier keeps the lights
+                        # of its drawing too (gd) and its drawn width (wd), for
+                        # where a town draws it.
+                        **({"wd": _tile_cells(t, dims.get(t["variants"][0], (0, 0))[0], shrink, hall_box,
+                                              landmarks, bscale) if t["variants"] else 0,
+                            **({"gd": t["lights"]} if t["lights"] else {})}
+                           if t["tile_id"] in upload and t["requires"]["building"] else {}),
                         # Whether lit windows are also found in it by colour.
                         **({} if t.get("auto_lights", True) else {"al": False}),
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
@@ -266,13 +273,20 @@ def _night_settings(bot, gid) -> dict:
         v = str(p.get(gid, key) or "").strip()
         return v if len(v) == 7 and v.startswith("#") else fallback
     return {"darkness": num("dodoland_night_darkness", 0, 1),
-            "colour": hexed("dodoland_night_colour", "#0b1430"), "dusk": hexed("dodoland_dusk_colour", "#4a2a48"),
+            "colour": hexed("dodoland_night_colour", "#0b1430"),
+            "dusk_colours": nightlights.colours(p.get(gid, "dodoland_dusk_colours"), nightlights.DUSK),
+            "dawn_colours": nightlights.colours(p.get(gid, "dodoland_dawn_colours"), nightlights.DAWN),
+            "tint": num("dodoland_twilight_tint", 0, 1), "spread": num("dodoland_twilight_spread", 0, 1),
+            "twilight": num("dodoland_twilight_hours", 0.25, 6),
+            "detail_from": num("dodoland_night_detail_from", 0, 400),
+            "detail_to": num("dodoland_night_detail_to", 1, 800),
             "light_glow": num("dodoland_light_glow", 0, 1), "window_glow": num("dodoland_window_glow", 0, 1),
             "min_red": num("dodoland_window_min_red", 0, 255), "min_green": num("dodoland_window_min_green", 0, 255),
             "warmth": num("dodoland_window_warmth", 0, 255),
             "max_size": num("dodoland_window_max_size", 0.0001, 0.2),
             "contrast": num("dodoland_window_contrast", 0, 255),
             "spill": num("dodoland_window_spill", 0, 30),
+            "most": num("dodoland_window_most", 0, 64), "merge": num("dodoland_window_merge", 0, 1),
             "walker_light": num("dodoland_walker_light", 0, 10)}
 
 
@@ -1348,6 +1362,7 @@ _SCRIPT = r"""
   namesBtn.onclick = function () {
     var on = world.classList.toggle('named');
     namesBtn.classList.toggle('on', on);
+    if (typeof nightSoon === 'function') nightSoon(true);
   };
 
   // --- towns ------------------------------------------------------------ //
@@ -2421,14 +2436,12 @@ _SCRIPT = r"""
   // once per frame at most, as the view moves; by day it does nothing.
   function nightState() {
     var S = D.sizes.sun || {}, N = D.sizes.night || {}, mode = S.mode || 'auto', h;
-    var rise = S.rise == null ? 6 : S.rise, set = S.set == null ? 20 : S.set;
+    var set = S.set == null ? 20 : S.set;
     if (mode === 'auto') { var now = new Date(); h = now.getHours() + now.getMinutes() / 60; }
     else h = {morning: 8, noon: 13, afternoon: 16, evening: set - 0.1, night: 23}[mode] || 13;
-    function smooth(a, b, x) { var t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
-    var dusk = smooth(set - 0.75, set + 1, h), dawn = 1 - smooth(rise - 1, rise + 0.5, h);
-    var k = h >= 12 ? dusk : dawn;
-    return {k: k, dark: (N.darkness == null ? 0.62 : N.darkness) * k,
-            colour: mixHex(N.dusk || '#4a2a48', N.colour || '#0b1430', k)};
+    // Dusk through pink, purple and violet into the night's blue, dawn from
+    // it into a warm orange (nightlights.py, skyAt).
+    return skyAt(S, N, h);
   }
   function mixHex(a, b, t) {
     var pa = [1, 3, 5].map(function (i) { return parseInt(a.slice(i, i + 2), 16); });
@@ -2448,80 +2461,19 @@ _SCRIPT = r"""
     x.fillStyle = g; x.fillRect(0, 0, 256, 256);
     return (stamps[key] = c);
   }
-  // A picture's lit windows, found once: its warm, bright pixels (thresholds
-  // dodoland_window_*), as a mask and a soft halo round them. Null if it has none.
+  // A picture's own lights (lit windows, lanterns, fires), found once per
+  // picture by findLights (nightlights.py) - the same finder the lights editor
+  // shows, so what a tile lights by itself is what its editor said. Null if
+  // it has none.
   var windowMaps = {};
-  // A picture's own lights, found once: lit windows, lanterns, fires. Warm,
-  // bright pixels (dodoland_window_min_*), grouped into patches; a patch is a
-  // light only if it is small (dodoland_window_max_size of the picture) and
-  // clearly brighter than what surrounds it (dodoland_window_contrast) - which
-  // is what tells a lantern from a thatched roof or a straw pile of the same
-  // colour. Each light is kept as a mask, a soft halo, and a spot that throws
-  // its own pool of light round it. Null if the picture has none.
   function windowsOf(src) {
     if (windowMaps[src] !== undefined) return windowMaps[src];
     windowMaps[src] = null;
-    var N = D.sizes.night || {}, im = new Image();
+    var im = new Image();
     im.onload = function () {
       try {
-        var sc = Math.min(1, 256 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1));
-        var w = Math.max(1, Math.round((im.naturalWidth || 120) * sc)), h = Math.max(1, Math.round((im.naturalHeight || 78) * sc));
-        var c = document.createElement('canvas'); c.width = w; c.height = h;
-        var x = c.getContext('2d'); x.drawImage(im, 0, 0, w, h);
-        var d = x.getImageData(0, 0, w, h), px = d.data;
-        var minR = N.min_red == null ? 200 : N.min_red, minG = N.min_green == null ? 100 : N.min_green;
-        var warm = N.warmth == null ? 80 : N.warmth;
-        var maxArea = Math.max(2, (N.max_size == null ? 0.006 : N.max_size) * w * h);
-        var minContrast = N.contrast == null ? 45 : N.contrast;
-        var lum = new Float32Array(w * h), hot = new Uint8Array(w * h), opaque = 0;
-        for (var i = 0, j = 0; j < w * h; i += 4, j++) {
-          lum[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-          if (px[i + 3] > 128) opaque++;
-          hot[j] = px[i + 3] > 128 && px[i] >= minR && px[i + 1] >= minG && px[i] - px[i + 2] >= warm ? 1 : 0;
-        }
-        // Patches of warm pixels (4-connected), each judged on its own.
-        var seen = new Int32Array(w * h).fill(-1), keep = [], stack = [];
-        for (var start = 0; start < w * h; start++) {
-          if (!hot[start] || seen[start] >= 0) continue;
-          var id = keep.length + 1000, cells = [], x0 = w, y0 = h, x1 = 0, y1 = 0, sum = 0;
-          stack.push(start); seen[start] = id;
-          while (stack.length) {
-            var q = stack.pop(), qx = q % w, qy = (q - qx) / w;
-            cells.push(q); sum += lum[q];
-            if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
-            [q - 1, q + 1, q - w, q + w].forEach(function (n2) {
-              if (n2 < 0 || n2 >= w * h || seen[n2] >= 0 || !hot[n2]) return;
-              if ((n2 === q - 1 && qx === 0) || (n2 === q + 1 && qx === w - 1)) return;
-              seen[n2] = id; stack.push(n2);
-            });
-          }
-          if (cells.length > maxArea) continue;   // a roof, a field: too big to be a light
-          // Its surroundings: the opaque, not-warm pixels in a ring round it.
-          var pad = 2, rsum = 0, rn = 0;
-          for (var ry = Math.max(0, y0 - pad); ry <= Math.min(h - 1, y1 + pad); ry++)
-            for (var rx = Math.max(0, x0 - pad); rx <= Math.min(w - 1, x1 + pad); rx++) {
-              var k2 = ry * w + rx;
-              if (hot[k2] || px[k2 * 4 + 3] <= 128) continue;
-              rsum += lum[k2]; rn++;
-            }
-          var inner = sum / cells.length, ring = rn ? rsum / rn : 0;
-          if (rn && inner - ring < minContrast) continue;   // as bright as around it: not a light
-          keep.push({cells: cells, cx: (x0 + x1 + 1) / 2 / w, cy: (y0 + y1 + 1) / 2 / h,
-                     r: Math.sqrt(cells.length / Math.PI) / w, glow: inner - ring});
-        }
-        if (!keep.length) return;
-        for (var m = 0; m < w * h * 4; m += 4) px[m + 3] = 0;
-        keep.forEach(function (blob) {
-          blob.cells.forEach(function (q) { px[q * 4] = px[q * 4 + 1] = px[q * 4 + 2] = 255; px[q * 4 + 3] = 255; });
-          delete blob.cells;
-        });
-        x.putImageData(d, 0, 0);
-        var halo = document.createElement('canvas'); halo.width = w; halo.height = h;
-        var hx = halo.getContext('2d');
-        hx.filter = 'blur(' + Math.max(1.5, w / 60).toFixed(1) + 'px)';
-        hx.drawImage(c, 0, 0); hx.drawImage(c, 0, 0);
-        windowMaps[src] = {mask: c, halo: halo, spots: keep};
-        nightSoon();
+        windowMaps[src] = findLights(im, D.sizes.night || {});
+        if (windowMaps[src]) nightSoon();
       } catch (e) { windowMaps[src] = null; }
     };
     im.src = src;
@@ -2530,17 +2482,36 @@ _SCRIPT = r"""
   var nightCv = document.createElement('canvas'), nightQueued = false;
   nightCv.className = 'dlnight';
   frame.appendChild(nightCv);
-  // keep: only the walkers moved, so the rest of the night is as it was.
+  // keep: only the walkers moved (or a name came or went), so the rest of the
+  // night is as it was.
   function nightSoon(keep) {
     if (!keep) nightCache = null;
     if (nightQueued) return;
     nightQueued = true;
     requestAnimationFrame(function () { nightQueued = false; drawNight(); });
   }
+  // A town's name shows while it is pointed at, and is lifted out of the
+  // night only while it shows: redrawn once it has faded in or out.
+  var nameHover = null;
+  world.addEventListener('pointerover', function (ev) {
+    if (!nightOn) return;
+    var t = ev.target && ev.target.closest ? ev.target.closest('.dltown') : null;
+    if (t === nameHover) return;
+    nameHover = t;
+    setTimeout(function () { nightSoon(true); }, 140);
+  });
+  // The tiers of the town buildings, for the lights put on their drawings.
+  function tierAsset(key, tier) {
+    for (var i = 0; i < D.assets.length; i++) {
+      var a = D.assets[i];
+      if (a.building === key && +a.tier === +tier) return a;
+    }
+    return null;
+  }
   var nightOn = false, nightCache = null;
   function drawNight() {
     var st = nightState();
-    nightOn = st.dark >= 0.01;
+    nightOn = Math.max(st.at(0).a, st.at(1).a) >= 0.01;
     if (!nightOn || !nat.w) { nightCv.style.display = 'none'; return; }
     nightCv.style.display = 'block';
     var R = 0.5, W = frame.clientWidth, H = frame.clientHeight;
@@ -2550,30 +2521,47 @@ _SCRIPT = r"""
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
     c.clearRect(0, 0, w, h);
-    c.fillStyle = 'rgba(' + st.colour.join(',') + ',' + st.dark.toFixed(3) + ')';
+    // The sky: across the screen from the sun's side, which is a little
+    // behind the far side - pinker at dusk in the west, oranger at dawn in the east.
+    var sky = c.createLinearGradient(st.sunLeft ? 0 : w, 0, st.sunLeft ? w : 0, 0);
+    for (var gi = 0; gi <= 4; gi++) {
+      var at = st.at(gi / 4);
+      sky.addColorStop(gi / 4, 'rgba(' + at.rgb.join(',') + ',' + at.a.toFixed(3) + ')');
+    }
+    c.fillStyle = sky;
     c.fillRect(0, 0, w, h);
     c.setTransform(R, 0, 0, R, 0, 0);
     var fr = frame.getBoundingClientRect(), cellPx = nat.w * view.k / D.cells_w;
+    // The lights inside a picture fade out as it gets small on screen
+    // (dodoland_night_detail_from/_to, its width in pixels): from afar a town
+    // is one soft glow, not a scatter of blobs.
+    var dFrom = N.detail_from == null ? 12 : N.detail_from;
+    var dTo = Math.max(dFrom + 1, N.detail_to == null ? 40 : N.detail_to);
+    function detail(px) { var t = Math.max(0, Math.min(1, (px - dFrom) / (dTo - dFrom))); return t * t * (3 - 2 * t); }
     var viewKey = [view.x, view.y, view.k, W, H, D.world.length, Object.keys(pieces).length].join('|');
     var cached = nightCache && nightCache.key === viewKey;
     var lights = cached ? nightCache.lights.slice() : [], windows = cached ? nightCache.windows : [];
-    var names = cached ? nightCache.names : [];
+    // A list of lights put on a picture (the lights editor), x and y as
+    // fractions of its box b. Its pool falls on the ground at foot.
+    function pushLights(list, b, flip, foot, perCell) {
+      list.forEach(function (L) {
+        var r = L.radius * perCell;
+        var lx = b.left - fr.left + (flip ? 1 - L.x : L.x) * b.width, ly = b.top - fr.top + L.y * b.height;
+        if (r <= 0 || lx < -r || ly < -r || lx > W + r || ly > H + r) return;
+        lights.push({x: lx, y: Math.max(ly, foot), top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
+      });
+    }
+    function seen(b) { return b.width && !(b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom); }
     if (!cached) {
-    // Lights: every placed piece whose tile has lights (the lights editor),
-    // each where it was put on the picture, mirrored with the piece and sized
-    // with it.
+    // Lights: every placed piece whose tile has lights, each where it was
+    // put on the picture, mirrored and sized with the piece.
     D.world.forEach(function (p) {
       var a = assetById(p.a), el = pieces[p.id];
       if (!a || !a.gl || !a.gl.length || !el) return;
       var img = el.querySelector('img');
       if (!img) return;
-      var b = img.getBoundingClientRect(), flip = el.classList.contains('flip');
-      a.gl.forEach(function (L) {
-        var r = L.radius * cellPx * (p.s || 1);
-        var lx = b.left - fr.left + (flip ? 1 - L.x : L.x) * b.width, ly = b.top - fr.top + L.y * b.height;
-        if (lx < -r || ly < -r || lx > W + r || ly > H + r) return;
-        lights.push({x: lx, y: ly + r * 0.15, top: ly, r: r, k: L.intensity, rgb: mixHex(L.colour, L.colour, 0)});
-      });
+      var b = img.getBoundingClientRect();
+      pushLights(a.gl, b, el.classList.contains('flip'), b.top - fr.top + b.height * PIECE_FOOT, cellPx * (p.s || 1));
     });
     // Windows: what has warm lit windows in its picture, in towns active lately.
     function lit(townId) { return !townId || (byId[townId] && byId[townId].lit); }
@@ -2584,42 +2572,93 @@ _SCRIPT = r"""
       if (pa && pa.al === false) return;   // its lights are only the ones put on it by hand
       var wm = windowsOf(img.src);
       if (!wm) return;
-      var b = img.getBoundingClientRect();
-      if (b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
-      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height, flip: el.classList.contains('flip')});
+      var b = img.getBoundingClientRect(), f = detail(b.width);
+      if (!seen(b) || f <= 0.01) return;
+      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height, f: f,
+                    flip: el.classList.contains('flip')});
     });
     world.querySelectorAll('.dltown .dlart > img:first-child, .dltown .dlart > svg, .dlhouse > svg').forEach(function (art) {
       var town = art.closest('.dltown'), house = art.closest('.dlhouse');
       var id = town ? town.dataset.id : house ? house.dataset.town : '';
       if (!lit(id)) return;
-      var host = art.parentNode, sh = host._shadow;
+      var b = art.getBoundingClientRect();
+      if (!seen(b)) return;
+      var person = town && byId[id], holes = null, own = true;
+      // A town drawn as its hall's painting: that tier's lights on it.
+      if (town && art.tagName === 'IMG' && person && person.hall_art) {
+        var ha = assetById(person.hall_art.a);
+        if (ha && ha.gl) pushLights(ha.gl, b, false, b.bottom - fr.top, cellPx);
+        if (ha && ha.al === false) own = false;
+      }
+      // A drawn town: each building in it at its tier, with the lights put
+      // on that tier's drawing, placed through the building's own transform;
+      // and where a tier finds none by itself, none are found on it.
+      if (town && art.tagName === 'svg' && person && person.built) {
+        art.querySelectorAll('.lot[data-building]').forEach(function (lot) {
+          var key = lot.getAttribute('data-building'), tier = 0;
+          person.built.forEach(function (bt) { if (bt.key === key) tier = bt.tier; });
+          var a = tier && tierAsset(key, tier);
+          if (!a) return;
+          var list = a.wd != null ? (a.gd || []) : (a.gl || []), wc = a.wd != null ? a.wd : a.wc;
+          var m = lot.getScreenCTM();
+          if (!m) return;
+          if (list.length && wc > 0) {
+            var perCell = 120 * Math.abs(m.a) / wc;
+            list.forEach(function (L) {
+              var ux = L.x * 120 - 60, uy = L.y * 78 - 64;
+              var lx = m.a * ux + m.c * uy + m.e - fr.left, ly = m.b * ux + m.d * uy + m.f - fr.top;
+              var foot = m.b * ux + m.f - fr.top, r = L.radius * perCell;
+              if (r <= 0 || lx < -r || ly < -r || lx > W + r || ly > H + r) return;
+              lights.push({x: lx, y: Math.max(ly, foot), top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
+            });
+          }
+          if (a.al === false) {
+            var lb = lot.getBoundingClientRect();
+            (holes = holes || []).push({x: lb.left - fr.left, y: lb.top - fr.top, w: lb.width, h: lb.height});
+          }
+        });
+      }
+      if (!own) return;
+      var sh = art.parentNode._shadow;
       var src = art.tagName === 'IMG' ? art.src : sh && sh.src;
       if (!src) return;
-      var wm = windowsOf(src);
-      if (!wm) return;
-      var b = art.getBoundingClientRect();
-      if (!b.width || b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
-      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height,
+      var wm = windowsOf(src), f = detail(b.width);
+      if (!wm || f <= 0.01) return;
+      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height, f: f, holes: holes,
                     flip: !!(house && house.classList.contains('flip'))});
     });
-    // Town names stay readable: the night is lifted off each label.
-    world.querySelectorAll('.dltown .dlname').forEach(function (n) {
-      var b = n.getBoundingClientRect();
-      if (!b.width || b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
-      names.push({x: b.left - fr.left - 2, y: b.top - fr.top - 2, w: b.width + 4, h: b.height + 4});
+    // From afar a lively town is a dot: it glows, a beacon rather than a hole.
+    world.querySelectorAll('.dltown.tiny .dldot').forEach(function (dot) {
+      var town = dot.closest('.dltown');
+      if (!lit(town.dataset.id)) return;
+      var b = dot.getBoundingClientRect();
+      if (!seen(b)) return;
+      var r = Math.max(6, b.width * 1.6);
+      lights.push({x: b.left - fr.left + b.width / 2, y: b.top - fr.top + b.height / 2,
+                   top: b.top - fr.top + b.height / 2, r: r, k: 0.9, rgb: [255, 196, 110]});
     });
-    // A picture's own lights (lanterns, fires, lit windows) light the ground
-    // round them too, a pool the size of the light times dodoland_window_spill.
+    // A picture's own lights light the ground round them too, a pool the
+    // size of the light times dodoland_window_spill.
     var spill = N.spill == null ? 6 : N.spill;
     windows.forEach(function (o) {
       (o.m.spots || []).forEach(function (sp) {
-        var r = Math.max(4, sp.r * o.w * spill), fx = o.flip ? 1 - sp.cx : sp.cx;
+        var r = Math.max(1, sp.r * o.w * spill), fx = o.flip ? 1 - sp.cx : sp.cx;
         var lx = o.x + fx * o.w, ly = o.y + sp.cy * o.h;
-        lights.push({x: lx, y: ly + r * 0.25, top: ly, r: r, rgb: [255, 190, 100], spot: true});
+        if (o.holes && o.holes.some(function (hr) { return lx >= hr.x && lx <= hr.x + hr.w && ly >= hr.y && ly <= hr.y + hr.h; })) return;
+        lights.push({x: lx, y: ly + r * 0.25, top: ly, r: r, k: o.f, rgb: [255, 190, 100], spot: true});
       });
     });
-    nightCache = {key: viewKey, lights: lights.slice(), windows: windows, names: names};
+    nightCache = {key: viewKey, lights: lights.slice(), windows: windows};
     }
+    // Town names stay readable, but only the ones showing: a hidden label
+    // lifted the night off a whole box of ground.
+    var names = [];
+    world.querySelectorAll(world.classList.contains('named') ? '.dltown .dlname'
+                           : '.dltown:hover .dlname, .dltown.on .dlname').forEach(function (n) {
+      var b = n.getBoundingClientRect();
+      if (!seen(b) || +getComputedStyle(n).opacity < 0.5) return;
+      names.push({x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height});
+    });
     // People out walking carry a small lantern (dodoland_walker_light, cells).
     var wl = N.walker_light == null ? 1.6 : N.walker_light;
     if (wl > 0 && typeof walkers !== 'undefined' && !world.classList.contains('lifefar')) {
@@ -2635,6 +2674,18 @@ _SCRIPT = r"""
       if (!flip) { c.drawImage(img, x, y, w2, h2); return; }
       c.save(); c.translate(x + w2, y); c.scale(-1, 1); c.drawImage(img, 0, 0, w2, h2); c.restore();
     }
+    // A picture's own glow, faded with its size on screen and kept off the
+    // buildings in it that find no lights by themselves.
+    function putWindow(o, img, alpha, fn) {
+      c.globalAlpha = Math.min(1, alpha * o.f);
+      if (!o.holes) { fn ? fn() : put(img, o.x, o.y, o.w, o.h, o.flip); return; }
+      c.save();
+      c.beginPath(); c.rect(-W, -H, W * 3, H * 3);
+      o.holes.forEach(function (hr) { c.rect(hr.x, hr.y, hr.w, hr.h); });
+      c.clip('evenodd');
+      fn ? fn() : put(img, o.x, o.y, o.w, o.h, o.flip);
+      c.restore();
+    }
     // Cut the night where things are lit.
     c.globalCompositeOperation = 'destination-out';
     var white = stamp([255, 255, 255]);
@@ -2644,10 +2695,10 @@ _SCRIPT = r"""
       c.globalAlpha = Math.min(1, k); c.drawImage(white, l.x - l.r * 0.22, l.top - l.r * 0.22, l.r * 0.44, l.r * 0.44);
     });
     windows.forEach(function (o) {
-      c.globalAlpha = 1; put(o.m.mask, o.x, o.y, o.w, o.h, o.flip);
-      c.globalAlpha = 0.7; put(o.m.halo, o.x, o.y, o.w, o.h, o.flip);
+      putWindow(o, o.m.mask, 1);
+      putWindow(o, o.m.halo, 0.7);
     });
-    c.globalAlpha = 1;
+    c.globalAlpha = 0.9; c.fillStyle = '#000';
     names.forEach(function (nm) { c.fillRect(nm.x, nm.y, nm.w, nm.h); });
     // And warm what they light.
     c.globalCompositeOperation = 'source-over';
@@ -2659,11 +2710,10 @@ _SCRIPT = r"""
     });
     var wg = (N.window_glow == null ? 0.8 : N.window_glow) * st.k, amber = stamp([255, 190, 90]);
     windows.forEach(function (o) {
-      c.globalAlpha = wg * 0.55; put(o.m.halo, o.x, o.y, o.w, o.h, o.flip);
-      if (wg > 0) {
-        c.globalAlpha = wg * 0.18;
+      putWindow(o, o.m.halo, wg * 0.55);
+      if (wg > 0) putWindow(o, null, wg * 0.18, function () {
         c.drawImage(amber, o.x + o.w * 0.1, o.y + o.h * 0.55, o.w * 0.8, o.h * 0.5);
-      }
+      });
     });
     c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
   }
@@ -3918,7 +3968,7 @@ _SCRIPT = r"""
   fillKitCats();
   renderKit();
 
-""" + terrain_ui.SCRIPT + forest_ui.SCRIPT + r"""
+""" + terrain_ui.SCRIPT + forest_ui.SCRIPT + nightlights.SCRIPT + r"""
   redraw();
   redrawDecor();
   renderList();

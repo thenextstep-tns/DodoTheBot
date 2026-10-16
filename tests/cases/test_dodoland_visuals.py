@@ -76,9 +76,14 @@ console.log(JSON.stringify(out));
     print("sun             morning left, evening right, shortest at noon, always behind, faint at night")
     # The night, from the same clock: none at noon, full at night, coming on at dusk.
     nfn = js[js.index("  function nightState()"):js.index("  // A soft round light, once per colour")]
-    probe = "var D = {sizes: {sun: {rise: 6, set: 20}, night: {}}};\n" + nfn + """
+    from web.dodoland import nightlights  # noqa: E402
+    probe = "var D = {sizes: {sun: {rise: 6, set: 20}, night: {}}};\n" + nightlights.SCRIPT + nfn + """
 var out = {};
-['noon', 'evening', 'night', 'morning'].forEach(function (m) { D.sizes.sun.mode = m; out[m] = nightState(); });
+['noon', 'evening', 'night', 'morning'].forEach(function (m) { D.sizes.sun.mode = m; var s = nightState(); out[m] = {dark: s.dark, k: s.k}; });
+// Mid-dusk and just after sunrise, from the sun's side and the far side.
+var dusk = skyAt({rise: 6, set: 20}, {}, 20), dawn = skyAt({rise: 6, set: 20}, {}, 6.3);
+out.dusk = {sun: dusk.at(0), far: dusk.at(1), left: dusk.sunLeft};
+out.dawn = {sun: dawn.at(0), far: dawn.at(1), left: dawn.sunLeft};
 console.log(JSON.stringify(out));
 """
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
@@ -87,15 +92,31 @@ console.log(JSON.stringify(out));
     assert night["noon"]["dark"] == 0 and night["morning"]["dark"] == 0, "it is dark by day"
     assert abs(night["night"]["dark"] - 0.62) < 0.01, night["night"]
     assert 0 < night["evening"]["dark"] < night["night"]["dark"], "dusk does not come on gradually"
+    d, w = night["dusk"], night["dawn"]
+    assert d["left"] and not w["left"], "the evening sun is not in the west"
+    assert d["sun"]["rgb"][0] > d["sun"]["rgb"][1] and d["sun"]["rgb"][2] > d["sun"]["rgb"][1], d   # pink-purple
+    assert d["far"]["rgb"][2] > d["far"]["rgb"][0], d                                               # bluer away from the sun
+    assert w["sun"]["rgb"][0] > w["sun"]["rgb"][1] > w["sun"]["rgb"][2], w                          # warm orange
+    assert d["sun"]["a"] > 0.05 and w["sun"]["a"] > 0.03, "dusk and dawn have no tint"
     print("night           dark at night, none by day, coming on at dusk")
-assert "function drawNight()" in js and "a.gl" in js and "L.intensity" in js and "pa.al === false" in js and "windowsOf(img.src)" in js, \
+    print("night           dusk pink into violet and blue (bluer away from the sun), dawn warm orange")
+assert "function drawNight()" in js and "a.gl" in js and "L.intensity" in js and "pa.al === false" in js and "windowsOf(img.src)" in js and "findLights(im" in js, \
     "lights and lit windows are not drawn at night"
-wfn = js[js.index("  function windowsOf(src)"):js.index("  var nightCv = document.createElement")]
+from web.dodoland import nightlights  # noqa: E402
+wfn = nightlights.SCRIPT[nightlights.SCRIPT.index("function findLights"):nightlights.SCRIPT.index("function skyAt")]
+assert "nightlights.SCRIPT" in pathlib.Path("web/dodoland/mappage.py").read_text(encoding="utf-8")
+assert "nightlights.SCRIPT" in pathlib.Path("web/dodoland/lights_ui.py").read_text(encoding="utf-8"),     "the editor finds lights differently from the map"
+assert "groups.length < most" in wfn, "a painting lights every warm highlight in it"
 assert "cells.length > maxArea" in wfn and "inner - ring < minContrast" in wfn, \
     "lights are found by colour alone (a thatched roof glows)"
 assert "spots: keep" in wfn and "sp.r * o.w * spill" in js, "a picture's own lanterns and fires light nothing round them"
 assert "wk.kind !== 'person'" in js and "nightSoon(true)" in js, "people out at night carry no lantern"
-assert "'.dltown .dlname'" in js[js.index("function drawNight"):], "town names are hidden by the night"
+night_fn = js[js.index("function drawNight"):]
+assert "'.dltown .dlname'" in night_fn, "town names are hidden by the night"
+assert "getComputedStyle(n).opacity" in night_fn, "a hidden name lifts the night off a box of ground"
+assert "detail(b.width)" in night_fn, "from afar every picture's lights still show as blobs"
+assert "PIECE_FOOT" in night_fn and "Math.max(ly, foot)" in night_fn, "a light's pool is not on the ground"
+assert ".lot[data-building]" in night_fn and "tierAsset(key, tier)" in night_fn, "drawn towns ignore their tiers' lights"
 print("night           lights (tiles with a light) and lit windows cut the night")
 print("night           a light is small and brighter than around it, and lights its surroundings")
 print("night           walkers carry lanterns; town names stay readable")
