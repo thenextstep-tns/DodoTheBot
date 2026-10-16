@@ -264,7 +264,11 @@ def _night_settings(bot, gid) -> dict:
             "colour": hexed("dodoland_night_colour", "#0b1430"), "dusk": hexed("dodoland_dusk_colour", "#4a2a48"),
             "light_glow": num("dodoland_light_glow", 0, 1), "window_glow": num("dodoland_window_glow", 0, 1),
             "min_red": num("dodoland_window_min_red", 0, 255), "min_green": num("dodoland_window_min_green", 0, 255),
-            "warmth": num("dodoland_window_warmth", 0, 255)}
+            "warmth": num("dodoland_window_warmth", 0, 255),
+            "max_size": num("dodoland_window_max_size", 0.0001, 0.2),
+            "contrast": num("dodoland_window_contrast", 0, 255),
+            "spill": num("dodoland_window_spill", 0, 30),
+            "walker_light": num("dodoland_walker_light", 0, 10)}
 
 
 def _sun_settings(bot, gid) -> dict:
@@ -2434,6 +2438,13 @@ _SCRIPT = r"""
   // A picture's lit windows, found once: its warm, bright pixels (thresholds
   // dodoland_window_*), as a mask and a soft halo round them. Null if it has none.
   var windowMaps = {};
+  // A picture's own lights, found once: lit windows, lanterns, fires. Warm,
+  // bright pixels (dodoland_window_min_*), grouped into patches; a patch is a
+  // light only if it is small (dodoland_window_max_size of the picture) and
+  // clearly brighter than what surrounds it (dodoland_window_contrast) - which
+  // is what tells a lantern from a thatched roof or a straw pile of the same
+  // colour. Each light is kept as a mask, a soft halo, and a spot that throws
+  // its own pool of light round it. Null if the picture has none.
   function windowsOf(src) {
     if (windowMaps[src] !== undefined) return windowMaps[src];
     windowMaps[src] = null;
@@ -2444,20 +2455,59 @@ _SCRIPT = r"""
         var w = Math.max(1, Math.round((im.naturalWidth || 120) * sc)), h = Math.max(1, Math.round((im.naturalHeight || 78) * sc));
         var c = document.createElement('canvas'); c.width = w; c.height = h;
         var x = c.getContext('2d'); x.drawImage(im, 0, 0, w, h);
-        var d = x.getImageData(0, 0, w, h), px = d.data, n = 0;
-        var minR = N.min_red == null ? 205 : N.min_red, minG = N.min_green == null ? 130 : N.min_green;
-        var warm = N.warmth == null ? 75 : N.warmth;
-        for (var i = 0; i < px.length; i += 4) {
-          var lit = px[i + 3] > 128 && px[i] >= minR && px[i + 1] >= minG && px[i] - px[i + 2] >= warm;
-          if (lit) { px[i] = px[i + 1] = px[i + 2] = 255; px[i + 3] = 255; n++; } else px[i + 3] = 0;
+        var d = x.getImageData(0, 0, w, h), px = d.data;
+        var minR = N.min_red == null ? 200 : N.min_red, minG = N.min_green == null ? 100 : N.min_green;
+        var warm = N.warmth == null ? 80 : N.warmth;
+        var maxArea = Math.max(2, (N.max_size == null ? 0.006 : N.max_size) * w * h);
+        var minContrast = N.contrast == null ? 45 : N.contrast;
+        var lum = new Float32Array(w * h), hot = new Uint8Array(w * h), opaque = 0;
+        for (var i = 0, j = 0; j < w * h; i += 4, j++) {
+          lum[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+          if (px[i + 3] > 128) opaque++;
+          hot[j] = px[i + 3] > 128 && px[i] >= minR && px[i + 1] >= minG && px[i] - px[i + 2] >= warm ? 1 : 0;
         }
-        if (n < 3) return;
+        // Patches of warm pixels (4-connected), each judged on its own.
+        var seen = new Int32Array(w * h).fill(-1), keep = [], stack = [];
+        for (var start = 0; start < w * h; start++) {
+          if (!hot[start] || seen[start] >= 0) continue;
+          var id = keep.length + 1000, cells = [], x0 = w, y0 = h, x1 = 0, y1 = 0, sum = 0;
+          stack.push(start); seen[start] = id;
+          while (stack.length) {
+            var q = stack.pop(), qx = q % w, qy = (q - qx) / w;
+            cells.push(q); sum += lum[q];
+            if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+            [q - 1, q + 1, q - w, q + w].forEach(function (n2) {
+              if (n2 < 0 || n2 >= w * h || seen[n2] >= 0 || !hot[n2]) return;
+              if ((n2 === q - 1 && qx === 0) || (n2 === q + 1 && qx === w - 1)) return;
+              seen[n2] = id; stack.push(n2);
+            });
+          }
+          if (cells.length > maxArea) continue;   // a roof, a field: too big to be a light
+          // Its surroundings: the opaque, not-warm pixels in a ring round it.
+          var pad = 2, rsum = 0, rn = 0;
+          for (var ry = Math.max(0, y0 - pad); ry <= Math.min(h - 1, y1 + pad); ry++)
+            for (var rx = Math.max(0, x0 - pad); rx <= Math.min(w - 1, x1 + pad); rx++) {
+              var k2 = ry * w + rx;
+              if (hot[k2] || px[k2 * 4 + 3] <= 128) continue;
+              rsum += lum[k2]; rn++;
+            }
+          var inner = sum / cells.length, ring = rn ? rsum / rn : 0;
+          if (rn && inner - ring < minContrast) continue;   // as bright as around it: not a light
+          keep.push({cells: cells, cx: (x0 + x1 + 1) / 2 / w, cy: (y0 + y1 + 1) / 2 / h,
+                     r: Math.sqrt(cells.length / Math.PI) / w, glow: inner - ring});
+        }
+        if (!keep.length) return;
+        for (var m = 0; m < w * h * 4; m += 4) px[m + 3] = 0;
+        keep.forEach(function (blob) {
+          blob.cells.forEach(function (q) { px[q * 4] = px[q * 4 + 1] = px[q * 4 + 2] = 255; px[q * 4 + 3] = 255; });
+          delete blob.cells;
+        });
         x.putImageData(d, 0, 0);
         var halo = document.createElement('canvas'); halo.width = w; halo.height = h;
         var hx = halo.getContext('2d');
         hx.filter = 'blur(' + Math.max(1.5, w / 60).toFixed(1) + 'px)';
         hx.drawImage(c, 0, 0); hx.drawImage(c, 0, 0);
-        windowMaps[src] = {mask: c, halo: halo};
+        windowMaps[src] = {mask: c, halo: halo, spots: keep};
         nightSoon();
       } catch (e) { windowMaps[src] = null; }
     };
@@ -2467,14 +2517,18 @@ _SCRIPT = r"""
   var nightCv = document.createElement('canvas'), nightQueued = false;
   nightCv.className = 'dlnight';
   frame.appendChild(nightCv);
-  function nightSoon() {
+  // keep: only the walkers moved, so the rest of the night is as it was.
+  function nightSoon(keep) {
+    if (!keep) nightCache = null;
     if (nightQueued) return;
     nightQueued = true;
     requestAnimationFrame(function () { nightQueued = false; drawNight(); });
   }
+  var nightOn = false, nightCache = null;
   function drawNight() {
     var st = nightState();
-    if (st.dark < 0.01 || !nat.w) { nightCv.style.display = 'none'; return; }
+    nightOn = st.dark >= 0.01;
+    if (!nightOn || !nat.w) { nightCv.style.display = 'none'; return; }
     nightCv.style.display = 'block';
     var R = 0.5, W = frame.clientWidth, H = frame.clientHeight;
     var w = Math.max(1, Math.round(W * R)), h = Math.max(1, Math.round(H * R));
@@ -2487,7 +2541,11 @@ _SCRIPT = r"""
     c.fillRect(0, 0, w, h);
     c.setTransform(R, 0, 0, R, 0, 0);
     var fr = frame.getBoundingClientRect(), cellPx = nat.w * view.k / D.cells_w;
-    var lights = [], windows = [];
+    var viewKey = [view.x, view.y, view.k, W, H, D.world.length, Object.keys(pieces).length].join('|');
+    var cached = nightCache && nightCache.key === viewKey;
+    var lights = cached ? nightCache.lights.slice() : [], windows = cached ? nightCache.windows : [];
+    var names = cached ? nightCache.names : [];
+    if (!cached) {
     // Lights: every placed piece whose tile gives light, from where it stands.
     D.world.forEach(function (p) {
       var a = assetById(p.a);
@@ -2524,6 +2582,35 @@ _SCRIPT = r"""
       windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height,
                     flip: !!(house && house.classList.contains('flip'))});
     });
+    // Town names stay readable: the night is lifted off each label.
+    world.querySelectorAll('.dltown .dlname').forEach(function (n) {
+      var b = n.getBoundingClientRect();
+      if (!b.width || b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
+      names.push({x: b.left - fr.left - 2, y: b.top - fr.top - 2, w: b.width + 4, h: b.height + 4});
+    });
+    // A picture's own lights (lanterns, fires, lit windows) light the ground
+    // round them too, a pool the size of the light times dodoland_window_spill.
+    var spill = N.spill == null ? 6 : N.spill;
+    windows.forEach(function (o) {
+      (o.m.spots || []).forEach(function (sp) {
+        var r = Math.max(4, sp.r * o.w * spill), fx = o.flip ? 1 - sp.cx : sp.cx;
+        var lx = o.x + fx * o.w, ly = o.y + sp.cy * o.h;
+        lights.push({x: lx, y: ly + r * 0.25, top: ly, r: r, rgb: [255, 190, 100], spot: true});
+      });
+    });
+    nightCache = {key: viewKey, lights: lights.slice(), windows: windows, names: names};
+    }
+    // People out walking carry a small lantern (dodoland_walker_light, cells).
+    var wl = N.walker_light == null ? 1.6 : N.walker_light;
+    if (wl > 0 && typeof walkers !== 'undefined' && !world.classList.contains('lifefar')) {
+      walkers.forEach(function (wk) {
+        if (wk.kind !== 'person' && wk.kind !== 'child') return;
+        var sx = view.x + wk.x / D.cells_w * nat.w * view.k, sy = view.y + wk.y / cellsH() * nat.h * view.k;
+        var r = wl * cellPx;
+        if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
+        lights.push({x: sx, y: sy, top: sy - r * 0.45, r: r, rgb: [255, 180, 80]});
+      });
+    }
     function put(img, x, y, w2, h2, flip) {
       if (!flip) { c.drawImage(img, x, y, w2, h2); return; }
       c.save(); c.translate(x + w2, y); c.scale(-1, 1); c.drawImage(img, 0, 0, w2, h2); c.restore();
@@ -2539,6 +2626,8 @@ _SCRIPT = r"""
       c.globalAlpha = 1; put(o.m.mask, o.x, o.y, o.w, o.h, o.flip);
       c.globalAlpha = 0.7; put(o.m.halo, o.x, o.y, o.w, o.h, o.flip);
     });
+    c.globalAlpha = 1;
+    names.forEach(function (nm) { c.fillRect(nm.x, nm.y, nm.w, nm.h); });
     // And warm what they light.
     c.globalCompositeOperation = 'source-over';
     var glow = (N.light_glow == null ? 0.35 : N.light_glow) * st.k;
@@ -3584,7 +3673,7 @@ _SCRIPT = r"""
     var scale = kind === 'horse' ? 0.30 : kind === 'child' ? 0.17 : 0.21;
     // People are drawn standing on y = 2.6, animals on y = 0.
     var el = standing('dlwalker', sprite(kind, colour, hat), WALKER_BOX, animal ? 0 : 2.6, scale);
-    walkers.push({el: el, art: el.firstChild, x: at.x, y: at.y, tx: at.x, ty: at.y,
+    walkers.push({el: el, art: el.firstChild, x: at.x, y: at.y, tx: at.x, ty: at.y, kind: kind,
                   wait: Math.random() * 3, face: 1, zone: zone,
                   speed: (animal ? 1.6 : 1.1) * (0.75 + Math.random() * 0.5)});
     stand(el, at.x, at.y);
@@ -3798,6 +3887,8 @@ _SCRIPT = r"""
         stand(w.el, w.x, w.y - bob);
         w.art.style.transform = w.face < 0 ? 'scaleX(-1)' : '';
       });
+      // Their lanterns move with them.
+      if (nightOn && (D.sizes.night || {}).walker_light > 0) nightSoon(true);
     }
     lifeRaf = requestAnimationFrame(stepLife);
   }

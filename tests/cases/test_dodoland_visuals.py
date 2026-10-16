@@ -90,7 +90,15 @@ console.log(JSON.stringify(out));
     print("night           dark at night, none by day, coming on at dusk")
 assert "function drawNight()" in js and "a.lr > 0" in js and "windowsOf(img.src)" in js, \
     "lights and lit windows are not drawn at night"
+wfn = js[js.index("  function windowsOf(src)"):js.index("  var nightCv = document.createElement")]
+assert "cells.length > maxArea" in wfn and "inner - ring < minContrast" in wfn, \
+    "lights are found by colour alone (a thatched roof glows)"
+assert "spots: keep" in wfn and "sp.r * o.w * spill" in js, "a picture's own lanterns and fires light nothing round them"
+assert "wk.kind !== 'person'" in js and "nightSoon(true)" in js, "people out at night carry no lantern"
+assert "'.dltown .dlname'" in js[js.index("function drawNight"):], "town names are hidden by the night"
 print("night           lights (tiles with a light) and lit windows cut the night")
+print("night           a light is small and brighter than around it, and lights its surroundings")
+print("night           walkers carry lanterns; town names stay readable")
 
 from helpers.dodoland import tiles as tile_rules  # noqa: E402
 lib = tile_rules.TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())

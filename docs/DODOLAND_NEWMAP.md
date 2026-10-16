@@ -1220,3 +1220,13 @@ tool (bake_bench.py), not in the repo.
   (`dodoland_window_glow` 0.8) on placed pieces, painted halls, generated
   towns and houses, but **only in towns that are lit** (active lately), so a
   dark window is a quiet town. Walkers carry no light yet.
+* **Lights are lights (16 Oct, later):** `windowsOf` now groups warm pixels
+  into patches and keeps one only if it is small (`dodoland_window_max_size`,
+  0.6% of the picture) and brighter than its surroundings by
+  `dodoland_window_contrast` (45): a thatched roof or straw no longer glows,
+  while lanterns, fires and windows do; the colour range reaches deeper orange
+  (min red 200, green 100, warmth 80). Every kept light also throws its own
+  pool (`dodoland_window_spill`, 6x its size), like a placed lamp. People out
+  walking carry a lantern (`dodoland_walker_light`, 1.6 cells; animals none),
+  redrawn each frame from a per-view cache (`nightCache`, `nightSoon(true)`),
+  and the night is lifted off town name labels.
