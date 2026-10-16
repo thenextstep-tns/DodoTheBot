@@ -1147,3 +1147,15 @@ item follows it (`routes._dodoland_scope`). The tile library was already the
 owner's. Members' own pages (`/dodoland/me…`, `/towns`) are unchanged. There
 are no DodoLand Discord commands. To give the panel scopes back, set it False.
 Test: `test_dodoland_owner_only.py` (all 28 admin routes, through the real gate).
+
+### Stutter: the ground bake (16 Oct 2026)
+Measured with real chunks round Beanburg in headless Chrome (the page's own
+`bakeChunk`): 30-65 ms a chunk on average, up to ~350 ms, three chunks a frame,
+and smart ground 85-95% of it. Now: smart ground's scratch canvases are reused
+(`autoScratch`) instead of made per kind per chunk; its blend mask is drawn and
+blurred at 4 px a cell and scaled up; its inside is one pattern fill of a path
+(only border cells draw tiles one by one); the texture block is cached. Result:
+5-25 ms a chunk typical. `terrDetail` bakes nearest the view's middle first,
+within `dodoland_bake_budget_ms` (8) a frame, at least one chunk. Next if it
+still hitches: bake in a worker (OffscreenCanvas). The benchmark is a scratch
+tool (bake_bench.py), not in the repo.
