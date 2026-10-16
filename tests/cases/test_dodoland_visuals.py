@@ -171,4 +171,10 @@ shadow_fn = js[js.index("function shadowFor"):js.index("function shadowsOn")]
 assert "low[c] - top[c]" in shadow_fn and "oy + low[c]" in shadow_fn, "height is not measured per column"
 print("sun             a shadow starts at each column's own base, so nothing floats")
 
+# A town's building moved up to the tier it has now asks for no picture, and
+# must still get its uploaded painting, not the generated drawing.
+pv = js[js.index("function pieceVariant"):js.index("function pieceWidth")]
+assert "(!piece.v || !(piece.v in a.vw))" in pv, "a building that grew a tier falls back to its drawing"
+print("buildings       a building that grew a tier keeps its uploaded painting")
+
 print("PASS")

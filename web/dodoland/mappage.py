@@ -2265,7 +2265,12 @@ _SCRIPT = r"""
   // other (a building drawn with its uploaded picture, placed before or just now).
   function pieceVariant(piece) {
     var a = typeof assetById === 'function' ? assetById(piece.a) : null, keys = a && a.vw ? Object.keys(a.vw) : [];
-    return (piece.v && keys.length === 1 && !(piece.v in a.vw)) ? keys[0] : piece.v;
+    // A tile drawn with one picture is drawn with it whatever the piece asks
+    // for - and asking for none (a town's building moved up to the tier it has
+    // reached now, a toolkit preview) is not "its first variant": a town
+    // building shown as its uploaded painting has that as its only picture,
+    // and the first variant is the generated drawing it stands in for.
+    return (keys.length === 1 && (!piece.v || !(piece.v in a.vw))) ? keys[0] : piece.v;
   }
   function pieceWidth(piece) {
     // A percentage of the base image, so decor shrinks with the coastline the
