@@ -79,6 +79,10 @@ details.tlcat > summary h2 { margin: 0; }
   border-radius: 4px; overflow: hidden;
   background: repeating-conic-gradient(#8884 0 25%, transparent 0 50%) 0 0 / 12px 12px; }
 .tlvar img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+/* A town building tier's uploaded painting, beside the drawing it can stand in for. */
+.tlvar.tlup { width: 112px; height: 112px; }
+.tlvar i { position: absolute; left: 2px; bottom: 2px; padding: 0 4px; border-radius: 4px; font-size: 10px;
+  font-style: normal; line-height: 15px; background: rgba(0, 0, 0, .6); color: #fff; }
 .tlvar button { position: absolute; top: 1px; right: 1px; padding: 0 5px; font-size: 11px;
   line-height: 16px; min-height: 0; }
 .tlrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -186,6 +190,13 @@ def _tile_card(tile: dict, categories: list[dict], ctx: _Ctx) -> str:
         + (f'<button class="tldelvar" data-vid="{_e(vid)}" title="Remove this variant">×</button>'
            if editable else "") + "</div>"
         for vid in tile["variants"])
+    if tile.get("uploaded"):
+        # Its uploaded painting first, then the drawing; labelled, as both are its.
+        variants = (f'<div class="tlvar tlup" title="The uploaded painting, drawn instead of the generated '
+                    f'drawing when the server draws with uploaded art"><img alt="" loading="lazy" '
+                    f'src="{ctx.art}{_e(tile["uploaded"])}"><i>uploaded</i></div>'
+                    + variants.replace('<div class="tlvar">', '<div class="tlvar" title="The generated drawing">', 1)
+                    .replace('</div>', '<i>drawn</i></div>', 1))
     count = len(tile["variants"])
     scope = ("<span class=\"tlbadge\">this server's</span>" if tile["guild_id"]
              else "<span class=\"tlbadge\">all servers</span>")

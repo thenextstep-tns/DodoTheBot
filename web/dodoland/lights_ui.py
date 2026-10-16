@@ -16,7 +16,7 @@ owner's page), as a dialog over it. The tile's picture is shown large, at night
 Town buildings (one tile per building and tier) are what drawn towns are made
 of, so lights put on a tier light that building in every drawn town that has it
 at that tier; a tier with an uploaded painting has the painting's lights
-separately (the Drawn / Painted switch).
+separately (the Uploaded / Drawn switch; the uploaded one opens first).
 
 The dialog asks ``GET /api/dodoland/lights/{tile_id}`` (:func:`api_tile_lights`)
 for the tile, and saves as it changes through the tile library's own endpoint
@@ -98,7 +98,7 @@ def dialog_html() -> str:
 <dialog id="lxdlg" class="lxdlg">
   <div class="lxbar">
     <b id="lxname">Lights</b>
-    <span class="lxseg" id="lxpics" hidden><button type="button" data-pic="v">Drawn</button><button type="button" data-pic="up">Painted</button></span>
+    <span class="lxseg" id="lxpics" hidden><button type="button" data-pic="up">Uploaded</button><button type="button" data-pic="v">Drawn</button></span>
     <span class="lxseg" id="lxtime"><button type="button" data-t="night" class="on">Night</button><button type="button" data-t="dusk">Dusk</button><button type="button" data-t="dawn">Dawn</button><button type="button" data-t="day">Day</button></span>
     <button type="button" id="lxclose" class="lxclose" title="Close">✕</button>
   </div>
@@ -200,7 +200,7 @@ _SCRIPT = r"""
         if (!res.ok) { stage.innerHTML = '<div class="lxhint">' + (res.error || 'Not found.') + '</div>'; return; }
         N = res.night || {}; S = res.sun || {}; paintedFirst = res.painted_first;
         cur = res.tile;
-        pic = cur.up && paintedFirst ? 'up' : 'v';
+        pic = cur.up ? 'up' : 'v';
         document.getElementById('lxname').textContent = '💡 ' + cur.name;
         document.getElementById('lxpics').hidden = !cur.up;
         document.getElementById('lxauto').checked = cur.auto !== false;
