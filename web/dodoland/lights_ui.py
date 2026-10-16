@@ -134,17 +134,16 @@ def light_summary(tile: dict) -> str:
     return ", ".join(parts)
 
 
-# In the panel's own colours (--card, --ink, --edge, --soft), so it reads in
-# the light theme and the dark one alike.
+# In the panel's own colours (panel.css: --panel, --text, --line, --muted).
 _CSS = """
-.lxdlg { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--edge);
-  border-radius: 14px; background: var(--card); color: var(--ink); padding: 14px 16px; }
+.lxdlg { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--line, #ddd);
+  border-radius: 14px; background: var(--panel, #fff); color: var(--text, #222); padding: 14px 16px; }
 .lxdlg::backdrop { background: rgba(0, 0, 0, .45); }
 .lxbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
-.lxclose { margin-left: auto; background: none; border: 1px solid var(--edge); border-radius: 8px;
-  color: var(--ink); cursor: pointer; padding: 4px 10px; font: inherit; }
-.lxseg { display: inline-flex; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
-.lxseg button { background: none; border: 0; color: var(--ink); padding: 5px 10px; cursor: pointer; font: inherit; }
+.lxclose { margin-left: auto; background: none; border: 1px solid var(--line, #ddd); border-radius: 8px;
+  color: var(--text, #222); cursor: pointer; padding: 4px 10px; font: inherit; }
+.lxseg { display: inline-flex; border: 1px solid var(--line, #ddd); border-radius: 8px; overflow: hidden; }
+.lxseg button { background: none; border: 0; color: var(--text, #222); padding: 5px 10px; cursor: pointer; font: inherit; }
 .lxseg button.on { background: #f0a64f; color: #1b130a; }
 .lxstage { position: relative; height: min(460px, 55vh); border-radius: 12px; overflow: hidden; background: #6f8a4f;
   display: flex; align-items: center; justify-content: center; user-select: none; }
@@ -161,10 +160,10 @@ _CSS = """
 .lxring { position: absolute; border: 1px dashed #fff8; border-radius: 50%; pointer-events: none; z-index: 1; }
 .lxside { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .lxfound { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
-  border: 1px dashed var(--edge); border-radius: 8px; font-size: 13px; }
+  border: 1px dashed var(--line, #ddd); border-radius: 8px; font-size: 13px; }
 .lxlights { display: flex; gap: 6px; flex-wrap: wrap; }
 .lxchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px;
-  border: 1px solid var(--edge); cursor: pointer; font-size: 12px; background: var(--card); color: var(--ink); }
+  border: 1px solid var(--line, #ddd); cursor: pointer; font-size: 12px; background: var(--panel, #fff); color: var(--text, #222); }
 .lxchip.on { border-color: #f0a64f; }
 .lxchip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .lxedit { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
