@@ -248,6 +248,22 @@ def _collect(bot, guild) -> dict:
             "standings": result["people"], "defs": buildings, "upload": upload}
 
 
+def _sun_settings(bot, gid) -> dict:
+    """The sun the page casts every shadow from: the time of day (``auto``
+    follows each viewer's own clock) and the shadow settings."""
+    p = bot.dodoland_params
+
+    def num(key, lo, hi):
+        return max(lo, min(hi, float(p.get(gid, key))))
+    mode = str(p.get(gid, "dodoland_time_of_day") or "auto")
+    return {"mode": mode if mode in ("auto", "morning", "noon", "afternoon", "evening", "night") else "auto",
+            "rise": num("dodoland_sunrise_hour", 0, 23), "set": num("dodoland_sunset_hour", 1, 24),
+            "strength": num("dodoland_shadow_strength", 0, 1), "contact": num("dodoland_shadow_contact", 0, 1),
+            "length": num("dodoland_shadow_length", 0.05, 1.5), "longest": num("dodoland_shadow_longest", 0.1, 3),
+            "swing": num("dodoland_shadow_swing", 0, 2), "night": num("dodoland_shadow_night", 0, 1),
+            "blur": num("dodoland_shadow_blur", 0, 0.2)}
+
+
 def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bscale: float) -> dict:
     """``{tile_id: (uploaded picture id, width in map cells)}`` for the town
     building tiles that have an uploaded picture, when the server draws its
@@ -490,12 +506,8 @@ async def map_page(request: web.Request):
         "bake_budget_ms": max(1, min(50, int(bot.dodoland_params.get(guild.id, "dodoland_bake_budget_ms")))),
         # Ground muting, the same the server applies to the zoomed-out picture.
         "ground_mute": terrainart.mute_settings(bot.dodoland_params, guild.id),
-        # Baked shadows under what stands (dodoland_shadow_*).
-        "shadow": {"strength": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_strength")))),
-                   "contact": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_contact")))),
-                   "lean": max(-2.0, min(2.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_lean")))),
-                   "length": max(0.05, min(1.5, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_length")))),
-                   "blur": max(0.0, min(0.2, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_blur"))))},
+        # The sun every shadow comes from (dodoland_time_of_day, dodoland_shadow_*).
+        "sun": _sun_settings(bot, guild.id),
         "autotile_variation": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_variation")))),
         # The walls choice on a town's card (dodoland_walls_option).
         "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
@@ -871,8 +883,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .dlpiece.flip img { transform: scaleX(-1); }
 /* A baked shadow behind its picture (made already mirrored for a mirrored piece). */
-.dlpiece img.dlshadow, .dltown .dlart img.dlshadow { position: absolute; z-index: -1; max-width: none;
-  pointer-events: none; transform: none; image-rendering: auto; }
+.dltown .dlart { position: relative; }
+.dlpiece img.dlshadow, .dltown .dlart img.dlshadow, .dlstand img.dlshadow { position: absolute; z-index: -1;
+  max-width: none; pointer-events: none; transform: none; image-rendering: auto; display: block; }
 /* Held and hovered pieces are marked by boxes on the frame, in screen pixels,
    not by outlines on the pieces. Anything drawn inside the zoomed world is
    scaled by the zoom, and a browser rounds an outline thinner than one pixel up
@@ -1371,6 +1384,7 @@ _SCRIPT = r"""
             host.querySelector('.dlart').innerHTML =
               '<svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">' +
               svg + '</svg>';
+            addShadow(host.querySelector('.dlart'), svgPicture([0, 0, 120, 78], svg), false);
           }
         }).catch(function () { art[person.id] = ''; });
     } else if (art[person.id]) {
@@ -1378,6 +1392,7 @@ _SCRIPT = r"""
       if (!host.firstChild) {
         host.innerHTML = '<svg viewBox="0 0 120 78" xmlns="http://www.w3.org/2000/svg">' +
           art[person.id] + '</svg>';
+        addShadow(host, svgPicture([0, 0, 120, 78], art[person.id]), false);
       }
     }
   }
@@ -2212,16 +2227,41 @@ _SCRIPT = r"""
   }
 
 
-  // --- baked shadows ------------------------------------------------------ //
-  // Under everything that stands: a soft cast shadow (its own outline, leaning
-  // away from the light at the top left and flattened onto the ground) and a
-  // darker patch where it meets the ground. Made once per picture, as a
-  // picture, and shown behind it: nothing is drawn per frame, so it costs
-  // nothing to pan or zoom. dodoland_shadow_* in the panel.
-  var shadows = {};
+  // --- the sun, and baked shadows ----------------------------------------- //
+  // One sun for the whole map, from the viewer's own clock (or a time of day
+  // set in the panel, dodoland_time_of_day): it rises in the east, so morning
+  // shadows fall to the left and long, at midday short and behind, in the
+  // evening to the right; at night a faint moon. Every shadow comes from it.
+  function sunState() {
+    var S = D.sizes.sun || {}, mode = S.mode || 'auto', h;
+    if (mode === 'auto') { var now = new Date(); h = now.getHours() + now.getMinutes() / 60; }
+    else h = {morning: 8, noon: 13, afternoon: 16, evening: 19, night: 23}[mode] || 13;
+    h = Math.round(h * 2) / 2;   // a new sun every half hour, not every frame
+    var rise = S.rise == null ? 6 : S.rise, set = S.set == null ? 20 : S.set;
+    var base = S.strength == null ? 0.38 : S.strength, noon = S.length == null ? 0.35 : S.length;
+    var out;
+    if (h > rise && h < set) {
+      var p = (h - rise) / (set - rise), elev = Math.sin(Math.PI * p);
+      var len = Math.min(S.longest == null ? 1.3 : S.longest, noon / Math.max(elev, 0.12));
+      out = {x: -Math.cos(Math.PI * p) * (S.swing == null ? 1 : S.swing), y: -(0.35 + 0.65 * elev) * 0.6,
+             len: len, strength: base * (0.6 + 0.4 * Math.min(1, elev * 2)), night: false};
+    } else {
+      out = {x: -0.3, y: -0.45, len: 0.5, strength: base * (S.night == null ? 0.3 : S.night), night: true};
+    }
+    out.contact = (S.contact == null ? 0.35 : S.contact) * (out.night ? 0.7 : 1);
+    out.blur = S.blur == null ? 0.03 : S.blur;
+    out.key = mode + '|' + h;
+    return out;
+  }
+  // A picture's shadow, made once per picture (and mirror) per sun. Height is
+  // measured per column from that column's lowest painted pixel, so whatever
+  // lies on the ground (a paved yard, a plinth's step) casts nothing, and only
+  // what rises casts, behind it and away from the sun - never out in front,
+  // which is what made things float. A soft rim darkens the ground right at
+  // the base. Small (it is blurred), as a WebP blob, behind the picture.
+  var shadows = {}, shadowed = [];
   function shadowFor(src, flip, done) {
-    var S = D.sizes.shadow || {};
-    var key = src + (flip ? '|f' : ''), hit = shadows[key];
+    var sun = sunState(), key = src + (flip ? '|f' : '') + '|' + sun.key, hit = shadows[key];
     if (hit && hit.url) { done(hit); return; }
     if (hit) { hit.wait.push(done); return; }
     hit = shadows[key] = {wait: [done]};
@@ -2229,54 +2269,54 @@ _SCRIPT = r"""
     im.decoding = 'async';
     im.onload = function () {
       try {
-        // Small: it is blurred anyway, and a few hundred pixels make it quickly.
-        var sc = Math.min(1, 240 / Math.max(im.naturalWidth, im.naturalHeight));
-        var w = Math.max(1, Math.round(im.naturalWidth * sc)), h = Math.max(1, Math.round(im.naturalHeight * sc));
+        var sc = Math.min(1, 220 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1));
+        var w = Math.max(1, Math.round((im.naturalWidth || 100) * sc)), h = Math.max(1, Math.round((im.naturalHeight || 100) * sc));
         var sil = document.createElement('canvas'); sil.width = w; sil.height = h;
         var sx = sil.getContext('2d');
         if (flip) { sx.translate(w, 0); sx.scale(-1, 1); }
         sx.drawImage(im, 0, 0, w, h);
-        sx.setTransform(1, 0, 0, 1, 0, 0);
-        // Where it stands: its lowest painted row, and how wide it is there.
-        var px = sx.getImageData(0, 0, w, h).data, base = h - 1, left = w, right = 0;
-        for (var y = h - 1; y >= 0; y--) {
-          var any = false;
-          for (var x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 96) { any = true; break; }
-          if (any) { base = y; break; }
+        var px = sx.getImageData(0, 0, w, h).data, low = [], top = [];
+        for (var x = 0; x < w; x++) {
+          low[x] = -1; top[x] = -1;
+          for (var y = h - 1; y >= 0; y--) if (px[(y * w + x) * 4 + 3] > 96) { low[x] = y; break; }
+          for (var y2 = 0; y2 < h; y2++) if (px[(y2 * w + x) * 4 + 3] > 96) { top[x] = y2; break; }
         }
-        for (var yy = Math.max(0, base - Math.round(h * 0.12)); yy <= base; yy++)
-          for (var xx = 0; xx < w; xx++) if (px[(yy * w + xx) * 4 + 3] > 96) { left = Math.min(left, xx); right = Math.max(right, xx); }
-        if (right <= left) { left = 0; right = w; }
-        sx.globalCompositeOperation = 'source-in'; sx.fillStyle = '#000'; sx.fillRect(0, 0, w, h);
-        var lean = S.lean == null ? 0.6 : S.lean, flat = S.length == null ? 0.42 : S.length;
-        var blur = Math.max(0.5, (S.blur == null ? 0.035 : S.blur) * h), pad = Math.ceil(blur * 3) + 2;
-        var reach = Math.ceil(base * lean * flat) + 1;
+        var dx = sun.x * sun.len, dy = sun.y * sun.len;
+        var blur = Math.max(0.6, sun.blur * h), pad = Math.ceil(blur * 3) + 2;
+        var reachL = Math.ceil(Math.max(0, -dx) * h) + 1, reachR = Math.ceil(Math.max(0, dx) * h) + 1;
         var cv = document.createElement('canvas');
-        cv.width = w + reach + pad * 2; cv.height = h + pad * 2;
-        var c = cv.getContext('2d');
-        // The cast shadow: x' = x + lean * flat * (base - y), y' = base - flat * (base - y).
-        c.save();
-        c.filter = 'blur(' + blur.toFixed(1) + 'px)';
-        c.globalAlpha = S.strength == null ? 0.32 : S.strength;
-        c.setTransform(1, 0, -lean * flat, flat, pad + lean * flat * base, pad + base * (1 - flat));
-        c.drawImage(sil, 0, 0);
-        c.restore();
-        // The contact patch, a soft ellipse where it meets the ground.
-        var ao = S.contact == null ? 0.4 : S.contact;
-        if (ao > 0) {
-          var cxp = pad + (left + right) / 2, rx = Math.max(2, (right - left) * 0.56), ry = Math.max(1, rx * 0.2);
-          c.save();
-          c.translate(cxp, pad + base); c.scale(1, ry / rx);
-          var g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
-          g.addColorStop(0, 'rgba(14,18,26,' + ao + ')'); g.addColorStop(1, 'rgba(14,18,26,0)');
-          c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI * 2); c.fill();
-          c.restore();
+        cv.width = w + reachL + reachR + pad * 2; cv.height = h + pad * 2;
+        var ox = pad + reachL, oy = pad;
+        var shape = document.createElement('canvas'); shape.width = cv.width; shape.height = cv.height;
+        var sc2 = shape.getContext('2d');
+        sc2.strokeStyle = '#000'; sc2.lineWidth = 1.6; sc2.lineCap = 'round';
+        sc2.beginPath();
+        for (var c = 0; c < w; c++) {
+          if (low[c] < 0) continue;
+          var z = low[c] - top[c];
+          sc2.moveTo(ox + c + 0.5, oy + low[c] + 0.5);
+          sc2.lineTo(ox + c + 0.5 + dx * z, oy + low[c] + 0.5 + dy * z);
+        }
+        sc2.stroke();
+        var ctx = cv.getContext('2d');
+        ctx.filter = 'blur(' + blur.toFixed(1) + 'px)';
+        ctx.globalAlpha = sun.strength;
+        ctx.drawImage(shape, 0, 0);
+        // The rim where it meets the ground.
+        if (sun.contact > 0) {
+          var rim = document.createElement('canvas'); rim.width = cv.width; rim.height = cv.height;
+          var rc = rim.getContext('2d');
+          rc.fillStyle = '#000';
+          for (var c2 = 0; c2 < w; c2++) if (low[c2] >= 0) rc.fillRect(ox + c2 - 0.5, oy + low[c2] - 1, 2, 3);
+          ctx.filter = 'blur(' + Math.max(0.6, blur * 0.6).toFixed(1) + 'px)';
+          ctx.globalAlpha = sun.contact;
+          ctx.drawImage(rim, 0, 0);
         }
         cv.toBlob(function (blob) {
           if (!blob) return;
           hit.url = URL.createObjectURL(blob);
           // Where it sits against the picture's own box, in percent of it.
-          hit.left = -pad / w * 100; hit.top = -pad / h * 100;
+          hit.left = -ox / w * 100; hit.top = -oy / h * 100;
           hit.width = cv.width / w * 100; hit.height = cv.height / h * 100;
           var wait = hit.wait; hit.wait = [];
           wait.forEach(function (f) { f(hit); });
@@ -2285,17 +2325,49 @@ _SCRIPT = r"""
     };
     im.src = src;
   }
+  function shadowsOn() {
+    var S = D.sizes.sun || {};
+    return (S.strength == null ? 0.38 : S.strength) > 0 || (S.contact == null ? 0.35 : S.contact) > 0;
+  }
+  // Put a picture's shadow behind it in el; remembered, so a new sun can redo it.
   function addShadow(el, src, flip) {
-    if (!D.sizes.shadow || !(D.sizes.shadow.strength > 0 || D.sizes.shadow.contact > 0)) return;
+    if (!shadowsOn() || !el) return;
+    el._shadow = {src: src, flip: !!flip};
+    if (shadowed.indexOf(el) < 0) shadowed.push(el);
     shadowFor(src, flip, function (s) {
-      if (!el.isConnected && !el.parentNode) return;
-      var sh = document.createElement('img');
+      var old = el.querySelector(':scope > img.dlshadow');
+      var sh = old || document.createElement('img');
       sh.className = 'dlshadow'; sh.alt = ''; sh.src = s.url;
       sh.style.left = s.left + '%'; sh.style.top = s.top + '%';
       sh.style.width = s.width + '%'; sh.style.height = s.height + '%';
-      el.appendChild(sh);
+      if (!old) el.appendChild(sh);
     });
   }
+  // An inline drawing's shadow (a generated town, a house, a walker): the
+  // drawing as an svg picture, shadowed like any other, one per drawing.
+  var svgPictures = {};
+  function svgPicture(box, body) {
+    var key = box.join(',') + '|' + body;
+    if (!svgPictures[key]) {
+      var w = Math.round(box[2] * 12), h = Math.round(box[3] * 12);
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + box.join(' ') + '" width="' + w +
+        '" height="' + h + '">' + body + '</svg>';
+      svgPictures[key] = URL.createObjectURL(new Blob([svg], {type: 'image/svg+xml'}));
+    }
+    return svgPictures[key];
+  }
+  // A new sun: every shadow redone (and the forests, whose trees carry theirs).
+  var sunKey = sunState().key;
+  setInterval(function () {
+    var now = sunState().key;
+    if (now === sunKey) return;
+    sunKey = now;
+    Object.keys(shadows).forEach(function (k) { if (shadows[k].url) URL.revokeObjectURL(shadows[k].url); });
+    shadows = {};
+    shadowed = shadowed.filter(function (el) { return el.isConnected; });
+    shadowed.forEach(function (el) { addShadow(el, el._shadow.src, el._shadow.flip); });
+    if (typeof forestRedrawAll === 'function') forestRedrawAll();
+  }, 60000);
 
   // Which pixels of a piece's picture are painted, read once per picture
   // into a small alpha map (pictures are ours, so the canvas is not tainted).
@@ -3304,6 +3376,7 @@ _SCRIPT = r"""
     var el = document.createElement('div');
     el.className = 'dlstand ' + cls;
     el.innerHTML = '<svg viewBox="' + box.join(' ') + '" preserveAspectRatio="xMidYMax meet">' + body + '</svg>';
+    addShadow(el, svgPicture(box, body), cls.indexOf(' flip') >= 0);
     el.style.width = (box[2] * cellsPerUnit / terr.world.cells_w * 100) + '%';
     var fx = -box[0] / box[2] * 100, fy = (groundY - box[1]) / box[3] * 100;
     el.style.transform = 'translate(' + (-fx).toFixed(2) + '%,' + (-fy).toFixed(2) + '%)';

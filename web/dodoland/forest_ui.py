@@ -127,6 +127,27 @@ SCRIPT = r"""
     }
     return im.complete && im.naturalWidth ? im : null;
   }
+  // A tree's baked shadow (the map's shadowFor, from the same sun), as a
+  // loaded picture to draw onto the strip; null until it is ready, and the
+  // forest is redrawn when it is.
+  function forestShadow(a, flip) {
+    if (typeof shadowFor !== 'function' || !shadowsOn()) return false;
+    var got = null;
+    shadowFor(assetUrl(a.id), flip, function (s) {
+      if (!s.img) {
+        s.img = new Image();
+        s.img.onload = function () { forestSoon(); };
+        s.img.src = s.url;
+      }
+      got = s;
+    });
+    return got && got.img && got.img.complete && got.img.naturalWidth ? got : null;
+  }
+  // Every forest drawn again: the sun moved, so its shadows did.
+  function forestRedrawAll() {
+    Object.keys(FOREST.drawn).forEach(forestDrop);
+    forestSoon();
+  }
   function forestDrop(key) {
     var d = FOREST.drawn[key];
     if (d) (d.els || []).forEach(function (el) { el.remove(); });
@@ -148,7 +169,16 @@ SCRIPT = r"""
       var n = Math.floor(t.y / strip), g = strips[n];
       if (!g) g = strips[n] = {items: [], x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, low: -Infinity};
       var x0 = t.x - t.w / 2, y0 = t.y - h * 0.85;
-      g.items.push({t: t, im: im, x0: x0, y0: y0, h: h});
+      // Its shadow, from the same sun as everything else on the map.
+      var sh = forestShadow(t.a, !!t.f), shade = null;
+      if (sh === null) ready = false;
+      else if (sh) {
+        shade = {img: sh.img, x0: x0 + sh.left / 100 * t.w, y0: y0 + sh.top / 100 * h,
+                 w: sh.width / 100 * t.w, h: sh.height / 100 * h};
+        g.x0 = Math.min(g.x0, shade.x0); g.y0 = Math.min(g.y0, shade.y0);
+        g.x1 = Math.max(g.x1, shade.x0 + shade.w); g.y1 = Math.max(g.y1, shade.y0 + shade.h);
+      }
+      g.items.push({t: t, im: im, x0: x0, y0: y0, h: h, shade: shade});
       g.x0 = Math.min(g.x0, x0); g.y0 = Math.min(g.y0, y0);
       g.x1 = Math.max(g.x1, x0 + t.w); g.y1 = Math.max(g.y1, y0 + h);
       g.low = Math.max(g.low, t.y);
@@ -162,6 +192,11 @@ SCRIPT = r"""
       cv.width = Math.max(1, Math.ceil(bw * r));
       cv.height = Math.max(1, Math.ceil(bh * r));
       var ctx = cv.getContext('2d');
+      // Every tree's shadow first, then the trees over them.
+      ctx.imageSmoothingEnabled = true;
+      g.items.forEach(function (s) {
+        if (s.shade) ctx.drawImage(s.shade.img, (s.shade.x0 - g.x0) * r, (s.shade.y0 - g.y0) * r, s.shade.w * r, s.shade.h * r);
+      });
       ctx.imageSmoothingEnabled = false;
       g.items.forEach(function (s) {
         var x = (s.x0 - g.x0) * r, y = (s.y0 - g.y0) * r, w = s.t.w * r, h = s.h * r;

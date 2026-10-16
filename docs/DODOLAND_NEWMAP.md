@@ -1184,3 +1184,17 @@ tool (bake_bench.py), not in the repo.
   the picture (`img.dlshadow`, z-index -1). Every standing piece (not flat) and
   a town drawn by its hall's painted picture get one. Nothing per frame.
   Forest-brush trees and generated SVG towns have none yet.
+* **One sun, and nothing floats (16 Oct, later):** `sunState()` (page) from
+  `dodoland_time_of_day` (auto = each viewer's clock; or morning / noon /
+  afternoon / evening / night), sunrise/sunset hours: shadow direction swings
+  left (morning) to right (evening), always behind (`y < 0`), longest near
+  sunrise/sunset (`_shadow_length` at noon up to `_shadow_longest`), softer at
+  dawn/dusk, a faint moon at night (`_shadow_night`); half-hour steps, and a
+  minute's check redoes every shadow when it moves (`shadowed`, forests via
+  `forestRedrawAll`). `shadowFor` now measures height per column from that
+  column's lowest painted pixel (a paved yard casts nothing; the old global
+  base made iso buildings float), draws a line per column away from the sun,
+  blurs it, and adds a thin contact rim (no ellipse). Shadows now on placed
+  pieces, painted halls, generated town art (`svgPicture` of its SVG), houses
+  and walkers (`standing`), and forest trees (drawn onto their strip canvases
+  first). `dodoland_shadow_lean` is gone (the sun decides).

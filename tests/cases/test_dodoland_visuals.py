@@ -43,8 +43,39 @@ assert "function groundMute(cv)" in js and "bake.blocks[key] = groundMute(cv)" i
     and "bake.autoImgs[key] = groundMute(cv)" in js, "a ground texture is not muted on the page"
 assert "function shadowFor(src, flip, done)" in js and "if (stackOf(piece) !== 'flat') addShadow(" in js, \
     "standing pieces are not given their baked shadow"
-assert "c.filter = 'blur(" in js[js.index("function shadowFor"):js.index("function addShadow")], \
+assert "filter = 'blur(" in js[js.index("function shadowFor"):js.index("function addShadow")], \
     "the shadow is not blurred when it is baked"
-print("page            textures are muted once as prepared; what stands gets a baked shadow")
+assert "addShadow(el, svgPicture(box, body)" in js, "houses and walkers cast no shadow"
+assert "forestShadow(t.a, !!t.f)" in js and "function forestRedrawAll()" in js, "forest trees cast no shadow"
+print("page            textures muted once; pieces, towns, houses, walkers and forests all get a shadow")
+
+# One sun for every shadow: morning to the left, evening to the right, short at
+# midday, faint at night; and height is measured per column, so nothing floats.
+import json  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+
+node = shutil.which("node")
+if node:
+    fn = js[js.index("  function sunState()"):js.index("  // A picture's shadow, made once per picture")]
+    probe = "var D = {sizes: {sun: {}}};\n" + fn + """
+var out = {};
+['morning', 'noon', 'evening', 'night'].forEach(function (m) { D.sizes.sun.mode = m; out[m] = sunState(); });
+console.log(JSON.stringify(out));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(probe)
+    run = subprocess.run([node, f.name], capture_output=True, text=True)
+    sun = json.loads(run.stdout)
+    assert sun["morning"]["x"] < 0 < sun["evening"]["x"], "the sun does not cross the sky"
+    assert sun["noon"]["len"] < sun["morning"]["len"] and sun["noon"]["len"] < sun["evening"]["len"], \
+        "midday shadows are not the shortest"
+    assert all(sun[m]["y"] < 0 for m in sun), "a shadow falls in front of what casts it"
+    assert sun["night"]["strength"] < sun["noon"]["strength"], "night shadows are not fainter"
+    print("sun             morning left, evening right, shortest at noon, always behind, faint at night")
+shadow_fn = js[js.index("function shadowFor"):js.index("function shadowsOn")]
+assert "low[c] - top[c]" in shadow_fn and "oy + low[c]" in shadow_fn, "height is not measured per column"
+print("sun             a shadow starts at each column's own base, so nothing floats")
 
 print("PASS")
