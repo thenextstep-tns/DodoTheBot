@@ -1159,3 +1159,12 @@ blurred at 4 px a cell and scaled up; its inside is one pattern fill of a path
 within `dodoland_bake_budget_ms` (8) a frame, at least one chunk. Next if it
 still hitches: bake in a worker (OffscreenCanvas). The benchmark is a scratch
 tool (bake_bench.py), not in the repo.
+* **No more pictures for chunks (16 Oct, later):** the 1-second freeze at a
+  change of detail was every visible chunk being re-encoded (`toBlob` PNG),
+  decoded and swapped into the one big terrain `<svg>`, which redrew with each.
+  Now the terrain layer is two svgs with `#dltdetail` between them as an HTML
+  div: each baked chunk's canvas is shown directly (`bakeShow` positions it in
+  percent of the world and `replaceWith`s the old one, so no flash). Memory is
+  bounded by `dodoland_ground_memory_mb` (256) as well as the chunk count;
+  on-screen chunks are never dropped. Measured: encoding alone was 110-160 ms
+  worst frame for 30 chunks, so the svg redraw/decoding was the rest.

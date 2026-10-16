@@ -478,6 +478,7 @@ async def map_page(request: web.Request):
         # how two grounds blend where they meet.
         "ground_detail": float(bot.dodoland_params.get(guild.id, "dodoland_ground_detail_max")),
         "ground_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_ground_chunks_max")),
+        "ground_memory_mb": max(32, int(bot.dodoland_params.get(guild.id, "dodoland_ground_memory_mb"))),
         "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
         "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),

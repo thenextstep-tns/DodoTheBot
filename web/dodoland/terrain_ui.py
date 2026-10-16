@@ -41,6 +41,8 @@ CSS = """
 .dlterrain { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
   pointer-events: none; z-index: 1; }
 .dlterrain.off { display: none; }
+.dlterrain > svg, .dltdetail { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.dltdetail canvas { position: absolute; display: block; image-rendering: pixelated; pointer-events: none; }
 .dlworld .dltown, .dlworld .dlpiece { z-index: 5; }
 .dlframe.painting { cursor: crosshair; }
 /* Overlay lines a fixed number of screen pixels wide at any zoom.
@@ -166,11 +168,17 @@ SCRIPT = r"""
   function terrSetup(world) {
     terr.world = world;
     terr.ver = world.version;
+    // Below: the overview picture. Between: the close-up ground, each chunk
+    // its own canvas, shown as it was drawn (an image per chunk inside the svg
+    // had to be encoded, decoded and the whole svg redrawn for every one, which
+    // at a change of detail was a second's freeze). Above: shading, areas,
+    // roads, walls, the selection and the brush.
+    var box = 'xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
+      'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' + world.cells_h + '"';
     terrLayer.innerHTML =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
-      'preserveAspectRatio="none" viewBox="0 0 ' + world.cells_w + ' ' +
-      world.cells_h + '"><g id="dltdefs"></g>' +
-      '<g id="dltover"></g><g id="dltdetail"></g><g id="dltshade"></g><g id="dltinfl"></g><g id="dltroads"></g><g id="dltwalls"></g>' +
+      '<svg ' + box + '><g id="dltdefs"></g><g id="dltover"></g></svg>' +
+      '<div id="dltdetail" class="dltdetail"></div>' +
+      '<svg ' + box + '><g id="dltshade"></g><g id="dltinfl"></g><g id="dltroads"></g><g id="dltwalls"></g>' +
       '<rect id="dltsel" class="dltline dltdash" fill="rgba(240,166,79,.12)" stroke="#f0a64f" ' +
       'style="display:none"/>' +
       // The brush's exact footprint: the cells a stroke here will paint, traced
@@ -911,24 +919,16 @@ SCRIPT = r"""
     var made = bakeChunk(key, res), at = key.split(',');
     var g = document.getElementById('dltdetail');
     if (!g) return;
-    var gen = bake.gen[key] || 0;
-    made.canvas.toBlob(function (blob) {
-      if (!blob) return;
-      var url = URL.createObjectURL(blob), old = bake.drawn[key];
-      var el = old && old.el && old.el.isConnected ? old.el
-        : document.createElementNS('http://www.w3.org/2000/svg', 'image');
-      // A hair over 64 cells, so neighbouring pictures never show a seam.
-      el.setAttribute('x', at[0] * 64); el.setAttribute('y', at[1] * 64);
-      el.setAttribute('width', 64.04); el.setAttribute('height', 64.04);
-      el.setAttribute('preserveAspectRatio', 'none');
-      el.setAttribute('style', 'image-rendering:pixelated;pointer-events:none');
-      el.setAttribute('href', url);
-      if (!el.isConnected) g.appendChild(el);
-      if (old && old.url) URL.revokeObjectURL(old.url);
-      bake.drawn[key] = {el: el, url: url, res: res, gen: gen, ready: made.ready};
-    }, 'image/png');
-    // Claimed now, so it is not baked twice while the picture encodes.
-    bake.drawn[key] = Object.assign({}, bake.drawn[key] || {}, {res: res, gen: gen, ready: made.ready, pending: true});
+    var gen = bake.gen[key] || 0, el = made.canvas, old = bake.drawn[key];
+    var cw = terr.world.cells_w, ch = terr.world.cells_h;
+    // In percent of the world, a hair over 64 cells so neighbours never seam.
+    el.style.left = (at[0] * 64 / cw * 100) + '%';
+    el.style.top = (at[1] * 64 / ch * 100) + '%';
+    el.style.width = (64.04 / cw * 100) + '%';
+    el.style.height = (64.04 / ch * 100) + '%';
+    // Swapped in one step, so a chunk never flashes empty between pictures.
+    if (old && old.el && old.el.isConnected) old.el.replaceWith(el); else g.appendChild(el);
+    bake.drawn[key] = {el: el, res: res, gen: gen, ready: made.ready};
   }
   function bakeRes(per) {
     var want = per * (window.devicePixelRatio || 1), res = 2;
@@ -1008,19 +1008,25 @@ SCRIPT = r"""
       bakeShow(due[i][1], res);
     }
     if (more) bakeSoon();
+    // Kept drawn: at most so many chunks and so much memory (a canvas holds
+    // its whole picture, 4 MB for a chunk at full detail), the furthest from
+    // the view dropped first and never one that is on screen.
     var keys = Object.keys(bake.drawn), cap = D.sizes.ground_chunks || 300;
-    if (keys.length > cap) {
-      var mx = (box.x0 + box.x1) / 2, my = (box.y0 + box.y1) / 2;
+    var budget = (D.sizes.ground_memory_mb || 256) * 1048576, used = 0;
+    keys.forEach(function (k) { var el = bake.drawn[k].el; if (el) used += el.width * el.height * 4; });
+    if (keys.length > cap || used > budget) {
+      var cx0 = (box.x0 + box.x1) / 2, cy0 = (box.y0 + box.y1) / 2;
       keys.sort(function (a, b) {
         var pa = a.split(','), pb = b.split(',');
-        return (Math.abs(pb[0] - mx) + Math.abs(pb[1] - my)) - (Math.abs(pa[0] - mx) + Math.abs(pa[1] - my));
+        return (Math.abs(pb[0] - cx0) + Math.abs(pb[1] - cy0)) - (Math.abs(pa[0] - cx0) + Math.abs(pa[1] - cy0));
       });
-      keys.slice(0, keys.length - cap).forEach(function (key) {
-        var d = bake.drawn[key];
-        if (d.el) d.el.remove();
+      for (var j = 0; j < keys.length && (keys.length - j > cap || used > budget); j++) {
+        var at = keys[j].split(','), d = bake.drawn[keys[j]];
+        if (+at[0] >= box.x0 && +at[0] <= box.x1 && +at[1] >= box.y0 && +at[1] <= box.y1) continue;
+        if (d.el) { used -= d.el.width * d.el.height * 4; d.el.remove(); }
         if (d.url) URL.revokeObjectURL(d.url);
-        delete bake.drawn[key];
-      });
+        delete bake.drawn[keys[j]];
+      }
     }
   }
 
