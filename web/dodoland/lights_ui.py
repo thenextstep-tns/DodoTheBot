@@ -1,39 +1,34 @@
 """
-The lights editor: see and set a tile's lights by hand.
+The lights editor: see and set one tile's lights by hand.
 
-``/dodoland/lights`` (the bot owner's, like the tile library it belongs to).
-Pick a tile; its picture is shown large, at night (or dusk, or dawn), lit the
-way the map lights it. Two kinds of light are on it:
+Opened from a tile's card in the tile library ("💡 Edit lights", the bot
+owner's page), as a dialog over it. The tile's picture is shown large, at night
+(or dusk, or dawn), lit the way the map lights it. Two kinds of light are on it:
 
 * **found by itself** - what the map finds in the picture by colour and shape
   (lit windows, lanterns, fires: ``nightlights.findLights``, the very code the
   map runs), drawn as dashed rings. "Make them mine" turns them into lights of
-  your own, and the switch beside it stops the map finding any in this tile;
+  your own; the switch beside it stops the map finding any in this tile;
 * **your own** - double-click the picture to add one, drag it to move it, click
   it to set its colour, its radius (in map cells, so the preview is the map's
-  scale) and its intensity; Delete removes it.
+  scale) and its intensity; Delete removes it. A light glows where it is put.
 
-A light's pool falls on the ground at the tile's foot, where the map stands
-it. Town buildings (the **Town buildings** category, one tile per building and
-tier) are what drawn towns are made of, so lights put on a tier light that
-building in every drawn town that has it at that tier; a tier with an uploaded
-painting has the painting's lights separately (the Drawn / Painted switch).
+Town buildings (one tile per building and tier) are what drawn towns are made
+of, so lights put on a tier light that building in every drawn town that has it
+at that tier; a tier with an uploaded painting has the painting's lights
+separately (the Drawn / Painted switch).
 
-Everything saves as it changes, through the tile library's own endpoint
+The dialog asks ``GET /api/dodoland/lights/{tile_id}`` (:func:`api_tile_lights`)
+for the tile, and saves as it changes through the tile library's own endpoint
 (``update_tile`` with ``lights`` / ``uploaded_lights`` / ``auto_lights``); the
 map draws them at night (``web/dodoland/mappage.py``, ``drawNight``).
 """
 
 from __future__ import annotations
 
-import json
-
 from aiohttp import web
 
 from web.dodoland import nightlights
-
-# The category the town buildings' tiers are in, listed first.
-_TOWN = "Town buildings"
 
 
 def _guild_for(bot):
@@ -47,17 +42,17 @@ def _guild_for(bot):
     return bot.guilds[0] if bot.guilds else None
 
 
-def editor_data(bot) -> dict:
-    """Every placed tile, with what the editor needs to draw, scale and light it."""
+def tile_data(bot, tile_id: str):
+    """One tile, with what the editor needs to draw, scale and light it; None
+    if there is no such tile."""
     from helpers.dodoland import townart
     from web.dodoland import mappage
 
     library = bot.dodoland_tiles
+    t = library.get(tile_id)
+    if not t or not t.get("variants"):
+        return None
     guild = _guild_for(bot)
-    # The global tiles and that server's own (its building tiers among them).
-    tiles = [t for t in library.tiles(guild.id if guild else None)
-             if t["placement"] == "place" and t["variants"]]
-    cats = {c["cat_id"]: c["name"] for c in library.categories()}
     params = bot.dodoland_params
     gid = guild.id if guild else 0
     try:
@@ -68,112 +63,90 @@ def editor_data(bot) -> dict:
         night, sun = mappage._night_settings(bot, gid), mappage._sun_settings(bot, gid)
     except Exception:  # noqa: BLE001
         shrink, hall_box, landmarks, bscale, night, sun = 1.0, 35.0, (), 0.5, {}, {}
-    dims = library.art_sizes([t["variants"][0] for t in tiles] + [t["uploaded"] for t in tiles if t.get("uploaded")])
-    painted = mappage.uploaded_sizes(bot, guild, tiles, hall_box, landmarks, bscale) if guild else {}
-    out = []
-    for t in tiles:
-        v = t["variants"][0]
-        w, h = dims.get(v, (0, 0))
-        tier = bool(str(t.get("source") or "").startswith("building:"))
-        row = {"id": t["tile_id"], "name": t["name"], "cat": cats.get(t["cat_id"], ""),
-               "v": v, "w": w, "h": h,
-               "wc": mappage._tile_cells(t, w, shrink, hall_box, landmarks, bscale) if w else 1,
-               # Where its light falls: a drawn town stands a building on
-               # townart's ground line, the map stands a piece at its foot.
-               "foot": round(townart.GROUND_Y / townart.HEIGHT, 4) if tier else nightlights.PIECE_FOOT,
-               "town": tier, "lights": t["lights"], "auto": t["auto_lights"]}
-        if t.get("uploaded"):
-            uw, uh = dims.get(t["uploaded"], (0, 0))
-            row.update({"up": t["uploaded"], "uw": uw, "uh": uh,
-                        "uwc": (painted.get(t["tile_id"]) or (None, row["wc"]))[1],
-                        "ulights": t["uploaded_lights"]})
-        out.append(row)
+    v = t["variants"][0]
+    dims = library.art_sizes([v] + ([t["uploaded"]] if t.get("uploaded") else []))
+    w, h = dims.get(v, (0, 0))
+    row = {"id": t["tile_id"], "name": t["name"], "v": v, "w": w, "h": h,
+           "wc": mappage._tile_cells(t, w, shrink, hall_box, landmarks, bscale) if w else 1,
+           "town": str(t.get("source") or "").startswith("building:"),
+           "lights": t["lights"], "auto": t["auto_lights"]}
+    if t.get("uploaded"):
+        uw, uh = dims.get(t["uploaded"], (0, 0))
+        painted = mappage.uploaded_sizes(bot, guild, [t], hall_box, landmarks, bscale) if guild else {}
+        row.update({"up": t["uploaded"], "uw": uw, "uh": uh,
+                    "uwc": (painted.get(t["tile_id"]) or (None, row["wc"]))[1],
+                    "ulights": t["uploaded_lights"]})
     mode = str(params.get(gid, "dodoland_building_art") or "generated") if guild else "generated"
-    return {"tiles": out, "painted_first": mode == "uploaded", "night": night, "sun": sun, "town_cat": _TOWN}
+    return {"tile": row, "painted_first": mode == "uploaded", "night": night, "sun": sun}
 
 
-async def lights_page(request: web.Request):
-    """The owner's lights editor. Gated with require_owner in the route table."""
+async def api_tile_lights(request: web.Request):
+    """The tile the dialog edits. Gated with require_owner in the route table."""
     import asyncio
 
-    from web.routes import _page
+    data = await asyncio.get_running_loop().run_in_executor(
+        None, tile_data, request.app["bot"], request.match_info["tile_id"])
+    if data is None:
+        return web.json_response({"ok": False, "error": "No such tile."}, status=404)
+    return web.json_response({"ok": True, **data})
 
-    data = await asyncio.get_running_loop().run_in_executor(None, editor_data, request.app["bot"])
-    return _page("Lights editor", lights_html(data, request.query.get("tile") or ""))
 
-
-def lights_html(data: dict, pick: str = "") -> str:
-    """The editor's body, for :func:`editor_data`'s tiles; ``pick`` is chosen first."""
+def dialog_html() -> str:
+    """The editor dialog, for the owner's tile library page: markup, its
+    style, and its script, which opens it from any ``.tllights`` button."""
     return f"""
-<h1>💡 Lights editor</h1>
-<p class="muted">Pick a tile. <b>Double-click</b> its picture to add a light, <b>drag</b> a light to move it,
-<b>click</b> one to change its colour, radius and intensity. Dashed rings are the lights the map finds in
-the picture by itself. Radius is in map cells, so the preview is the map's own scale. The tiers of the town
-buildings are under <b>{_TOWN}</b>: their lights light that building in every drawn town. Saved as you go.
-<a href="/dodoland/tiles">← Tile library</a></p>
-<div class="lxwrap">
-  <aside class="lxlist">
-    <input id="lxq" class="lxin" placeholder="Search tiles…">
-    <select id="lxcat" class="lxin"></select>
-    <label class="lxsmall"><input type="checkbox" id="lxonly"> Only tiles with lights of my own</label>
-    <div id="lxgrid" class="lxgrid"></div>
-  </aside>
-  <section class="lxmain">
-    <div class="lxbar">
-      <b id="lxname">Pick a tile</b>
-      <span class="lxseg" id="lxpics" hidden><button data-pic="v">Drawn</button><button data-pic="up">Painted</button></span>
-      <span class="lxseg" id="lxtime"><button data-t="night" class="on">Night</button><button data-t="dusk">Dusk</button><button data-t="dawn">Dawn</button><button data-t="day">Day</button></span>
+<dialog id="lxdlg" class="lxdlg">
+  <div class="lxbar">
+    <b id="lxname">Lights</b>
+    <span class="lxseg" id="lxpics" hidden><button type="button" data-pic="v">Drawn</button><button type="button" data-pic="up">Painted</button></span>
+    <span class="lxseg" id="lxtime"><button type="button" data-t="night" class="on">Night</button><button type="button" data-t="dusk">Dusk</button><button type="button" data-t="dawn">Dawn</button><button type="button" data-t="day">Day</button></span>
+    <button type="button" id="lxclose" class="lxclose" title="Close">✕</button>
+  </div>
+  <p class="muted lxsmall"><b>Double-click</b> the picture to add a light, <b>drag</b> one to move it, <b>click</b> one
+  to change it. Dashed rings are the lights the map finds in the picture by itself. Radius is in map cells, so the
+  preview is the map's own scale. Saved as you go.</p>
+  <div class="lxstage" id="lxstage"><div class="lxhint">Loading…</div></div>
+  <div class="lxside">
+    <div class="lxfound" id="lxfound" hidden>
+      <span id="lxfoundn"></span>
+      <label class="lxsmall"><input type="checkbox" id="lxauto"> Light them on the map</label>
+      <button type="button" id="lxadopt">Make them mine</button>
     </div>
-    <div class="lxstage" id="lxstage"><div class="lxhint">No tile chosen.</div></div>
-    <div class="lxside">
-      <div class="lxfound" id="lxfound" hidden>
-        <span id="lxfoundn"></span>
-        <label class="lxsmall"><input type="checkbox" id="lxauto"> Light them on the map</label>
-        <button id="lxadopt" type="button">Make them mine</button>
-      </div>
-      <div id="lxlights" class="lxlights"></div>
-      <div id="lxedit" class="lxedit" hidden>
-        <label>Colour <input type="color" id="lxcol"></label>
-        <label>Radius <input type="range" id="lxrad" min="0.5" max="20" step="0.5"> <output id="lxradn"></output> cells</label>
-        <label>Intensity <input type="range" id="lxint" min="0" max="2" step="0.05"> <output id="lxintn"></output></label>
-        <button id="lxdel" type="button" class="danger">Remove this light</button>
-      </div>
-      <p id="lxmsg" class="muted lxsmall"></p>
+    <div id="lxlights" class="lxlights"></div>
+    <div id="lxedit" class="lxedit" hidden>
+      <label>Colour <input type="color" id="lxcol"></label>
+      <label>Radius <input type="range" id="lxrad" min="0.5" max="20" step="0.5"> <output id="lxradn"></output> cells</label>
+      <label>Intensity <input type="range" id="lxint" min="0" max="2" step="0.05"> <output id="lxintn"></output></label>
+      <button type="button" id="lxdel" class="danger">Remove this light</button>
     </div>
-  </section>
-</div>
+    <p id="lxmsg" class="muted lxsmall"></p>
+  </div>
+</dialog>
 <style>{_CSS}</style>
-<script>var LX = {_js(data)}; var LX_PICK = {_js(pick)};</script>
 <script>(function () {{{nightlights.SCRIPT}{_SCRIPT}}})();</script>"""
 
 
-def _js(value) -> str:
-    """JSON that is safe inside a <script> (a tile named "</script>" stays text)."""
-    return json.dumps(value).replace("<", "\\u003c")
+def light_summary(tile: dict) -> str:
+    """What a tile card says about its lights, beside its Edit lights button."""
+    own = len(tile.get("lights") or []) + len(tile.get("uploaded_lights") or [])
+    parts = [f"{own} of my own" if own else "none of my own"]
+    parts.append("finds its own" if tile.get("auto_lights", True) else "finds none")
+    return ", ".join(parts)
 
 
 # In the panel's own colours (--card, --ink, --edge, --soft), so it reads in
 # the light theme and the dark one alike.
 _CSS = """
-.lxwrap { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
-.lxlist { flex: 0 0 280px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
-.lxin { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--edge);
-  background: var(--card); color: var(--ink); font: inherit; }
-.lxin option { background: var(--card); color: var(--ink); }
-.lxgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 70vh; overflow-y: auto; }
-.lxtile { border: 1px solid var(--edge); border-radius: 8px; padding: 4px; background: var(--card);
-  cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink); font: inherit; }
-.lxtile img { width: 100%; height: 56px; object-fit: contain; }
-.lxtile span { font-size: 11px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.lxtile.on { border-color: #f0a64f; box-shadow: 0 0 0 1px #f0a64f; }
-.lxtile.lit span::after { content: " 💡"; }
-.lxgroup { grid-column: 1 / -1; font-size: 11px; font-weight: 700; color: var(--soft); margin-top: 6px; }
-.lxmain { flex: 1 1 520px; min-width: 300px; }
-.lxbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.lxdlg { width: min(980px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--edge);
+  border-radius: 14px; background: var(--card); color: var(--ink); padding: 14px 16px; }
+.lxdlg::backdrop { background: rgba(0, 0, 0, .45); }
+.lxbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.lxclose { margin-left: auto; background: none; border: 1px solid var(--edge); border-radius: 8px;
+  color: var(--ink); cursor: pointer; padding: 4px 10px; font: inherit; }
 .lxseg { display: inline-flex; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
 .lxseg button { background: none; border: 0; color: var(--ink); padding: 5px 10px; cursor: pointer; font: inherit; }
 .lxseg button.on { background: #f0a64f; color: #1b130a; }
-.lxstage { position: relative; height: 460px; border-radius: 12px; overflow: hidden; background: #6f8a4f;
+.lxstage { position: relative; height: min(460px, 55vh); border-radius: 12px; overflow: hidden; background: #6f8a4f;
   display: flex; align-items: center; justify-content: center; user-select: none; }
 .lxbox { position: relative; }
 .lxbox img { display: block; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none; }
@@ -201,48 +174,50 @@ _CSS = """
 """
 
 _SCRIPT = r"""
-  var tiles = LX.tiles, N = LX.night || {}, S = LX.sun || {};
-  var cur = null, pic = 'v', sel = -1, time = 'night', saveT = null;
-  var grid = document.getElementById('lxgrid'), q = document.getElementById('lxq'),
-      catSel = document.getElementById('lxcat'), only = document.getElementById('lxonly'),
-      stage = document.getElementById('lxstage'), msg = document.getElementById('lxmsg');
+  var dlg = document.getElementById('lxdlg');
+  if (!dlg) return;
+  var N = {}, S = {}, paintedFirst = false;
+  var cur = null, card = null, pic = 'v', sel = -1, time = 'night', saveT = null;
+  var stage = document.getElementById('lxstage'), msg = document.getElementById('lxmsg');
   function art(v) { return '/dodoland/tiles/art/' + v; }
-  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
-  // Town buildings first: they are what every drawn town is made of.
-  var cats = []; tiles.forEach(function (t) { if (cats.indexOf(t.cat) < 0) cats.push(t.cat); });
-  cats.sort(function (a, b) { return (b === LX.town_cat) - (a === LX.town_cat) || a.localeCompare(b); });
-  catSel.innerHTML = '<option value="">Every category</option>' + cats.map(function (c) {
-    return '<option>' + esc(c) + '</option>'; }).join('');
   function lightsOf(t) { return (pic === 'up' ? t.ulights : t.lights) || []; }
   function mine() { return pic === 'up' ? (cur.ulights = cur.ulights || []) : (cur.lights = cur.lights || []); }
-  function hasLights(t) { return (t.lights && t.lights.length) || (t.ulights && t.ulights.length); }
-  function renderGrid() {
-    var term = q.value.toLowerCase(), c = catSel.value, html = '', last = null, n = 0;
-    tiles.filter(function (t) {
-      return (!c || t.cat === c) && (!term || t.name.toLowerCase().indexOf(term) >= 0) && (!only.checked || hasLights(t));
-    }).sort(function (a, b) { return cats.indexOf(a.cat) - cats.indexOf(b.cat); }).slice(0, 300).forEach(function (t) {
-      if (!c && t.cat !== last) { html += '<div class="lxgroup">' + esc(t.cat) + '</div>'; last = t.cat; }
-      n++;
-      html += '<button type="button" class="lxtile' + (cur && cur.id === t.id ? ' on' : '') + (hasLights(t) ? ' lit' : '') +
-        '" data-id="' + t.id + '" title="' + esc(t.name) + '"><img loading="lazy" alt="" src="' +
-        art(t.up && LX.painted_first ? t.up : t.v) + '"><span>' + esc(t.name) + '</span></button>';
-    });
-    grid.innerHTML = n ? html : '<p class="muted lxsmall">Nothing matches.</p>';
-    grid.querySelectorAll('.lxtile').forEach(function (b) {
-      b.onclick = function () { choose(b.dataset.id); };
-    });
+
+  // Opened from a tile card's Edit lights button.
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('.tllights');
+    if (!b) return;
+    ev.preventDefault();
+    open(b.dataset.tile, b.closest('.tltile'));
+  });
+  function open(id, from) {
+    card = from; cur = null; sel = -1; msg.textContent = '';
+    stage.innerHTML = '<div class="lxhint">Loading…</div>';
+    document.getElementById('lxname').textContent = 'Lights';
+    if (!dlg.open) dlg.showModal();
+    fetch('/api/dodoland/lights/' + encodeURIComponent(id))
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { stage.innerHTML = '<div class="lxhint">' + (res.error || 'Not found.') + '</div>'; return; }
+        N = res.night || {}; S = res.sun || {}; paintedFirst = res.painted_first;
+        cur = res.tile;
+        pic = cur.up && paintedFirst ? 'up' : 'v';
+        document.getElementById('lxname').textContent = '💡 ' + cur.name;
+        document.getElementById('lxpics').hidden = !cur.up;
+        document.getElementById('lxauto').checked = cur.auto !== false;
+        renderStage();
+      })
+      .catch(function (err) { stage.innerHTML = '<div class="lxhint">' + String(err) + '</div>'; });
   }
-  [q, catSel, only].forEach(function (el) { el.addEventListener('input', renderGrid); });
-  function choose(id) {
-    cur = tiles.filter(function (t) { return t.id === id; })[0] || null;
-    if (!cur) return;
-    pic = cur.up && LX.painted_first ? 'up' : 'v';
-    sel = -1;
-    document.getElementById('lxname').textContent = cur.name;
-    document.getElementById('lxpics').hidden = !cur.up;
-    document.getElementById('lxauto').checked = cur.auto !== false;
-    renderGrid(); renderStage();
-  }
+  document.getElementById('lxclose').onclick = function () { dlg.close(); };
+  dlg.addEventListener('close', function () {
+    // The card says what it has now.
+    if (cur && card) {
+      var s = card.querySelector('.tllightsum');
+      var own = (cur.lights || []).length + (cur.ulights || []).length;
+      if (s) s.textContent = (own ? own + ' of my own' : 'none of my own') + ', ' + (cur.auto !== false ? 'finds its own' : 'finds none');
+    }
+  });
   document.querySelectorAll('#lxpics button').forEach(function (b) {
     b.onclick = function () { pic = b.dataset.pic; sel = -1; renderStage(); };
   });
@@ -292,7 +267,7 @@ _SCRIPT = r"""
   function fit() {
     var w = pic === 'up' ? cur.uw : cur.w, h = pic === 'up' ? cur.uh : cur.h;
     // Big enough to work on, with room round it for the light to spread.
-    var maxW = Math.min(stage.clientWidth - 80, 560), maxH = stage.clientHeight - 80;
+    var maxW = Math.min(stage.clientWidth - 80, 620), maxH = stage.clientHeight - 60;
     var k = Math.min(maxW / Math.max(1, w), maxH / Math.max(1, h), 12);
     var dw = Math.max(1, Math.round(w * k));
     return {w: dw, h: Math.max(1, Math.round(h * k)), cell: dw / picCells()};
@@ -332,8 +307,8 @@ _SCRIPT = r"""
     return (stamps[key] = s);
   }
   // The same night the map draws: the sky over everything, light cut out
-  // round each light (its pool on the ground at the tile's foot), and a warm
-  // glow over what it lights; with what the map finds by itself, if it may.
+  // round each light, and a warm glow over what it lights; with what the map
+  // finds by itself, if it may.
   function drawGlow() {
     var c = cv.getContext('2d');
     c.clearRect(0, 0, cv.width, cv.height);
@@ -343,10 +318,10 @@ _SCRIPT = r"""
     for (var i = 0; i <= 4; i++) { var a = st.at(i / 4); g.addColorStop(i / 4, 'rgba(' + a.rgb.join(',') + ',' + a.a.toFixed(3) + ')'); }
     c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
     c.fillStyle = g; c.fillRect(0, 0, cv.width, cv.height);
-    var o = origin(), foot = o.y + cur.foot * dims.h, lights = [];
+    var o = origin(), lights = [];
     lightsOf(cur).forEach(function (L) {
-      var x = o.x + L.x * dims.w, y = o.y + L.y * dims.h;
-      lights.push({x: x, y: Math.max(y, foot), top: y, r: L.radius * dims.cell, k: L.intensity, rgb: hexRgb(L.colour)});
+      var x = o.x + L.x * dims.w, y = o.y + L.y * dims.h, r = L.radius * dims.cell;
+      lights.push({x: x, y: y + r * 0.15, top: y, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
     });
     var f = cur.auto !== false && found[picSrc()], spill = N.spill == null ? 6 : N.spill;
     if (f) f.spots.forEach(function (sp) {
@@ -403,7 +378,7 @@ _SCRIPT = r"""
     d.style.left = (o.x + L.x * dims.w) + 'px'; d.style.top = (o.y + L.y * dims.h) + 'px';
   }
   function placeRing() {
-    var ring = stage.querySelector('.lxring'), L = lightsOf(cur)[sel];
+    var ring = stage.querySelector('.lxring'), L = cur && lightsOf(cur)[sel];
     if (!L) { if (ring) ring.remove(); return; }
     if (!ring) { ring = document.createElement('div'); ring.className = 'lxring'; stage.appendChild(ring); }
     var o = origin(), r = L.radius * dims.cell;
@@ -455,8 +430,8 @@ _SCRIPT = r"""
     list.push({x: +Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width)).toFixed(4),
                y: +Math.max(0, Math.min(1, (ev.clientY - b.top) / b.height)).toFixed(4),
                colour: last ? last.colour : '#ffc46b', radius: last ? last.radius : 3, intensity: last ? last.intensity : 1});
-    sel = list.length - 1;
-    drawDots(); drawGlow(); renderChips(); save();
+    select(list.length - 1);
+    save();
   });
   // Choosing a light; keepDots when its dot is under the pointer right now.
   function select(i, keepDots) {
@@ -503,11 +478,11 @@ _SCRIPT = r"""
     drawDots(); drawGlow(); renderChips(); save();
   }
   document.getElementById('lxdel').onclick = removeSelected;
-  window.addEventListener('keydown', function (ev) {
+  dlg.addEventListener('keydown', function (ev) {
     var tag = document.activeElement && document.activeElement.tagName;
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && cur && sel >= 0 && tag !== 'INPUT' && tag !== 'SELECT') removeSelected();
   });
-  window.addEventListener('resize', function () { if (cur) renderStage(); });
+  window.addEventListener('resize', function () { if (cur && dlg.open) renderStage(); });
 
   // Saved a moment after the last change, through the tile library.
   function save() {
@@ -522,11 +497,8 @@ _SCRIPT = r"""
         .then(function (r) { return r.json(); })
         .then(function (res) {
           msg.textContent = res.ok ? 'Saved. The map shows it after a reload.' : (res.error || 'That did not save.');
-          renderGrid();
         })
         .catch(function (err) { msg.textContent = String(err); });
     }, 450);
   }
-  renderGrid();
-  if (LX_PICK) choose(LX_PICK);
 """

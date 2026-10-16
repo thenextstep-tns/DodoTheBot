@@ -22,10 +22,6 @@ Python never runs this; :mod:`web.dodoland.mappage` and
 :mod:`web.dodoland.lights_ui` each include it in their page's script.
 """
 
-# A placed piece stands at this fraction of its picture's height (the map's
-# .dlpiece is translate(-50%, -85%)), which is where a light's pool falls.
-PIECE_FOOT = 0.85
-
 # The sky's colours from the day's edge into the night (dusk) and from the
 # night into the day (dawn): the defaults of dodoland_dusk_colours and
 # dodoland_dawn_colours.
@@ -43,7 +39,7 @@ def colours(text, fallback: list) -> list:
             out.append(v)
     return out or list(fallback)
 
-SCRIPT = f"  var PIECE_FOOT = {PIECE_FOOT};" + r"""
+SCRIPT = r"""
   function hexRgb(hex) {
     return [1, 3, 5].map(function (i) { return parseInt(String(hex).slice(i, i + 2), 16) || 0; });
   }

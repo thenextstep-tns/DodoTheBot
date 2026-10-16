@@ -1292,3 +1292,13 @@ picture, mirrored with a flipped piece and scaled with it.
   under the pointer), found lights shown as dashed rings with "Light them on
   the map" (= auto_lights) and "Make them mine" (turns them into own lights,
   auto off; clicking a ring does the same), Night/Dusk/Dawn/Day previews.
+
+### Lights editor is a dialog on each tile card (16 Oct 2026)
+The standalone `/dodoland/lights` page with its tile grid is gone. Each placed
+tile's card in the owner's tile library has a Light row: "💡 Edit lights" and a
+summary (`lights_ui.light_summary`); the old light_radius/colour inputs are
+gone (the model keeps them for old rows). The button opens `#lxdlg`
+(`lights_ui.dialog_html`, included only on the owner's page), which loads the
+tile from `GET /api/dodoland/lights/{tile_id}` (`api_tile_lights`, owner) and
+saves through `update_tile`. A light's pool is centred on the point again
+(y + 0.15 r), on the map and in the editor; the foot anchoring is removed.

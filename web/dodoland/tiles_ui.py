@@ -159,13 +159,23 @@ def _fields(tile: dict, ctx: _Ctx, dis: str) -> str:
        max="{tile_rules.SCALE_CEILING}" value="{tile['scale_min']}"{dis} title="Smallest">–
     <input type="number" class="tlf" data-f="scale_max" step="0.05" min="{tile_rules.SCALE_FLOOR}"
        max="{tile_rules.SCALE_CEILING}" value="{tile['scale_max']}"{dis} title="Largest">×</div>
-  <div class="tlrow" title="At night it lights the ground around it: how far, in map cells (0 = no light), and in what colour"><span class="tlk">Light</span>
-    <input type="number" class="tlf" data-f="light_radius" step="0.5" min="0" max="{tile_rules.MAX_LIGHT}"
-       value="{tile['light_radius']}"{dis}> cells
-    <input type="color" class="tlf" data-f="light_colour" value="{tile['light_colour']}"{dis}></div>
+{_light_row(tile, ctx)}
   <div class="tlrow" title="How many of this art's pixels make one map cell"><span class="tlk">Scale</span>
     <input type="number" class="tlf" data-f="cell_px" list="tlcellsizes" min="{tile_rules.MIN_CELL}"
        max="{tile_rules.MAX_CELL}" value="{tile['cell_px']}"{dis}> px per map cell</div>"""
+
+
+def _light_row(tile: dict, ctx: _Ctx) -> str:
+    """Where it glows at night: the lights editor, one tile at a time (the
+    bot owner's page only, like the editor's dialog)."""
+    if ctx.guild_id is not None or tile["placement"] != "place":
+        return ""
+    from web.dodoland import lights_ui
+
+    return (f'  <div class="tlrow" title="Where it glows at night: lights you put on its picture, and the '
+            f'ones the map finds in it by itself"><span class="tlk">Light</span>'
+            f'<button type="button" class="tllights" data-tile="{_e(tile["tile_id"])}">💡 Edit lights</button>'
+            f'<span class="tllightsum small muted">{_e(lights_ui.light_summary(tile))}</span></div>')
 
 
 def _tile_card(tile: dict, categories: list[dict], ctx: _Ctx) -> str:
@@ -202,6 +212,14 @@ def _tile_card(tile: dict, categories: list[dict], ctx: _Ctx) -> str:
   {pack}
   <span class="tlmsg small muted"></span>
 </div>"""
+
+
+def _lights_dialog(ctx: _Ctx) -> str:
+    if ctx.guild_id is not None:
+        return ""
+    from web.dodoland import lights_ui
+
+    return lights_ui.dialog_html()
 
 
 def _summary(tiles: list[dict]) -> str:
@@ -304,7 +322,6 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True, owner: 
     return f"""{_STYLE}
 <div class="tlpage" data-api="{_e(ctx.api)}">
   {'<div class="panelhead"><h1>🧱 Tile library</h1></div>' if heading else ''}
-  {'<p><a class="btn" href="/dodoland/lights">💡 Lights editor</a> where each tile glows at night</p>' if ctx.guild_id is None else ''}
   <div class="explain"><p>Everything that can be put on the map. {who}
   Each tile has a <b>layer</b>, <b>access</b> (the bot owner can always use everything),
   a <b>requirement</b> a player must reach first — a building and its tier, as the asset
@@ -324,6 +341,7 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True, owner: 
   </div></div>
   {body}
 </div>
+{_lights_dialog(ctx)}
 <datalist id="tlcellsizes">{''.join(f'<option value="{s}"></option>' for s in tile_rules.CELL_SIZES)}</datalist>
 <script>
 (function () {{

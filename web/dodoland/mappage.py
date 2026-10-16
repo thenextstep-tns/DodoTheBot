@@ -2542,13 +2542,13 @@ _SCRIPT = r"""
     var cached = nightCache && nightCache.key === viewKey;
     var lights = cached ? nightCache.lights.slice() : [], windows = cached ? nightCache.windows : [];
     // A list of lights put on a picture (the lights editor), x and y as
-    // fractions of its box b. Its pool falls on the ground at foot.
-    function pushLights(list, b, flip, foot, perCell) {
+    // fractions of its box b; each glows where it was put.
+    function pushLights(list, b, flip, perCell) {
       list.forEach(function (L) {
         var r = L.radius * perCell;
         var lx = b.left - fr.left + (flip ? 1 - L.x : L.x) * b.width, ly = b.top - fr.top + L.y * b.height;
         if (r <= 0 || lx < -r || ly < -r || lx > W + r || ly > H + r) return;
-        lights.push({x: lx, y: Math.max(ly, foot), top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
+        lights.push({x: lx, y: ly + r * 0.15, top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
       });
     }
     function seen(b) { return b.width && !(b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom); }
@@ -2561,7 +2561,7 @@ _SCRIPT = r"""
       var img = el.querySelector('img');
       if (!img) return;
       var b = img.getBoundingClientRect();
-      pushLights(a.gl, b, el.classList.contains('flip'), b.top - fr.top + b.height * PIECE_FOOT, cellPx * (p.s || 1));
+      pushLights(a.gl, b, el.classList.contains('flip'), cellPx * (p.s || 1));
     });
     // Windows: what has warm lit windows in its picture, in towns active lately.
     function lit(townId) { return !townId || (byId[townId] && byId[townId].lit); }
@@ -2587,7 +2587,7 @@ _SCRIPT = r"""
       // A town drawn as its hall's painting: that tier's lights on it.
       if (town && art.tagName === 'IMG' && person && person.hall_art) {
         var ha = assetById(person.hall_art.a);
-        if (ha && ha.gl) pushLights(ha.gl, b, false, b.bottom - fr.top, cellPx);
+        if (ha && ha.gl) pushLights(ha.gl, b, false, cellPx);
         if (ha && ha.al === false) own = false;
       }
       // A drawn town: each building in it at its tier, with the lights put
@@ -2607,9 +2607,9 @@ _SCRIPT = r"""
             list.forEach(function (L) {
               var ux = L.x * 120 - 60, uy = L.y * 78 - 64;
               var lx = m.a * ux + m.c * uy + m.e - fr.left, ly = m.b * ux + m.d * uy + m.f - fr.top;
-              var foot = m.b * ux + m.f - fr.top, r = L.radius * perCell;
+              var r = L.radius * perCell;
               if (r <= 0 || lx < -r || ly < -r || lx > W + r || ly > H + r) return;
-              lights.push({x: lx, y: Math.max(ly, foot), top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
+              lights.push({x: lx, y: ly + r * 0.15, top: ly, r: r, k: L.intensity, rgb: hexRgb(L.colour)});
             });
           }
           if (a.al === false) {

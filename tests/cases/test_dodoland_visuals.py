@@ -115,7 +115,7 @@ night_fn = js[js.index("function drawNight"):]
 assert "'.dltown .dlname'" in night_fn, "town names are hidden by the night"
 assert "getComputedStyle(n).opacity" in night_fn, "a hidden name lifts the night off a box of ground"
 assert "detail(b.width)" in night_fn, "from afar every picture's lights still show as blobs"
-assert "PIECE_FOOT" in night_fn and "Math.max(ly, foot)" in night_fn, "a light's pool is not on the ground"
+assert "y: ly + r * 0.15, top: ly" in night_fn, "a light does not glow where it was put"
 assert ".lot[data-building]" in night_fn and "tierAsset(key, tier)" in night_fn, "drawn towns ignore their tiers' lights"
 print("night           lights (tiles with a light) and lit windows cut the night")
 print("night           a light is small and brighter than around it, and lights its surroundings")
@@ -159,7 +159,12 @@ for bad in ("lamp", [{"x": 0.5}], [{"x": 0, "y": 0, "colour": "red"}]):
 print("lights          lights placed on a picture are clipped into range; the old reach becomes one")
 editor = pathlib.Path("web/dodoland/lights_ui.py").read_text(encoding="utf-8")
 routes = pathlib.Path("web/dodoland/__init__.py").read_text(encoding="utf-8")
-assert 'web.get("/dodoland/lights", owner(lights_page))' in routes, "the lights editor is not the owner's"
+assert 'web.get("/api/dodoland/lights/{tile_id}", owner(api_tile_lights))' in routes, "the lights editor is not the owner's"
+from web.dodoland import tiles_ui  # noqa: E402
+owner_page = tiles_ui.tiles_html(lib)
+assert 'class="tllights"' in owner_page and 'id="lxdlg"' in owner_page, "a tile card has no Edit lights"
+guild_page = tiles_ui.tiles_html(lib, guild_id=7, owner=False)
+assert "tllights" not in guild_page and "lxdlg" not in guild_page, "a server's admins get the lights editor"
 assert "update_tile" in editor and "uploaded_lights" in editor and "dblclick" in editor
 print("lights editor   owner-only, saves through the tile library")
 shadow_fn = js[js.index("function shadowFor"):js.index("function shadowsOn")]
