@@ -50,6 +50,7 @@ from aiohttp import web
 from helpers.dodoland import flourish as flourish_rules
 from helpers.dodoland import standing
 from helpers.dodoland import tiles as tile_rules
+from helpers.dodoland import terrainart
 from helpers.dodoland import townart
 from helpers.dodoland import towns as town_rules
 from helpers.dodoland import store as store_module
@@ -487,6 +488,14 @@ async def map_page(request: web.Request):
         "autotile_inset": max(0.0, min(0.2, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_inset")))),
         "autotile_blend": max(0.0, min(3.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_blend")))),
         "bake_budget_ms": max(1, min(50, int(bot.dodoland_params.get(guild.id, "dodoland_bake_budget_ms")))),
+        # Ground muting, the same the server applies to the zoomed-out picture.
+        "ground_mute": terrainart.mute_settings(bot.dodoland_params, guild.id),
+        # Baked shadows under what stands (dodoland_shadow_*).
+        "shadow": {"strength": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_strength")))),
+                   "contact": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_contact")))),
+                   "lean": max(-2.0, min(2.0, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_lean")))),
+                   "length": max(0.05, min(1.5, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_length")))),
+                   "blur": max(0.0, min(0.2, float(bot.dodoland_params.get(guild.id, "dodoland_shadow_blur"))))},
         "autotile_variation": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_variation")))),
         # The walls choice on a town's card (dodoland_walls_option).
         "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
@@ -861,6 +870,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlpiece img { display: block; width: 100%; height: auto;
   -webkit-user-drag: none; user-select: none; pointer-events: none; }
 .dlpiece.flip img { transform: scaleX(-1); }
+/* A baked shadow behind its picture (made already mirrored for a mirrored piece). */
+.dlpiece img.dlshadow, .dltown .dlart img.dlshadow { position: absolute; z-index: -1; max-width: none;
+  pointer-events: none; transform: none; image-rendering: auto; }
 /* Held and hovered pieces are marked by boxes on the frame, in screen pixels,
    not by outlines on the pieces. Anything drawn inside the zoomed world is
    scaled by the zoom, and a browser rounds an outline thinner than one pixel up
@@ -1312,6 +1324,7 @@ _SCRIPT = r"""
       if (D.cells_w) el.style.width = (person.hall_art.wc / D.cells_w * 100) + '%';
       el.querySelector('.dlart').innerHTML = '<img alt="" src="' + assetUrl(person.hall_art.a) +
         '?v=' + person.hall_art.v + '">' + flagHtml(person);
+      addShadow(el.querySelector('.dlart'), assetUrl(person.hall_art.a) + '?v=' + person.hall_art.v, false);
     } else if (person.hall_piece) {
       el.classList.add('pictured', 'bypiece');
     }
@@ -2198,6 +2211,92 @@ _SCRIPT = r"""
     return (D.decorsize * WS * piece.s / nat.w * 100) + '%';
   }
 
+
+  // --- baked shadows ------------------------------------------------------ //
+  // Under everything that stands: a soft cast shadow (its own outline, leaning
+  // away from the light at the top left and flattened onto the ground) and a
+  // darker patch where it meets the ground. Made once per picture, as a
+  // picture, and shown behind it: nothing is drawn per frame, so it costs
+  // nothing to pan or zoom. dodoland_shadow_* in the panel.
+  var shadows = {};
+  function shadowFor(src, flip, done) {
+    var S = D.sizes.shadow || {};
+    var key = src + (flip ? '|f' : ''), hit = shadows[key];
+    if (hit && hit.url) { done(hit); return; }
+    if (hit) { hit.wait.push(done); return; }
+    hit = shadows[key] = {wait: [done]};
+    var im = new Image();
+    im.decoding = 'async';
+    im.onload = function () {
+      try {
+        // Small: it is blurred anyway, and a few hundred pixels make it quickly.
+        var sc = Math.min(1, 240 / Math.max(im.naturalWidth, im.naturalHeight));
+        var w = Math.max(1, Math.round(im.naturalWidth * sc)), h = Math.max(1, Math.round(im.naturalHeight * sc));
+        var sil = document.createElement('canvas'); sil.width = w; sil.height = h;
+        var sx = sil.getContext('2d');
+        if (flip) { sx.translate(w, 0); sx.scale(-1, 1); }
+        sx.drawImage(im, 0, 0, w, h);
+        sx.setTransform(1, 0, 0, 1, 0, 0);
+        // Where it stands: its lowest painted row, and how wide it is there.
+        var px = sx.getImageData(0, 0, w, h).data, base = h - 1, left = w, right = 0;
+        for (var y = h - 1; y >= 0; y--) {
+          var any = false;
+          for (var x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 96) { any = true; break; }
+          if (any) { base = y; break; }
+        }
+        for (var yy = Math.max(0, base - Math.round(h * 0.12)); yy <= base; yy++)
+          for (var xx = 0; xx < w; xx++) if (px[(yy * w + xx) * 4 + 3] > 96) { left = Math.min(left, xx); right = Math.max(right, xx); }
+        if (right <= left) { left = 0; right = w; }
+        sx.globalCompositeOperation = 'source-in'; sx.fillStyle = '#000'; sx.fillRect(0, 0, w, h);
+        var lean = S.lean == null ? 0.6 : S.lean, flat = S.length == null ? 0.42 : S.length;
+        var blur = Math.max(0.5, (S.blur == null ? 0.035 : S.blur) * h), pad = Math.ceil(blur * 3) + 2;
+        var reach = Math.ceil(base * lean * flat) + 1;
+        var cv = document.createElement('canvas');
+        cv.width = w + reach + pad * 2; cv.height = h + pad * 2;
+        var c = cv.getContext('2d');
+        // The cast shadow: x' = x + lean * flat * (base - y), y' = base - flat * (base - y).
+        c.save();
+        c.filter = 'blur(' + blur.toFixed(1) + 'px)';
+        c.globalAlpha = S.strength == null ? 0.32 : S.strength;
+        c.setTransform(1, 0, -lean * flat, flat, pad + lean * flat * base, pad + base * (1 - flat));
+        c.drawImage(sil, 0, 0);
+        c.restore();
+        // The contact patch, a soft ellipse where it meets the ground.
+        var ao = S.contact == null ? 0.4 : S.contact;
+        if (ao > 0) {
+          var cxp = pad + (left + right) / 2, rx = Math.max(2, (right - left) * 0.56), ry = Math.max(1, rx * 0.2);
+          c.save();
+          c.translate(cxp, pad + base); c.scale(1, ry / rx);
+          var g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+          g.addColorStop(0, 'rgba(14,18,26,' + ao + ')'); g.addColorStop(1, 'rgba(14,18,26,0)');
+          c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, Math.PI * 2); c.fill();
+          c.restore();
+        }
+        cv.toBlob(function (blob) {
+          if (!blob) return;
+          hit.url = URL.createObjectURL(blob);
+          // Where it sits against the picture's own box, in percent of it.
+          hit.left = -pad / w * 100; hit.top = -pad / h * 100;
+          hit.width = cv.width / w * 100; hit.height = cv.height / h * 100;
+          var wait = hit.wait; hit.wait = [];
+          wait.forEach(function (f) { f(hit); });
+        }, 'image/webp', 0.9);
+      } catch (e) { hit.failed = true; }
+    };
+    im.src = src;
+  }
+  function addShadow(el, src, flip) {
+    if (!D.sizes.shadow || !(D.sizes.shadow.strength > 0 || D.sizes.shadow.contact > 0)) return;
+    shadowFor(src, flip, function (s) {
+      if (!el.isConnected && !el.parentNode) return;
+      var sh = document.createElement('img');
+      sh.className = 'dlshadow'; sh.alt = ''; sh.src = s.url;
+      sh.style.left = s.left + '%'; sh.style.top = s.top + '%';
+      sh.style.width = s.width + '%'; sh.style.height = s.height + '%';
+      el.appendChild(sh);
+    });
+  }
+
   // Which pixels of a piece's picture are painted, read once per picture
   // into a small alpha map (pictures are ours, so the canvas is not tainted).
   var alphaMaps = {};
@@ -2271,9 +2370,11 @@ _SCRIPT = r"""
     stackZ(el, piece);
     var w = pieceWidth(piece);
     if (w) el.style.width = w;
-    el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + assetUrl(piece.a) +
-      (pieceVariant(piece) ? '?v=' + pieceVariant(piece) : '') + '">' +
+    var picture = assetUrl(piece.a) + (pieceVariant(piece) ? '?v=' + pieceVariant(piece) : '');
+    el.innerHTML = '<img alt="" loading="lazy" decoding="async" src="' + picture + '">' +
       (hallPieces[piece.id] ? flagHtml(hallPieces[piece.id]) : '');
+    // Its shadow, behind it, for everything that stands (not flat ground).
+    if (stackOf(piece) !== 'flat') addShadow(el, picture, !!piece.f);
 
     // Dragging, and clicking, from one gesture. The frame owns panning and
     // takes pointer capture as soon as a drag starts, so a piece that only

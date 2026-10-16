@@ -108,6 +108,50 @@ def pattern_layout(key: str, tile: dict, dims: Optional[dict] = None,
     return {"size": [round(size_w, 4), round(size_h, 4)], "block": block, "px": round(cell_px, 3)}
 
 
+def mute_rgb(rgb, mute: dict) -> tuple:
+    """One colour pushed into the background, the way every ground texture is
+    (the page's ``groundMute`` does the same to each pixel): its contrast
+    pulled towards a mid-tone, its saturation lowered, and a little of a warm
+    tint mixed in. ``mute`` is :func:`mute_settings`; at 1, 1 and 0 it is the
+    colour unchanged."""
+    contrast, sat, mid = mute["contrast"], mute["saturation"], mute["mid"]
+    tr, tg, tb = mute["tint"]
+    amount = mute["tint_amount"]
+    r, g, b = (c / 255 for c in rgb)
+    r, g, b = (mid + (c - mid) * contrast for c in (r, g, b))
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    r, g, b = (lum + (c - lum) * sat for c in (r, g, b))
+    r, g, b = (c * (1 - amount) + t / 255 * amount for c, t in ((r, tr), (g, tg), (b, tb)))
+    return tuple(max(0, min(255, round(c * 255))) for c in (r, g, b))
+
+
+def mute_hex(colour: str, mute: dict) -> str:
+    text = str(colour or "")
+    if not (text.startswith("#") and len(text) == 7) or mute_is_off(mute):
+        return text
+    r, g, b = mute_rgb(tuple(int(text[i:i + 2], 16) for i in (1, 3, 5)), mute)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def mute_is_off(mute: dict) -> bool:
+    return mute["contrast"] == 1 and mute["saturation"] == 1 and mute["tint_amount"] == 0
+
+
+def mute_settings(params, guild_id: int) -> dict:
+    """The server's ground muting (``dodoland_ground_*``), clamped."""
+    def num(key, lo, hi):
+        return max(lo, min(hi, float(params.get(guild_id, key))))
+    tint = str(params.get(guild_id, "dodoland_ground_tint") or "#d8b98c").strip()
+    try:
+        rgb = [int(tint[i:i + 2], 16) for i in (1, 3, 5)] if tint.startswith("#") and len(tint) == 7 else [216, 185, 140]
+    except ValueError:
+        rgb = [216, 185, 140]
+    return {"contrast": num("dodoland_ground_contrast", 0.0, 2.0),
+            "saturation": num("dodoland_ground_saturation", 0.0, 2.0),
+            "mid": num("dodoland_ground_midtone", 0.0, 1.0),
+            "tint": rgb, "tint_amount": num("dodoland_ground_tint_amount", 0.0, 1.0)}
+
+
 def kind_fill(kind: dict, colours: dict) -> str:
     """The flat colour a kind is drawn in when it is not textured: its tile's
     average colour if it has one, else its palette slot."""

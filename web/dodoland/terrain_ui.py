@@ -404,6 +404,28 @@ SCRIPT = r"""
     }
     return im.complete && im.naturalWidth ? im : null;
   }
+  // A ground texture pushed into the background (dodoland_ground_*), the same
+  // as terrainart.mute_rgb does to the zoomed-out picture's colours: contrast
+  // pulled towards a mid-tone, saturation lowered, a little warm tint. Done
+  // once to each texture as it is prepared, never while drawing.
+  function groundMute(cv) {
+    var M = D.sizes.ground_mute;
+    if (!M || (M.contrast === 1 && M.saturation === 1 && !M.tint_amount)) return cv;
+    var x = cv.getContext('2d'), w = cv.width, h = cv.height;
+    if (!w || !h) return cv;
+    var img = x.getImageData(0, 0, w, h), d = img.data;
+    var c = M.contrast, s = M.saturation, mid = M.mid * 255, t = M.tint_amount;
+    var tr = M.tint[0], tg = M.tint[1], tb = M.tint[2];
+    for (var i = 0; i < d.length; i += 4) {
+      if (!d[i + 3]) continue;
+      var r = mid + (d[i] - mid) * c, g = mid + (d[i + 1] - mid) * c, b = mid + (d[i + 2] - mid) * c;
+      var l = 0.299 * r + 0.587 * g + 0.114 * b;
+      r = l + (r - l) * s; g = l + (g - l) * s; b = l + (b - l) * s;
+      d[i] = r * (1 - t) + tr * t; d[i + 1] = g * (1 - t) + tg * t; d[i + 2] = b * (1 - t) + tb * t;
+    }
+    x.putImageData(img, 0, 0);
+    return cv;
+  }
   // A kind's 4x4 block of tiles at a detail, once; null until its art is in.
   function bakeBlock(k, res) {
     var key = k + '@' + res;
@@ -425,7 +447,7 @@ SCRIPT = r"""
       for (var x = 0; x < 4; x++)
         ctx.drawImage(imgs[j * 4 + x], Math.round(x * cw), Math.round(j * ch),
                       Math.round((x + 1) * cw) - Math.round(x * cw), Math.round((j + 1) * ch) - Math.round(j * ch));
-    bake.blocks[key] = cv;
+    bake.blocks[key] = groundMute(cv);
     return cv;
   }
   // The fill for kind k on a canvas whose top-left is world cell (ox, oy):
@@ -669,7 +691,7 @@ SCRIPT = r"""
     }
     if (mode.indexOf('x') >= 0) cv = pass(cv, true);
     if (mode.indexOf('y') >= 0) cv = pass(cv, false);
-    bake.autoImgs[key] = cv;
+    bake.autoImgs[key] = groundMute(cv);
     return cv;
   }
   // A variation, faded out towards its edges so it melts into the ground.

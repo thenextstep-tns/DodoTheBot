@@ -1168,3 +1168,19 @@ tool (bake_bench.py), not in the repo.
   bounded by `dodoland_ground_memory_mb` (256) as well as the chunk count;
   on-screen chunks are never dropped. Measured: encoding alone was 110-160 ms
   worst frame for 30 chunks, so the svg redraw/decoding was the rest.
+
+### Cozy pass: muted ground and baked shadows (16 Oct 2026)
+* **Muted ground** (`dodoland_ground_contrast` 0.85, `_saturation` 0.92,
+  `_midtone` 0.45, `_tint` #d8b98c at `_tint_amount` 0.06):
+  `terrainart.mute_rgb` / `mute_settings`. Server side it mutes the palette
+  (`terrain_api._colours`) and every kind's flat colour (`_muted_kinds`) for
+  the zoomed-out picture, the overview and the rle `fill`s (the picture's cache
+  key includes the settings). The page's `groundMute` applies the same per
+  pixel, once, to each texture as it is prepared (`bakeBlock`, `autoProc`).
+* **Baked shadows** (`dodoland_shadow_strength` 0.38, `_contact` 0.4, `_lean`
+  0.6, `_length` 0.42, `_blur` 0.035): `shadowFor` makes, once per picture (and
+  mirror), a small blurred, sheared, flattened silhouette plus a contact
+  ellipse at its lowest painted row, as a WebP blob; `addShadow` puts it behind
+  the picture (`img.dlshadow`, z-index -1). Every standing piece (not flat) and
+  a town drawn by its hall's painted picture get one. Nothing per frame.
+  Forest-brush trees and generated SVG towns have none yet.

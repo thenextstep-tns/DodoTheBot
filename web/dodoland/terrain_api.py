@@ -133,8 +133,21 @@ def _bad(error: str):
 
 
 def _colours(bot, guild_id: int) -> dict:
+    """The world's palette, muted like its ground (``terrainart.mute_settings``)."""
     row = bot.dodoland_terrain.world(guild_id)
-    return palette_rules.resolve(world=row.get("palette"))
+    mute = terrainart.mute_settings(bot.dodoland_params, guild_id)
+    return {k: terrainart.mute_hex(v, mute) for k, v in palette_rules.resolve(world=row.get("palette")).items()}
+
+
+def _muted_kinds(bot, guild_id: int, kinds: list) -> list:
+    """Kinds with their flat colour muted like the textures are."""
+    mute = terrainart.mute_settings(bot.dodoland_params, guild_id)
+    return [dict(k, hex=terrainart.mute_hex(k.get("hex"), mute)) if k and k.get("hex") else k for k in kinds]
+
+
+def _mute_key(bot, guild_id: int) -> str:
+    m = terrainart.mute_settings(bot.dodoland_params, guild_id)
+    return f'{m["contrast"]}|{m["saturation"]}|{m["mid"]}|{m["tint"]}|{m["tint_amount"]}'
 
 
 def _overview_step(cells_w: int) -> int:
@@ -244,7 +257,8 @@ def picture_bytes(bot, guild_id: int) -> bytes:
     _fresh(guild_id, world)
     if not world["cells_w"]:
         return b""
-    ver = version(guild_id)
+    # The muting is part of the picture: changing it in the panel redraws it.
+    ver = version(guild_id) + "|" + _mute_key(bot, guild_id)
     hit = _PICTURES.get(int(guild_id))
     if hit and hit[0] == ver:
         return hit[1]
@@ -252,7 +266,7 @@ def picture_bytes(bot, guild_id: int) -> bytes:
     tiles = {t["tile_id"]: t for t in bot.dodoland_tiles.tiles(guild_id)}
     data = terrain_raster.picture(
         bot.dodoland_terrain, guild_id, _colours(bot, guild_id),
-        kinds=T.sync_tile_kinds(world["kinds"], tiles),
+        kinds=_muted_kinds(bot, guild_id, T.sync_tile_kinds(world["kinds"], tiles)),
         shading=float(params.get(guild_id, "dodoland_overview_shading")),
         grain=float(params.get(guild_id, "dodoland_overview_grain")))
     _PICTURES[int(guild_id)] = (ver, data)
@@ -323,7 +337,7 @@ async def terrain_overview(request: web.Request):
     if not world["cells_w"]:
         return web.Response(text="", content_type="image/svg+xml")
     step = _overview_step(world["cells_w"])
-    key = (guild.id, T.TERRAIN, "overview", step)
+    key = (guild.id, T.TERRAIN, "overview", step, _mute_key(bot, guild.id))
     if key not in _CACHE:
         def draw():
             cxs, cys = store.chunk_counts(guild.id)
@@ -370,7 +384,7 @@ async def terrain_rle(request: web.Request):
         return _bad("Too many chunks at once; zoom in or ask for fewer.")
     rows = store.snapshot(guild.id, wanted, layer=T.TERRAIN)
     tiles = _tile_index(bot, guild)
-    kinds = T.sync_tile_kinds(world["kinds"], tiles)
+    kinds = _muted_kinds(bot, guild.id, T.sync_tile_kinds(world["kinds"], tiles))
     used = [tiles[k["tile_id"]] for k in kinds if k.get("tile_id") in tiles]
     dims = bot.dodoland_tiles.art_sizes(v for t in used for v in t["variants"])
     shrink = float(bot.dodoland_params.get(guild.id, "dodoland_tile_scale"))
