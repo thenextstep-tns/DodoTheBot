@@ -61,6 +61,7 @@ def dodoland_routes() -> list:
     from web.dodoland.roads_api import roads_layer
     from web.dodoland import player_map
     from web.dodoland.mappage import map_page
+    from web.dodoland.lights_ui import lights_page
     from web.dodoland.tiles_ui import (
         api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
     )
@@ -76,6 +77,7 @@ def dodoland_routes() -> list:
     owner = require_owner
     return [
         web.get("/dodoland/tiles", owner(tiles_page)),
+        web.get("/dodoland/lights", owner(lights_page)),
         web.get("/dodoland/tiles/art/{vid}", owner(tile_art)),
         web.post("/api/dodoland/tiles", owner(api_tiles)),
         web.get("/guild/{gid}/dodoland", configure(dodoland_page)),

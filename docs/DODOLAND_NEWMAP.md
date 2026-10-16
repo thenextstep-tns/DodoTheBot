@@ -1246,3 +1246,20 @@ a time (single acts unchanged). Test: `test_dodoland_writer.py` replays a burst
 past both caps both ways and compares every row and pair. Days are stamped at
 queue time, so a batch spanning midnight is right. Needs a full restart (store.py
 is a startup helper).
+
+### Lights editor (16 Oct 2026)
+`/dodoland/lights` (owner-only, linked from the tile library; `?tile=<id>`
+preselects): `web/dodoland/lights_ui.py`. Pick a tile from a searchable,
+category-filtered grid; its picture is shown large with the map's own night
+over it. Double-click adds a light, drag moves it, click selects it; per light:
+colour, radius (map cells, previewed at true scale from the tile's width in
+cells, `mappage._tile_cells` / `uploaded_sizes`) and intensity (0-2), Delete
+removes it. Drawn and painted (uploaded) pictures have their own lights.
+"Also find lit windows automatically" is per tile. Autosaves (debounced) via
+`update_tile`. Model (`helpers/dodoland/tiles.py`): `lights`, `uploaded_lights`
+(`[{x, y, colour, radius, intensity}]`, x/y as fractions of the picture,
+`clean_lights`, max `MAX_LIGHTS` = 16), `auto_lights` (default on). The old
+single `light_radius`/`light_colour` reads as one light at (0.5, 0.25);
+saving points sets `light_radius` to 0. The map sends `gl` (the points for the
+picture it draws) and `al: false`; `drawNight` places each point on the piece's
+picture, mirrored with a flipped piece and scaled with it.

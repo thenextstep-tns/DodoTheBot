@@ -88,7 +88,7 @@ console.log(JSON.stringify(out));
     assert abs(night["night"]["dark"] - 0.62) < 0.01, night["night"]
     assert 0 < night["evening"]["dark"] < night["night"]["dark"], "dusk does not come on gradually"
     print("night           dark at night, none by day, coming on at dusk")
-assert "function drawNight()" in js and "a.lr > 0" in js and "windowsOf(img.src)" in js, \
+assert "function drawNight()" in js and "a.gl" in js and "L.intensity" in js and "pa.al === false" in js and "windowsOf(img.src)" in js, \
     "lights and lit windows are not drawn at night"
 wfn = js[js.index("  function windowsOf(src)"):js.index("  var nightCv = document.createElement")]
 assert "cells.length > maxArea" in wfn and "inner - ring < minContrast" in wfn, \
@@ -116,6 +116,31 @@ for bad in ({"light_colour": "orange"}, {"light_radius": "far"}):
         pass
 assert lib.update_tile(lamp["tile_id"], light_radius=999)["light_radius"] == tile_rules.MAX_LIGHT
 print("lights          a tile's light reach and colour are its own settings, checked")
+# The old single light reads as one point near the top of the picture.
+old = lib.get(lamp["tile_id"])["lights"]
+assert len(old) == 1 and old[0]["radius"] == tile_rules.MAX_LIGHT and old[0]["colour"] == "#ff9a3c", old
+# Lights placed in the editor: clipped into range, the old reach let go.
+lamp = lib.update_tile(lamp["tile_id"], lights=[
+    {"x": 0.3, "y": 1.7, "colour": "#AABBCC", "radius": 99, "intensity": 5},
+    {"x": -1, "y": 0.4, "radius": 2, "intensity": 0.5}], uploaded_lights=[{"x": 0.5, "y": 0.5}], auto_lights=False)
+lamp = lib.get(lamp["tile_id"])
+assert lamp["light_radius"] == 0 and lamp["auto_lights"] is False
+assert lamp["lights"][0] == {"x": 0.3, "y": 1.0, "colour": "#aabbcc", "radius": tile_rules.MAX_LIGHT, "intensity": 2.0}
+assert lamp["lights"][1]["x"] == 0.0 and lamp["lights"][1]["colour"] == tile_rules.DEFAULT_LIGHT_COLOUR
+assert len(lamp["uploaded_lights"]) == 1
+assert len(tile_rules.clean_lights([{"x": 0, "y": 0}] * 40)) == tile_rules.MAX_LIGHTS
+for bad in ("lamp", [{"x": 0.5}], [{"x": 0, "y": 0, "colour": "red"}]):
+    try:
+        tile_rules.clean_lights(bad)
+        raise AssertionError(f"bad lights were accepted: {bad}")
+    except tile_rules.TileError:
+        pass
+print("lights          lights placed on a picture are clipped into range; the old reach becomes one")
+editor = pathlib.Path("web/dodoland/lights_ui.py").read_text(encoding="utf-8")
+routes = pathlib.Path("web/dodoland/__init__.py").read_text(encoding="utf-8")
+assert 'web.get("/dodoland/lights", owner(lights_page))' in routes, "the lights editor is not the owner's"
+assert "update_tile" in editor and "uploaded_lights" in editor and "dblclick" in editor
+print("lights editor   owner-only, saves through the tile library")
 shadow_fn = js[js.index("function shadowFor"):js.index("function shadowsOn")]
 assert "low[c] - top[c]" in shadow_fn and "oy + low[c]" in shadow_fn, "height is not measured per column"
 print("sun             a shadow starts at each column's own base, so nothing floats")

@@ -304,6 +304,7 @@ def tiles_html(library: tile_rules.TileLibrary, *, heading: bool = True, owner: 
     return f"""{_STYLE}
 <div class="tlpage" data-api="{_e(ctx.api)}">
   {'<div class="panelhead"><h1>🧱 Tile library</h1></div>' if heading else ''}
+  {'<p><a class="btn" href="/dodoland/lights">💡 Lights editor</a> where each tile glows at night</p>' if ctx.guild_id is None else ''}
   <div class="explain"><p>Everything that can be put on the map. {who}
   Each tile has a <b>layer</b>, <b>access</b> (the bot owner can always use everything),
   a <b>requirement</b> a player must reach first — a building and its tier, as the asset
@@ -522,7 +523,10 @@ def _fields_from(body: dict) -> dict:
                 "light_radius", "light_colour"):
         if key in raw:
             out[key] = raw[key]
-    for key in ("passable", "spreads", "resizable"):
+    for key in ("lights", "uploaded_lights"):
+        if key in raw:
+            out[key] = raw[key]
+    for key in ("passable", "spreads", "resizable", "auto_lights"):
         if key in raw:
             value = raw[key]
             out[key] = value in (True, 1, "1", "true", "yes") if not isinstance(value, bool) else value

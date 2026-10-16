@@ -243,7 +243,12 @@ def _collect(bot, guild) -> dict:
                         # Members may place it (when they have unlocked it).
                         "pl": "player" in t["access"],
                         # A light: how far it lights at night (cells) and in what colour.
-                        **({"lr": t["light_radius"], "lc": t["light_colour"]} if t.get("light_radius") else {}),
+                        # Its lights (set in the lights editor), for the picture the map
+                        # draws: the uploaded painting's own, or its own pictures'.
+                        **({"gl": t["uploaded_lights"] if t["tile_id"] in upload else t["lights"]}
+                           if (t["uploaded_lights"] if t["tile_id"] in upload else t["lights"]) else {}),
+                        # Whether lit windows are also found in it by colour.
+                        **({} if t.get("auto_lights", True) else {"al": False}),
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
                        for t in placeable],
             # Not sent to the page: what a member's toolkit is unlocked from.
@@ -300,6 +305,14 @@ def uploaded_art(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bsc
     params = bot.dodoland_params
     if str(params.get(guild.id, "dodoland_building_art") or "") != "uploaded":
         return {}
+    return uploaded_sizes(bot, guild, tiles, hall_box, landmarks, bscale)
+
+
+def uploaded_sizes(bot, guild, tiles: list, hall_box: float, landmarks: tuple, bscale: float) -> dict:
+    """``{tile_id: (uploaded picture id, width in map cells)}`` for every town
+    building tile with an uploaded picture, whatever the server draws with
+    (:func:`uploaded_art` is this when the server draws with them)."""
+    params = bot.dodoland_params
     mine = [t for t in tiles if t.get("uploaded") and str(t.get("source") or "").startswith("building:")]
     if not mine:
         return {}
@@ -2546,22 +2559,29 @@ _SCRIPT = r"""
     var lights = cached ? nightCache.lights.slice() : [], windows = cached ? nightCache.windows : [];
     var names = cached ? nightCache.names : [];
     if (!cached) {
-    // Lights: every placed piece whose tile gives light, from where it stands.
+    // Lights: every placed piece whose tile has lights (the lights editor),
+    // each where it was put on the picture, mirrored with the piece and sized
+    // with it.
     D.world.forEach(function (p) {
-      var a = assetById(p.a);
-      if (!a || !(a.lr > 0)) return;
-      var sx = view.x + p.x / 100 * nat.w * view.k, sy = view.y + p.y / 100 * nat.h * view.k;
-      var r = a.lr * cellPx * (p.s || 1);
-      if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
-      var el = pieces[p.id], top = sy;
-      if (el) { var b = el.getBoundingClientRect(); top = b.top - fr.top + b.height * 0.22; }
-      lights.push({x: sx, y: sy, top: top, r: r, rgb: mixHex(a.lc || '#ffc46b', a.lc || '#ffc46b', 0)});
+      var a = assetById(p.a), el = pieces[p.id];
+      if (!a || !a.gl || !a.gl.length || !el) return;
+      var img = el.querySelector('img');
+      if (!img) return;
+      var b = img.getBoundingClientRect(), flip = el.classList.contains('flip');
+      a.gl.forEach(function (L) {
+        var r = L.radius * cellPx * (p.s || 1);
+        var lx = b.left - fr.left + (flip ? 1 - L.x : L.x) * b.width, ly = b.top - fr.top + L.y * b.height;
+        if (lx < -r || ly < -r || lx > W + r || ly > H + r) return;
+        lights.push({x: lx, y: ly + r * 0.15, top: ly, r: r, k: L.intensity, rgb: mixHex(L.colour, L.colour, 0)});
+      });
     });
     // Windows: what has warm lit windows in its picture, in towns active lately.
     function lit(townId) { return !townId || (byId[townId] && byId[townId].lit); }
     Object.keys(pieces).forEach(function (id) {
       var el = pieces[id], p = el && el._piece, img = el && el.querySelector('img');
       if (!img || !lit(p && p.t)) return;
+      var pa = p && assetById(p.a);
+      if (pa && pa.al === false) return;   // its lights are only the ones put on it by hand
       var wm = windowsOf(img.src);
       if (!wm) return;
       var b = img.getBoundingClientRect();
@@ -2619,8 +2639,9 @@ _SCRIPT = r"""
     c.globalCompositeOperation = 'destination-out';
     var white = stamp([255, 255, 255]);
     lights.forEach(function (l) {
-      c.globalAlpha = 0.85; c.drawImage(white, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
-      c.globalAlpha = 1; c.drawImage(white, l.x - l.r * 0.22, l.top - l.r * 0.22, l.r * 0.44, l.r * 0.44);
+      var k = l.k == null ? 1 : l.k;
+      c.globalAlpha = Math.min(1, 0.85 * k); c.drawImage(white, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
+      c.globalAlpha = Math.min(1, k); c.drawImage(white, l.x - l.r * 0.22, l.top - l.r * 0.22, l.r * 0.44, l.r * 0.44);
     });
     windows.forEach(function (o) {
       c.globalAlpha = 1; put(o.m.mask, o.x, o.y, o.w, o.h, o.flip);
@@ -2632,9 +2653,9 @@ _SCRIPT = r"""
     c.globalCompositeOperation = 'source-over';
     var glow = (N.light_glow == null ? 0.35 : N.light_glow) * st.k;
     lights.forEach(function (l) {
-      var s = stamp(l.rgb);
-      c.globalAlpha = glow; c.drawImage(s, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
-      c.globalAlpha = Math.min(1, glow * 2); c.drawImage(s, l.x - l.r * 0.18, l.top - l.r * 0.18, l.r * 0.36, l.r * 0.36);
+      var s = stamp(l.rgb), k = l.k == null ? 1 : l.k;
+      c.globalAlpha = Math.min(1, glow * k); c.drawImage(s, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
+      c.globalAlpha = Math.min(1, glow * 2 * k); c.drawImage(s, l.x - l.r * 0.18, l.top - l.r * 0.18, l.r * 0.36, l.r * 0.36);
     });
     var wg = (N.window_glow == null ? 0.8 : N.window_glow) * st.k, amber = stamp([255, 190, 90]);
     windows.forEach(function (o) {

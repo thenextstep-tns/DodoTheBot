@@ -111,11 +111,37 @@ DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX = 0.5, 3.0
 # The fields an editor may change in place, and nothing else.
 EDITABLE = ("name", "cat_id", "cell_px", "layer", "placement", "access", "requires",
             "passable", "spreads", "resizable", "scale_min", "scale_max",
-            "light_radius", "light_colour")
+            "light_radius", "light_colour", "lights", "uploaded_lights", "auto_lights")
 # A light (a lamp post, a lantern, a campfire): how far its light reaches at
 # night, in map cells (0 = it gives none), and its colour.
 MAX_LIGHT = 40.0
 DEFAULT_LIGHT_COLOUR = "#ffc46b"
+# Lights placed on a tile's picture in the lights editor: at most so many.
+MAX_LIGHTS = 16
+
+
+def clean_lights(value) -> list:
+    """Lights on a picture: ``[{x, y, colour, radius, intensity}]``, x and y as
+    fractions of the picture (0-1), radius in map cells, intensity 0-2."""
+    if value in (None, ""):
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise TileError("Lights are a list.")
+    out = []
+    for item in list(value)[:MAX_LIGHTS]:
+        try:
+            x, y = float(item["x"]), float(item["y"])
+            radius = float(item.get("radius", 4))
+            intensity = float(item.get("intensity", 1))
+        except (KeyError, TypeError, ValueError):
+            raise TileError("A light needs a place, a radius and an intensity.") from None
+        colour = str(item.get("colour") or DEFAULT_LIGHT_COLOUR).strip().lower()
+        if not (len(colour) == 7 and colour.startswith("#") and all(c in "0123456789abcdef" for c in colour[1:])):
+            raise TileError("A light's colour is #rrggbb.")
+        out.append({"x": round(max(0.0, min(1.0, x)), 4), "y": round(max(0.0, min(1.0, y)), 4),
+                    "colour": colour, "radius": round(max(0.0, min(MAX_LIGHT, radius)), 2),
+                    "intensity": round(max(0.0, min(2.0, intensity)), 2)})
+    return out
 
 
 class TileError(ValueError):
@@ -280,6 +306,16 @@ def _complete(row: dict) -> dict:
         row["light_radius"] = 0.0
     colour = str(row.get("light_colour") or DEFAULT_LIGHT_COLOUR)
     row["light_colour"] = colour if len(colour) == 7 and colour.startswith("#") else DEFAULT_LIGHT_COLOUR
+    try:
+        row["lights"] = clean_lights(row.get("lights"))
+        row["uploaded_lights"] = clean_lights(row.get("uploaded_lights"))
+    except TileError:
+        row["lights"], row["uploaded_lights"] = [], []
+    # A tile with only the old single light: one point near its top.
+    if not row["lights"] and row["light_radius"] > 0:
+        row["lights"] = [{"x": 0.5, "y": 0.25, "colour": row["light_colour"],
+                          "radius": row["light_radius"], "intensity": 1.0}]
+    row["auto_lights"] = bool(row.get("auto_lights", True))
     for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
         try:
             value = float(row.get(key, default))
@@ -578,6 +614,15 @@ class TileLibrary:
                 out["light_radius"] = max(0.0, min(MAX_LIGHT, float(given["light_radius"] or 0)))
             except (TypeError, ValueError):
                 raise TileError("A light's reach is a number of cells.") from None
+        for key in ("lights", "uploaded_lights"):
+            if key in given:
+                out[key] = clean_lights(given[key])
+        if "lights" in given:
+            # The points replace the old single light, or deleting every point
+            # would bring it back.
+            out["light_radius"] = 0.0
+        if "auto_lights" in given:
+            out["auto_lights"] = bool(given["auto_lights"])
         if "light_colour" in given:
             colour = str(given["light_colour"] or "").strip().lower()
             if not (len(colour) == 7 and colour.startswith("#")
