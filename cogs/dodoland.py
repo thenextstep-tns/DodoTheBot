@@ -142,12 +142,15 @@ class DodoLand(commands.Cog, name="dodoland"):
             return
         try:
             self._ensure_indexes()
+            # Queued, not written: the bot's background writer batches them
+            # (helpers/dodoland/writer.py), so no Discord event waits on the
+            # database any more.
+            from helpers.dodoland.writer import writer_for
+            writer = writer_for(self.bot)
             for act in acts:
-                self.bot.dodoland.record(
-                    guild_id, act.user_id, act.metric,
-                    channel_id=act.channel_id, partner_id=act.partner_id,
-                    link=getattr(act, "link", True),
-                )
+                writer.put(guild_id, act.user_id, act.metric,
+                           channel_id=act.channel_id, partner_id=act.partner_id,
+                           link=getattr(act, "link", True))
         except Exception as error:
             self.bot.logger.error(f"DodoLand failed to record activity: {error}")
 
@@ -325,17 +328,14 @@ class DodoLand(commands.Cog, name="dodoland"):
             return  # alone, or nobody stayed long enough
         try:
             self._ensure_indexes()
-            # Minutes are credited in one write rather than one per minute.
-            self.bot.dodoland.record(
-                guild_id, credit.user_id, "voice_minute", amount=credit.minutes,
-            )
+            # Minutes are credited in one act rather than one per minute, and
+            # queued for the background writer like every other act.
+            from helpers.dodoland.writer import writer_for
+            writer = writer_for(self.bot)
+            writer.put(guild_id, credit.user_id, "voice_minute", amount=credit.minutes)
             for other in partners:
-                self.bot.dodoland.record(
-                    guild_id, credit.user_id, "voice_together", partner_id=other,
-                )
-                self.bot.dodoland.record(
-                    guild_id, other, "voice_together", partner_id=credit.user_id,
-                )
+                writer.put(guild_id, credit.user_id, "voice_together", partner_id=other)
+                writer.put(guild_id, other, "voice_together", partner_id=credit.user_id)
         except Exception as error:
             self.bot.logger.error(f"DodoLand failed to record a voice session: {error}")
 

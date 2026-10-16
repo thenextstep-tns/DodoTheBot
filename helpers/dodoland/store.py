@@ -167,11 +167,13 @@ class ActivityStore:
                 return 0
             # ``link=False`` (a mass ping): it scores, but makes no pair row,
             # so it is nobody's "person reached" and spends no per-pair cap.
+            # How much of it is under the per-pair cap (all of it, for a
+            # mass ping, which spends none).
             within_partner_cap = self._bump_pair(
                 guild_id, int(user_id), int(partner_id), metric_key, stamp, amount
-            ) if link else True
+            ) if link else amount
         else:
-            within_partner_cap = True
+            within_partner_cap = amount
 
         after = self._activity.find_one_and_update(
             {"guild_id": guild_id, "user_id": int(user_id), "day": stamp},
@@ -182,7 +184,10 @@ class ActivityStore:
 
         if not within_partner_cap:
             return 0
-        allowed = allowance(done - amount, amount, self.daily_cap(guild_id, metric_key))
+        # Both caps clip, so ``amount`` acts at once (the background writer's
+        # batches) score exactly what they would have one at a time.
+        allowed = min(int(within_partner_cap),
+                      allowance(done - amount, amount, self.daily_cap(guild_id, metric_key)))
         if allowed <= 0:
             return 0
 
@@ -195,8 +200,9 @@ class ActivityStore:
         return allowed
 
     def _bump_pair(self, guild_id: int, user_id: int, partner_id: int,
-                   metric_key: str, stamp: str, amount: int = 1) -> bool:
-        """Count this act on the undirected pair row; True if it is under the cap.
+                   metric_key: str, stamp: str, amount: int = 1) -> int:
+        """Count these acts on the undirected pair row; how many of them are
+        under the per-pair cap (all of them with no cap, 0 past it).
 
         The row is bumped whether or not the act scores, because the pair count
         is the social graph and a capped evening of chatting is still two people
@@ -210,7 +216,7 @@ class ActivityStore:
         ) or {}
         done = int((after.get("acts") or {}).get(metric_key, amount))
         cap = self.partner_cap(guild_id, metric_key)
-        return cap <= 0 or done <= cap
+        return amount if cap <= 0 else max(0, min(amount, cap - (done - amount)))
 
     # ------------------------------------------------------------------ #
     #  Reading

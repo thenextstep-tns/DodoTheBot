@@ -1230,3 +1230,19 @@ tool (bake_bench.py), not in the repo.
   walking carry a lantern (`dodoland_walker_light`, 1.6 cells; animals none),
   redrawn each frame from a per-view cache (`nightCache`, `nightSoon(true)`),
   and the night is lifted off town name labels.
+
+### Activity written behind the bot's back (16 Oct 2026)
+Every counted act was up to three Atlas round trips made inside the Discord
+event (from the laptop, 100-300 ms of the bot's event loop per message). Now
+`cogs/dodoland.py` only queues (`helpers/dodoland/writer.py`,
+`writer_for(bot)` -> `bot.dodoland_writer`, made once, survives a cog reload);
+one daemon thread wakes every `dodoland_write_batch_seconds` (2), drains the
+queue, sums acts that differ only in amount (same guild, person, metric, room,
+partner, link, day) and calls `ActivityStore.record(amount=...)` once per sum;
+`flush()` on exit (`atexit`). Exactness: the per-pair cap now clips like the
+daily cap (`_bump_pair` returns how many are under it; `record` scores
+`min(pair allowance, daily allowance)`), so batches score exactly as acts one at
+a time (single acts unchanged). Test: `test_dodoland_writer.py` replays a burst
+past both caps both ways and compares every row and pair. Days are stamped at
+queue time, so a batch spanning midnight is right. Needs a full restart (store.py
+is a startup helper).
