@@ -110,7 +110,12 @@ SCALE_FLOOR, SCALE_CEILING = 0.25, 12.0
 DEFAULT_SCALE_MIN, DEFAULT_SCALE_MAX = 0.5, 3.0
 # The fields an editor may change in place, and nothing else.
 EDITABLE = ("name", "cat_id", "cell_px", "layer", "placement", "access", "requires",
-            "passable", "spreads", "resizable", "scale_min", "scale_max")
+            "passable", "spreads", "resizable", "scale_min", "scale_max",
+            "light_radius", "light_colour")
+# A light (a lamp post, a lantern, a campfire): how far its light reaches at
+# night, in map cells (0 = it gives none), and its colour.
+MAX_LIGHT = 40.0
+DEFAULT_LIGHT_COLOUR = "#ffc46b"
 
 
 class TileError(ValueError):
@@ -269,6 +274,12 @@ def _complete(row: dict) -> dict:
     # A town building's uploaded picture (tools/dodoland_import_building_art.py),
     # kept apart from its generated variants so rebuilding those never drops it.
     row["uploaded"] = str(row.get("uploaded") or "")
+    try:
+        row["light_radius"] = max(0.0, min(MAX_LIGHT, float(row.get("light_radius") or 0)))
+    except (TypeError, ValueError):
+        row["light_radius"] = 0.0
+    colour = str(row.get("light_colour") or DEFAULT_LIGHT_COLOUR)
+    row["light_colour"] = colour if len(colour) == 7 and colour.startswith("#") else DEFAULT_LIGHT_COLOUR
     for key, default in (("scale_min", DEFAULT_SCALE_MIN), ("scale_max", DEFAULT_SCALE_MAX)):
         try:
             value = float(row.get(key, default))
@@ -562,6 +573,17 @@ class TileLibrary:
         for key, what in (("scale_min", "smallest"), ("scale_max", "largest")):
             if key in given:
                 out[key] = clean_scale(given[key], what)
+        if "light_radius" in given:
+            try:
+                out["light_radius"] = max(0.0, min(MAX_LIGHT, float(given["light_radius"] or 0)))
+            except (TypeError, ValueError):
+                raise TileError("A light's reach is a number of cells.") from None
+        if "light_colour" in given:
+            colour = str(given["light_colour"] or "").strip().lower()
+            if not (len(colour) == 7 and colour.startswith("#")
+                    and all(c in "0123456789abcdef" for c in colour[1:])):
+                raise TileError("A light's colour is #rrggbb.")
+            out["light_colour"] = colour
         low = out.get("scale_min", (current or {}).get("scale_min", DEFAULT_SCALE_MIN))
         high = out.get("scale_max", (current or {}).get("scale_max", DEFAULT_SCALE_MAX))
         if low > high:

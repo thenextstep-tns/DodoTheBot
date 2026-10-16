@@ -74,6 +74,40 @@ console.log(JSON.stringify(out));
     assert all(sun[m]["y"] < 0 for m in sun), "a shadow falls in front of what casts it"
     assert sun["night"]["strength"] < sun["noon"]["strength"], "night shadows are not fainter"
     print("sun             morning left, evening right, shortest at noon, always behind, faint at night")
+    # The night, from the same clock: none at noon, full at night, coming on at dusk.
+    nfn = js[js.index("  function nightState()"):js.index("  // A soft round light, once per colour")]
+    probe = "var D = {sizes: {sun: {rise: 6, set: 20}, night: {}}};\n" + nfn + """
+var out = {};
+['noon', 'evening', 'night', 'morning'].forEach(function (m) { D.sizes.sun.mode = m; out[m] = nightState(); });
+console.log(JSON.stringify(out));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(probe)
+    night = json.loads(subprocess.run([node, f.name], capture_output=True, text=True).stdout)
+    assert night["noon"]["dark"] == 0 and night["morning"]["dark"] == 0, "it is dark by day"
+    assert abs(night["night"]["dark"] - 0.62) < 0.01, night["night"]
+    assert 0 < night["evening"]["dark"] < night["night"]["dark"], "dusk does not come on gradually"
+    print("night           dark at night, none by day, coming on at dusk")
+assert "function drawNight()" in js and "a.lr > 0" in js and "windowsOf(img.src)" in js, \
+    "lights and lit windows are not drawn at night"
+print("night           lights (tiles with a light) and lit windows cut the night")
+
+from helpers.dodoland import tiles as tile_rules  # noqa: E402
+lib = tile_rules.TileLibrary(FakeCollection(), FakeCollection(), FakeCollection())
+cat = lib.add_category("Lights")
+lamp = lib.add_tile(name="Lamp", cat_id=cat["cat_id"], data=b"<svg/>", content_type="image/svg+xml")
+lamp = lib.get(lamp["tile_id"])
+assert lamp["light_radius"] == 0 and lamp["light_colour"] == tile_rules.DEFAULT_LIGHT_COLOUR
+lamp = lib.update_tile(lamp["tile_id"], light_radius=6, light_colour="#FF9A3C")
+assert lamp["light_radius"] == 6 and lamp["light_colour"] == "#ff9a3c"
+for bad in ({"light_colour": "orange"}, {"light_radius": "far"}):
+    try:
+        lib.update_tile(lamp["tile_id"], **bad)
+        raise AssertionError(f"a bad light setting was stored: {bad}")
+    except tile_rules.TileError:
+        pass
+assert lib.update_tile(lamp["tile_id"], light_radius=999)["light_radius"] == tile_rules.MAX_LIGHT
+print("lights          a tile's light reach and colour are its own settings, checked")
 shadow_fn = js[js.index("function shadowFor"):js.index("function shadowsOn")]
 assert "low[c] - top[c]" in shadow_fn and "oy + low[c]" in shadow_fn, "height is not measured per column"
 print("sun             a shadow starts at each column's own base, so nothing floats")

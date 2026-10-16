@@ -159,6 +159,10 @@ def _fields(tile: dict, ctx: _Ctx, dis: str) -> str:
        max="{tile_rules.SCALE_CEILING}" value="{tile['scale_min']}"{dis} title="Smallest">–
     <input type="number" class="tlf" data-f="scale_max" step="0.05" min="{tile_rules.SCALE_FLOOR}"
        max="{tile_rules.SCALE_CEILING}" value="{tile['scale_max']}"{dis} title="Largest">×</div>
+  <div class="tlrow" title="At night it lights the ground around it: how far, in map cells (0 = no light), and in what colour"><span class="tlk">Light</span>
+    <input type="number" class="tlf" data-f="light_radius" step="0.5" min="0" max="{tile_rules.MAX_LIGHT}"
+       value="{tile['light_radius']}"{dis}> cells
+    <input type="color" class="tlf" data-f="light_colour" value="{tile['light_colour']}"{dis}></div>
   <div class="tlrow" title="How many of this art's pixels make one map cell"><span class="tlk">Scale</span>
     <input type="number" class="tlf" data-f="cell_px" list="tlcellsizes" min="{tile_rules.MIN_CELL}"
        max="{tile_rules.MAX_CELL}" value="{tile['cell_px']}"{dis}> px per map cell</div>"""
@@ -514,7 +518,8 @@ def _fields_from(body: dict) -> dict:
     """Turn the editor's field names into the library's."""
     raw = dict(body.get("fields") or {})
     out = {}
-    for key in ("name", "cat_id", "cell_px", "layer", "placement", "scale_min", "scale_max", "requires"):
+    for key in ("name", "cat_id", "cell_px", "layer", "placement", "scale_min", "scale_max", "requires",
+                "light_radius", "light_colour"):
         if key in raw:
             out[key] = raw[key]
     for key in ("passable", "spreads", "resizable"):

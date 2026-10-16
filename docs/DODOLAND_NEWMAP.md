@@ -1198,3 +1198,25 @@ tool (bake_bench.py), not in the repo.
   pieces, painted halls, generated town art (`svgPicture` of its SVG), houses
   and walkers (`standing`), and forest trees (drawn onto their strip canvases
   first). `dodoland_shadow_lean` is gone (the sun decides).
+
+### Night, lights and lit windows (16 Oct 2026)
+* **Night** (`nightState`, same clock as the sun): dusk from 45 min before
+  sunset to an hour after, dawn from an hour before sunrise to 30 min after;
+  `dodoland_night_darkness` (0.62), `_night_colour`, `_dusk_colour`.
+  `drawNight` paints one half-resolution canvas over the frame (`.dlnight`,
+  z 6): the night, `destination-out` light pools and lit windows, then a warm
+  `source-over` glow. Only at night, at most once a frame (`nightSoon`, from
+  `apply()` and every minute).
+* **Lights are a tile setting**: `light_radius` (cells, 0 = none, up to
+  `MAX_LIGHT` 40) and `light_colour` on every tile, in `EDITABLE`, validated in
+  `_props`, defaulted in `_complete`, edited in the tile library ("Light").
+  The map gets `lr`/`lc` per asset. `tools/dodoland_lights_category.py` made the
+  **Lights** category and moved Lamp post, Lantern pedestal, Oil lantern (warm
+  #ffc46b), Wall torch, Fireplace, Campfire (fire #ff9a3c) into it, lit.
+  `dodoland_light_glow` (0.35) is how warmly they tint what they light.
+* **Lit windows**: `windowsOf(src)` finds a picture's warm bright pixels once
+  (`dodoland_window_min_red` 205, `_min_green` 130, `_warmth` 75) as a mask
+  and a blurred halo; at night they are cut out and glow
+  (`dodoland_window_glow` 0.8) on placed pieces, painted halls, generated
+  towns and houses, but **only in towns that are lit** (active lately), so a
+  dark window is a quiet town. Walkers carry no light yet.

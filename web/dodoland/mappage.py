@@ -242,10 +242,29 @@ def _collect(bot, guild) -> dict:
                         "building": t["requires"]["building"], "tier": t["requires"]["tier"],
                         # Members may place it (when they have unlocked it).
                         "pl": "player" in t["access"],
+                        # A light: how far it lights at night (cells) and in what colour.
+                        **({"lr": t["light_radius"], "lc": t["light_colour"]} if t.get("light_radius") else {}),
                         "lo": tile_rules.scale_range(t)[0], "hi": tile_rules.scale_range(t)[1]}
                        for t in placeable],
             # Not sent to the page: what a member's toolkit is unlocked from.
             "standings": result["people"], "defs": buildings, "upload": upload}
+
+
+def _night_settings(bot, gid) -> dict:
+    """How dark the night is, its colours, and how lights and windows glow."""
+    p = bot.dodoland_params
+
+    def num(key, lo, hi):
+        return max(lo, min(hi, float(p.get(gid, key))))
+
+    def hexed(key, fallback):
+        v = str(p.get(gid, key) or "").strip()
+        return v if len(v) == 7 and v.startswith("#") else fallback
+    return {"darkness": num("dodoland_night_darkness", 0, 1),
+            "colour": hexed("dodoland_night_colour", "#0b1430"), "dusk": hexed("dodoland_dusk_colour", "#4a2a48"),
+            "light_glow": num("dodoland_light_glow", 0, 1), "window_glow": num("dodoland_window_glow", 0, 1),
+            "min_red": num("dodoland_window_min_red", 0, 255), "min_green": num("dodoland_window_min_green", 0, 255),
+            "warmth": num("dodoland_window_warmth", 0, 255)}
 
 
 def _sun_settings(bot, gid) -> dict:
@@ -508,6 +527,8 @@ async def map_page(request: web.Request):
         "ground_mute": terrainart.mute_settings(bot.dodoland_params, guild.id),
         # The sun every shadow comes from (dodoland_time_of_day, dodoland_shadow_*).
         "sun": _sun_settings(bot, guild.id),
+        # The night, from the same clock (dodoland_night_*, dodoland_window_*).
+        "night": _night_settings(bot, guild.id),
         "autotile_variation": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_variation")))),
         # The walls choice on a town's card (dodoland_walls_option).
         "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
@@ -884,6 +905,9 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
 .dlpiece.flip img { transform: scaleX(-1); }
 /* A baked shadow behind its picture (made already mirrored for a mirrored piece). */
 .dltown .dlart { position: relative; }
+/* The night: one canvas over the map, lights cut out of it (see drawNight). */
+.dlnight { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none;
+  z-index: 6; display: none; }
 .dlpiece img.dlshadow, .dltown .dlart img.dlshadow, .dlstand img.dlshadow { position: absolute; z-index: -1;
   max-width: none; pointer-events: none; transform: none; image-rendering: auto; display: block; }
 /* Held and hovered pieces are marked by boxes on the frame, in screen pixels,
@@ -1184,6 +1208,7 @@ _SCRIPT = r"""
     levelOfDetail();
     if (typeof placePop === 'function') placePop();
     if (typeof placeMarks === 'function') placeMarks();
+    if (typeof nightSoon === 'function') nightSoon();
   }
   function clamp() {
     // Two different jobs depending on which is bigger. When the world is larger
@@ -2368,6 +2393,171 @@ _SCRIPT = r"""
     shadowed.forEach(function (el) { addShadow(el, el._shadow.src, el._shadow.flip); });
     if (typeof forestRedrawAll === 'function') forestRedrawAll();
   }, 60000);
+
+
+  // --- night --------------------------------------------------------------- //
+  // From the same clock as the sun: dusk comes on around sunset, full night,
+  // then dawn. One canvas over the map at half the screen's resolution: filled
+  // with the night, then lights cut out of it (lamps, lanterns, campfires -
+  // any tile with a light - and the lit windows of towns that were active
+  // lately), then a warm glow laid over what they light. Drawn only at night,
+  // once per frame at most, as the view moves; by day it does nothing.
+  function nightState() {
+    var S = D.sizes.sun || {}, N = D.sizes.night || {}, mode = S.mode || 'auto', h;
+    var rise = S.rise == null ? 6 : S.rise, set = S.set == null ? 20 : S.set;
+    if (mode === 'auto') { var now = new Date(); h = now.getHours() + now.getMinutes() / 60; }
+    else h = {morning: 8, noon: 13, afternoon: 16, evening: set - 0.1, night: 23}[mode] || 13;
+    function smooth(a, b, x) { var t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+    var dusk = smooth(set - 0.75, set + 1, h), dawn = 1 - smooth(rise - 1, rise + 0.5, h);
+    var k = h >= 12 ? dusk : dawn;
+    return {k: k, dark: (N.darkness == null ? 0.62 : N.darkness) * k,
+            colour: mixHex(N.dusk || '#4a2a48', N.colour || '#0b1430', k)};
+  }
+  function mixHex(a, b, t) {
+    var pa = [1, 3, 5].map(function (i) { return parseInt(a.slice(i, i + 2), 16); });
+    var pb = [1, 3, 5].map(function (i) { return parseInt(b.slice(i, i + 2), 16); });
+    return pa.map(function (v, i) { return Math.round(v + (pb[i] - v) * t); });
+  }
+  // A soft round light, once per colour: white for cutting the dark, the
+  // light's own colour for its glow.
+  var stamps = {};
+  function stamp(rgb) {
+    var key = rgb.join(',');
+    if (stamps[key]) return stamps[key];
+    var c = document.createElement('canvas'); c.width = c.height = 256;
+    var x = c.getContext('2d'), g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, 'rgba(' + key + ',1)'); g.addColorStop(0.35, 'rgba(' + key + ',.7)');
+    g.addColorStop(0.7, 'rgba(' + key + ',.22)'); g.addColorStop(1, 'rgba(' + key + ',0)');
+    x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+    return (stamps[key] = c);
+  }
+  // A picture's lit windows, found once: its warm, bright pixels (thresholds
+  // dodoland_window_*), as a mask and a soft halo round them. Null if it has none.
+  var windowMaps = {};
+  function windowsOf(src) {
+    if (windowMaps[src] !== undefined) return windowMaps[src];
+    windowMaps[src] = null;
+    var N = D.sizes.night || {}, im = new Image();
+    im.onload = function () {
+      try {
+        var sc = Math.min(1, 256 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1));
+        var w = Math.max(1, Math.round((im.naturalWidth || 120) * sc)), h = Math.max(1, Math.round((im.naturalHeight || 78) * sc));
+        var c = document.createElement('canvas'); c.width = w; c.height = h;
+        var x = c.getContext('2d'); x.drawImage(im, 0, 0, w, h);
+        var d = x.getImageData(0, 0, w, h), px = d.data, n = 0;
+        var minR = N.min_red == null ? 205 : N.min_red, minG = N.min_green == null ? 130 : N.min_green;
+        var warm = N.warmth == null ? 75 : N.warmth;
+        for (var i = 0; i < px.length; i += 4) {
+          var lit = px[i + 3] > 128 && px[i] >= minR && px[i + 1] >= minG && px[i] - px[i + 2] >= warm;
+          if (lit) { px[i] = px[i + 1] = px[i + 2] = 255; px[i + 3] = 255; n++; } else px[i + 3] = 0;
+        }
+        if (n < 3) return;
+        x.putImageData(d, 0, 0);
+        var halo = document.createElement('canvas'); halo.width = w; halo.height = h;
+        var hx = halo.getContext('2d');
+        hx.filter = 'blur(' + Math.max(1.5, w / 60).toFixed(1) + 'px)';
+        hx.drawImage(c, 0, 0); hx.drawImage(c, 0, 0);
+        windowMaps[src] = {mask: c, halo: halo};
+        nightSoon();
+      } catch (e) { windowMaps[src] = null; }
+    };
+    im.src = src;
+    return null;
+  }
+  var nightCv = document.createElement('canvas'), nightQueued = false;
+  nightCv.className = 'dlnight';
+  frame.appendChild(nightCv);
+  function nightSoon() {
+    if (nightQueued) return;
+    nightQueued = true;
+    requestAnimationFrame(function () { nightQueued = false; drawNight(); });
+  }
+  function drawNight() {
+    var st = nightState();
+    if (st.dark < 0.01 || !nat.w) { nightCv.style.display = 'none'; return; }
+    nightCv.style.display = 'block';
+    var R = 0.5, W = frame.clientWidth, H = frame.clientHeight;
+    var w = Math.max(1, Math.round(W * R)), h = Math.max(1, Math.round(H * R));
+    if (nightCv.width !== w || nightCv.height !== h) { nightCv.width = w; nightCv.height = h; }
+    var c = nightCv.getContext('2d'), N = D.sizes.night || {};
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(' + st.colour.join(',') + ',' + st.dark.toFixed(3) + ')';
+    c.fillRect(0, 0, w, h);
+    c.setTransform(R, 0, 0, R, 0, 0);
+    var fr = frame.getBoundingClientRect(), cellPx = nat.w * view.k / D.cells_w;
+    var lights = [], windows = [];
+    // Lights: every placed piece whose tile gives light, from where it stands.
+    D.world.forEach(function (p) {
+      var a = assetById(p.a);
+      if (!a || !(a.lr > 0)) return;
+      var sx = view.x + p.x / 100 * nat.w * view.k, sy = view.y + p.y / 100 * nat.h * view.k;
+      var r = a.lr * cellPx * (p.s || 1);
+      if (sx < -r || sy < -r || sx > W + r || sy > H + r) return;
+      var el = pieces[p.id], top = sy;
+      if (el) { var b = el.getBoundingClientRect(); top = b.top - fr.top + b.height * 0.22; }
+      lights.push({x: sx, y: sy, top: top, r: r, rgb: mixHex(a.lc || '#ffc46b', a.lc || '#ffc46b', 0)});
+    });
+    // Windows: what has warm lit windows in its picture, in towns active lately.
+    function lit(townId) { return !townId || (byId[townId] && byId[townId].lit); }
+    Object.keys(pieces).forEach(function (id) {
+      var el = pieces[id], p = el && el._piece, img = el && el.querySelector('img');
+      if (!img || !lit(p && p.t)) return;
+      var wm = windowsOf(img.src);
+      if (!wm) return;
+      var b = img.getBoundingClientRect();
+      if (b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
+      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height, flip: el.classList.contains('flip')});
+    });
+    world.querySelectorAll('.dltown .dlart > img:first-child, .dltown .dlart > svg, .dlhouse > svg').forEach(function (art) {
+      var town = art.closest('.dltown'), house = art.closest('.dlhouse');
+      var id = town ? town.dataset.id : house ? house.dataset.town : '';
+      if (!lit(id)) return;
+      var host = art.parentNode, sh = host._shadow;
+      var src = art.tagName === 'IMG' ? art.src : sh && sh.src;
+      if (!src) return;
+      var wm = windowsOf(src);
+      if (!wm) return;
+      var b = art.getBoundingClientRect();
+      if (!b.width || b.right < fr.left || b.bottom < fr.top || b.left > fr.right || b.top > fr.bottom) return;
+      windows.push({m: wm, x: b.left - fr.left, y: b.top - fr.top, w: b.width, h: b.height,
+                    flip: !!(house && house.classList.contains('flip'))});
+    });
+    function put(img, x, y, w2, h2, flip) {
+      if (!flip) { c.drawImage(img, x, y, w2, h2); return; }
+      c.save(); c.translate(x + w2, y); c.scale(-1, 1); c.drawImage(img, 0, 0, w2, h2); c.restore();
+    }
+    // Cut the night where things are lit.
+    c.globalCompositeOperation = 'destination-out';
+    var white = stamp([255, 255, 255]);
+    lights.forEach(function (l) {
+      c.globalAlpha = 0.85; c.drawImage(white, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
+      c.globalAlpha = 1; c.drawImage(white, l.x - l.r * 0.22, l.top - l.r * 0.22, l.r * 0.44, l.r * 0.44);
+    });
+    windows.forEach(function (o) {
+      c.globalAlpha = 1; put(o.m.mask, o.x, o.y, o.w, o.h, o.flip);
+      c.globalAlpha = 0.7; put(o.m.halo, o.x, o.y, o.w, o.h, o.flip);
+    });
+    // And warm what they light.
+    c.globalCompositeOperation = 'source-over';
+    var glow = (N.light_glow == null ? 0.35 : N.light_glow) * st.k;
+    lights.forEach(function (l) {
+      var s = stamp(l.rgb);
+      c.globalAlpha = glow; c.drawImage(s, l.x - l.r, l.y - l.r * 0.7, l.r * 2, l.r * 1.4);
+      c.globalAlpha = Math.min(1, glow * 2); c.drawImage(s, l.x - l.r * 0.18, l.top - l.r * 0.18, l.r * 0.36, l.r * 0.36);
+    });
+    var wg = (N.window_glow == null ? 0.8 : N.window_glow) * st.k, amber = stamp([255, 190, 90]);
+    windows.forEach(function (o) {
+      c.globalAlpha = wg * 0.55; put(o.m.halo, o.x, o.y, o.w, o.h, o.flip);
+      if (wg > 0) {
+        c.globalAlpha = wg * 0.18;
+        c.drawImage(amber, o.x + o.w * 0.1, o.y + o.h * 0.55, o.w * 0.8, o.h * 0.5);
+      }
+    });
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  }
+  setInterval(nightSoon, 60000);
 
   // Which pixels of a piece's picture are painted, read once per picture
   // into a small alpha map (pictures are ours, so the canvas is not tainted).
