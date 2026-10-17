@@ -360,17 +360,22 @@ SCRIPT = r"""
   }
 
   // --- the close-up ground, baked ------------------------------------------ //
-  // Each 64-cell chunk is drawn once into a canvas — its textures, and where
-  // two grounds meet, one faded into the other through a soft mask — and shown
-  // as a plain picture. Moving and scaling finished pictures is what the
-  // browser does fastest, so panning costs the same however much is drawn.
-  // A stroke re-bakes only the chunks it touched and their neighbours.
+  // Each 64-cell chunk is drawn once into a canvas and shown as a plain
+  // picture. Moving and scaling finished pictures is what the browser does
+  // fastest, so panning costs the same however much is drawn. A stroke
+  // re-bakes only the chunks it touched and their neighbours.
+  //
+  // Drawn on a dual grid: every ground is laid at the cell *corners*. A corner
+  // looks at the four cells round it; which of them hold this ground (or one
+  // drawn after it) is a number 0-15, and the corner gets that one of sixteen
+  // shapes - a rounded corner, a straight edge, an inner corner, a diagonal
+  // join - made once per ground and detail (dualTiles). So an edge is a curve
+  // wherever it turns, and baking a chunk is stamping small pictures and one
+  // texture fill per ground: nothing traced, nothing blurred. A smart ground (a
+  // 3 x 3 tileset) also gets its fringe - a shore's rocks and foam, a path's
+  // pebbles - laid along the same curves from its edge tile.
   var bake = {kinds: null, art: '', rle: {}, cells: {}, known: {}, gen: {}, drawn: {},
-              imgs: {}, blocks: {}, fetching: false, queued: false};
-  var BLUR_OK = (function () {
-    try { var c = document.createElement('canvas').getContext('2d'); return typeof c.filter === 'string'; }
-    catch (e) { return false; }
-  })();
+              imgs: {}, blocks: {}, dual: {}, fetching: false, queued: false};
   function bakeDecode(rle) {
     var out = new Uint16Array(4096), i = 0;
     String(rle || '').split(' ').forEach(function (part) {
@@ -390,7 +395,7 @@ SCRIPT = r"""
       }
   }
   // After a stroke or an undo: forget those chunks' cells, so they are read
-  // again, and mark them and their neighbours (whose blends reach them) stale.
+  // again, and mark them and their neighbours (whose edges reach them) stale.
   function bakeTouched(touched) {
     touched.forEach(function (t) { delete bake.known[t[0] + ',' + t[1]]; bakeBump(t[0], t[1]); });
   }
@@ -450,19 +455,6 @@ SCRIPT = r"""
     bake.blocks[key] = groundMute(cv);
     return cv;
   }
-  // The fill for kind k on a canvas whose top-left is world cell (ox, oy):
-  // its block repeated from the world's origin, so neighbouring chunks meet.
-  function bakeStyle(ctx, k, res, ox, oy) {
-    var kind = bake.kinds[k];
-    if (!kind.layout) return kind.fill;
-    var block = bakeBlock(k, res);
-    if (!block) return null;
-    var pat = ctx.createPattern(block, 'repeat');
-    var bw = block.width, bh = block.height;
-    var tx = -((ox * res) % bw), ty = -((oy * res) % bh);
-    if (pat.setTransform) pat.setTransform(new DOMMatrix([1, 0, 0, 1, tx, ty]));
-    return pat;
-  }
   // The cells of a square around a chunk (margin m), from it and its neighbours.
   function bakeArea(cx, cy, m) {
     var A = 64 + 2 * m, out = new Uint16Array(A * A);
@@ -476,205 +468,28 @@ SCRIPT = r"""
     }
     return out;
   }
-  // Rows of runs where test(value) holds, as one path in canvas pixels.
-  function bakePath(cells, A, res, x0, y0, n, test) {
-    var path = new Path2D();
-    for (var y = y0; y < y0 + n; y++) {
-      var x = x0;
-      while (x < x0 + n) {
-        if (!test(cells[y * A + x])) { x++; continue; }
-        var s = x;
-        while (x < x0 + n && test(cells[y * A + x])) x++;
-        path.rect((s - x0) * res, (y - y0) * res, (x - s) * res, res);
-      }
-    }
-    return path;
-  }
-  // A region's border as closed loops of cell corners (the region always on
-  // one side), corners only — the same walk as influence.loops.
-  function bakeLoops(cells, A, test) {
-    var next = new Map();
-    function add(ax, ay, bx, by) {
-      var k = ax * 65536 + ay, l = next.get(k);
-      if (!l) next.set(k, l = []);
-      l.push([bx, by]);
-    }
-    for (var y = 0; y < A; y++) {
-      for (var x = 0; x < A; x++) {
-        if (!test(cells[y * A + x])) continue;
-        if (y === 0 || !test(cells[(y - 1) * A + x])) add(x, y, x + 1, y);
-        if (x === A - 1 || !test(cells[y * A + x + 1])) add(x + 1, y, x + 1, y + 1);
-        if (y === A - 1 || !test(cells[(y + 1) * A + x])) add(x + 1, y + 1, x, y + 1);
-        if (x === 0 || !test(cells[y * A + x - 1])) add(x, y + 1, x, y);
-      }
-    }
-    var loops = [];
-    while (next.size) {
-      var startKey = next.keys().next().value, sx = Math.floor(startKey / 65536), sy = startKey % 65536;
-      var loop = [[sx, sy]], hx = sx, hy = sy;
-      while (true) {
-        var k = hx * 65536 + hy, ways = next.get(k);
-        if (!ways || !ways.length) { next.delete(k); break; }
-        var step = ways.pop();
-        if (!ways.length) next.delete(k);
-        if (step[0] === sx && step[1] === sy) break;
-        loop.push(step);
-        hx = step[0]; hy = step[1];
-      }
-      var corners = loop.filter(function (pt, i) {
-        var a = loop[(i - 1 + loop.length) % loop.length], c = loop[(i + 1) % loop.length];
-        return (pt[0] - a[0]) !== (c[0] - pt[0]) || (pt[1] - a[1]) !== (c[1] - pt[1]);
-      });
-      if (corners.length >= 3) loops.push(corners);
-    }
-    return loops;
-  }
-  // A region on a half-cell grid, with a bridge wherever two of its cells
-  // touch only at a corner: a road painted diagonally is one shape, not beads.
-  function bakeHalf(area, A, test) {
-    var inside = new Uint8Array(A * A), B = A * 2, out = new Uint8Array(B * B);
-    for (var i = 0; i < A * A; i++) inside[i] = test(area[i]) ? 1 : 0;
-    for (var y = 0; y < A; y++)
-      for (var x = 0; x < A; x++)
-        if (inside[y * A + x]) {
-          var o = (2 * y) * B + 2 * x;
-          out[o] = out[o + 1] = out[o + B] = out[o + B + 1] = 1;
-        }
-    for (var y = 0; y < A - 1; y++)
-      for (var x = 0; x < A - 1; x++) {
-        var a = inside[y * A + x], b = inside[y * A + x + 1], c = inside[(y + 1) * A + x], d = inside[(y + 1) * A + x + 1];
-        if (a && d && !b && !c) { out[(2 * y + 1) * B + 2 * x + 2] = 1; out[(2 * y + 2) * B + 2 * x + 1] = 1; }
-        if (b && c && !a && !d) { out[(2 * y + 1) * B + 2 * x + 1] = 1; out[(2 * y + 2) * B + 2 * x + 2] = 1; }
-      }
-    return out;
-  }
-  // An outline evened out along its own length: the corner points resampled
-  // every half cell, then each moved to a Gaussian-weighted average of its
-  // neighbours along the outline (a Gaussian of ``reach`` half-cells). Stairs and
-  // spikes shorter than that even out into slopes and curves; a long side
-  // stays straight, a big shape keeps its size (it shrinks only by about
-  // reach squared over its radius).
-  function bakeResample(loop) {
-    var out = [];
-    for (var i = 0; i < loop.length; i++) {
-      var a = loop[i], b = loop[(i + 1) % loop.length];
-      var n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1])));
-      for (var j = 0; j < n; j++) out.push([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n]);
-    }
-    return out;
-  }
-  function bakeGauss(pts, reach) {
-    var n = pts.length, sigma = reach, r = Math.ceil(sigma * 3);
-    if (n < 4 || sigma < 0.25) return pts;
-    r = Math.min(r, Math.floor((n - 1) / 2));
-    var w = [], total = 0;
-    for (var j = -r; j <= r; j++) { var v = Math.exp(-j * j / (2 * sigma * sigma)); w.push(v); total += v; }
-    var out = [];
-    for (var i = 0; i < n; i++) {
-      var x = 0, y = 0;
-      for (var j = -r; j <= r; j++) {
-        var q = pts[((i + j) % n + n) % n], k = w[j + r];
-        x += q[0] * k; y += q[1] * k;
-      }
-      out.push([x / total, y / total]);
-    }
-    return out;
-  }
-  // The smoothed outline of a region of the area, as a path in pixels with
-  // ``m`` cells of margin taken off.
-  function bakeSmoothPath(area, A, m, res, test, strength) {
-    var path = new Path2D(), s = Math.min(1, strength);
-    var reach = 2 * (D.sizes.straighten === undefined ? 1.5 : D.sizes.straighten) * s;
-    bakeLoops(bakeHalf(area, A, test), A * 2, function (v) { return v === 1; }).forEach(function (loop) {
-      // Half-cell units throughout, then back to cells.
-      var pts = bakeGauss(bakeResample(loop), reach);
-      pts.forEach(function (pt, i) {
-        var x = (pt[0] / 2 - m) * res, y = (pt[1] / 2 - m) * res;
-        if (i) path.lineTo(x, y); else path.moveTo(x, y);
-      });
-      path.closePath();
-    });
-    return path;
-  }
-  // --- smart ground -------------------------------------------------------- //
-  // A smart ground (a tile with an `auto` set: tools/dodoland_import_autotiles.py)
-  // is drawn cell by cell from its four neighbours: its centre (or, now and
-  // then, a variation) inside; at a border the edge or corner tile of its
-  // 3 x 3 set; a cell on its own, the single tile. A shape the 3 x 3 has no
-  // tile for (a strip one cell wide, its end) is put together from quarters:
-  // each quarter of the cell from the tile for the two sides it touches.
-  // No smoothing and no blending: the tiles' own edges are the transition.
   function autoHash(x, y) {
     var h = (x * 374761393 + y * 668265263) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   }
-  // What a cell shows, as pieces [{v, sx, sy, sw, sh, dx, dy, dw, dh}] in
-  // fractions of the picture and of the cell. A tile spans N x N cells
-  // (dodoland_autotile_cells), so inside the ground is one continuous texture,
-  // seamed only every N cells. Along each axis a cell is a border on one side
-  // (it shows the outer 1/N band of that side's edge tile, where its fringe
-  // is), on both (a strip: its two halves show both outer bands), or inside
-  // (the band where it falls in the world's N-grid). n, e, s, w: is the same
-  // ground on that side.
-  function autoTile(n, e, s, w, gx, gy, set, share, N) {
-    var E = set.edges, c = set.center;
-    if (!n && !e && !s && !w) return [{v: set.single || c[0], sx: 0, sy: 0, sw: 1, sh: 1, dx: 0, dy: 0, dw: 1, dh: 1}];
-    var band = 1 / N, mx = ((gx % N) + N) % N, my = ((gy % N) + N) % N;
-    // Along one axis: the parts of the cell, each [state, source start, dest start, dest size].
-    function axis(lo, hi, at) {
-      if (!lo && !hi) return [['lo', 0, 0, 0.5], ['hi', 1 - band, 0.5, 0.5]];
-      if (!lo) return [['lo', 0, 0, 1]];
-      if (!hi) return [['hi', 1 - band, 0, 1]];
-      return [['in', at * band, 0, 1]];
-    }
-    var inside = n && e && s && w, centre = c[0];
-    if (inside && c.length > 1) {
-      // A variation now and then, a whole tile of it: chosen per N x N block.
-      var bx = Math.floor(gx / N), by = Math.floor(gy / N);
-      if (autoHash(bx, by) < share) centre = c[1 + Math.floor(autoHash(by + 7919, bx + 104729) * (c.length - 1))];
-    }
-    var name = {lolo: 'top_left', loin: 'top_center', lohi: 'top_right',
-                inlo: 'mid_left', inhi: 'mid_right',
-                hilo: 'bottom_left', hiin: 'bottom_center', hihi: 'bottom_right'};
-    var out = [];
-    axis(n, s, my).forEach(function (v) {
-      axis(w, e, mx).forEach(function (h) {
-        var key = v[0] + h[0];
-        out.push({v: key === 'inin' ? centre : E[name[key]], sx: h[1], sy: v[1], sw: band, sh: band,
-                  dx: h[2], dy: v[2], dw: h[3], dh: v[3]});
-      });
-    });
-    return out;
-  }
-  // What the rest of the bake sees: under a smart ground's border cell, the
-  // ordinary ground beside it (so it runs on under the edge tiles' clear
-  // margins); under its insides, nothing.
-  function autoUnder(cells, A, K) {
-    var out = new Uint16Array(cells);
-    for (var y = 0; y < A; y++) for (var x = 0; x < A; x++) {
-      var i = y * A + x, v = cells[i];
-      if (!K[v] || !K[v].auto) continue;
-      var near = [y > 0 ? cells[i - A] : 0, x < A - 1 ? cells[i + 1] : 0,
-                  y < A - 1 ? cells[i + A] : 0, x > 0 ? cells[i - 1] : 0];
-      out[i] = 0;
-      for (var j = 0; j < 4; j++) if (K[near[j]] && !K[near[j]].auto) { out[i] = near[j]; break; }
-    }
-    return out;
-  }
-  // A tile's picture made ready to draw, once: trimmed of its frame, and made
+  // A tile's picture made ready to draw, once: a part of it (fractions x, y,
+  // w, h of the picture after trimming ``inset`` off every side), made
   // seamless along 'x', 'y' or both ('xy'): the picture blended over itself
   // shifted by half, so repeated it has no seam. Null until it has loaded.
-  function autoProc(vid, mode, inset) {
-    var key = vid + '|' + mode + '|' + inset;
+  function autoProc(vid, mode, inset, part) {
+    part = part || [0, 0, 1, 1];
+    var key = vid + '|' + mode + '|' + inset + '|' + part.join(',');
     bake.autoImgs = bake.autoImgs || {};
     if (bake.autoImgs[key]) return bake.autoImgs[key];
     var im = bakeImg(vid);
     if (!im) return null;
-    var w = Math.max(1, Math.round(im.naturalWidth * (1 - 2 * inset))), h = Math.max(1, Math.round(im.naturalHeight * (1 - 2 * inset)));
+    var iw = im.naturalWidth * (1 - 2 * inset), ih = im.naturalHeight * (1 - 2 * inset);
+    var w = Math.max(1, Math.round(iw * part[2])), h = Math.max(1, Math.round(ih * part[3]));
     function blank() { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
     var cv = blank();
-    cv.getContext('2d').drawImage(im, im.naturalWidth * inset, im.naturalHeight * inset, w, h, 0, 0, w, h);
+    cv.getContext('2d').drawImage(im, im.naturalWidth * inset + iw * part[0], im.naturalHeight * inset + ih * part[1],
+                                  w, h, 0, 0, w, h);
     function pass(src, horizontal) {
       var out = blank(), oc = out.getContext('2d');
       // The picture shifted by half, wrapped round: its seam is in the middle.
@@ -710,231 +525,270 @@ SCRIPT = r"""
     bake.autoImgs[key] = cv;
     return cv;
   }
-  // Draw every smart ground of a chunk's area onto its canvas, lowest first.
-  // Each in three layers: its tiles (edges and corners where it borders, the
-  // centre inside), a seamless texture made from its centre with its
-  // variations faded in, and between them a mask that is whole inside and
-  // fades out across the border cells (dodoland_autotile_blend). The texture
-  // goes over the tiles through the mask, only where the tiles are opaque, so
-  // the inside has no seams and a border keeps its fringe and melts inwards.
-  // A lower ground carries on (as plain inside) one cell under a higher one's
-  // border, so the higher's clear edge shows it, not a gap. False while a
-  // picture is still loading.
-  // Scratch canvases for the smart-ground bake, kept and reused by name and
-  // size. Made fresh per kind per chunk they were most of a bake's time (and
-  // a lot of garbage), for pictures thrown away a moment later.
-  function autoScratch(name, w, h) {
-    bake.scratch = bake.scratch || {};
-    var c = bake.scratch[name];
-    if (!c || c.width !== w || c.height !== h) {
-      c = bake.scratch[name] = document.createElement('canvas');
-      c.width = w; c.height = h;
+
+  // --- the dual grid's sixteen shapes ------------------------------------- //
+  // A corner's four cells, as bits: 1 up-left, 2 up-right, 4 down-right, 8
+  // down-left. Its tile spans from the up-left cell's centre (u, v = 0, 0) to
+  // the down-right's (1, 1). At (u, v), dualAt gives f, how much the ground is
+  // there (it is where f > 0.5: bilinear between the four cells, so a lone
+  // corner is a rounded quarter, three an inner curve; two diagonal cells are
+  // joined by a band, so a road painted diagonally is one road), d, how far in
+  // from its edge that is (cells), and t, where along the edge (0-1, the same
+  // at both ends, so a fringe runs on across neighbouring tiles).
+  function dualAt(idx, u, v) {
+    var a = idx & 1, b = (idx >> 1) & 1, c = (idx >> 2) & 1, e = (idx >> 3) & 1;
+    var f = a * (1 - u) * (1 - v) + b * u * (1 - v) + c * u * v + e * (1 - u) * v;
+    var gu = (b - a) * (1 - v) + (c - e) * v, gv = (e - a) * (1 - u) + (c - b) * u;
+    var d = (f - 0.5) / Math.max(0.35, Math.hypot(gu, gv)), t;
+    if (idx === 5 || idx === 10) {
+      // Two diagonal cells: a band along the diagonal, 0.6 of a cell across.
+      var off = idx === 5 ? Math.abs(u - v) / Math.SQRT2 : Math.abs(u + v - 1) / Math.SQRT2;
+      var band = 0.5 + (0.3 - off) * 1.5;
+      if (band > f) { f = band; d = 0.3 - off; }
+      t = idx === 5 ? (u + v) / 2 : (u + 1 - v) / 2;
+    } else if (idx === 3 || idx === 12) t = u;          // a straight edge across
+    else if (idx === 6 || idx === 9) t = v;             // a straight edge down
+    else {
+      // A corner, rounded: along the curve round the odd one out of the four.
+      // (the one ground corner of a rounded tip, the one bare corner of an inner curve).
+      var odd = a + b + c + e === 1 ? idx : ~idx & 15;
+      var ox = odd === 2 || odd === 4 ? 1 : 0, oy = odd === 4 || odd === 8 ? 1 : 0;
+      t = Math.atan2(Math.abs(v - oy), Math.abs(u - ox)) / (Math.PI / 2);
     }
-    var x = c.getContext('2d');
-    x.setTransform(1, 0, 0, 1, 0, 0);
-    x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.filter = 'none';
-    x.imageSmoothingEnabled = true;
-    x.clearRect(0, 0, w, h);
-    return c;
+    return {f: f, d: d, t: t};
   }
-  function autoDraw(ctx, cells, A, m, res, gx0, gy0) {
-    var K = bake.kinds, ok = true, share = D.sizes.autotile_variation || 0, seen = {};
-    var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
-    var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
-    var soften = Math.max(0, D.sizes.autotile_blend == null ? 0.5 : D.sizes.autotile_blend);
-    var big = A * res;
-    // The blend mask is a soft fade, so it is drawn and blurred at a few pixels
-    // a cell and scaled up: the same picture for a sixteenth of the work.
-    var MR = Math.min(res, 4), small = A * MR;
-    var y0 = Math.max(0, m - 3), y1 = Math.min(A - 1, m + 66);
-    for (var yy = y0; yy <= y1; yy++) for (var xx = y0; xx <= y1; xx++) {
-      var v0 = cells[yy * A + xx];
-      if (K[v0] && K[v0].auto) seen[v0] = 1;
+  // The sixteen shapes of kind k at ``res`` pixels a cell, made once: masks
+  // (white where the ground is, its edge feathered by dodoland_ground_feather)
+  // and, for a smart ground, its fringe - the outer band of its top edge tile
+  // laid along each edge, dodoland_ground_fringe of a cell deep, fading into
+  // the inside. Null while a picture is still loading.
+  function dualTiles(k, res) {
+    var key = k + '@' + res;
+    if (bake.dual[key]) return bake.dual[key];
+    var kind = bake.kinds[k], auto = kind.auto, R = Math.max(2, Math.round(res));
+    var feather = Math.max(0.001, D.sizes.ground_feather == null ? 0.08 : D.sizes.ground_feather);
+    var depth = Math.max(0, Math.min(0.5, D.sizes.ground_fringe == null ? 0.5 : D.sizes.ground_fringe));
+    var band = null, bw = 0, bh = 0;
+    if (auto && depth > 0) {
+      // One cell of the edge tile's outer band, seamless across, at this detail.
+      var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
+      var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+      var src = autoProc(auto.edges.top_center, 'x', inset, [0, 0, 1 / N, 1 / N]);
+      if (!src) return null;
+      bw = R; bh = Math.max(1, Math.round(R * depth));
+      var bc = document.createElement('canvas'); bc.width = bw; bc.height = bh;
+      var bx = bc.getContext('2d');
+      bx.drawImage(src, 0, 0, src.width, src.height * depth, 0, 0, bw, bh);
+      band = bx.getImageData(0, 0, bw, bh).data;
     }
-    Object.keys(seen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
-      var set = K[k].auto, here = new Uint8Array(A * A), role = {};
-      set.center.forEach(function (v) { role[v] = 'xy'; });
-      [['top_center', 'x'], ['bottom_center', 'x'], ['mid_left', 'y'], ['mid_right', 'y']].forEach(function (r) {
-        role[set.edges[r[0]]] = r[1];
-      });
-      for (var i = 0; i < A * A; i++) if (cells[i] === k) here[i] = 1;
-      for (var y = 0; y < A; y++) for (var x = 0; x < A; x++) {
-        var j = y * A + x, v = cells[j];
-        if (here[j] || !K[v] || !K[v].auto || v < k) continue;
-        if ((x > 0 && cells[j - 1] === k) || (x < A - 1 && cells[j + 1] === k) ||
-            (y > 0 && cells[j - A] === k) || (y < A - 1 && cells[j + A] === k)) here[j] = 2;
-      }
-      function same(x, y) { return x < 0 || y < 0 || x >= A || y >= A || here[y * A + x] > 0; }
-      // The seamless texture, laid from the world's origin, N cells a tile.
-      var base = autoProc(set.center[0], 'xy', inset);
-      if (!base) { ok = false; return; }
-      var span = N * res, bkey = set.center[0] + '|' + res + '|' + N + '|' + inset;
-      bake.autoBlocks = bake.autoBlocks || {};
-      var block = bake.autoBlocks[bkey];
-      if (!block) {
-        block = bake.autoBlocks[bkey] = document.createElement('canvas');
-        block.width = block.height = Math.max(1, Math.round(span));
-        var bk = block.getContext('2d'); bk.imageSmoothingEnabled = true;
-        bk.drawImage(base, 0, 0, block.width, block.height);
-      }
-      var ox = -(((gx0 * res) % span) + span) % span, oy = -(((gy0 * res) % span) + span) % span;
-      var tiles = autoScratch('tiles', big, big), tc = tiles.getContext('2d');
-      var inner = autoScratch('inner', small, small), ic = inner.getContext('2d');
-      ic.fillStyle = '#fff';
-      // Every inside cell at once, filled with the texture: drawn one tile at a
-      // time they were thousands of draws a chunk, all covered by the texture.
-      var insidePath = new Path2D();
-      for (var y = y0; y <= y1; y++) for (var x = y0; x <= y1; x++) {
-        var at = y * A + x;
-        if (!here[at]) continue;
-        var n = same(x, y - 1), e = same(x + 1, y), s = same(x, y + 1), w = same(x - 1, y);
-        // Under a higher ground's border it is plain inside: no fringe of its own.
-        var inside = here[at] === 2 || (n && e && s && w);
-        if (inside) {
-          ic.fillRect(x * MR, y * MR, MR, MR);
-          insidePath.rect(x * res, y * res, res, res);
-          continue;
+    var out = {mask: [], fringe: []};
+    for (var idx = 1; idx < 15; idx++) {
+      var m = document.createElement('canvas'); m.width = m.height = R;
+      var mx = m.getContext('2d'), mi = mx.createImageData(R, R), md = mi.data;
+      var fr = null, fd = null;
+      if (band) { fr = document.createElement('canvas'); fr.width = fr.height = R; fd = mx.createImageData(R, R); }
+      for (var py = 0; py < R; py++)
+        for (var px = 0; px < R; px++) {
+          var at = dualAt(idx, (px + 0.5) / R, (py + 0.5) / R), o = (py * R + px) * 4;
+          var x = (at.f - 0.5 + feather) / (2 * feather), alpha = x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+          md[o] = md[o + 1] = md[o + 2] = 255; md[o + 3] = Math.round(alpha * 255);
+          if (!band || at.d < -feather || at.d >= depth) continue;
+          var sx = Math.min(bw - 1, Math.floor(((at.t % 1) + 1) % 1 * bw));
+          var sy = Math.min(bh - 1, Math.max(0, Math.floor(at.d / depth * bh)));
+          var so = (sy * bw + sx) * 4, fade = Math.min(1, (depth - at.d) / (depth * 0.35));
+          fd.data[o] = band[so]; fd.data[o + 1] = band[so + 1]; fd.data[o + 2] = band[so + 2];
+          fd.data[o + 3] = Math.round(band[so + 3] * fade * alpha);
         }
-        var pick = autoTile(n, e, s, w, gx0 + x, gy0 + y, set, share, N);
-        for (var q = 0; q < pick.length; q++) {
-          var pc = pick[q], im = autoProc(pc.v, role[pc.v] || '', inset);
-          if (!im) { ok = false; continue; }
-          tc.drawImage(im, pc.sx * im.width, pc.sy * im.height, pc.sw * im.width, pc.sh * im.height,
-                       x * res + pc.dx * res, y * res + pc.dy * res, pc.dw * res, pc.dh * res);
-        }
-      }
-      var inPat = tc.createPattern(block, 'repeat');
-      if (inPat.setTransform) inPat.setTransform(new DOMMatrix([1, 0, 0, 1, ox, oy]));
-      tc.fillStyle = inPat; tc.fill(insidePath);
-      var tex = autoScratch('tex', big, big), xc = tex.getContext('2d'), pat = xc.createPattern(block, 'repeat');
-      if (pat.setTransform) pat.setTransform(new DOMMatrix([1, 0, 0, 1, ox, oy]));
-      xc.fillStyle = pat; xc.fillRect(0, 0, big, big);
-      // Its variations, a whole block now and then, faded into it.
+      mx.putImageData(mi, 0, 0);
+      out.mask[idx] = m;
+      if (fr) { fr.getContext('2d').putImageData(fd, 0, 0); out.fringe[idx] = fr; }
+    }
+    bake.dual[key] = out;
+    return out;
+  }
+  // The fill for kind k on a canvas whose top-left is world cell (ox, oy),
+  // laid from the world's origin so neighbouring chunks meet: a smart ground's
+  // seamless centre (N cells a tile) with its variations faded in now and
+  // then, a tile pack's block of tiles, or a plain colour. Drawn into the box
+  // [x, y, w, h] (pixels) with ``mode``: source-in takes the shape already on
+  // ``c``, source-over fills the box. A variation goes only where ``here(x, y)``
+  // (area cells) says the ground is. False while a picture is still loading.
+  function bakeFill(c, k, res, ox, oy, A, box, mode, here) {
+    var kind = bake.kinds[k];
+    c.globalCompositeOperation = mode;
+    if (kind.auto) {
+      var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
+      var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+      var share = D.sizes.autotile_variation || 0, set = kind.auto, span = N * res;
+      var block = autoBlock(set, res);
+      if (!block) return false;
+      var pat = c.createPattern(block, 'repeat');
+      if (pat.setTransform) pat.setTransform(new DOMMatrix([1, 0, 0, 1, -(((ox * res) % span) + span) % span,
+                                                             -(((oy * res) % span) + span) % span]));
+      c.fillStyle = pat; c.fillRect(box[0], box[1], box[2], box[3]);
+      c.globalCompositeOperation = 'source-atop';
       if (set.center.length > 1 && share > 0) {
-        for (var by = Math.floor(gy0 / N); by <= Math.floor((gy0 + A - 1) / N); by++)
-          for (var bx = Math.floor(gx0 / N); bx <= Math.floor((gx0 + A - 1) / N); bx++) {
+        for (var by = Math.floor(oy / N); by <= Math.floor((oy + A - 1) / N); by++)
+          for (var bx = Math.floor(ox / N); bx <= Math.floor((ox + A - 1) / N); bx++) {
             if (autoHash(bx, by) >= share) continue;
-            var cxl = bx * N + Math.floor(N / 2) - gx0, cyl = by * N + Math.floor(N / 2) - gy0;
-            if (cxl < 0 || cyl < 0 || cxl >= A || cyl >= A || !here[cyl * A + cxl]) continue;
+            var hx = bx * N + Math.floor(N / 2) - ox, hy = by * N + Math.floor(N / 2) - oy;
+            if (!here(hx, hy)) continue;
             var vid = set.center[1 + Math.floor(autoHash(by + 7919, bx + 104729) * (set.center.length - 1))];
             var soft = autoSoft(vid, inset);
-            if (!soft) { ok = false; continue; }
-            xc.drawImage(soft, (bx * N - gx0) * res - span * 0.15, (by * N - gy0) * res - span * 0.15, span * 1.3, span * 1.3);
+            if (!soft) return false;
+            c.drawImage(soft, (bx * N - ox) * res - span * 0.15, (by * N - oy) * res - span * 0.15, span * 1.3, span * 1.3);
           }
       }
-      // The mask: whole inside, fading out across the border cells.
-      var mask = autoScratch('mask', small, small), mc = mask.getContext('2d');
-      if (BLUR_OK && soften > 0) mc.filter = 'blur(' + Math.max(0.5, soften * MR).toFixed(1) + 'px)';
-      mc.drawImage(inner, 0, 0);
-      xc.globalCompositeOperation = 'destination-in'; xc.drawImage(mask, 0, 0, big, big);
-      tc.globalCompositeOperation = 'source-atop'; tc.drawImage(tex, 0, 0);
-      ctx.drawImage(tiles, 0, 0);
-    });
-    return ok;
+    } else if (kind.layout) {
+      var blk = bakeBlock(k, res);
+      if (!blk) return false;
+      var p2 = c.createPattern(blk, 'repeat');
+      if (p2.setTransform) p2.setTransform(new DOMMatrix([1, 0, 0, 1, -((ox * res) % blk.width), -((oy * res) % blk.height)]));
+      c.fillStyle = p2; c.fillRect(box[0], box[1], box[2], box[3]);
+    } else {
+      c.fillStyle = kind.fill; c.fillRect(box[0], box[1], box[2], box[3]);
+    }
+    c.globalCompositeOperation = 'source-over';
+    return true;
   }
+  // A smart ground's seamless centre at ``res`` pixels a cell, N cells a tile,
+  // once; null until its picture is in.
+  function autoBlock(set, res) {
+    var N = Math.max(1, Math.round(D.sizes.autotile_cells || 2));
+    var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+    var bkey = set.center[0] + '|' + res + '|' + N + '|' + inset;
+    bake.autoBlocks = bake.autoBlocks || {};
+    if (bake.autoBlocks[bkey]) return bake.autoBlocks[bkey];
+    var base = autoProc(set.center[0], 'xy', inset);
+    if (!base) return null;
+    var block = bake.autoBlocks[bkey] = document.createElement('canvas');
+    block.width = block.height = Math.max(1, Math.round(N * res));
+    var bk = block.getContext('2d'); bk.imageSmoothingEnabled = true;
+    bk.drawImage(base, 0, 0, block.width, block.height);
+    return block;
+  }
+  // Everything a chunk's bake would otherwise make the first time it meets a
+  // ground, made while the map loads ("Preparing the ground" on the loading
+  // card): every ground's pictures fetched, then at every detail the bake
+  // uses, its textures, its sixteen corner shapes and its fringe - a few
+  // milliseconds at a time, so the card keeps moving. Chunks baked afterwards
+  // only stamp and fill.
+  function bakeTake(res) {
+    if (!bake.kinds || res.kinds.length !== bake.kinds.length) { bake.blocks = {}; bake.dual = {}; }
+    bake.kinds = res.kinds;
+    bake.art = res.art;
+  }
+  function bakeWarm() {
+    function done() { if (typeof loaded === 'function') loaded('textures'); }
+    fetch(terrUrl('rle', '?r=0,0,0,0&v=' + encodeURIComponent(terr.ver)))
+      .then(function (r) { return r.ok ? r.json() : {ok: false}; })
+      .then(function (res) {
+        if (!res.ok) { done(); return; }
+        bakeTake(res);
+        var jobs = [], top = D.sizes.ground_detail || 16, levels = [];
+        for (var r = 2; r <= top; r *= 2) levels.push(r);
+        var inset = Math.max(0, Math.min(0.2, D.sizes.autotile_inset == null ? 0.03 : D.sizes.autotile_inset));
+        // Ask for every picture now; each job waits until its own are in.
+        bake.kinds.forEach(function (kind, k) {
+          if (!kind) return;
+          if (kind.auto) {
+            kind.auto.center.concat([kind.auto.edges.top_center]).forEach(bakeImg);
+            kind.auto.center.slice(1).forEach(function (vid) { jobs.push(function () { return autoSoft(vid, inset); }); });
+          } else if (kind.layout) kind.layout.block.forEach(bakeImg);
+          levels.forEach(function (lv) {
+            jobs.push(function () {
+              if (kind.auto && !autoBlock(kind.auto, lv)) return null;
+              if (!kind.auto && kind.layout && !bakeBlock(k, lv)) return null;
+              return dualTiles(k, lv);
+            });
+          });
+        });
+        var started = performance.now(), budget = D.sizes.bake_budget_ms || 8;
+        (function step() {
+          var t0 = performance.now(), waiting = [];
+          while (jobs.length && performance.now() - t0 < budget) {
+            var job = jobs.shift();
+            if (!job()) waiting.push(job);   // its pictures are not in yet
+          }
+          jobs = waiting.concat(jobs);
+          // Pictures that never arrive do not hold the map up for long.
+          if (!jobs.length || performance.now() - started > 15000) { done(); bakeSoon(); return; }
+          setTimeout(step, waiting.length && waiting.length === jobs.length ? 60 : 0);
+        })();
+      })
+      .catch(done);
+  }
+  // A scratch canvas for one ground's layer, kept and reused; only the box
+  // about to be drawn in is cleared.
+  function bakeScratch(w, box) {
+    var c = bake.scratch;
+    if (!c || c.width !== w) { c = bake.scratch = document.createElement('canvas'); c.width = c.height = w; }
+    var x = c.getContext('2d');
+    x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1;
+    x.clearRect(box[0], box[1], box[2], box[3]);
+    return c;
+  }
+  // One chunk. Grounds are drawn in order - plain grounds by their rank, then
+  // smart grounds by theirs - each over everything drawn before it, as the
+  // shape of itself and every ground drawn after it: where a later ground
+  // rounds off, an earlier one shows beneath, never a gap. One cell of margin
+  // round the chunk, so its edge corners see their neighbours. Each ground
+  // works only in its own box; the first, where it covers the whole chunk (it
+  // does unless the chunk has unpainted cells), is simply filled in.
   function bakeChunk(key, res) {
-    var at = key.split(','), cx = +at[0], cy = +at[1];
-    var K = bake.kinds, width = D.sizes.blend_width || 0, strength = D.sizes.blend_strength || 0;
-    var smooth = Math.max(0, D.sizes.smoothing || 0);
-    var blend = BLUR_OK && width > 0 && strength > 0;
-    var coastK = D.sizes.coast_shading || 0, coastW = D.sizes.coast_width || 0;
-    var coast = BLUR_OK && coastK > 0 && coastW > 0;
-    // Everything is drawn on a canvas a margin larger than the chunk, so a
-    // curve, a blend or the coast's shading carries over the chunk line just
-    // as the neighbour draws it; the chunk is cut out at the end.
-    var m = Math.max(4, blend ? Math.ceil(width) + 1 : 0,
-                     smooth > 0 ? Math.ceil(2 * (D.sizes.straighten || 1.5)) + 2 : 0,
-                     coast ? Math.ceil(coastW * 2.4) + 1 : 0, 1);
-    var A = 64 + 2 * m, big = A * res, size = 64 * res, ready = true;
-    var area = bakeArea(cx, cy, m);
-    // Smart ground is drawn last, tile by tile (autoDraw); the bake below sees
-    // only what lies under it (autoUnder).
-    var cellsAll = area, hasAuto = false;
-    for (var q = 0; q < A * A; q++) if (K[area[q]] && K[area[q]].auto) { hasAuto = true; break; }
-    if (hasAuto) area = autoUnder(cellsAll, A, K);
-    var near = {};
-    for (var i = 0; i < A * A; i++) near[area[i]] = 1;
-    function known(v) { return v && K[v]; }
-    function isLand(v) { return v && K[v] && K[v].land; }
-    function canvas() { var c = document.createElement('canvas'); c.width = c.height = big; return c; }
-    var kinds = Object.keys(near).map(Number).filter(known).sort(function (a, b) { return a - b; });
-    // Each kind's shape, once. Smoothed, a kind's shape is the outline of
-    // itself *and everything ranked above it*: drawn lowest first, where a
-    // corner is rounded off what shows is the ground beneath. The lowest
-    // fills all known ground. Unsmoothed, each is its own cells.
-    var shapes = {};
-    kinds.forEach(function (k, i) {
-      shapes[k] = smooth > 0 && i === 0 ? null
-        : smooth > 0 ? bakeSmoothPath(area, A, 0, res, function (v) { return known(v) && v >= k; }, smooth)
-        : bakePath(area, A, res, 0, 0, A, function (v) { return v === k; });
+    var at = key.split(','), cx = +at[0], cy = +at[1], K = bake.kinds;
+    var m = 1, A = 64 + 2 * m, big = A * res, size = 64 * res, ready = true;
+    var area = bakeArea(cx, cy, m), present = {}, unknown = false;
+    for (var i = 0; i < A * A; i++) {
+      if (area[i] && K[area[i]]) present[area[i]] = 1; else unknown = true;
+    }
+    var kinds = Object.keys(present).map(Number).sort(function (a, b) {
+      return ((K[a].auto ? 1 : 0) - (K[b].auto ? 1 : 0)) || (a - b);
     });
-    var knownClip = bakePath(area, A, res, 0, 0, A, known);
-    function fillShape(c, k) {
-      if (shapes[k]) c.fill(shapes[k], 'evenodd'); else c.fillRect(0, 0, big, big);
-    }
-    // Land and water as drawn, from the very same shapes in the same order,
-    // so the blend and the coast's shading meet the fills exactly.
-    var landMask = canvas(), waterMask = canvas();
-    if (blend || coast) {
-      var lc = landMask.getContext('2d');
-      lc.save(); lc.clip(knownClip); lc.fillStyle = '#fff';
-      kinds.forEach(function (k) {
-        lc.globalCompositeOperation = K[k].land ? 'source-over' : 'destination-out';
-        fillShape(lc, k);
-      });
-      lc.restore();
-      var wc = waterMask.getContext('2d');
-      wc.fillStyle = '#fff'; wc.fill(knownClip);
-      wc.globalCompositeOperation = 'destination-out'; wc.drawImage(landMask, 0, 0);
-    }
-    // A shape (or picture) blurred, kept to a mask, and tinted.
-    function soft(draw, sigma, keep, tint) {
-      var src = canvas(), sc = src.getContext('2d');
-      sc.fillStyle = '#fff'; sc.strokeStyle = '#fff';
-      draw(sc);
-      var out = canvas(), oc = out.getContext('2d');
-      oc.filter = 'blur(' + Math.max(0.5, sigma * res).toFixed(1) + 'px)';
-      oc.drawImage(src, 0, 0);
-      oc.filter = 'none';
-      oc.globalCompositeOperation = 'destination-in'; oc.drawImage(keep, 0, 0);
-      oc.globalCompositeOperation = 'source-in'; oc.fillStyle = tint; oc.fillRect(0, 0, big, big);
-      return out;
-    }
-    var cv = canvas(), ctx = cv.getContext('2d');
-    var lowestLand = Infinity;
-    kinds.forEach(function (k) { if (K[k].land) lowestLand = Math.min(lowestLand, k); });
-    kinds.forEach(function (k) {
-      var style = bakeStyle(ctx, k, res, cx * 64 - m, cy * 64 - m);
-      if (style === null) { ready = false; return; }
-      ctx.save(); ctx.clip(knownClip); ctx.fillStyle = style; fillShape(ctx, k); ctx.restore();
-      // The blend, land into land: the kind's shape grown by half the width
-      // and blurred, kept to land as drawn, in the kind's own texture. Kinds
-      // ranked above are drawn after and cover what spilled onto them.
-      if (!blend || !K[k].land || k <= lowestLand) return;
-      // Its land only: smoothed, its fill shape takes in the water ranked
-      // above it, and a blend must not spill from a lake's shore.
-      var from = smooth > 0 ? bakeSmoothPath(area, A, 0, res, function (v) { return isLand(v) && v >= k; }, smooth)
-                            : shapes[k];
-      var spill = soft(function (c) {
-        c.lineWidth = width * res; c.lineJoin = 'round';
-        c.fill(from, 'evenodd'); c.stroke(from);
-      }, width / 3, landMask, style);
-      ctx.globalAlpha = strength; ctx.drawImage(spill, 0, 0); ctx.globalAlpha = 1;
-    });
-    // The coast: land a little darker towards the water, water a little
-    // brighter with surf, from the shore as drawn.
-    if (coast && kinds.some(function (k) { return !K[k].land; }) && kinds.some(function (k) { return K[k].land; })) {
-      // Half strength at the shore line (the blur), so twice the old values.
-      ctx.globalAlpha = Math.min(1, 0.36 * coastK);
-      ctx.drawImage(soft(function (c) { c.drawImage(waterMask, 0, 0); }, coastW * 0.8, landMask, '#000'), 0, 0);
-      ctx.globalAlpha = Math.min(1, 0.7 * Math.min(1, coastK));
-      ctx.drawImage(soft(function (c) { c.drawImage(landMask, 0, 0); }, coastW * 0.5, waterMask, '#fff'), 0, 0);
-      ctx.globalAlpha = 1;
-    }
-    if (hasAuto && !autoDraw(ctx, cellsAll, A, m, res, cx * 64 - m, cy * 64 - m)) ready = false;
+    var rank = new Int32Array(K.length + 1).fill(-1);
+    kinds.forEach(function (k, n) { rank[k] = n; });
+    // Drawn straight into the chunk's picture, shifted by the margin.
     var out = document.createElement('canvas');
     out.width = out.height = size;
-    out.getContext('2d').drawImage(cv, m * res, m * res, size, size, 0, 0, size, size);
+    var ctx = out.getContext('2d'), ox = cx * 64 - m, oy = cy * 64 - m;
+    ctx.translate(-m * res, -m * res);
+    kinds.forEach(function (k, n) {
+      if (n === 0 && !unknown) {
+        if (!bakeFill(ctx, k, res, ox, oy, A, [0, 0, big, big], 'source-over', function () { return true; })) ready = false;
+        return;
+      }
+      var tiles = dualTiles(k, res);
+      if (!tiles) { ready = false; return; }
+      var whole = new Path2D(), edges = [], x0 = A, y0 = A, x1 = 0, y1 = 0;
+      function has(x, y) { return x >= 0 && y >= 0 && x < A && y < A && rank[area[y * A + x]] >= n; }
+      // Corner (x, y) sits between cells x-1 and x, y-1 and y.
+      for (var y = 1; y < A; y++) {
+        var run = -1;
+        for (var x = 1; x <= A; x++) {
+          var idx = x < A ? (has(x - 1, y - 1) ? 1 : 0) | (has(x, y - 1) ? 2 : 0) | (has(x, y) ? 4 : 0) | (has(x - 1, y) ? 8 : 0) : 0;
+          if (idx) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+          if (idx === 15) { if (run < 0) run = x; continue; }
+          if (run >= 0) { whole.rect((run - 0.5) * res, (y - 0.5) * res, (x - run) * res, res); run = -1; }
+          if (idx) edges.push(idx, x, y);
+        }
+      }
+      if (x1 < x0) return;
+      var box = [(x0 - 0.5) * res, (y0 - 0.5) * res, (x1 - x0 + 1) * res, (y1 - y0 + 1) * res];
+      var layer = bakeScratch(big, box), lc = layer.getContext('2d');
+      lc.fillStyle = '#fff'; lc.fill(whole);
+      for (var e = 0; e < edges.length; e += 3)
+        lc.drawImage(tiles.mask[edges[e]], (edges[e + 1] - 0.5) * res, (edges[e + 2] - 0.5) * res, res, res);
+      if (!bakeFill(lc, k, res, ox, oy, A, box, 'source-in', has)) { ready = false; return; }
+      if (tiles.fringe.length) {
+        lc.globalCompositeOperation = 'source-atop';
+        for (var f = 0; f < edges.length; f += 3) {
+          var fr = tiles.fringe[edges[f]];
+          if (fr) lc.drawImage(fr, (edges[f + 1] - 0.5) * res, (edges[f + 2] - 0.5) * res, res, res);
+        }
+        lc.globalCompositeOperation = 'source-over';
+      }
+      ctx.drawImage(layer, box[0], box[1], box[2], box[3], box[0], box[1], box[2], box[3]);
+    });
     return {canvas: out, ready: ready};
   }
   function bakeShow(key, res) {
@@ -978,9 +832,7 @@ SCRIPT = r"""
       .then(function (res) {
         bake.fetching = false;
         if (!res.ok) return;
-        if (!bake.kinds || res.kinds.length !== bake.kinds.length) bake.blocks = {};
-        bake.kinds = res.kinds;
-        bake.art = res.art;
+        bakeTake(res);
         Object.keys(res.chunks).forEach(function (key) {
           var rle = res.chunks[key];
           bake.known[key] = true;
@@ -1536,7 +1388,7 @@ SCRIPT = r"""
     .then(function (world) {
       if (!world.ok || !world.cells_w) {
         terrSay('No world yet. Import the map first with tools/dodoland_terrain_import.py.', true);
-        if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); }
+        if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); loaded('textures'); }
         return;
       }
       terrSetup(world);
@@ -1544,12 +1396,13 @@ SCRIPT = r"""
       loadInfluence();
       loadRoads();
       terrOverview();
+      bakeWarm();
       terrDetail();
       // The reference is hidden when the overview arrives (terrOverview): the
       // terrain *is* the map now, and the upload is only there to trace against.
     })
     .catch(function () {
       terrSay('The world could not be loaded.', true);
-      if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); }
+      if (typeof loaded === 'function') { loaded('ground'); loaded('reach'); loaded('textures'); }
     });
 """

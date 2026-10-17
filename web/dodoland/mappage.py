@@ -542,17 +542,16 @@ async def map_page(request: web.Request):
         "forest_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_full_at")),
         "forest_strip": float(bot.dodoland_params.get(guild.id, "dodoland_forest_strip_cells")),
         # The close-up ground, baked per chunk: how finely, how many kept, and
-        # how two grounds blend where they meet.
+        # how soft its curved edges are and how deep a smart ground's fringe.
+        "ground_feather": max(0.001, min(0.5, float(bot.dodoland_params.get(guild.id, "dodoland_ground_feather")))),
+        "ground_fringe": max(0.0, min(0.5, float(bot.dodoland_params.get(guild.id, "dodoland_ground_fringe")))),
         "ground_detail": float(bot.dodoland_params.get(guild.id, "dodoland_ground_detail_max")),
         "ground_chunks": int(bot.dodoland_params.get(guild.id, "dodoland_ground_chunks_max")),
         "ground_memory_mb": max(32, int(bot.dodoland_params.get(guild.id, "dodoland_ground_memory_mb"))),
-        "blend_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_width"))),
-        "smoothing": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_smoothing")))),
         "hit_alpha": max(0, min(255, int(bot.dodoland_params.get(guild.id, "dodoland_hit_alpha")))),
         # Smart ground: how many cells one tile spans, and how often a variation shows.
         "autotile_cells": max(1, min(8, int(bot.dodoland_params.get(guild.id, "dodoland_autotile_cells")))),
         "autotile_inset": max(0.0, min(0.2, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_inset")))),
-        "autotile_blend": max(0.0, min(3.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_blend")))),
         "bake_budget_ms": max(1, min(50, int(bot.dodoland_params.get(guild.id, "dodoland_bake_budget_ms")))),
         # Ground muting, the same the server applies to the zoomed-out picture.
         "ground_mute": terrainart.mute_settings(bot.dodoland_params, guild.id),
@@ -567,13 +566,6 @@ async def map_page(request: web.Request):
         "picture_max": town_rules.picture_limit(bot.dodoland_params, guild.id),
         # Population on a town's card: the tiles its area covers, times this.
         "pop_per_cell": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_population_per_cell"))),
-        "straighten": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_ground_straighten"))),
-        # The coast's dark land edge and surf, drawn in the bake from the
-        # smoothed shore at the strength the close-up shading has.
-        "coast_shading": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_detail_shading")) *
-                             float(bot.dodoland_params.get(guild.id, "dodoland_overview_shading"))),
-        "coast_width": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_coast_shade_width"))),
-        "blend_strength": max(0.0, min(0.99, float(bot.dodoland_params.get(guild.id, "dodoland_tile_blend_strength")))),
         "forest_gap_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_full")),
         "forest_gap_zero": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_zero")),
     }
@@ -630,6 +622,7 @@ async def map_page(request: web.Request):
         <li data-step="map">Unrolling the map</li>
         <li data-step="ground">Painting the land and sea</li>
         <li data-step="reach">Measuring every town's reach</li>
+        <li data-step="textures">Preparing the ground</li>
       </ul>
     </div>
   </div>
@@ -1188,7 +1181,7 @@ _SCRIPT = r"""
   // Three things make the first picture: the base image (the map's size), the
   // ground, and the towns' areas. The card lifts when all three are in, or
   // after a while regardless — a slow area must not hold the map hostage.
-  var waitingFor = {map: 1, ground: 1, reach: 1};
+  var waitingFor = {map: 1, ground: 1, reach: 1, textures: 1}, steps = Object.keys(waitingFor).length;
   function loaded(step) {
     if (!waitingFor[step]) return;
     delete waitingFor[step];
@@ -1196,7 +1189,7 @@ _SCRIPT = r"""
     if (li) li.classList.add('ok');
     var left = Object.keys(waitingFor).length;
     var fill = document.getElementById('dlloadfill');
-    if (fill) fill.style.width = Math.round((3 - left) / 3 * 100) + '%';
+    if (fill) fill.style.width = Math.round((steps - left) / steps * 100) + '%';
     if (!left) liftLoading();
   }
   function liftLoading() {

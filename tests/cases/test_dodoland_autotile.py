@@ -40,24 +40,22 @@ print("import          every role is found in a set, and a missing one is named"
 node = shutil.which("node")
 if node:
     js = terrain_ui.SCRIPT
-    fns = js[js.index("  function autoHash(x, y)"):js.index("  // What the rest of the bake sees")]
+    fns = js[js.index("  var DUAL_BITS"):js.index("  // The sixteen shapes of kind k")]
     probe = fns + r"""
-var set = {center: ['C', 'V1', 'V2'], single: 'S', edges: {top_left: 'TL', top_center: 'TC', top_right: 'TR',
-  mid_left: 'ML', mid_right: 'MR', bottom_left: 'BL', bottom_center: 'BC', bottom_right: 'BR'}};
-function pick(n, e, s, w, N, share) {
-  return autoTile(n, e, s, w, 5, 9, set, share || 0, N || 1).map(function (p) { return p.v; }).join('+');
-}
+function f(i, u, v) { return dualAt(i, u, v).f; }
 var out = {
-  inside: pick(1, 1, 1, 1), single: pick(0, 0, 0, 0),
-  north: pick(0, 1, 1, 1), east: pick(1, 0, 1, 1), south: pick(1, 1, 0, 1), west: pick(1, 1, 1, 0),
-  nw: pick(0, 1, 1, 0), ne: pick(0, 0, 1, 1), sw: pick(1, 1, 0, 0), se: pick(1, 0, 0, 1),
-  strip_h: pick(0, 1, 0, 1), strip_v: pick(1, 0, 1, 0), end_w: pick(0, 1, 0, 0),
-  varied: pick(1, 1, 1, 1, 1, 1)
+  // A lone corner of ground is a rounded quarter: in near its cell, out across the diagonal.
+  tip_in: f(1, 0.2, 0.2) > 0.5, tip_out: f(1, 0.36, 0.36) < 0.5,
+  // Three corners: the bare one is an inner curve, the mirror of the tip.
+  inner_out: f(14, 0.2, 0.2) < 0.5, inner_in: f(14, 0.36, 0.36) > 0.5,
+  // Two side by side: a straight edge on the cell line, its depth measured from it.
+  edge: f(12, 0.5, 0.49) < 0.5 && f(12, 0.5, 0.51) > 0.5, depth: dualAt(12, 0.3, 0.8).d.toFixed(2),
+  // Two diagonal: joined through the middle, so a road painted diagonally is one road.
+  diag_mid: f(5, 0.5, 0.5) > 0.5, diag_off: f(5, 0.9, 0.1) < 0.5,
+  // Along an edge the fringe's place runs 0 to 1 and meets the next tile's.
+  t_tip: [dualAt(1, 0.5, 0.0001).t, dualAt(1, 0.0001, 0.5).t].map(function (x) { return x.toFixed(2); }).join(','),
+  t_edge: dualAt(12, 0.25, 0.5).t.toFixed(2)
 };
-// With tiles two cells across, a north border shows the top band of the edge
-// tile, and inside the band follows the world grid.
-var band = autoTile(0, 1, 1, 1, 4, 9, set, 0, 2)[0], inner = autoTile(1, 1, 1, 1, 5, 9, set, 0, 2)[0];
-out.band = [band.sy, band.sh, inner.sx, inner.sy].join(',');
 console.log(JSON.stringify(out));
 """
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
@@ -65,18 +63,19 @@ console.log(JSON.stringify(out));
     run = subprocess.run([node, f.name], capture_output=True, text=True)
     got = json.loads(run.stdout or "{}") if run.returncode == 0 else {}
     assert got, (run.stdout, run.stderr)
-    assert got["inside"] == "C" and got["single"] == "S", got
-    assert (got["north"], got["east"], got["south"], got["west"]) == ("TC", "MR", "BC", "ML"), got
-    assert (got["nw"], got["ne"], got["sw"], got["se"]) == ("TL", "TR", "BL", "BR"), got
-    print("tiles           inside, single, each edge and each corner get their own tile")
-    assert got["strip_h"] == "TC+BC" and got["strip_v"] == "ML+MR", got
-    assert got["end_w"] == "TL+BL", f"a strip's west end is not its two west corners: {got['end_w']}"
-    print("tiles           a strip one cell wide is the outer bands of both its edges")
-    assert got["varied"] in ("V1", "V2"), "a variation share of 1 left the plain centre"
-    assert got["band"] == "0,0.5,0.5,0.5", got["band"]
-    print("tiles           a tile spans N cells: a border shows its edge band, inside follows the grid")
+    assert got["tip_in"] and got["tip_out"], f"a lone corner is not a rounded tip: {got}"
+    assert got["inner_out"] and got["inner_in"], f"an inner corner is not curved: {got}"
+    assert got["edge"] and got["depth"] == "0.30", f"a straight edge is not on the cell line: {got}"
+    print("shapes          a lone corner is a rounded tip, three an inner curve, two a straight edge")
+    assert got["diag_mid"] and got["diag_off"], f"two diagonal cells are not joined: {got}"
+    print("shapes          two diagonal cells are joined, so a diagonal road is one road")
+    assert got["t_tip"] == "0.00,1.00" and got["t_edge"] == "0.25", f"the fringe does not run on: {got}"
+    print("shapes          the fringe's place along an edge runs on from tile to tile")
+    bake = js[js.index("  // --- the close-up ground, baked"):js.index("  function bakeShow(key, res) {")]
+    assert "blur(" not in bake and "bakeSmoothPath" not in bake, "the bake still blurs or traces outlines"
+    print("bake            no blurs and no traced outlines: stamped corner shapes and one fill a ground")
 else:
-    print("tiles           (node not installed; the page's tile picking was not run)")
+    print("shapes          (node not installed; the page's corner shapes were not run)")
 
 server = pathlib.Path("web/dodoland/terrain_api.py").read_text(encoding="utf-8")
 assert '"auto": {"center"' in server and 'tile = {**tile, "variants": list(auto.get("center")' in server, \

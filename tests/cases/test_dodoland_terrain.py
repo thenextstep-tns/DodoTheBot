@@ -514,53 +514,6 @@ too_many = asyncio.run(terrain_api.terrain_rle(_Get(rle_bot, {"r": "0,0,40,40"})
 assert too_many.status == 400 or rle_store.chunk_counts(GUILD)[0] < 40
 print("baking          the ground arrives as run-length chunks, with each kind's layout and land flag")
 
-# Smooth borders, worked out by the page at bake time (no canvas needed for the
-# geometry): a road painted diagonally is one shape, stairs even out, a shape
-# keeps its size, and nothing moves much more than the smoothing reach.
-import shutil  # noqa: E402
-import subprocess  # noqa: E402
-import tempfile  # noqa: E402
-from web.dodoland import terrain_ui  # noqa: E402
-
-_node = shutil.which("node")
-if _node:
-    _js = terrain_ui.SCRIPT
-    _fns = _js[_js.index("  // A region's border as closed loops of cell corners"):_js.index("  // The smoothed outline of a region of the area")]
-    _probe = _fns + r"""
-var A = 40, out = [];
-function grid(fill) { var g = new Uint16Array(A * A); fill(g); return g; }
-function loops(g) { return bakeLoops(bakeHalf(g, A, function (v) { return v === 1; }), A * 2, function (v) { return v === 1; }); }
-function area(pts) { var s = 0; for (var i = 0; i < pts.length; i++) { var a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1]; } return Math.abs(s) / 2; }
-// A one-cell road painted diagonally: one loop, not beads.
-var road = grid(function (g) { for (var i = 2; i < 30; i++) g[(i) * A + i] = 1; });
-out.push('road=' + loops(road).length);
-// Stairs one over and one down (a diagonal edge): smoothed, the edge stays
-// within a fraction of a cell of the straight line through it.
-var stairs = grid(function (g) { for (var y = 0; y < 40; y++) for (var x = 0; x < Math.min(40, y + 4); x++) g[y * A + x] = 1; });
-var sm = bakeGauss(bakeResample(loops(stairs)[0]), 3), worst = 0;
-sm.forEach(function (pt) {
-  if (pt[1] < 16 || pt[1] > 60 || pt[0] < 16 || pt[0] > 60) return;   // away from the area's edges
-  // The stairs' mid-line: cells x < y + 4, so x = y + 3.5 cells, 7 half-cells.
-  worst = Math.max(worst, Math.abs((pt[0] - pt[1]) - 7) / Math.SQRT2);
-});
-out.push('stairs=' + (worst / 2).toFixed(2));
-// A 10 x 10 plaza keeps its size, and no point moves more than the reach.
-var pl = bakeResample(loops(grid(function (g) { for (var y = 10; y < 20; y++) for (var x = 10; x < 20; x++) g[y * A + x] = 1; }))[0]);
-var spl = bakeGauss(pl, 3), moved = 0;
-spl.forEach(function (pt, i) { moved = Math.max(moved, Math.hypot(pt[0] - pl[i][0], pt[1] - pl[i][1])); });
-out.push('size=' + (area(spl) / area(pl)).toFixed(3));
-out.push('moved=' + (moved / 2).toFixed(2));
-console.log(out.join(' '));
-"""
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as _f:
-        _f.write(_probe)
-    _run = subprocess.run([_node, _f.name], capture_output=True, text=True)
-    _got = dict(part.split("=") for part in _run.stdout.split())
-    assert _got.get("road") == "1", ("a diagonal road traced as beads", _run.stdout, _run.stderr)
-    assert float(_got["stairs"]) < 0.2, f"a stepped diagonal edge stays {_got['stairs']} cells off straight"
-    assert 0.9 < float(_got["size"]) <= 1.0, f"smoothing changed a plaza's size to {_got['size']} of itself"
-    assert float(_got["moved"]) < 1.6, f"smoothing moved a point {_got['moved']} cells"
-    print(f"smoothing       a diagonal road is one line, stairs within {_got['stairs']} cells of straight, "
-          f"a plaza keeps {float(_got['size']):.0%} of its size")
+# The close-up ground's corner shapes are tested in test_dodoland_autotile.py.
 
 print("PASS")

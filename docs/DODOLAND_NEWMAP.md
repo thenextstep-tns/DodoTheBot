@@ -1302,3 +1302,28 @@ gone (the model keeps them for old rows). The button opens `#lxdlg`
 tile from `GET /api/dodoland/lights/{tile_id}` (`api_tile_lights`, owner) and
 saves through `update_tile`. A light's pool is centred on the point again
 (y + 0.15 r), on the map and in the editor; the foot anchoring is removed.
+
+### Ground bake rewritten: dual grid, smooth and cheaper (17 Oct 2026)
+The close-up bake (terrain_ui.py) no longer traces and Gaussian-smooths
+outlines, blurs blends and coasts, or lays smart ground cell by cell. Every
+ground is laid at the cell corners (dual grid): a corner's four cells give an
+index 0-15 (bits 1 up-left, 2 up-right, 4 down-right, 8 down-left, of cells
+holding this ground or one drawn after it) and the corner gets that one of 16
+shapes (`dualAt`: bilinear between the four cells, threshold 0.5 - a lone
+corner is a rounded tip, three an inner curve; diagonal pairs joined by a band
+so diagonal roads stay one road). `dualTiles(k, res)` makes the 16 masks
+(edge feathered by `dodoland_ground_feather`) and, for smart grounds, 16 fringe
+tiles sampled from one cell of the top edge tile's outer band (made seamless)
+by depth from the edge and position along it (`dodoland_ground_fringe` deep,
+max 0.5 cell). `bakeChunk`: grounds ordered plain-then-smart by rank; the
+first fills the chunk directly; each other works in its own box on a scratch
+layer: interior corners as rect runs, edge corners stamped, `bakeFill` (texture
+source-in; smart ground's seamless centre `autoBlock` + variations only where
+it is), fringe source-atop, composited. Margin is 1 cell. Removed settings:
+ground smoothing/straighten, tile blend width/strength, coast shade width,
+autotile blend (shore surf now comes from the tilesets' own fringe).
+`bakeWarm` runs during loading (new card step "Preparing the ground"): fetches
+the kinds via `rle?r=0,0,0,0`, loads every ground's pictures and makes every
+ground's textures, blocks and dual tiles at every detail level in budgeted
+slices. Same test chunk, headless CPU, warm: old 53/29/22 ms (res 16/8/4),
+new ~21/11/8 ms; the ~70 ms first-meeting cost is moved into loading.
