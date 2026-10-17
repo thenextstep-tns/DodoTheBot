@@ -158,9 +158,38 @@ SCRIPT = r"""
   // where each trunk stands. Each strip stacks by its lowest trunk exactly as
   // a piece or a walker does (depth), so somebody walking through the wood
   // passes behind the trees in front of them and in front of those behind.
+  // Zoomed out (below dodoland_forest_merge px a cell) a forest is not trees
+  // standing among the towns but a texture: each chunk is one flat picture,
+  // trees drawn back to front, no shadows - one layer for the browser to move
+  // instead of dozens of strips each holding every tree's shadow.
+  function forestMerged() { return pxPerCell() < (D.sizes.forest_merge == null ? 6 : D.sizes.forest_merge); }
+  function forestRenderFlat(key, res, trees) {
+    var at = key.split(','), cx = +at[0], cy = +at[1], ready = true, ch = cellsH();
+    var x0 = cx * 64 - 2, y0 = cy * 64 - 4, bw = 68, bh = 70;
+    var cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.ceil(bw * res)); cv.height = Math.max(1, Math.ceil(bh * res));
+    var ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    trees.sort(function (a, b) { return a.y - b.y; }).forEach(function (t) {
+      var im = forestImg(t.a);
+      if (!im) { ready = false; return; }
+      var h = t.w * im.naturalHeight / im.naturalWidth, x = (t.x - t.w / 2 - x0) * res, y = (t.y - h * 0.85 - y0) * res;
+      if (t.f) { ctx.save(); ctx.translate(x + t.w * res, y); ctx.scale(-1, 1); ctx.drawImage(im, 0, 0, t.w * res, h * res); ctx.restore(); }
+      else ctx.drawImage(im, x, y, t.w * res, h * res);
+    });
+    forestDrop(key);
+    cv.style.left = (x0 / D.cells_w * 100) + '%';
+    cv.style.top = (y0 / ch * 100) + '%';
+    cv.style.width = (bw / D.cells_w * 100) + '%';
+    cv.style.height = (bh / ch * 100) + '%';
+    cv.style.zIndex = depth(cy * 64 / ch * 100);
+    forestLayer().appendChild(cv);
+    FOREST.drawn[key] = {els: [cv], res: res, rle: ready ? FOREST.rle[key] : null, ready: ready, flat: true};
+  }
   function forestRender(key, res) {
     var at = key.split(','), cx = +at[0], cy = +at[1];
     var trees = forestTrees(cx, cy, FOREST.cells[key], forestKeep(res)), ready = true;
+    if (forestMerged()) { forestRenderFlat(key, res, trees); return; }
     var strip = Math.max(0.5, D.sizes.forest_strip || 2), strips = {};
     trees.forEach(function (t) {
       var im = forestImg(t.a);
@@ -287,7 +316,8 @@ SCRIPT = r"""
           if (d && FOREST.known[key]) forestDrop(key);
           continue;
         }
-        var stale = !d || d.rle !== FOREST.rle[key] || !d.ready || (d.res < res && d.res < (D.sizes.forest_detail || 12));
+        var stale = !d || d.rle !== FOREST.rle[key] || !d.ready || (d.res < res && d.res < (D.sizes.forest_detail || 12)) ||
+                    !!d.flat !== forestMerged();
         if (!stale) continue;
         if (budget-- > 0) forestRender(key, res); else more = true;
       }

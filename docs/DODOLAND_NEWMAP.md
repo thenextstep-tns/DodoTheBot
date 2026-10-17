@@ -1385,3 +1385,7 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   longer wander towns. "Find my traveller": town card button and the 🐎 map
   button (flashes the ring). Zoo catch radius 5 cells x scale. Honours (banner,
   cups, parse) removed for now.
+- Forest LOD (17 Oct): below `dodoland_forest_merge` screen px per cell
+  (default 6) a forest chunk is one flat canvas (`forestRenderFlat`: trees back
+  to front, no shadows, z at the chunk's top) instead of depth strips with
+  per-tree shadows; crossing the threshold re-renders (`d.flat`).

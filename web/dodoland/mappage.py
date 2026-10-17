@@ -684,6 +684,8 @@ async def map_page(request: web.Request):
         # Population on a town's card: the tiles its area covers, times this.
         "pop_per_cell": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_population_per_cell"))),
         "forest_gap_full": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_full")),
+        # Below this, px per cell, a forest chunk is one flat picture, not trees.
+        "forest_merge": max(0.0, float(bot.dodoland_params.get(guild.id, "dodoland_forest_merge"))),
         "forest_gap_zero": float(bot.dodoland_params.get(guild.id, "dodoland_forest_spacing_zero")),
     }
 
