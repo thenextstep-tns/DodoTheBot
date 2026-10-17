@@ -1177,7 +1177,8 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dltcard span { display: block; font-size: 13px; margin-top: 2px; }
 .dltcard small { display: block; font-size: 11px; opacity: .7; margin-top: 6px; }
 /* The runaway horse: it takes clicks; what it says is drawn at screen size. */
-.dlstand.dlhorse { z-index: 25000 !important; }
+/* Over everything, a town pointed at included (30000): it grazes among them. */
+.dlstand.dlhorse { z-index: 40000 !important; }
 .dlhorse svg { transition: transform .15s; }
 .dlhorse.running svg { animation: dlgallop .22s linear infinite; }
 @keyframes dlgallop { 50% { translate: 0 -6%; } }
@@ -1419,10 +1420,7 @@ _SCRIPT = r"""
       return;
     }
     if (ev.target.closest && ev.target.closest('.dlzoom')) return;
-    if (ev.button === 0 && typeof figureAt === 'function') {
-      var fig = figureAt(ev.clientX, ev.clientY);
-      if (fig) { figPress = fig; ev.preventDefault(); return; }
-    }
+
     if (typeof toolDown === 'function' && toolDown(ev)) return;
     down = true; captured = false; moved = 0; pid = ev.pointerId;
     last = {x: ev.clientX, y: ev.clientY};
@@ -2209,7 +2207,6 @@ _SCRIPT = r"""
     });
   }
   frame.addEventListener('click', function (ev) {
-    if (figPress) { var fig = figPress; figPress = null; fig.act(ev); return; }
     if (swallowClick) { swallowClick = false; return; }
     if (moved > 6 || !nat.w) return;
     if (typeof hidePop === 'function') hidePop();
@@ -4246,9 +4243,7 @@ _SCRIPT = r"""
       '<b>' + escapeHtml(t.who.owner || t.who.name) + '</b>' +
       '<span>' + (t.rest > 0 ? 'resting before ' : 'on the road to ') + escapeHtml(going.name) + '</span>' +
       '<small>visiting the towns of the people they talk to most</small>';
-    travelCard.style.left = Math.min(f.width - 220, ev.clientX - f.left + 12) + 'px';
-    travelCard.style.top = Math.max(8, ev.clientY - f.top - 140) + 'px';
-    travelCard.classList.add('on');
+    cardOver(t.el);
   }
   frame.addEventListener('pointerdown', function () { travelCard.classList.remove('on'); });
   // What a press lands on, among the things that move: checked before the
@@ -4272,11 +4267,38 @@ _SCRIPT = r"""
       for (var j = 0; j < (t.pets || []).length; j++) {
         if (hit(t.pets[j].el, 3)) {
           var q = t.pets[j];
-          return {act: function (ev) { petCard({pet: q.pet, owner: t.who}, ev); }};
+          return {act: function (ev) { petCard({pet: q.pet, owner: t.who, el: q.el}, ev); }};
         }
       }
     }
     return null;
+  }
+  // Asked in the capture phase, before anything under the pointer (a town, a
+  // building - which keep their presses to themselves) sees the press.
+  frame.addEventListener('pointerdown', function (ev) {
+    figPress = null;
+    if (ev.button !== 0 || (typeof terr !== 'undefined' && terr.armed !== null)) return;
+    var fig = figureAt(ev.clientX, ev.clientY);
+    if (fig) { figPress = fig; ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
+  frame.addEventListener('click', function (ev) {
+    if (!figPress) return;
+    var fig = figPress;
+    figPress = null;
+    ev.stopPropagation(); ev.preventDefault();
+    fig.act(ev);
+  }, true);
+  // A card over a figure: centred above it, clear of the rider and their
+  // picture; below it when there is no room above.
+  function cardOver(el) {
+    var f = frame.getBoundingClientRect(), r = el.getBoundingClientRect();
+    travelCard.classList.add('on');
+    var w = travelCard.offsetWidth, h = travelCard.offsetHeight;
+    var left = Math.max(8, Math.min(f.width - w - 8, r.left - f.left + r.width / 2 - w / 2));
+    var top = r.top - f.top - h - 46;
+    if (top < 8) top = r.bottom - f.top + 12;
+    travelCard.style.left = left + 'px';
+    travelCard.style.top = top + 'px';
   }
   // A traveller's pet: clicking it shows it.
   function petCard(w, ev) {
@@ -4284,9 +4306,7 @@ _SCRIPT = r"""
     travelCard.innerHTML = (pet.u ? '<img class="pet" alt="" src="' + escapeHtml(pet.u) + '">' : '') +
       '<b>' + escapeHtml(pet.n || 'A pet') + '</b><span>' + escapeHtml(pet.t || '') + '</span>' +
       '<small>' + escapeHtml(w.owner.owner || w.owner.name) + '\'s ' + (pet.k === 'dog' ? 'dog' : 'cat') + '</small>';
-    travelCard.style.left = Math.min(f.width - 220, ev.clientX - f.left + 12) + 'px';
-    travelCard.style.top = Math.max(8, ev.clientY - f.top - 160) + 'px';
-    travelCard.classList.add('on');
+    cardOver(w.el);
   }
   // A town's ordinary houses: scattered through its area, thickest around the
   // hall, kept clear of the hall and of the buildings it has placed, and the

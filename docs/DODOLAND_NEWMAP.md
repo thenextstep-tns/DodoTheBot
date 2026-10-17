@@ -1412,3 +1412,8 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   `_pets_of`/`dodoland_pets_per_town` removed. Clicks: the frame asks
   `figureAt` (horse, travellers, their pets, by screen rect) before anything
   else; figures carry no listeners of their own.
+- Figure clicks (17 Oct): the runaway horse spawned inside a town, where
+  pieces and towns (z up to 30000 hovered) stacked over it and their own
+  pointerdown handlers kept the press. `figureAt` now runs in capture-phase
+  listeners on the frame (pointerdown + click, stopPropagation), horse z 40000.
+  Cards open centred above the figure (`cardOver`), below when no room.
