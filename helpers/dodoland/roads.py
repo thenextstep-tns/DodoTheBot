@@ -96,10 +96,14 @@ def coarse_costs(cells, kinds: list[dict], step: int, bridge: float, blocked=Non
 
 
 def astar(cost, start: tuple[int, int], goal: tuple[int, int], road=None,
-          reuse: float = 1.0) -> Optional[list[tuple[int, int]]]:
+          reuse: float = 1.0, greed: float = 1.0) -> Optional[list[tuple[int, int]]]:
     """The cheapest 8-neighbour path from ``start`` to ``goal`` on ``cost``,
     or ``None``. ``road`` marks blocks already carrying a road, which cost
     ``reuse`` times as much. Diagonal steps cost sqrt(2) times a straight one.
+    ``greed`` above 1 trusts the straight-line estimate that much more: a
+    path a little short of the cheapest, found far faster - for grids where a
+    cheap kind of ground (paths) makes the plain estimate too timid to reach
+    a far goal within the search's limit.
     """
     import numpy as np
 
@@ -155,7 +159,7 @@ def astar(cost, start: tuple[int, int], goal: tuple[int, int], road=None,
                 best[ni] = total
                 came[ni] = here
                 ddx, ddy = abs(gx - nx), abs(gy - ny)
-                guess = (max(ddx, ddy) + (SQRT2 - 1) * min(ddx, ddy)) * cheapest
+                guess = (max(ddx, ddy) + (SQRT2 - 1) * min(ddx, ddy)) * cheapest * greed
                 heapq.heappush(queue, (total + guess, total, ni))
     return None
 

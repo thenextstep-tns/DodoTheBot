@@ -1389,3 +1389,16 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   (default 6) a forest chunk is one flat canvas (`forestRenderFlat`: trees back
   to front, no shadows, z at the chunk's top) instead of depth strips with
   per-tree shadows; crossing the threshold re-renders (`d.flat`).
+- Travellers v3 (17 Oct): `web/dodoland/travel_api.py`, GET `.../travel` (and
+  the member reader `/me/w/travel`). One traveller per person (`who_travels`:
+  viewer first, then top pairs sending whoever is not out yet). Routes: the
+  roads' coarse grid (`roads.coarse_costs`, water cost
+  `dodoland_travel_water_cost` 150, sea impassable) with path/road ground
+  (`dodoland_travel_path_words` in the kind's key/label) costing
+  `dodoland_travel_path_cost` (0.3) by share of the block; endpoints snapped to
+  the nearest open block; `roads.astar(greed=2.5)` (new param, weighted
+  heuristic; roads keep 1.0), retried in reverse when the search limit is hit.
+  Cached hourly / on plots, settings, day - not per paint stroke (~8 s cold).
+  The page fetches it once (`travelLoad`). Ring is an SVG ellipse under the
+  feet (was an absolutely positioned element covering the body); torches show
+  only while `.dldark` (set by drawNight at dusk, night, dawn).

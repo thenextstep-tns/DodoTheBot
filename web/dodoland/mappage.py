@@ -76,31 +76,6 @@ def _grown(power: int, biggest: int) -> float:
     return min(1.0, (power / biggest) ** 0.5)
 
 
-def _travel(data: dict, placed: list, viewer: str, most: int) -> list:
-    """``[{a, b, w}]``: the pairs of settled people who talk most, one
-    traveller each (dodoland_travellers), and always the viewer's own: with
-    whoever they talk to most, else the nearest town."""
-    if most <= 0 or len(placed) < 2:
-        return []
-    here = {p["id"]: p for p in placed}
-    pairs = sorted(((w, a, b) for (a, b), w in (data.get("talk") or {}).items()
-                    if a in here and b in here and a != b), reverse=True)
-    out, seen = [], set()
-    for w, a, b in pairs[:most]:
-        out.append({"a": a, "b": b, "w": w})
-        seen.update((a, b))
-    if viewer in here and not any(viewer in (t["a"], t["b"]) for t in out):
-        mine = next(((w, a, b) for w, a, b in pairs if viewer in (a, b)), None)
-        if mine:
-            out.append({"a": mine[1], "b": mine[2], "w": mine[0], "me": True})
-        else:
-            me = here[viewer]["plot"]
-            near = min((p for p in placed if p["id"] != viewer),
-                       key=lambda p: (p["plot"]["x"] - me["x"]) ** 2 + (p["plot"]["y"] - me["y"]) ** 2)
-            out.append({"a": viewer, "b": near["id"], "w": 0, "me": True})
-    return out
-
-
 def _avatar_of(guild, user_id) -> str:
     """A member's own picture (Discord's, small), or ""."""
     member = guild.get_member(int(user_id)) if str(user_id).isdigit() else None
@@ -182,11 +157,6 @@ def _collect(bot, guild) -> dict:
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
     rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
-    # Who talks to whom, as weights, for the travellers on the roads.
-    talk: dict = {}
-    for row in pairs:
-        key = (str(row.get("a")), str(row.get("b")))
-        talk[key] = talk.get(key, 0) + int(row.get("n") or 0)
     # Shared with every other reader of the same rows (cached, read-only).
     result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
                                        buildings, since)
@@ -309,7 +279,6 @@ def _collect(bot, guild) -> dict:
                    for d in world_decor]
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
-            "talk": talk,
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
             "world": [{"id": d["piece_id"], "a": d["asset_id"], "v": d.get("variant") or "",
                        "l": d.get("layer") or "objects",
@@ -603,7 +572,6 @@ async def map_page(request: web.Request):
                  'DodoLand page first.</div>')
 
     placed = [p for p in data["people"] if p["plot"]]
-    travel = _travel(data, placed, viewer, int(bot.dodoland_params.get(guild.id, "dodoland_travellers")))
     unplaced = [p for p in data["people"] if not p["plot"]]
     # How large a piece of decor is drawn at 100% zoom, before its own scale.
     decor_size = int(bot.dodoland_params.get(guild.id, "dodoland_asset_size"))
@@ -801,7 +769,7 @@ async def map_page(request: web.Request):
 <aside class="dlcard" id="dlcard" hidden></aside>
 
 <script>window.DL = {json.dumps({"people": data["people"], "sizes": sizes,
-                                 "gid": str(guild.id), "me": viewer, "travel": travel,
+                                 "gid": str(guild.id), "me": viewer,
                                  "world": data["world"],
                                  "assets": data["assets"],
                                  "cells_w": data["cells_w"],
@@ -1231,7 +1199,7 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
    the towns. Pets and travellers take clicks. */
 .dlstand.dltraveller, .dlstand.dlpet, .dlstand.dlhorse { pointer-events: auto; cursor: pointer; }
 .dlstand.dltraveller.found .dltring { animation: dlfound .5s ease-in-out 6 alternate; }
-@keyframes dlfound { to { transform: translateX(-50%) scale(2.2); opacity: .4; } }
+@keyframes dlfound { to { transform: scale(2.4); opacity: .4; } }
 .dllook { display: flex; gap: 10px; flex-wrap: wrap; }
 .dllook label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .dlpets { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
@@ -1241,8 +1209,8 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dltraveller .tr { display: none; }
 .dltraveller.riding .tw { display: none; }
 .dltraveller.riding .tr { display: inline; }
-.dltring { position: absolute; left: 50%; bottom: -6%; width: 130%; height: 30%; transform: translateX(-50%);
-  border-radius: 50%; border: 2px solid #ffd257; box-shadow: 0 0 6px #ffd257; pointer-events: none; }
+.dltring { transform-box: fill-box; transform-origin: center; }
+.dlworld:not(.dldark) .dltorch { display: none; }
 .dltface { position: absolute; left: 50%; bottom: 112%; width: 22px; height: 22px; border-radius: 50%;
   border: 2px solid #ffd257; transform: translateX(-50%) scale(var(--inv, 1)); transform-origin: bottom center;
   box-shadow: 0 1px 4px rgba(0,0,0,.5); background: #2a1d12; }
@@ -2757,6 +2725,7 @@ _SCRIPT = r"""
   function drawNight() {
     var st = nightState();
     nightOn = Math.max(st.at(0).a, st.at(1).a) >= 0.01;
+    world.classList.toggle('dldark', nightOn);
     if (!nightOn || !nat.w) { nightCv.style.display = 'none'; return; }
     nightCv.style.display = 'block';
     var R = 0.5, W = frame.clientWidth, H = frame.clientHeight;
@@ -4197,49 +4166,43 @@ _SCRIPT = r"""
     for (var i = 0; i + 1 < nums.length; i += 2) out.push({x: +nums[i], y: +nums[i + 1]});
     return out;
   }
+  // Who travels and the way they go come from the server (travel_api.py):
+  // one traveller per person, on a way over the terrain that keeps out of
+  // the water and to paths and roads. Asked once the map is up.
+  var TRAVEL = null;
+  function travelLoad() {
+    if (TRAVEL !== null || !D.ep.base) return;
+    TRAVEL = [];
+    fetch(D.ep.base + '/travel').then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (res) { TRAVEL = res.travel || []; travellersReset(); })
+      .catch(function () {});
+  }
   function travellersReset() {
     travellers.forEach(function (t) { t.el.remove(); (t.pets || []).forEach(function (q) { q.el.remove(); }); });
     travellers = [];
-    if (!terr.world || !(D.travel || []).length) return;
-    var cw = terr.world.cells_w, ch = terr.world.cells_h;
-    (D.travel || []).forEach(function (pair, n) {
-      var A = byId[pair.a], B = byId[pair.b];
-      if (!A || !B || !A.plot || !B.plot) return;
-      var ax = A.plot.x / 100 * cw, ay = A.plot.y / 100 * ch, bx = B.plot.x / 100 * cw, by = B.plot.y / 100 * ch;
-      // Along the road between them if there is one, else across country:
-      // a gentle curve from one town to the other.
-      var road = (terr.roads || []).filter(function (r) {
-        return (String(r.a) === pair.a && String(r.b) === pair.b) || (String(r.a) === pair.b && String(r.b) === pair.a);
-      })[0];
-      var pts = road ? roadPoints(road.d) : [];
-      if (pts.length < 2) {
-        var mx = (ax + bx) / 2, my = (ay + by) / 2, nx = -(by - ay), ny = bx - ax, bend = (n % 2 ? 0.12 : -0.12);
-        pts = [];
-        for (var i = 0; i <= 12; i++) {
-          var f = i / 12, c = 4 * f * (1 - f) * bend;
-          pts.push({x: ax + (bx - ax) * f + nx * c, y: ay + (by - ay) * f + ny * c});
-        }
-      } else if (Math.hypot(pts[0].x - ax, pts[0].y - ay) > Math.hypot(pts[pts.length - 1].x - ax, pts[pts.length - 1].y - ay)) pts.reverse();
-      // The one who travels: the viewer when it is theirs; else whoever of
-      // the two has a picture, by turns.
-      var walker = pair.a === String(D.me) ? A : pair.b === String(D.me) ? B :
-                   (n % 2 ? B : A).av ? (n % 2 ? B : A) : (A.av ? A : B);
-      if (walker === B) pts.reverse();
+    if (!terr.world) return;
+    if (TRAVEL === null) { travelLoad(); return; }
+    TRAVEL.forEach(function (way, n) {
+      var walker = byId[way.w], to = byId[way.t], pts = roadPoints(way.d);
+      if (!walker || !to || pts.length < 2) return;
+      var A = walker, B = to;
       var len = [0];
       for (var j = 1; j < pts.length; j++) len.push(len[j - 1] + Math.hypot(pts[j].x - pts[j - 1].x, pts[j].y - pts[j - 1].y));
       var colour = ['#ff3b3b', '#ffb000', '#00b7ff', '#ff4fd8', '#2fe36b', '#ffe14d'][n % 6];
       // A torch in the right hand; on a horse outside the towns.
-      var torch = '<line x1="2.6" y1="0" x2="3.4" y2="-5" stroke="#6b4423" stroke-width="0.55"/>' +
-                  '<circle class="dlflame" cx="3.5" cy="-5.6" r="0.95" fill="#ffb84d"/>';
+      // The torch is lit from dusk to dawn (.dldark on the world, drawNight).
+      var torch = '<g class="dltorch"><line x1="2.6" y1="0" x2="3.4" y2="-5" stroke="#6b4423" stroke-width="0.55"/>' +
+                  '<circle class="dlflame" cx="3.5" cy="-5.6" r="0.95" fill="#ffb84d"/></g>';
+      // The gold ring under their feet, in the figure itself so it lies behind it.
+      var ring = '<ellipse class="dltring" cx="0" cy="2.6" rx="3.2" ry="0.95" fill="none" stroke="#ffd257" stroke-width="0.45"/>';
       var look = walker.look || {};
       var me = String(LIFE.member || '').split('@H@').join(look.head || '#f2c9a0').split('@B@').join(look.body || colour) + torch;
       var ride = '<g transform="translate(0 2.6) scale(1.35)">' + sprite('horse', look.horse || '#7a4e2c') + '</g>' +
                  '<g transform="translate(0 -3.2) scale(0.9)">' + me + '</g>';
       var el = standing('dlwalker dltraveller dlkeep',
-                        '<g class="tw">' + me + '</g><g class="tr">' + ride + '</g>', WALKER_BOX, 2.6, 0.21, true);
-      el.insertAdjacentHTML('afterbegin', '<i class="dltring"></i>');
+                        ring + '<g class="tw">' + me + '</g><g class="tr">' + ride + '</g>', WALKER_BOX, 2.6, 0.21, true);
       if (walker.av) el.insertAdjacentHTML('beforeend', '<img class="dltface" alt="" src="' + walker.av + '">');
-      var t = {el: el, who: walker, to: walker === A ? B : A, pts: pts, len: len,
+      var t = {el: el, who: walker, to: to, pts: pts, len: len,
                at: Math.random() * len[len.length - 1], dir: 1, rest: 0, speed: 1.1 + Math.random() * 0.4};
       el.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
       el.addEventListener('click', function (ev) {

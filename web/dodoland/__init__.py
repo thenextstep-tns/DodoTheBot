@@ -64,6 +64,7 @@ def dodoland_routes() -> list:
     from web.dodoland.lights_ui import api_tile_lights
     from web.dodoland.horse_api import api_horse
     from web.dodoland.look_api import api_my_pets, api_town_pets
+    from web.dodoland.travel_api import travel_layer
     from web.dodoland.tiles_ui import (
         api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
     )
@@ -112,6 +113,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/influence", configure(influence_layer)),
         # The roads the bot lays between connected towns (layer 2).
         web.get("/guild/{gid}/dodoland/roads", configure(roads_layer)),
+        web.get("/guild/{gid}/dodoland/travel", configure(travel_layer)),
         web.post("/api/guild/{gid}/dodoland/terrain/paint", full(api_terrain_paint)),
         web.post("/api/guild/{gid}/dodoland/forest/paint", full(api_forest_paint)),
         web.post("/api/guild/{gid}/dodoland/terrain/undo", full(api_terrain_undo)),
@@ -166,6 +168,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/me/w/terrain/cells", player.require_town(world=True)(player_map.reader(terrain_cells))),
         web.get("/guild/{gid}/dodoland/me/w/influence", player.require_town(world=True)(player_map.reader(influence_layer))),
         web.get("/guild/{gid}/dodoland/me/w/roads", player.require_town(world=True)(player_map.reader(roads_layer))),
+        web.get("/guild/{gid}/dodoland/me/w/travel", player.require_town(world=True)(player_map.reader(travel_layer))),
         web.get("/guild/{gid}/dodoland/me/w/tiles/art/{vid}", player.require_town(world=True)(player_map.reader(guild_tile_art))),
         web.get("/guild/{gid}/dodoland/me/w/asset/{aid}", player.require_town(world=True)(player_map.reader(asset_image))),
         web.get("/guild/{gid}/dodoland/me/w/town/{uid}/art", player.require_town(world=True)(player_map.reader(town_art))),
