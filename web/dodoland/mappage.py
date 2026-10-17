@@ -4112,6 +4112,7 @@ _SCRIPT = r"""
       .then(function (res) {
         if (!res.ok || !horse.el) return;
         horseRun(horseCells(res), function () {
+          if (res.refused === 'full') { horseSay(txt('HORSE_ZOO_FULL')); return; }
           if (!res.caught) return;
           var owner = byId[res.caught.owner];
           horseSay(txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}), 3200);

@@ -153,15 +153,18 @@ def kick(bot, gid, fx: float, fy: float) -> dict:
             best = (nx, ny)
     nx, ny = best
     reach = float(_p(bot, gid, "dodoland_horse_catch", 2.0))
-    caught = None
+    caught, full = None, False
     resting = time.time() < float(state.get("zoo_rest") or 0)
-    for zoo in ([] if resting else _zoos(bot, gid)):
+    for zoo in _zoos(bot, gid):
         if _segment_gap(zoo["x"], zoo["y"], hx, hy, nx, ny) <= zoo["r"] + reach:
+            if resting:
+                full = True   # it ran past a zoo, but the zoos are resting: say so
+                break
             caught = zoo
             nx, ny = zoo["x"], zoo["y"]
             break
     out = {"on": not caught, "x": round(nx / cw * 100, 4), "y": round(ny / ch * 100, 4),
-           "from": {"x": state["x"], "y": state["y"]}}
+           "from": {"x": state["x"], "y": state["y"]}, **({"refused": "full"} if full else {})}
     if caught:
         rest = random.uniform(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
                               max(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
@@ -235,6 +238,10 @@ async def api_horse(request: web.Request):
     except (TypeError, ValueError, AttributeError):
         return web.json_response({"ok": False, "error": "Where was it kicked from?"}, status=400)
     caught = out.get("caught")
+    # Every chase in the log: who, and what came of it.
+    if getattr(bot, "logger", None):
+        bot.logger.info(f"DodoLand horse ({'catch' if body.get('catch') else 'kick'}) by {request.get('uid')}: "
+                        f"{'caught for ' + str(caught['owner']) if caught else out.get('refused') or 'ran'}")
     if caught:
         catcher = int(request.get("uid") or 0)
         owner = int(caught["owner"]) if str(caught["owner"]).isdigit() else 0
