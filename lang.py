@@ -74,6 +74,8 @@ SWEETROLLS_NEMESIS = "{name}'s arch-nemesis is **{nemesis}** with **{count}** st
 SWEETROLLS_NO_NEMESIS = "{name} don't have an arch-nemesis (yet). "
 SWEETROLLS_SUGAR_DADDY = "{name}'s sugar doddy is **{daddy}** with **{count}** sweetrolls gifted. :smirk:"
 SWEETROLLS_NO_SUGAR_DADDY = "{name} don't have a sugar doddy (yet). "
+SWEETROLLS_SAVOURY = "{name} has **{count}** sweetrolls that smell slightly savoury."
+SWEETROLLS_HORSES = "{name} has processed **{count}** horses."
 
 # --------------------------------------------------------------------------- #
 #  Parsing cog
@@ -1087,8 +1089,31 @@ TRIAL_ERROR_GUILD_ONLY = "This only works inside the server."
 DODOLAND_HORSE_LINE = "NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!"
 DODOLAND_HORSE_BUSY = "Nay, I'm on a business trip right now"
 DODOLAND_HORSE_PAID = "\U0001F36C \u00d7 {count} for {owner}!"
-# Said by a horse as it is run into a zoo, just before it turns into sweetrolls.
-DODOLAND_HORSE_IN_ZOO = "Oh sweet, this machine smells like carrots or carrot cake!!"
+# Said by a horse as it is run into a zoo, just before it turns into
+# sweetrolls: one picked at random each time, comically scared or blissfully
+# excited.
+DODOLAND_HORSE_IN_ZOO = [
+    'What do you mean get into the dough processor?!',
+    'Wait wait wait, why is it so warm in here?!',
+    'I was promised a meadow. This is NOT a meadow!',
+    'Is that... icing?! Tell my foal I loved her!',
+    'Nobody said anything about being glazed!',
+    "Hold on, what's the rolling pin for?!",
+    "I've changed my mind! I'll go back to the zoo! Please!",
+    'Why does it say SWEETROLL MACHINE on the door?!',
+    'I can hear the oven humming and I do not like it!',
+    'Neigh! NEIGH! Get me a lawyer!',
+    "Oh that's so awesome, did you say sweetroll?",
+    'Oh sweet, this machine smells like carrots or carrot cake!!',
+    "Cinnamon? For me? You shouldn't have!",
+    'Finally, my dream of becoming a pastry comes true!',
+    'Wheee, a slide! Is this the bakery bit?',
+    'I always knew I was destined to be delicious.',
+    'Sprinkles? Oh, I hope there are sprinkles!',
+    'Five sweetrolls of pure horse power, coming right up!',
+    'Warm, cosy and smells of sugar. Best zoo ever!',
+    'Tell everyone I went out frosted!',
+]
 DODOLAND_HORSE_THE_ZOO = "the zoo"
 DODOLAND_HORSE_CAUGHT = "{catcher} just turned a horse into {count} sweetrolls for {owner}!"
 DODOLAND_TRAVELLER_ON_ROAD = "on the road to {town}"

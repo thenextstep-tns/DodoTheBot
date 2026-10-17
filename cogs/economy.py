@@ -72,6 +72,13 @@ class Economy(commands.Cog, name="economy"):
                 received=rolls.count_documents({"gifted_to": user_id}),
             ),
             lang.SWEETROLLS_RHUBARB.format(name=name, count=rolls.count_documents({"victim": user_id, "rhubarb": 1})),
+            # DodoLand: horses run into a zoo turn into sweetrolls for its owner
+            # (source dodoland_horse); whoever ran them in processed them, one
+            # horse per catch (its rolls share one date).
+            lang.SWEETROLLS_SAVOURY.format(
+                name=name, count=rolls.count_documents({"gifted_to": user_id, "source": "dodoland_horse"})),
+            lang.SWEETROLLS_HORSES.format(
+                name=name, count=len(rolls.distinct("date", {"gifter": user_id, "source": "dodoland_horse"}))),
         ]
         if nemesis_count > 0:
             lines.append(lang.SWEETROLLS_NEMESIS.format(name=name, nemesis=nemesis.display_name, count=nemesis_count))

@@ -133,7 +133,7 @@ print("look            a member searches only their own pets")
 # Every word the horses, travellers and map say is in the Strings menu.
 import lang  # noqa: E402
 from web.dodoland import mappage  # noqa: E402
-missing = [k for k in mappage.PAGE_STRINGS if not isinstance(getattr(lang, "DODOLAND_" + k, None), str)]
+missing = [k for k in mappage.PAGE_STRINGS if not isinstance(getattr(lang, "DODOLAND_" + k, None), (str, list))]
 assert not missing and isinstance(lang.DODOLAND_HORSE_CAUGHT, str), missing
 page = mappage._SCRIPT + pathlib.Path("web/dodoland/horse_api.py").read_text(encoding="utf-8")
 for said in ("not coming back to the zoo", "business trip", "zoo is full", "on the road to", "Find my traveller"):

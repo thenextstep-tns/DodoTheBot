@@ -88,9 +88,10 @@ def _page_strings(bot, guild) -> dict:
     out = {}
     for key in PAGE_STRINGS:
         try:
-            out[key] = str(bot.lang.get("DODOLAND_" + key, guild=guild))
+            value = bot.lang.get("DODOLAND_" + key, guild=guild)
         except Exception:  # noqa: BLE001 - no lang manager (a test): the default
-            out[key] = str(getattr(lang_module, "DODOLAND_" + key, ""))
+            value = getattr(lang_module, "DODOLAND_" + key, "")
+        out[key] = [str(v) for v in value] if isinstance(value, (list, tuple)) else str(value)
     return out
 
 
@@ -1205,6 +1206,10 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dltcard b { display: block; font-size: 15px; }
 .dltcard span { display: block; font-size: 13px; margin-top: 2px; }
 .dltcard small { display: block; font-size: 11px; opacity: .7; margin-top: 6px; }
+.dltcard q { display: block; font-size: 13px; font-style: italic; margin-top: 8px; quotes: none; }
+/* A zoo turning a horse into sweetrolls: shaking with the work. */
+.dlpiece.dlprocess img:not(.dlshadow) { animation: dlshake .11s linear 24 alternate; }
+@keyframes dlshake { from { translate: -1.2% 0; rotate: -1.2deg; } to { translate: 1.2% -0.8%; rotate: 1.2deg; } }
 /* The runaway horse: it takes clicks; what it says is drawn at screen size. */
 /* Over everything, a town pointed at included (30000): it grazes among them. */
 .dlstand.dlhorse { z-index: 40000 !important; }
@@ -1499,7 +1504,10 @@ _SCRIPT = r"""
   document.getElementById('dlfindme').onclick = findTraveller;
   // A text from the Strings menu (D.str), its {markers} filled in.
   function txt(key, fill) {
-    return String((D.str || {})[key] || '').replace(/\{(\w+)\}/g, function (m, n) {
+    var said = (D.str || {})[key] || '';
+    // A list of ways to say it: one at random.
+    if (Array.isArray(said)) said = said[Math.floor(Math.random() * said.length)] || '';
+    return String(said).replace(/\{(\w+)\}/g, function (m, n) {
       return fill && fill[n] != null ? fill[n] : m;
     });
   }
@@ -4178,6 +4186,7 @@ _SCRIPT = r"""
         horseRun(horseCells(res), function () {
           if (!res.caught) return;
           var owner = byId[res.caught.owner];
+          zooAtWork(res.caught.zoo);
           horseSay(txt('HORSE_IN_ZOO'), 1700);
           setTimeout(function () {
             horseSay(txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}), 3200);
@@ -4325,6 +4334,7 @@ _SCRIPT = r"""
         if (t.at >= end) { t.leg = (t.leg + 1) % t.legs.length; t.at = 0; t.rest = 3 + Math.random() * 5; }
         travellerPlace(t);
       });
+      if (cardWith && travelCard.classList.contains('on')) cardOver(cardWith);
     }
     travelRaf = requestAnimationFrame(travelStep);
   }
@@ -4343,10 +4353,24 @@ _SCRIPT = r"""
     travelCard.innerHTML = (t.who.av ? '<img alt="" src="' + t.who.av.replace(/size=\d+/, 'size=256') + '">' : '') +
       '<b>' + escapeHtml(t.who.owner || t.who.name) + '</b>' +
       '<span>' + escapeHtml(txt(t.rest > 0 ? 'TRAVELLER_RESTING' : 'TRAVELLER_ON_ROAD', {town: going.name})) + '</span>' +
+      '<q class="dltquote">\u2026</q>' +
       '<small>' + escapeHtml(txt('TRAVELLER_NOTE')) + '</small>';
     cardOver(t.el);
+    cardWith = t.el;
+    // Something they once said in a public channel (quote_api.py).
+    var asked = t;
+    fetch(D.ep.base + '/quote?user=' + encodeURIComponent(t.who.id))
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (res) {
+        var q = travelCard.querySelector('.dltquote');
+        if (!q || cardWith !== asked.el) return;
+        if (res.quote) { q.textContent = '\u201c' + res.quote + '\u201d'; } else { q.remove(); }
+        cardOver(asked.el);
+      }).catch(function () {});
   }
-  frame.addEventListener('pointerdown', function () { travelCard.classList.remove('on'); });
+  // The figure an open card belongs to: the card goes along with it.
+  var cardWith = null;
+  frame.addEventListener('pointerdown', function () { travelCard.classList.remove('on'); cardWith = null; });
   // What a press lands on, among the things that move: checked before the
   // map's own handling, so whatever lies over them (a forest, the ground
   // layers) never takes the click. Topmost first: the horse, then travellers,
@@ -4368,7 +4392,6 @@ _SCRIPT = r"""
       var t = travellers[i];
       if (getComputedStyle(t.el).display === 'none') continue;
       if (hit(t.el, 4)) return {act: function (ev) {
-        if (t.riding) travellerSay(t, txt('HORSE_BUSY'));
         travellerCard(t, ev);
       }};
       for (var j = 0; j < (t.pets || []).length; j++) {
@@ -4389,6 +4412,12 @@ _SCRIPT = r"""
     if (!cells) return false;
     var v = cells[(Math.floor(y) - cy * 64) * 64 + (Math.floor(x) - cx * 64)], k = bake.kinds[v];
     return !!(k && !k.land);
+  }
+  function zooAtWork(zooId) {
+    var el = pieces[zooId];
+    if (!el) return;
+    el.classList.remove('dlprocess'); void el.offsetWidth; el.classList.add('dlprocess');
+    setTimeout(function () { el.classList.remove('dlprocess'); }, 2800);
   }
   function zoosHere() {
     return D.world.filter(function (q) {
@@ -4433,6 +4462,7 @@ _SCRIPT = r"""
           if (res.caught) {
             var owner = byId[res.caught.owner];
             if (res.away) HORSES_AWAY[res.away] = 1;
+            zooAtWork(res.caught.zoo);
             travellerSay(w, txt('HORSE_IN_ZOO'));
             setTimeout(function () {
               travellerSay(w, txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}));
@@ -4477,6 +4507,7 @@ _SCRIPT = r"""
       '<b>' + escapeHtml(pet.n || 'A pet') + '</b><span>' + escapeHtml(pet.t || '') + '</span>' +
       '<small>' + escapeHtml(txt(pet.k === 'dog' ? 'PET_DOG' : 'PET_CAT', {owner: w.owner.owner || w.owner.name})) + '</small>';
     cardOver(w.el);
+    cardWith = w.el;
   }
   // A town's ordinary houses: scattered through its area, thickest around the
   // hall, kept clear of the hall and of the buildings it has placed, and the
