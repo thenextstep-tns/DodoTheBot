@@ -40,7 +40,7 @@ print("import          every role is found in a set, and a missing one is named"
 node = shutil.which("node")
 if node:
     js = terrain_ui.SCRIPT
-    fns = js[js.index("  var DUAL_BITS"):js.index("  // The sixteen shapes of kind k")]
+    fns = js[js.index("  // A corner's four cells, as bits"):js.index("  // The sixteen shapes of kind k")]
     probe = fns + r"""
 function f(i, u, v) { return dualAt(i, u, v).f; }
 var out = {
