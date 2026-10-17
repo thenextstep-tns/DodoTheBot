@@ -49,8 +49,11 @@ disagree about it.
 
 from __future__ import annotations
 
+import copy
 import secrets
+import threading
 import time
+from collections import OrderedDict
 from typing import Any, Iterable, Optional
 
 # Storage ceilings, not behaviour: they keep one upload from filling the
@@ -375,6 +378,10 @@ def unlocked_for(tiles: Iterable[dict], person: Optional[dict],
 # Writes made through the library drop its cache at once; this is how long a
 # listing trusts that no other process (an import tool) wrote meanwhile.
 TRUST_S = 30.0
+# How much picture data the library keeps in memory (dodoland_art_cache_mb sets
+# it from the panel). A picture is never changed under its id, so a kept one is
+# never stale; the least recently used go first.
+ART_CACHE_MB = 128
 _WRITES = frozenset({"insert_one", "insert_many", "update_one", "update_many",
                      "replace_one", "delete_one", "delete_many", "find_one_and_update",
                      "find_one_and_delete", "bulk_write"})
@@ -414,6 +421,13 @@ class TileLibrary:
         self._art = art
         self._indexed = False
         self._listing: Optional[tuple[float, list[dict], list[dict]]] = None
+        self._by_id: Optional[tuple[list[dict], dict]] = None
+        # Pictures, by id: a map draws hundreds, and each was a round trip to
+        # the database across the internet, made while the bot waited.
+        self._pictures: "OrderedDict[str, dict]" = OrderedDict()
+        self._picture_bytes = 0
+        self._picture_lock = threading.Lock()
+        self.art_cache_mb = ART_CACHE_MB
 
     def _changed(self) -> None:
         self._listing = None
@@ -536,12 +550,34 @@ class TileLibrary:
             _complete(row)
         return row
 
+    def peek(self, tile_id: str) -> Optional[dict]:
+        """A tile from the in-memory listing (a copy), for reading: no round
+        trip unless the listing is due a refresh. :meth:`get` reads the
+        database itself, for a change about to be written."""
+        _, rows = self._rows()
+        hit = self._by_id
+        if hit is None or hit[0] is not rows:
+            hit = self._by_id = (rows, {row["tile_id"]: row for row in rows})
+        row = hit[1].get(str(tile_id))
+        return copy.deepcopy(row) if row is not None else self.get(tile_id)
+
     def visible(self, tile_id: str, guild_id: int) -> Optional[dict]:
         """The tile, if this server may see it at all."""
-        row = self.get(tile_id)
+        row = self.peek(tile_id)
         if row and row["guild_id"] in (GLOBAL, int(guild_id)):
             return row
         return None
+
+    def picture(self, tile_id: str, guild_id: int, want: str = "") -> Optional[dict]:
+        """The picture a server shows for a tile: ``want`` if it is one of the
+        tile's own (a variant, or its uploaded painting), else its first; None
+        if the server cannot see the tile. Blocking on a picture not yet kept."""
+        tile = self.visible(tile_id, guild_id)
+        if tile is None:
+            return None
+        if want and (want in tile["variants"] or want == tile.get("uploaded")):
+            return self.art(want)
+        return self.art(tile["variants"][0]) if tile["variants"] else None
 
     def usable(self, guild_id: int, layer: str, role: str,
                placement: Optional[str] = None) -> list[dict]:
@@ -723,6 +759,7 @@ class TileLibrary:
         row = self._need(tile_id)
         self._tiles.delete_one({"tile_id": str(tile_id)})
         self._art.delete_many({"tile_id": str(tile_id)})
+        self._forget_picture(*(row.get("variants") or []), *([row["uploaded"]] if row.get("uploaded") else []))
         self._renumber_tiles(row.get("cat_id") or "")
 
     # ------------------------------------------------------------------ #
@@ -757,11 +794,39 @@ class TileLibrary:
         variants.remove(str(vid))
         self._tiles.update_one({"tile_id": str(tile_id)}, {"$set": {"variants": variants}})
         self._art.delete_one({"vid": str(vid)})
+        self._forget_picture(vid)
 
     def art(self, vid: str) -> Optional[dict]:
-        """One variant's bytes. The only read that carries them."""
+        """One variant's bytes. The only read that carries them; kept in memory
+        afterwards (up to ``art_cache_mb``), as a picture never changes."""
+        vid = str(vid)
+        with self._picture_lock:
+            hit = self._pictures.get(vid)
+            if hit is not None:
+                self._pictures.move_to_end(vid)
+                return hit
         self._ensure_indexes()
-        return self._art.find_one({"vid": str(vid)})
+        row = self._art.find_one({"vid": vid})
+        if row is None:
+            return None
+        size = len(bytes(row.get("data") or b""))
+        cap = max(0, int(self.art_cache_mb)) * 1048576
+        if size <= cap // 4:
+            with self._picture_lock:
+                if vid not in self._pictures:
+                    self._pictures[vid] = row
+                    self._picture_bytes += size
+                while self._picture_bytes > cap and self._pictures:
+                    _, old = self._pictures.popitem(last=False)
+                    self._picture_bytes -= len(bytes(old.get("data") or b""))
+        return row
+
+    def _forget_picture(self, *vids: str) -> None:
+        with self._picture_lock:
+            for vid in vids:
+                old = self._pictures.pop(str(vid), None)
+                if old is not None:
+                    self._picture_bytes -= len(bytes(old.get("data") or b""))
 
     def art_sizes(self, vids: Iterable[str]) -> dict:
         """``{vid: (w, h)}`` for some variants, without their bytes."""
@@ -769,10 +834,3 @@ class TileLibrary:
         wanted = [str(v) for v in vids]
         rows = self._art.find({"vid": {"$in": wanted}}, {"data": 0}) if wanted else []
         return {row["vid"]: (int(row.get("w") or 0), int(row.get("h") or 0)) for row in rows}
-
-    def first_art(self, tile_id: str) -> Optional[dict]:
-        """A tile's first variant's bytes — what a toolkit button shows."""
-        row = self.get(tile_id)
-        if not row or not row["variants"]:
-            return None
-        return self.art(row["variants"][0])

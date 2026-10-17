@@ -530,18 +530,28 @@ def _art_response(row) -> web.Response:
     )
 
 
+async def _off_loop(fn, *args):
+    """A blocking library read, run off the bot's loop: a picture not yet in
+    memory is a database round trip, and a map asks for a hundred at once."""
+    import asyncio
+
+    return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
+
+
 async def tile_art(request: web.Request):
     """One variant's bytes, for the owner's page."""
-    return _art_response(request.app["bot"].dodoland_tiles.art(request.match_info.get("vid") or ""))
+    library = request.app["bot"].dodoland_tiles
+    return _art_response(await _off_loop(library.art, request.match_info.get("vid") or ""))
 
 
 async def guild_tile_art(request: web.Request):
     """One variant's bytes, if the tile it belongs to is visible to this server."""
     library, guild = request.app["bot"].dodoland_tiles, request["guild"]
-    row = library.art(request.match_info.get("vid") or "")
-    if row is None or library.visible(row.get("tile_id"), guild.id) is None:
-        return _art_response(None)
-    return _art_response(row)
+
+    def read(vid):
+        row = library.art(vid)
+        return row if row is not None and library.visible(row.get("tile_id"), guild.id) is not None else None
+    return _art_response(await _off_loop(read, request.match_info.get("vid") or ""))
 
 
 def _fields_from(body: dict) -> dict:

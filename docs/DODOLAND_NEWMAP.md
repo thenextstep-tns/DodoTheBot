@@ -1327,3 +1327,17 @@ the kinds via `rle?r=0,0,0,0`, loads every ground's pictures and makes every
 ground's textures, blocks and dual tiles at every detail level in budgeted
 slices. Same test chunk, headless CPU, warm: old 53/29/22 ms (res 16/8/4),
 new ~21/11/8 ms; the ~70 ms first-meeting cost is moved into loading.
+
+### Pictures kept in memory, read off the loop (17 Oct 2026)
+Profiling the live map (Nik's log, /guild/.../dodoland/map): ~240 picture
+requests each did one or two blocking Atlas round trips (~70-125 ms) on the
+bot's event loop - 21 of them froze the bot 2.6 s; the full load took 25 s.
+`TileLibrary.art` now keeps picture rows in an LRU (`art_cache_mb`, set from
+`dodoland_art_cache_mb`, default 128; a picture never changes under its vid;
+removed ones are forgotten); `peek(tile_id)` reads the in-memory listing (used
+by `visible`, so a picture request needs no tile round trip); `picture(tile,
+guild, want)` is the one way to pick a tile's picture. Routes read off the loop:
+`assets_route.picture_response` (panel and member asset routes), tiles_ui
+`_off_loop` (tile library art). `first_art` removed. Test:
+test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
+2.9 s cold to build (DB round trips in _collect), and terrain/world 0.3-2.4 s.

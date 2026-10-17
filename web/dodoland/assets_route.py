@@ -17,23 +17,18 @@ from __future__ import annotations
 from aiohttp import web
 
 
-async def asset_image(request: web.Request):
-    """One tile's first image, for the map toolkit and the decor placed from it.
+async def picture_response(bot, guild_id: int, tile_id: str, want: str = "") -> web.Response:
+    """A tile's picture as a response (``TileLibrary.picture``): read off the
+    bot's own loop, as a picture not yet in memory is a database round trip,
+    and a map asks for hundreds at once."""
+    import asyncio
 
-    The path still says ``asset``: decor rows carry the id in ``asset_id`` and
-    the toolkit builds these URLs. It is a tile id since the tile library
-    replaced the asset library, and only a tile this server can see is served.
-    """
-    bot = request.app["bot"]
-    guild = request["guild"]
-    tile_id = request.match_info.get("aid") or ""
-    tile = bot.dodoland_tiles.visible(tile_id, guild.id)
-    want = request.query.get("v") or ""
-    # ``?v=`` asks for one of the tile's own variants, and only one of its own.
-    row = None
-    if tile is not None:
-        row = (bot.dodoland_tiles.art(want) if want and (want in tile["variants"] or want == tile.get("uploaded"))
-               else bot.dodoland_tiles.first_art(tile_id))
+    library = bot.dodoland_tiles
+    try:
+        library.art_cache_mb = int(bot.dodoland_params.get(guild_id, "dodoland_art_cache_mb"))
+    except Exception:  # noqa: BLE001 - a setting added since startup is not known yet
+        pass
+    row = await asyncio.get_running_loop().run_in_executor(None, library.picture, tile_id, guild_id, want)
     if row is None:
         return web.Response(status=404, text="Not found.", content_type="text/plain")
     raw = row.get("data")
@@ -44,6 +39,18 @@ async def asset_image(request: web.Request):
         # library of fifty icons from being refetched on every page load.
         headers={"Cache-Control": "private, max-age=604800, immutable"},
     )
+
+
+async def asset_image(request: web.Request):
+    """One tile's first image, for the map toolkit and the decor placed from it.
+
+    The path still says ``asset``: decor rows carry the id in ``asset_id`` and
+    the toolkit builds these URLs. It is a tile id since the tile library
+    replaced the asset library, and only a tile this server can see is served.
+    ``?v=`` asks for one of the tile's own variants, and only one of its own.
+    """
+    return await picture_response(request.app["bot"], request["guild"].id,
+                                  request.match_info.get("aid") or "", request.query.get("v") or "")
 
 
 # (guild, user, original size, width) -> (webp bytes, type). Small: a card each.
