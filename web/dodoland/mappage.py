@@ -615,6 +615,8 @@ async def map_page(request: web.Request):
         # Real members travelling the busiest roads (0: none), and what a
         # traveller's horse says when somebody tries to herd it.
         "travellers": max(0, int(bot.dodoland_params.get(guild.id, "dodoland_travellers"))),
+        # The town hall's building key, for drawing a town just placed.
+        "town_hall": str(bot.dodoland_params.get(guild.id, "dodoland_town_hall") or ""),
         # How much a piece turned on the ground slants (dodoland_turn_depth).
         "turn_depth": max(0.0, min(1.5, float(bot.dodoland_params.get(guild.id, "dodoland_turn_depth")))),
         # How a chased horse runs (the same settings the runaway's server uses).
@@ -670,6 +672,7 @@ async def map_page(request: web.Request):
     <button type="button" id="dlout" title="Zoom out">&minus;</button>
     <button type="button" id="dlfit" title="Fit the whole map">&#9634;</button>
     <button type="button" id="dlnames" title="Show every name">A</button>
+    <button type="button" id="dlwiki" title="How DodoLand works">?</button>
     <button type="button" id="dlfindme" title="{_e(_page_strings(bot, guild)['FIND_TRAVELLER_TIP'])}">&#128014;</button>
     <span class="dlzsep"></span>
     <button type="button" data-tool="pointer" title="Select (V): click a piece, shift-click to add, drag a box"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3l14 8-6 1.5L10 19z" fill="currentColor"/></svg></button>
@@ -1179,6 +1182,15 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
    their heads (drawn at screen size), a flickering torch; on a horse outside
    the towns. Pets and travellers take clicks. */
 .dlstand.dltraveller, .dlstand.dlpet, .dlstand.dlhorse { pointer-events: auto; cursor: pointer; }
+/* The wiki, over the map. */
+.dlwikibox { position: fixed; top: 64px; right: 70px; bottom: 16px; width: min(440px, calc(100vw - 100px)); z-index: 50;
+  overflow-y: auto; padding: 18px 20px; border-radius: 14px; background: var(--paper, #fff8ec); color: var(--ink, #2b2118);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 14px; line-height: 1.5; }
+.dlwikibox h3 { margin: 14px 0 4px; font-size: 16px; }
+.dlwikibox section:first-child h3 { margin-top: 0; }
+.dlwikibox ul { margin: 4px 0; padding-left: 20px; }
+.dlwikibox .x { position: sticky; top: 0; float: right; background: none; border: 0; font-size: 20px; cursor: pointer; color: inherit; }
+.dlwikibox .edit { margin-top: 16px; font-size: 12px; opacity: .8; }
 .dlstand.dltraveller.found .dltring { animation: dlfound .5s ease-in-out 6 alternate; }
 @keyframes dlfound { to { transform: scale(2.4); opacity: .4; } }
 .dllook { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -1502,6 +1514,22 @@ _SCRIPT = r"""
     setTimeout(function () { t.el.classList.remove('found'); }, 3000);
   }
   document.getElementById('dlfindme').onclick = findTraveller;
+  // The wiki (helpers/dodoland/wiki.py): how it all works, in the owner's words.
+  var wikiBox = null;
+  document.getElementById('dlwiki').onclick = function () {
+    if (wikiBox) { wikiBox.remove(); wikiBox = null; return; }
+    wikiBox = document.createElement('aside');
+    wikiBox.className = 'dlwikibox';
+    wikiBox.innerHTML = '<button type="button" class="x">\u00d7</button><div class="in">\u2026</div>';
+    wikiBox.querySelector('.x').onclick = function () { wikiBox.remove(); wikiBox = null; };
+    document.body.appendChild(wikiBox);
+    fetch(D.ep.base + '/wiki').then(function (r) { return r.json(); }).then(function (res) {
+      if (!wikiBox) return;
+      wikiBox.querySelector('.in').innerHTML = (res.sections || []).map(function (s) {
+        return '<section><h3>' + escapeHtml(s.title) + '</h3>' + s.html + '</section>';
+      }).join('') + (D.ep.player ? '' : '<p class="edit"><a href="/dodoland/wiki" target="_blank">Edit the wiki</a></p>');
+    }).catch(function () {});
+  };
   // A text from the Strings menu (D.str), its {markers} filled in.
   function txt(key, fill) {
     var said = (D.str || {})[key] || '';
@@ -2212,6 +2240,19 @@ _SCRIPT = r"""
     clearTimeout(notify.t);
     notify.t = setTimeout(function () { notice.classList.remove('on'); }, 14000);
   }
+  // A town drawn as its hall's uploaded picture (what pictured_towns does on
+  // the server when the page is built): its hall's tier, if that tier has an
+  // uploaded picture and the server draws with them. True if it changed.
+  function pictureTown(p) {
+    var hall = D.sizes.town_hall;
+    if (!p || p.hall_art || p.hall_piece || !hall || typeof tierAsset !== 'function') return false;
+    var tier = 1;
+    (p.built || []).forEach(function (b) { if (b.key === hall) tier = b.tier; });
+    var a = tierAsset(hall, tier), vid = a && a.wd != null && Object.keys(a.vw || {})[0];
+    if (!vid) return false;
+    p.hall_art = {a: a.id, v: vid, wc: a.wc};
+    return true;
+  }
   function place(id, point) {
     if (!D.ep.settle) return;
     fetch(D.ep.settle, {
@@ -2227,6 +2268,9 @@ _SCRIPT = r"""
         return;
       }
       byId[id].plot = point ? {x: res.x, y: res.y} : null;
+      // Just placed, it is drawn as its hall's uploaded picture straight away
+      // (the page was built before it stood anywhere).
+      if (point && pictureTown(byId[id]) && nodes[id]) { nodes[id].remove(); delete nodes[id]; }
       armed = null;
       frame.classList.remove('placing');
       hint.textContent = point ? 'Placed.' : 'Removed from the map.';

@@ -91,6 +91,17 @@ class Metric:
 # --------------------------------------------------------------------------- #
 METRICS: tuple[Metric, ...] = (
     Metric(
+        key="arrived",
+        label="Opened the map",
+        description=(
+            "Opening DodoLand's map with nothing counted yet: one point, so "
+            "somebody who has just joined has a town to place before they "
+            "have said a word. At most once a day, and only until anything "
+            "else of theirs counts."
+        ),
+        kind=SOLO, weight=1, daily_cap=1,
+    ),
+    Metric(
         key="message",
         label="Message posted",
         description=(

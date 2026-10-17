@@ -130,6 +130,22 @@ mine = looks[looks.index("async def api_my_pets"):looks.index("async def api_tow
 assert 'request["uid"]' in mine and "user_id" not in mine, "a member's pet search reads a user id from the request"
 print("look            a member searches only their own pets")
 
+# Somebody who has just joined gets a point for opening the map, once.
+from helpers.dodoland import parameters as dp  # noqa: E402
+from helpers.dodoland import standing  # noqa: E402
+from helpers.dodoland.store import ActivityStore  # noqa: E402
+from helpers.parameters import ParamManager  # noqa: E402
+from web.dodoland import player_map  # noqa: E402
+acts = ActivityStore(FakeCollection(), FakeCollection(), ParamManager(FakeCollection(), dp.DODOLAND_PARAMETERS))
+newbie = types.SimpleNamespace(dodoland=acts)
+standing._RECENT[(G, "x")] = (0, [], [])
+assert player_map.welcome(newbie, types.SimpleNamespace(id=G), 42) is True
+assert (G, "x") not in standing._RECENT, "the standings were not read afresh for the newcomer"
+row = acts._activity.find_one({"user_id": 42})
+assert row and (row.get("scored") or {}).get("arrived") == 1, row
+assert player_map.welcome(newbie, types.SimpleNamespace(id=G), 42) is False, "a second point for opening the map"
+print("arrival         a newcomer opening the map gets one point, so their town shows; once")
+
 # Every word the horses, travellers and map say is in the Strings menu.
 import lang  # noqa: E402
 from web.dodoland import mappage  # noqa: E402

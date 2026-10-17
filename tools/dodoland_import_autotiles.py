@@ -37,9 +37,11 @@ EDGES = ("top_left", "top_center", "top_right", "mid_left", "mid_right",
          "bottom_left", "bottom_center", "bottom_right")
 # Names, and the grounds that are not open ground. Water stops a wall and a
 # road; the shallows still let a town spread over them (at the water cost).
-NAMES = {"water_lake": "Lake water", "ocean_shallows": "Shallow sea water",
+NAMES = {"water_lake": "Lake water", "ocean_shallows": "Shallow sea water", "deep_ocean": "Deep ocean water",
          "farm_furrows": "Farm furrows", "wooden_dock": "Wooden dock"}
-CLOSED = {"water_lake": True, "ocean_shallows": True, "lava": False, "abyss_chasm": False}
+# Closed ground (impassable); True when towns still spread over it. The deep
+# ocean is the open sea: nothing crosses it, though towns reach out over it.
+CLOSED = {"water_lake": True, "ocean_shallows": True, "lava": False, "abyss_chasm": False, "deep_ocean": True}
 
 
 def roles(folder: pathlib.Path) -> dict:

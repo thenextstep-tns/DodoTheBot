@@ -51,10 +51,33 @@ def reader(handler):
     return run
 
 
+def welcome(bot, guild, uid) -> bool:
+    """A member with nothing counted yet gets their first point (the
+    ``arrived`` metric) for opening the map, so the town they place shows -
+    a town is drawn for people the standings know, and somebody who has just
+    joined has no rows. The standings are read afresh for them. Blocking."""
+    from helpers.dodoland import standing
+
+    if bot.dodoland._activity.find_one({"guild_id": int(guild.id), "user_id": int(uid)}):
+        return False
+    bot.dodoland.record(guild.id, int(uid), "arrived", channel_id=0)
+    for cache in (standing._RECENT, standing._WHOLE):
+        for key in [k for k in cache if k and k[0] == guild.id]:
+            cache.pop(key, None)
+    return True
+
+
 async def page(request: web.Request):
     """``GET /guild/{gid}/dodoland/me/map`` — the map, as a member sees it."""
     from web.dodoland import mappage
 
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, welcome, request.app["bot"], request["guild"], request["uid"])
+    except Exception as error:  # noqa: BLE001 - the map opens regardless
+        logger = getattr(request.app["bot"], "logger", None)
+        if logger:
+            logger.warning(f"DodoLand welcome point failed: {error}")
     request["player"] = True
     request["dl_base"] = _base(request)
     return await mappage.map_page(request)

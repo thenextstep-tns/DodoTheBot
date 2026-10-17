@@ -66,6 +66,7 @@ def dodoland_routes() -> list:
     from web.dodoland.look_api import api_my_pets, api_town_pets
     from web.dodoland.travel_api import travel_layer
     from web.dodoland.quote_api import quote_layer
+    from web.dodoland.wiki_ui import api_wiki, wiki_page, wiki_read
     from web.dodoland.tiles_ui import (
         api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
     )
@@ -81,6 +82,9 @@ def dodoland_routes() -> list:
     owner = require_owner
     return [
         web.get("/dodoland/tiles", owner(tiles_page)),
+        # The wiki: the owner writes it, everybody who sees the map reads it.
+        web.get("/dodoland/wiki", owner(wiki_page)),
+        web.post("/api/dodoland/wiki", owner(api_wiki)),
         web.get("/api/dodoland/lights/{tile_id}", owner(api_tile_lights)),
         web.get("/dodoland/tiles/art/{vid}", owner(tile_art)),
         web.post("/api/dodoland/tiles", owner(api_tiles)),
@@ -116,6 +120,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/roads", configure(roads_layer)),
         web.get("/guild/{gid}/dodoland/travel", configure(travel_layer)),
         web.get("/guild/{gid}/dodoland/quote", configure(quote_layer)),
+        web.get("/guild/{gid}/dodoland/wiki", configure(wiki_read)),
         web.post("/api/guild/{gid}/dodoland/terrain/paint", full(api_terrain_paint)),
         web.post("/api/guild/{gid}/dodoland/forest/paint", full(api_forest_paint)),
         web.post("/api/guild/{gid}/dodoland/terrain/undo", full(api_terrain_undo)),
@@ -172,6 +177,7 @@ def dodoland_routes() -> list:
         web.get("/guild/{gid}/dodoland/me/w/roads", player.require_town(world=True)(player_map.reader(roads_layer))),
         web.get("/guild/{gid}/dodoland/me/w/travel", player.require_town(world=True)(player_map.reader(travel_layer))),
         web.get("/guild/{gid}/dodoland/me/w/quote", player.require_town(world=True)(player_map.reader(quote_layer))),
+        web.get("/guild/{gid}/dodoland/me/w/wiki", player.require_town(world=True)(player_map.reader(wiki_read))),
         web.get("/guild/{gid}/dodoland/me/w/tiles/art/{vid}", player.require_town(world=True)(player_map.reader(guild_tile_art))),
         web.get("/guild/{gid}/dodoland/me/w/asset/{aid}", player.require_town(world=True)(player_map.reader(asset_image))),
         web.get("/guild/{gid}/dodoland/me/w/town/{uid}/art", player.require_town(world=True)(player_map.reader(town_art))),

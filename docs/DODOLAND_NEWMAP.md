@@ -1442,3 +1442,17 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   `dodoland_turn_depth` (0.5). A second handle (blue diamond, `.dlturn.yaw`) on
   an ellipse round the foot sets it (Shift 15°, double-click resets). Handle
   feet now come from the piece's map position, not its box.
+- 17 Oct (evening): (1) a town just placed is drawn as its hall's uploaded
+  picture at once (`pictureTown` on the page, D.sizes.town_hall) - it used to
+  take a reload. (2) New metric `arrived` (1 point, cap 1/day): the member map
+  (`player_map.welcome`) gives it to anyone with no activity rows yet and drops
+  the standings caches for the guild, so a newcomer's town shows. (3) Wiki:
+  `helpers/dodoland/wiki.py` (sections in dodoland_config `_id: "wiki"`, skeleton
+  until saved; plain text with paragraphs, "- " bullets, **bold**), owner editor
+  `/dodoland/wiki` (+ nav "📖 Wiki"), read from the map's "?" button
+  (`.../wiki`, member reader too). (4) Deep ocean: `deep_ocean_tileset` imported
+  as smart ground "Deep ocean water" (closed, towns spread over it as before,
+  overview hex #06335c); `tools/dodoland_rewater.py` repainted Deep water ->
+  Deep ocean water, Shallow water -> Shallow sea water, Lake water -> Lake water
+  (smart): 3.87M cells in 1311 chunks, backup logs/terrain_backup_1792253307.json
+  (`--restore <file>` puts it back).
