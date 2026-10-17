@@ -1104,6 +1104,16 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dlplaced small { display: block; color: var(--soft); }
 .dlplaced button { background: none; border: 1px solid var(--edge); border-radius: 6px; color: inherit;
   cursor: pointer; font-size: 12px; padding: 2px 7px; }
+/* "Placing..." while a place or move is saved: a bar that fills over about
+   as long as saving usually takes here, so nobody pulls things about meanwhile. */
+.dlbusy { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 40;
+  display: none; min-width: 180px; padding: 8px 14px 10px; border-radius: 12px;
+  background: rgba(20, 14, 8, .88); color: #f3e6cf; font-size: 13px; font-weight: 600;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35); pointer-events: none; text-align: center; }
+.dlbusy.on { display: block; }
+.dlbusy i { display: block; height: 4px; margin-top: 7px; border-radius: 2px; background: rgba(243, 230, 207, .18); overflow: hidden; }
+.dlbusy b { display: block; height: 100%; width: 0; background: var(--lantern, #f0a64f); border-radius: 2px; }
+.dlframe.busy, .dlframe.busy * { cursor: progress !important; }
 /* The pointer's selection box and the brush's reach, on screen. */
 .dlbox { position: absolute; display: none; pointer-events: none; z-index: 21;
   border: 1px dashed var(--lantern); background: rgba(240, 166, 79, .1); }
@@ -3001,7 +3011,44 @@ _SCRIPT = r"""
     if (sel[id] && selIds().length === 1) selectOnly([]); else selectOnly([id]);
   }
 
+  // "Placing..." / "Moving..." while a place or move is saved: the bar fills
+  // over this browser's running average of how long that takes (eased so it
+  // nears the end without reaching it), then completes and fades.
+  var busy = {n: 0, el: null};
+  function busyStart(action) {
+    var kind = /move/.test(action) ? 'move' : /place/.test(action) ? 'place' : '';
+    if (!kind) return null;
+    if (!busy.el) {
+      busy.el = document.createElement('div'); busy.el.className = 'dlbusy';
+      busy.el.innerHTML = '<span></span><i><b></b></i>';
+      document.body.appendChild(busy.el);
+    }
+    var avg = 700;
+    try { avg = +localStorage.getItem('dlbusy-' + kind) || avg; } catch (e) {}
+    busy.n++;
+    busy.el.querySelector('span').textContent = kind === 'move' ? 'Moving…' : 'Placing…';
+    var bar = busy.el.querySelector('b');
+    bar.style.transition = 'none'; bar.style.width = '0';
+    busy.el.classList.add('on'); frame.classList.add('busy');
+    void bar.offsetWidth;
+    bar.style.transition = 'width ' + Math.round(avg * 1.15) + 'ms cubic-bezier(.2,.7,.3,1)';
+    bar.style.width = '92%';
+    return {kind: kind, t0: performance.now()};
+  }
+  function busyEnd(b) {
+    if (!b) return;
+    var took = performance.now() - b.t0;
+    try {
+      var old = +localStorage.getItem('dlbusy-' + b.kind) || took;
+      localStorage.setItem('dlbusy-' + b.kind, String(Math.round(old * 0.7 + took * 0.3)));
+    } catch (e) {}
+    if (--busy.n > 0) return;
+    var bar = busy.el.querySelector('b');
+    bar.style.transition = 'width 120ms linear'; bar.style.width = '100%';
+    setTimeout(function () { if (busy.n <= 0) { busy.el.classList.remove('on'); frame.classList.remove('busy'); } }, 220);
+  }
   function decorPost(payload, then, fail) {
+    var b = busyStart(payload.action || '');
     fetch(D.ep.decor, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
@@ -3010,6 +3057,7 @@ _SCRIPT = r"""
         return {ok: false, error: 'The server answered with ' + r.status + '.'};
       });
     }).then(function (res) {
+      busyEnd(b);
       if (!res.ok) {
         kitSay(res.error || 'That did not work.', true);
         hint.textContent = res.error || 'That did not work.';
@@ -3019,7 +3067,7 @@ _SCRIPT = r"""
       then(res);
       // A placed piece can block a town's growth, so its area may have changed.
       if (typeof loadInfluence === 'function') loadInfluence();
-    }).catch(function (err) { kitSay(String(err), true); });
+    }).catch(function (err) { busyEnd(b); kitSay(String(err), true); });
   }
 
   function placeDecor(point) {
