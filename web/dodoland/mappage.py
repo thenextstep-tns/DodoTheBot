@@ -76,6 +76,31 @@ def _grown(power: int, biggest: int) -> float:
     return min(1.0, (power / biggest) ** 0.5)
 
 
+def _travel(data: dict, placed: list, viewer: str, most: int) -> list:
+    """``[{a, b, w}]``: the pairs of settled people who talk most, one
+    traveller each (dodoland_travellers), and always the viewer's own: with
+    whoever they talk to most, else the nearest town."""
+    if most <= 0 or len(placed) < 2:
+        return []
+    here = {p["id"]: p for p in placed}
+    pairs = sorted(((w, a, b) for (a, b), w in (data.get("talk") or {}).items()
+                    if a in here and b in here and a != b), reverse=True)
+    out, seen = [], set()
+    for w, a, b in pairs[:most]:
+        out.append({"a": a, "b": b, "w": w})
+        seen.update((a, b))
+    if viewer in here and not any(viewer in (t["a"], t["b"]) for t in out):
+        mine = next(((w, a, b) for w, a, b in pairs if viewer in (a, b)), None)
+        if mine:
+            out.append({"a": mine[1], "b": mine[2], "w": mine[0], "me": True})
+        else:
+            me = here[viewer]["plot"]
+            near = min((p for p in placed if p["id"] != viewer),
+                       key=lambda p: (p["plot"]["x"] - me["x"]) ** 2 + (p["plot"]["y"] - me["y"]) ** 2)
+            out.append({"a": viewer, "b": near["id"], "w": 0, "me": True})
+    return out
+
+
 def _avatar_of(guild, user_id) -> str:
     """A member's own picture (Discord's, small), or ""."""
     member = guild.get_member(int(user_id)) if str(user_id).isdigit() else None
@@ -87,34 +112,6 @@ def _avatar_of(guild, user_id) -> str:
 
 _PETS: dict = {}
 
-
-def _honours_of(bot, guild, owners: list) -> dict:
-    """``{owner id: {vet: [trial], hm: [trial], parse: best}}``: the trial
-    clears a settled person holds (the clear roles the pat cog hands out:
-    config vet_clears / hm_clears) and their best logged parse (the parsing
-    cog's ``parses``), for the trophies over their town and on its card."""
-    import config_py
-
-    out: dict = {}
-    clears = (("vet", getattr(config_py, "vet_clears", {}) or {}), ("hm", getattr(config_py, "hm_clears", {}) or {}))
-    for owner in owners:
-        member = guild.get_member(int(owner)) if str(owner).isdigit() else None
-        if member is None:
-            continue
-        held = {r.id for r in getattr(member, "roles", [])}
-        mine = {kind: sorted(trial for trial, role in table.items() if role in held) for kind, table in clears}
-        if mine["vet"] or mine["hm"]:
-            out[str(owner)] = mine
-    try:
-        ids = [str(o) for o in owners] + [int(o) for o in owners if str(o).isdigit()]
-        best = config_py.parses.aggregate([{"$match": {"ID": {"$in": ids}}},
-                                           {"$group": {"_id": "$ID", "best": {"$max": {"$convert": {"input": "$Parse", "to": "int", "onError": 0, "onNull": 0}}}}}])
-        for row in best:
-            if row.get("best"):
-                out.setdefault(str(row["_id"]), {"vet": [], "hm": []})["parse"] = int(row["best"])
-    except Exception:  # noqa: BLE001 - parses stored oddly are not worth a broken map
-        pass
-    return out
 
 
 def _pets_of(bot, guild_id: int, owners: list) -> dict:
@@ -185,6 +182,11 @@ def _collect(bot, guild) -> dict:
         int(bot.dodoland_params.get(guild.id, "dodoland_lit_days")))
 
     rows, pairs = standing.recent_rows(bot.dodoland, bot.dodoland_params, guild.id, since)
+    # Who talks to whom, as weights, for the travellers on the roads.
+    talk: dict = {}
+    for row in pairs:
+        key = (str(row.get("a")), str(row.get("b")))
+        talk[key] = talk.get(key, 0) + int(row.get("n") or 0)
     # Shared with every other reader of the same rows (cached, read-only).
     result = standing.recent_standings(bot.dodoland, bot.dodoland_params, guild.id,
                                        buildings, since)
@@ -256,7 +258,6 @@ def _collect(bot, guild) -> dict:
             "flourish": int(shine.get("level", 0)),
             "flourish_label": shine.get("label") or "",
             "rank": shine.get("rank_name") or "",
-            "rank_colour": shine.get("colour") or "",
             "lit": uid in lit,
             "plot": plots.get(uid),
             # A town grows from the base width by its standing, on a square-root
@@ -296,7 +297,6 @@ def _collect(bot, guild) -> dict:
     looks = {p["id"]: (details.get(int(p["id"])) or details.get(p["id"]) or {}).get("look") or {} for p in settled}
     from helpers.dodoland import pets as pet_rules
     follow = pet_rules.details({uid: lk.get("pets") for uid, lk in looks.items() if lk.get("pets")})
-    honours = _honours_of(bot, guild, [p["id"] for p in settled])
     for p in settled:
         p["av"] = _avatar_of(guild, p["id"])
         if pets.get(p["id"]):
@@ -305,12 +305,11 @@ def _collect(bot, guild) -> dict:
             p["look"] = looks[p["id"]]
         if follow.get(p["id"]):
             p["follow"] = follow[p["id"]]
-        if honours.get(p["id"]):
-            p["honours"] = honours[p["id"]]
     world_decor = [dict(d, variant=upload[d["asset_id"]][0]) if d.get("asset_id") in upload else d
                    for d in world_decor]
     return {"people": people, "buildings": buildings,
             "total": len(result["people"]),
+            "talk": talk,
             "cells_w": bot.dodoland_terrain.world(guild.id)["cells_w"],
             "world": [{"id": d["piece_id"], "a": d["asset_id"], "v": d.get("variant") or "",
                        "l": d.get("layer") or "objects",
@@ -604,6 +603,7 @@ async def map_page(request: web.Request):
                  'DodoLand page first.</div>')
 
     placed = [p for p in data["people"] if p["plot"]]
+    travel = _travel(data, placed, viewer, int(bot.dodoland_params.get(guild.id, "dodoland_travellers")))
     unplaced = [p for p in data["people"] if not p["plot"]]
     # How large a piece of decor is drawn at 100% zoom, before its own scale.
     decor_size = int(bot.dodoland_params.get(guild.id, "dodoland_asset_size"))
@@ -722,6 +722,7 @@ async def map_page(request: web.Request):
     <button type="button" id="dlout" title="Zoom out">&minus;</button>
     <button type="button" id="dlfit" title="Fit the whole map">&#9634;</button>
     <button type="button" id="dlnames" title="Show every name">A</button>
+    <button type="button" id="dlfindme" title="Find your traveller on the roads">&#128014;</button>
     <span class="dlzsep"></span>
     <button type="button" data-tool="pointer" title="Select (V): click a piece, shift-click to add, drag a box"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3l14 8-6 1.5L10 19z" fill="currentColor"/></svg></button>
     <button type="button" data-tool="hand" title="Hand (H): drag to move around; drag a selected piece to move it"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 11V5.5a1.5 1.5 0 013 0V10m0-5.5a1.5 1.5 0 013 0V10m0-4a1.5 1.5 0 013 0v7c0 4-2.5 7-6.5 7S5 17 4 14l-1.5-3.5a1.4 1.4 0 012.4-1.4L8 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -798,7 +799,7 @@ async def map_page(request: web.Request):
 <aside class="dlcard" id="dlcard" hidden></aside>
 
 <script>window.DL = {json.dumps({"people": data["people"], "sizes": sizes,
-                                 "gid": str(guild.id), "me": viewer,
+                                 "gid": str(guild.id), "me": viewer, "travel": travel,
                                  "world": data["world"],
                                  "assets": data["assets"],
                                  "cells_w": data["cells_w"],
@@ -1226,20 +1227,9 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 /* Real members on the roads: a gold ring at their feet, their picture over
    their heads (drawn at screen size), a flickering torch; on a horse outside
    the towns. Pets and travellers take clicks. */
-.dltraveller, .dlpet { pointer-events: auto; cursor: pointer; }
-.dlhonours { position: absolute; left: 50%; bottom: 100%; display: flex; gap: 3px; align-items: flex-end;
-  transform: translateX(-50%) scale(var(--inv, 1)); transform-origin: bottom center; margin-bottom: 2px;
-  pointer-events: auto; white-space: nowrap; }
-.dltown.tiny .dlhonours { display: none; }
-.dlhonours .cup { font-size: 13px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
-.dlhonours .cup:not(.hm):not(.parse) { filter: grayscale(.6) brightness(1.2) drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
-.ban { display: inline-block; padding: 2px 8px 6px; font-size: 11px; font-weight: 700; color: #fff;
-  background: var(--c, #c9a24a); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
-  text-shadow: 0 1px 1px rgba(0,0,0,.5); }
-.dltrophies { margin: 10px 0 0; font-size: 13px; }
-.dltrophies ul { list-style: none; margin: 4px 0 0; padding: 0; }
-.dltrophies li { margin: 3px 0; }
-.dltrophies small { opacity: .7; }
+.dlstand.dltraveller, .dlstand.dlpet, .dlstand.dlhorse { pointer-events: auto; cursor: pointer; }
+.dlstand.dltraveller.found .dltring { animation: dlfound .5s ease-in-out 6 alternate; }
+@keyframes dlfound { to { transform: translateX(-50%) scale(2.2); opacity: .4; } }
 .dllook { display: flex; gap: 10px; flex-wrap: wrap; }
 .dllook label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .dlpets { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
@@ -1266,7 +1256,7 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
 .dltcard span { display: block; font-size: 13px; margin-top: 2px; }
 .dltcard small { display: block; font-size: 11px; opacity: .7; margin-top: 6px; }
 /* The runaway horse: it takes clicks; what it says is drawn at screen size. */
-.dlhorse { pointer-events: auto; cursor: pointer; z-index: 25000 !important; }
+.dlstand.dlhorse { z-index: 25000 !important; }
 .dlhorse svg { transition: transform .15s; }
 .dlhorse.running svg { animation: dlgallop .22s linear infinite; }
 @keyframes dlgallop { 50% { translate: 0 -6%; } }
@@ -1540,6 +1530,18 @@ _SCRIPT = r"""
   document.getElementById('dlout').onclick = function () {
     zoom(1 / 1.4, frame.clientWidth / 2, frame.clientHeight / 2); };
   document.getElementById('dlfit').onclick = fit;
+  // Your own traveller: the view goes to them and their ring flashes.
+  function findTraveller() {
+    var t = (typeof travellers !== 'undefined' ? travellers : []).filter(function (q) { return String(q.who.id) === String(D.me); })[0];
+    if (!t || t.x == null) { hint.textContent = 'Your traveller is not on the roads (settle a town and talk to people).'; return; }
+    view.k = Math.max(view.k, Math.min(kMax(), 10 / WS));
+    view.x = frame.clientWidth / 2 - t.x / terr.world.cells_w * nat.w * view.k;
+    view.y = frame.clientHeight / 2 - t.y / terr.world.cells_h * nat.h * view.k;
+    clamp(); apply();
+    t.el.classList.add('found');
+    setTimeout(function () { t.el.classList.remove('found'); }, 3000);
+  }
+  document.getElementById('dlfindme').onclick = findTraveller;
   var namesBtn = document.getElementById('dlnames');
   namesBtn.onclick = function () {
     var on = world.classList.toggle('named');
@@ -1568,7 +1570,7 @@ _SCRIPT = r"""
     el.style.width = (person.w || D.sizes.town_pct) + '%';
     el.innerHTML = '<span class="dldot"></span>' +
       '<div class="dlart"></div>' +
-      '<div class="dlname">' + escapeHtml(person.name) + '</div>' + honoursHtml(person);
+      '<div class="dlname">' + escapeHtml(person.name) + '</div>';
     // Uploaded art: the town is its hall's painted picture (hall_art), or one
     // of its own painted buildings carries its flag (hall_piece); no generated hall.
     if (person.hall_art) {
@@ -1600,27 +1602,6 @@ _SCRIPT = r"""
     return el;
   }
 
-  // Over a town: its owner's trial rank as a banner in the rank's colour, and
-  // a cup for each trial they hold a clear of (gold for hard mode) and for a
-  // logged parse. Drawn at screen size, like the name; hidden when a dot.
-  function honoursHtml(p) {
-    var h = p.honours || {}, out = '';
-    if (p.rank) out += '<span class="ban" style="--c:' + escapeHtml(p.rank_colour || '#c9a24a') + '" title="' +
-      escapeHtml(p.flourish_label || p.rank) + '">' + escapeHtml(p.rank) + '</span>';
-    (h.hm || []).forEach(function (t) { out += '<span class="cup hm" title="' + escapeHtml(t) + ' (hard mode)">\ud83c\udfc6</span>'; });
-    (h.vet || []).forEach(function (t) { if ((h.hm || []).indexOf(t) < 0) out += '<span class="cup" title="' + escapeHtml(t) + ' (veteran)">\ud83c\udfc6</span>'; });
-    if (h.parse) out += '<span class="cup parse" title="Best parse: ' + h.parse.toLocaleString() + ' DPS">\u2694\ufe0f</span>';
-    return out ? '<div class="dlhonours">' + out + '</div>' : '';
-  }
-  function honoursCard(p) {
-    var h = p.honours || {}, rows = [];
-    if (p.rank) rows.push('<li><span class="ban" style="--c:' + escapeHtml(p.rank_colour || '#c9a24a') + '">' + escapeHtml(p.rank) + '</span> ' +
-                          escapeHtml(p.flourish_label || '') + '</li>');
-    (h.hm || []).forEach(function (t) { rows.push('<li>\ud83c\udfc6 ' + escapeHtml(t) + ' <small>hard mode</small></li>'); });
-    (h.vet || []).forEach(function (t) { if ((h.hm || []).indexOf(t) < 0) rows.push('<li>\ud83c\udfc6 ' + escapeHtml(t) + ' <small>veteran</small></li>'); });
-    if (h.parse) rows.push('<li>\u2694\ufe0f Best parse: ' + h.parse.toLocaleString() + ' DPS</li>');
-    return rows.length ? '<div class="dltrophies"><b>Trophies &amp; banners</b><ul>' + rows.join('') + '</ul></div>' : '';
-  }
   // A town's flag on a picture: a pole and the town's own picture as cloth.
   function flagHtml(person) {
     if (!person || !person.has_image) return '';
@@ -1789,7 +1770,7 @@ _SCRIPT = r"""
         ' people reached' +
         '<span id="dlpopn">' + popText(p) + '</span>' +
         (p.rank ? ' · ' + escapeHtml(p.flourish_label) + ' (' + escapeHtml(p.rank) + ')' : '') +
-        '</div>' + honoursCard(p) +
+        '</div>' +
       breadthLine(p) +
       (p.blurb ? '<p class="blurb">' + escapeHtml(p.blurb) + '</p>' : '') +
       (p.has_image
@@ -1805,7 +1786,7 @@ _SCRIPT = r"""
       '<div class="acts">' +
         (D.ep.player ? (mine ? '<button data-act="edit" class="own">Customise your town</button>' : '') +
           (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
-          ? '<button data-act="edit" class="own">Customise your town</button>'
+          ? '<button data-act="edit" class="own">Customise your town</button><button data-act="findme">Find my traveller</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
         '<button data-act="remove">Remove Town</button>') +
@@ -1853,6 +1834,7 @@ _SCRIPT = r"""
           return;
         }
         if (act === 'close') { closeCard(); }
+        else if (act === 'findme') { closeCard(); findTraveller(); }
         else if (act === 'move') { arm(id); closeCard(); }
         else if (act === 'remove') {
           var own = D.world.filter(function (q) { return q.t === String(id); }).length;
@@ -4216,22 +4198,33 @@ _SCRIPT = r"""
   function travellersReset() {
     travellers.forEach(function (t) { t.el.remove(); (t.pets || []).forEach(function (q) { q.el.remove(); }); });
     travellers = [];
-    var most = (D.sizes.travellers == null ? 8 : D.sizes.travellers);
-    if (!most || !terr.world || !terr.roads) return;
+    if (!terr.world || !(D.travel || []).length) return;
     var cw = terr.world.cells_w, ch = terr.world.cells_h;
-    terr.roads.slice().sort(function (a, b) { return (b.weight || 0) - (a.weight || 0); }).slice(0, most).forEach(function (road, n) {
-      var pts = roadPoints(road.d);
-      if (pts.length < 2) return;
-      // Whose end is whose: the end nearer a town's plot is that town's.
-      var A = byId[road.a], B = byId[road.b];
+    (D.travel || []).forEach(function (pair, n) {
+      var A = byId[pair.a], B = byId[pair.b];
       if (!A || !B || !A.plot || !B.plot) return;
-      var ax = A.plot.x / 100 * cw, ay = A.plot.y / 100 * ch;
-      if (Math.hypot(pts[0].x - ax, pts[0].y - ay) > Math.hypot(pts[pts.length - 1].x - ax, pts[pts.length - 1].y - ay)) pts.reverse();
-      // The one who walks: whoever of the two has a picture, by turns.
-      var walker = (n % 2 ? B : A).av ? (n % 2 ? B : A) : (A.av ? A : B), home = walker === A ? 0 : 1;
-      if (home) pts.reverse();
+      var ax = A.plot.x / 100 * cw, ay = A.plot.y / 100 * ch, bx = B.plot.x / 100 * cw, by = B.plot.y / 100 * ch;
+      // Along the road between them if there is one, else across country:
+      // a gentle curve from one town to the other.
+      var road = (terr.roads || []).filter(function (r) {
+        return (String(r.a) === pair.a && String(r.b) === pair.b) || (String(r.a) === pair.b && String(r.b) === pair.a);
+      })[0];
+      var pts = road ? roadPoints(road.d) : [];
+      if (pts.length < 2) {
+        var mx = (ax + bx) / 2, my = (ay + by) / 2, nx = -(by - ay), ny = bx - ax, bend = (n % 2 ? 0.12 : -0.12);
+        pts = [];
+        for (var i = 0; i <= 12; i++) {
+          var f = i / 12, c = 4 * f * (1 - f) * bend;
+          pts.push({x: ax + (bx - ax) * f + nx * c, y: ay + (by - ay) * f + ny * c});
+        }
+      } else if (Math.hypot(pts[0].x - ax, pts[0].y - ay) > Math.hypot(pts[pts.length - 1].x - ax, pts[pts.length - 1].y - ay)) pts.reverse();
+      // The one who travels: the viewer when it is theirs; else whoever of
+      // the two has a picture, by turns.
+      var walker = pair.a === String(D.me) ? A : pair.b === String(D.me) ? B :
+                   (n % 2 ? B : A).av ? (n % 2 ? B : A) : (A.av ? A : B);
+      if (walker === B) pts.reverse();
       var len = [0];
-      for (var i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      for (var j = 1; j < pts.length; j++) len.push(len[j - 1] + Math.hypot(pts[j].x - pts[j - 1].x, pts[j].y - pts[j - 1].y));
       var colour = ['#ff3b3b', '#ffb000', '#00b7ff', '#ff4fd8', '#2fe36b', '#ffe14d'][n % 6];
       // A torch in the right hand; on a horse outside the towns.
       var torch = '<line x1="2.6" y1="0" x2="3.4" y2="-5" stroke="#6b4423" stroke-width="0.55"/>' +
@@ -4244,7 +4237,7 @@ _SCRIPT = r"""
                         '<g class="tw">' + me + '</g><g class="tr">' + ride + '</g>', WALKER_BOX, 2.6, 0.21, true);
       el.insertAdjacentHTML('afterbegin', '<i class="dltring"></i>');
       if (walker.av) el.insertAdjacentHTML('beforeend', '<img class="dltface" alt="" src="' + walker.av + '">');
-      var t = {el: el, who: walker, to: walker === A ? B : A, road: road, pts: pts, len: len,
+      var t = {el: el, who: walker, to: walker === A ? B : A, pts: pts, len: len,
                at: Math.random() * len[len.length - 1], dir: 1, rest: 0, speed: 1.1 + Math.random() * 0.4};
       el.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
       el.addEventListener('click', function (ev) {
@@ -4253,7 +4246,7 @@ _SCRIPT = r"""
         travellerCard(t, ev);
       });
       // The pets they chose, trotting behind them.
-      t.pets = (walker.follow || []).map(function (pet, j) {
+      t.pets = (walker.follow && walker.follow.length ? walker.follow : (walker.pets || [])).map(function (pet, j) {
         var furs = ['#8a6a4a', '#d9a066', '#5a5050', '#e8dcc8', '#c47a3a', '#2f2a28'];
         var pel = standing('dlwalker dlpet dlkeep', sprite(pet.k === 'dog' ? 'dog' : 'cat', furs[(pet.n.length + j) % furs.length]),
                            WALKER_BOX, 0, 0.21, true);
@@ -4505,17 +4498,7 @@ _SCRIPT = r"""
         addWalker(kind, colours[i % colours.length], i % 3,
                   {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
       }
-      // A few of the owner's own cats and dogs (dodoland_pets_per_town).
-      var furs = ['#8a6a4a', '#d9a066', '#5a5050', '#e8dcc8', '#c47a3a', '#2f2a28'];
-      (p.pets || []).forEach(function (pet, j) {
-        var w = addWalker(pet.k === 'dog' ? 'dog' : 'cat', furs[(String(pet.n || '').length + j) % furs.length], 0,
-                          {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
-        w.pet = pet; w.owner = p;
-        w.el.classList.add('dlpet');
-        w.el.title = (pet.n || 'A pet') + (pet.t ? ' (' + pet.t + ')' : '');
-        w.el.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
-        w.el.addEventListener('click', function (ev) { ev.stopPropagation(); petCard(w, ev); });
-      });
+
       // The zoo: animals inside it, more for each tier it has reached.
       var zoo = LIFE.zoo && townPiece(p, LIFE.zoo), tier = townTier(p, LIFE.zoo);
       var meta = zoo && assetById(currentTile(p, LIFE.zoo) ? currentTile(p, LIFE.zoo).id : zoo.a);
@@ -4532,6 +4515,7 @@ _SCRIPT = r"""
       }
     });
     if (!lifeRaf && walkers.length) lifeRaf = requestAnimationFrame(stepLife);
+    travellersReset();
   }
   function nextSpot(w) {
     if (w.zone.type === 'zoo') {

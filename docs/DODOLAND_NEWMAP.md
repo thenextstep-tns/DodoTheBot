@@ -1375,3 +1375,13 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   in its colour (`rank_colour`); drawn over each town (`.dlhonours`) and on
   its card (`honoursCard`).
 - Kept figures (`.dlkeep`) survive `buildLife`'s clear-out.
+- Fixes (17 Oct): figures were unclickable (`.dlstand` pointer-events:none came
+  later in the CSS) - now `.dlstand.dlhorse/.dltraveller/.dlpet`. Travellers come
+  from who talks to whom (`_travel`: top `dodoland_travellers` pairs among
+  settled people from the pair rows, plus always the viewer's own - their top
+  partner or the nearest town), walking the road between the two if there is
+  one, else a gentle curve across country; spawned from `buildLife` and again
+  when roads load. Pets follow the traveller (chosen, else the first few) and no
+  longer wander towns. "Find my traveller": town card button and the 🐎 map
+  button (flashes the ring). Zoo catch radius 5 cells x scale. Honours (banner,
+  cups, parse) removed for now.

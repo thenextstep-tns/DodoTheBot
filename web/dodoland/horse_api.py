@@ -91,7 +91,7 @@ def _zoos(bot, gid) -> list[dict]:
         if d.get("asset_id") in tiles and d.get("town"):
             out.append({"id": d["piece_id"], "owner": str(d["town"]),
                         "x": float(d.get("x", 0)) / 100 * cw, "y": float(d.get("y", 0)) / 100 * ch,
-                        "r": 3.0 * float(d.get("scale", 1.0))})
+                        "r": 5.0 * float(d.get("scale", 1.0))})
     return out
 
 
