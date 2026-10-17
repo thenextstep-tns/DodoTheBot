@@ -172,3 +172,6 @@ logs/profile_web
 
 # Redrawn tile batches made by .agent/workflows/pixelate-map-art.md
 art_batches/
+
+# The running bot's log and backups made by tools
+logs/
