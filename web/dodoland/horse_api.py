@@ -210,26 +210,12 @@ def _pay(owner: int, catcher: int, count: int) -> None:
 
 
 async def _announce(bot, guild, catcher: int, owner: int, count: int) -> None:
-    import discord
+    """The catch, in the server's bot channel (helpers/bot_channel.py), in the
+    Strings menu's wording (lang.py DODOLAND_HORSE_CAUGHT)."""
+    from helpers import bot_channel
 
-    # The server's bot channel (its settings' "Bot channel", DODO_CHANNEL).
-    try:
-        channel = guild.get_channel(int(bot.guild_config.get(guild.id, "DODO_CHANNEL") or 0))
-    except (AttributeError, TypeError, ValueError):
-        channel = None
-    if channel is None:
-        if getattr(bot, "logger", None):
-            bot.logger.warning("DodoLand horse: no bot channel set (server settings, Bot channel) to announce in.")
-        return
-    # The Strings menu's wording (lang.py DODOLAND_HORSE_CAUGHT), this server's.
     line = str(bot.lang.get("DODOLAND_HORSE_CAUGHT", guild=guild))
-    text = line.format(catcher=f"<@{int(catcher)}>", owner=f"<@{int(owner)}>", count=count)
-    try:
-        # Named, not pinged.
-        await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-    except Exception as error:  # noqa: BLE001 - a missing permission never breaks the chase
-        if getattr(bot, "logger", None):
-            bot.logger.warning(f"DodoLand horse announcement failed: {error}")
+    await bot_channel.post(bot, guild, line.format(catcher=f"<@{int(catcher)}>", owner=f"<@{int(owner)}>", count=count))
 
 
 async def api_horse(request: web.Request):
