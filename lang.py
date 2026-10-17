@@ -1087,8 +1087,8 @@ TRIAL_ERROR_GUILD_ONLY = "This only works inside the server."
 DODOLAND_HORSE_LINE = "NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!"
 DODOLAND_HORSE_BUSY = "Nay, I'm on a business trip right now"
 DODOLAND_HORSE_PAID = "\U0001F36C \u00d7 {count} for {owner}!"
-# Said by a horse run into a zoo while the zoos rest after a catch (no sweetrolls).
-DODOLAND_HORSE_ZOO_FULL = "Oh sweet, this machine smells like carrots or carrot cake!!"
+# Said by a horse as it is run into a zoo, just before it turns into sweetrolls.
+DODOLAND_HORSE_IN_ZOO = "Oh sweet, this machine smells like carrots or carrot cake!!"
 DODOLAND_HORSE_THE_ZOO = "the zoo"
 DODOLAND_HORSE_CAUGHT = "{catcher} just turned a horse into {count} sweetrolls for {owner}!"
 DODOLAND_TRAVELLER_ON_ROAD = "on the road to {town}"

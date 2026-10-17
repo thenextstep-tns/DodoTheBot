@@ -1430,3 +1430,9 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   (`mappage.PAGE_STRINGS`, `_page_strings`) and says them with `txt(key, fill)`;
   the announcement uses `DODOLAND_HORSE_CAUGHT` and goes to the server's Bot
   channel (guild config `DODO_CHANNEL`). The horse's text settings are gone.
+- Per-horse rest (17 Oct): no zoo-wide rest (`zoo_rest` gone). A caught horse is
+  away for the rest hours: the runaway via `back_at`, a town's horse via
+  `horse.away` (`{"<town>:<n>": back_at}`, n = its index in the town's crowd;
+  `catch(horse_id, ...)` refuses one that is away). GET returns `away`; the page
+  skips/removes those walkers (`HORSES_AWAY`). Into the zoo the horse says
+  `DODOLAND_HORSE_IN_ZOO` (the carrot line), then the payout bubble.

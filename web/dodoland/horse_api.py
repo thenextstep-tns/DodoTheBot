@@ -18,9 +18,10 @@ everything placed. Settings: ``dodoland_horse_*``.
 Every other horse on the map (the ones walking the towns) can be chased too:
 the page bolts it away from the click and, if its run passes a zoo, asks here
 (POST {catch: {zoo, from, to}}); the run is checked (the zoo is real, the run
-is no longer than a bolt and passes it) and paid like the runaway's. After any
-catch the zoos take no more horses for the rest hours (``zoo_rest``), so the
-towns' horses are not a farm either.
+is no longer than a bolt and passes it) and paid like the runaway's. A
+caught horse is away for the rest hours, like the runaway (``away``: its id,
+``<town>:<n>``, and when it is back); every other horse can still be herded,
+so a member can go round and run them all into their zoo, once each.
 
 Endpoints: GET/POST ``/api/guild/{gid}/dodoland/horse`` (the panel's map) and
 ``.../dodoland/me/horse`` (a member's map); POST {x, y} is a kick from there.
@@ -31,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import math
 import random
+import re
 import time
 from datetime import datetime
 
@@ -109,19 +111,33 @@ def _segment_gap(px, py, ax, ay, bx, by) -> float:
     return math.hypot(ax + dx * t - px, ay + dy * t - py)
 
 
+def _rest(bot, gid) -> float:
+    """How long a caught horse is away, seconds: between the two settings."""
+    lo = float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3))
+    return random.uniform(lo, max(lo, float(_p(bot, gid, "dodoland_horse_rest_max_hours", 6)))) * 3600
+
+
+def _away(state: dict) -> dict:
+    """The town horses caught and not back yet: ``{id: back at}``."""
+    now = time.time()
+    return {k: v for k, v in (state.get("away") or {}).items() if float(v) > now}
+
+
 def current(bot, gid) -> dict:
-    """The horse as the page draws it; brought back once its rest is over."""
+    """The horse as the page draws it (brought back once its rest is over),
+    and the towns' horses that are away."""
     if not bool(_p(bot, gid, "dodoland_horse_on", True)):
         return {"on": False}
     state = _state(bot, gid)
+    away = sorted(_away(state))
     if not state.get("on") and time.time() >= float(state.get("back_at") or 0):
         fresh = _spawn(bot, gid)
         if fresh:
-            _save(bot, gid, fresh)
-            state = fresh
+            state = dict(fresh, away=_away(state))
+            _save(bot, gid, state)
     if not state.get("on"):
-        return {"on": False, "back_in": max(0, int(float(state.get("back_at") or 0) - time.time()))}
-    return {"on": True, "x": state["x"], "y": state["y"]}
+        return {"on": False, "away": away, "back_in": max(0, int(float(state.get("back_at") or 0) - time.time()))}
+    return {"on": True, "x": state["x"], "y": state["y"], "away": away}
 
 
 def kick(bot, gid, fx: float, fy: float) -> dict:
@@ -153,36 +169,35 @@ def kick(bot, gid, fx: float, fy: float) -> dict:
             best = (nx, ny)
     nx, ny = best
     reach = float(_p(bot, gid, "dodoland_horse_catch", 2.0))
-    caught, full = None, False
-    resting = time.time() < float(state.get("zoo_rest") or 0)
+    caught = None
     for zoo in _zoos(bot, gid):
         if _segment_gap(zoo["x"], zoo["y"], hx, hy, nx, ny) <= zoo["r"] + reach:
-            if resting:
-                full = True   # it ran past a zoo, but the zoos are resting: say so
-                break
             caught = zoo
             nx, ny = zoo["x"], zoo["y"]
             break
     out = {"on": not caught, "x": round(nx / cw * 100, 4), "y": round(ny / ch * 100, 4),
-           "from": {"x": state["x"], "y": state["y"]}, **({"refused": "full"} if full else {})}
+           "from": {"x": state["x"], "y": state["y"]}}
     if caught:
-        rest = random.uniform(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
-                              max(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
-                                  float(_p(bot, gid, "dodoland_horse_rest_max_hours", 6))))
-        _save(bot, gid, {"on": False, "back_at": time.time() + rest * 3600, "zoo_rest": time.time() + rest * 3600})
+        # This horse is away for a while; the zoos take others meanwhile.
+        _save(bot, gid, {"on": False, "back_at": time.time() + _rest(bot, gid), "away": _away(state)})
         out["caught"] = {"zoo": caught["id"], "owner": caught["owner"]}
     else:
         _save(bot, gid, dict(state, on=True, x=out["x"], y=out["y"], back_at=0))
     return out
 
 
-def catch(bot, gid, zoo_id: str, start: dict, end: dict) -> dict:
-    """A town's horse run into a zoo by the page. Checked: the zoos are not
-    resting, the zoo is a placed zoo, the run is no longer than a bolt can be
-    and passes it. Blocking."""
+def catch(bot, gid, horse_id: str, zoo_id: str, start: dict, end: dict) -> dict:
+    """A town's horse (``<town>:<n>``) run into a zoo by the page. Checked:
+    that horse is not away, the zoo is a placed zoo, the run is no longer than
+    a bolt can be and passes it. The horse is then away for the rest hours.
+    Blocking."""
     state = _state(bot, gid)
-    if time.time() < float(state.get("zoo_rest") or 0):
-        return {"refused": "full", "back_in": int(float(state["zoo_rest"]) - time.time())}
+    horse_id = str(horse_id or "")[:64]
+    if not re.fullmatch(r"\d+:\d+", horse_id):
+        return {"refused": "unreadable"}
+    away = _away(state)
+    if horse_id in away:
+        return {"refused": "away"}
     zoo = next((z for z in _zoos(bot, gid) if z["id"] == str(zoo_id)), None)
     if zoo is None:
         return {"refused": "no zoo"}
@@ -196,10 +211,10 @@ def catch(bot, gid, zoo_id: str, start: dict, end: dict) -> dict:
     reach = float(_p(bot, gid, "dodoland_horse_catch", 2.0))
     if math.hypot(bx - ax, by - ay) > longest or _segment_gap(zoo["x"], zoo["y"], ax, ay, bx, by) > zoo["r"] + reach + 0.5:
         return {"refused": "missed"}
-    lo = float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3))
-    rest = random.uniform(lo, max(lo, float(_p(bot, gid, "dodoland_horse_rest_max_hours", 6))))
-    _save(bot, gid, dict(state, zoo_rest=time.time() + rest * 3600))
-    return {"caught": {"zoo": zoo["id"], "owner": zoo["owner"]}}
+    away[horse_id] = time.time() + _rest(bot, gid)
+    state = {k: v for k, v in state.items() if k != "zoo_rest"}
+    _save(bot, gid, dict(state, away=away))
+    return {"caught": {"zoo": zoo["id"], "owner": zoo["owner"]}, "away": horse_id}
 
 
 def _pay(owner: int, catcher: int, count: int) -> None:
@@ -231,8 +246,8 @@ async def api_horse(request: web.Request):
         body = await request.json()
         if body.get("catch"):
             c = body["catch"]
-            out = await loop.run_in_executor(None, catch, bot, guild.id, str(c.get("zoo") or ""),
-                                             c.get("from") or {}, c.get("to") or {})
+            out = await loop.run_in_executor(None, catch, bot, guild.id, str(c.get("horse") or ""),
+                                             str(c.get("zoo") or ""), c.get("from") or {}, c.get("to") or {})
         else:
             out = await loop.run_in_executor(None, kick, bot, guild.id, float(body.get("x")), float(body.get("y")))
     except (TypeError, ValueError, AttributeError):

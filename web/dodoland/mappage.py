@@ -78,7 +78,7 @@ def _grown(power: int, biggest: int) -> float:
 
 # The map's texts in the Strings menu (lang.py, DODOLAND_*), by their names
 # without the prefix; the page reads them as D.str.
-PAGE_STRINGS = ['HORSE_LINE', 'HORSE_BUSY', 'HORSE_PAID', 'HORSE_ZOO_FULL', 'HORSE_THE_ZOO', 'TRAVELLER_ON_ROAD', 'TRAVELLER_RESTING', 'TRAVELLER_NOTE', 'TRAVELLER_NEXT_TOWN', 'FIND_TRAVELLER', 'FIND_TRAVELLER_TIP', 'NO_TRAVELLER', 'LOOK_TITLE', 'LOOK_HEAD', 'LOOK_BODY', 'LOOK_HORSE', 'LOOK_PETS', 'LOOK_SEARCH', 'LOOK_NONE', 'LOOK_NOT_FOUND', 'PET_CAT', 'PET_DOG', 'PET_UNNAMED', 'PLACING', 'MOVING', 'TURN_TIP']
+PAGE_STRINGS = ['HORSE_LINE', 'HORSE_BUSY', 'HORSE_PAID', 'HORSE_IN_ZOO', 'HORSE_THE_ZOO', 'TRAVELLER_ON_ROAD', 'TRAVELLER_RESTING', 'TRAVELLER_NOTE', 'TRAVELLER_NEXT_TOWN', 'FIND_TRAVELLER', 'FIND_TRAVELLER_TIP', 'NO_TRAVELLER', 'LOOK_TITLE', 'LOOK_HEAD', 'LOOK_BODY', 'LOOK_HORSE', 'LOOK_PETS', 'LOOK_SEARCH', 'LOOK_NONE', 'LOOK_NOT_FOUND', 'PET_CAT', 'PET_DOG', 'PET_UNNAMED', 'PLACING', 'MOVING', 'TURN_TIP']
 
 
 def _page_strings(bot, guild) -> dict:
@@ -4057,7 +4057,7 @@ _SCRIPT = r"""
   // and the server says where it bolted to (away from the click, a little
   // randomly) and whether it ran into a zoo. Everybody sees the same horse:
   // it is asked for again every so often and gallops to where it is now.
-  var horse = {el: null, x: 0, y: 0, busy: false, line: ''};
+  var horse = {el: null, x: 0, y: 0, busy: false, line: ''}, HORSES_AWAY = {};
   function horseCells(st) {
     return {x: st.x / 100 * terr.world.cells_w, y: st.y / 100 * terr.world.cells_h};
   }
@@ -4112,12 +4112,14 @@ _SCRIPT = r"""
       .then(function (res) {
         if (!res.ok || !horse.el) return;
         horseRun(horseCells(res), function () {
-          if (res.refused === 'full') { horseSay(txt('HORSE_ZOO_FULL')); return; }
           if (!res.caught) return;
           var owner = byId[res.caught.owner];
-          horseSay(txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}), 3200);
+          horseSay(txt('HORSE_IN_ZOO'), 1700);
+          setTimeout(function () {
+            horseSay(txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}), 3200);
+          }, 1700);
           horse.el.classList.add('gone');
-          setTimeout(function () { horseDraw({on: false}); }, 3400);
+          setTimeout(function () { horseDraw({on: false}); }, 5000);
         });
       })
       .catch(function () {});
@@ -4126,6 +4128,13 @@ _SCRIPT = r"""
     if (!D.ep.horse || !terr.world || !nat.w) { setTimeout(horsePoll, 2000); return; }
     fetch(D.ep.horse).then(function (r) { return r.json(); }).then(function (res) {
       if (!res.ok) return;
+      // The towns' horses caught a while ago are away: not drawn till they are back.
+      HORSES_AWAY = {};
+      (res.away || []).forEach(function (id) { HORSES_AWAY[id] = 1; });
+      walkers = walkers.filter(function (w) {
+        if (w.hid && HORSES_AWAY[w.hid] && !w.gallop) { w.el.remove(); return false; }
+        return true;
+      });
       horseDraw(res);
       setTimeout(horsePoll, res.on ? 20000 : Math.min(600000, Math.max(20000, (res.back_in || 600) * 1000)));
     }).catch(function () { setTimeout(horsePoll, 60000); });
@@ -4352,18 +4361,20 @@ _SCRIPT = r"""
     w.gallop = w.gallop || w.speed; w.speed = 7;
     w.onArrive = !zoo ? null : function () {
       fetch(D.ep.horse, {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({catch: {zoo: zoo.id,
+        body: JSON.stringify({catch: {horse: w.hid || '', zoo: zoo.id,
           from: {x: from.x / terr.world.cells_w * 100, y: from.y / terr.world.cells_h * 100},
           to: {x: to.x / terr.world.cells_w * 100, y: to.y / terr.world.cells_h * 100}}})})
         .then(function (r) { return r.json(); })
         .then(function (res) {
           if (res.caught) {
             var owner = byId[res.caught.owner];
-            travellerSay(w, txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}));
+            if (res.away) HORSES_AWAY[res.away] = 1;
+            travellerSay(w, txt('HORSE_IN_ZOO'));
+            setTimeout(function () {
+              travellerSay(w, txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}));
+            }, 1700);
             w.gone = true; w.el.classList.add('gone');
-            setTimeout(function () { w.el.remove(); walkers = walkers.filter(function (o) { return o !== w; }); }, 3400);
-          } else if (res.refused === 'full') {
-            travellerSay(w, txt('HORSE_ZOO_FULL'));
+            setTimeout(function () { w.el.remove(); walkers = walkers.filter(function (o) { return o !== w; }); }, 5000);
           }
         }).catch(function () {});
     };
@@ -4550,8 +4561,12 @@ _SCRIPT = r"""
       for (var i = 0; i < crowd; i++) {
         var pool = pools[i % pools.length];
         var kind = pool[Math.floor(i / pools.length) % pool.length];
-        addWalker(kind, colours[i % colours.length], i % 3,
-                  {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
+        // A town's horse is that town's n-th: caught, it is away a while (horse_api).
+        var hid = kind === 'horse' ? p.id + ':' + i : '';
+        if (hid && HORSES_AWAY[hid]) continue;
+        var w = addWalker(kind, colours[i % colours.length], i % 3,
+                          {type: 'area', spots: spots}, spots[Math.floor(Math.random() * spots.length)]);
+        if (hid) w.hid = hid;
       }
 
       // The zoo: animals inside it, more for each tier it has reached.
