@@ -1417,3 +1417,10 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   pointerdown handlers kept the press. `figureAt` now runs in capture-phase
   listeners on the frame (pointerdown + click, stopPropagation), horse z 40000.
   Cards open centred above the figure (`cardOver`), below when no room.
+- Every horse (17 Oct): towns' walker horses (not zoo ones) are clickable via
+  `figureAt` -> `herd()`: shout, bolt away from the click client-side (round
+  water via `wetAt` on the baked cells, `D.sizes.horse` settings), become
+  free (zone 'free'); a run passing a placed zoo POSTs `{catch: {zoo, from,
+  to}}` -> `horse_api.catch` (zoo real, run <= 1.6x bolt_max, passes within
+  r + reach; refused while `zoo_rest`), paid and announced like the runaway.
+  Any catch sets `zoo_rest` (rest hours) for all horses.

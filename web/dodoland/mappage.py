@@ -595,6 +595,11 @@ async def map_page(request: web.Request):
         # traveller's horse says when somebody tries to herd it.
         "travellers": max(0, int(bot.dodoland_params.get(guild.id, "dodoland_travellers"))),
         "horse_busy": str(bot.dodoland_params.get(guild.id, "dodoland_horse_busy_line")),
+        # How a chased horse runs (the same settings the runaway's server uses).
+        "horse": {"min": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_min")),
+                  "max": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_max")),
+                  "spread": float(bot.dodoland_params.get(guild.id, "dodoland_horse_spread")),
+                  "reach": float(bot.dodoland_params.get(guild.id, "dodoland_horse_catch"))},
         "autotile_variation": max(0.0, min(1.0, float(bot.dodoland_params.get(guild.id, "dodoland_autotile_variation")))),
         # The walls choice on a town's card (dodoland_walls_option).
         "walls": bool(bot.dodoland_params.get(guild.id, "dodoland_walls_option")),
@@ -4257,6 +4262,12 @@ _SCRIPT = r"""
       return r.width > 0 && x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
     }
     if (horse.el && !horse.el.classList.contains('gone') && hit(horse.el, 6)) return {act: horseKick};
+    // The towns' own horses (not the ones already in a zoo).
+    for (var h = 0; h < walkers.length; h++) {
+      var wk = walkers[h];
+      if (wk.kind !== 'horse' || wk.zone.type === 'zoo' || wk.gone || world.classList.contains('lifefar')) continue;
+      if (hit(wk.el, 5)) return {act: (function (w) { return function (ev) { herd(w, ev); }; })(wk)};
+    }
     for (var i = 0; i < travellers.length; i++) {
       var t = travellers[i];
       if (getComputedStyle(t.el).display === 'none') continue;
@@ -4272,6 +4283,67 @@ _SCRIPT = r"""
       }
     }
     return null;
+  }
+  // A town's horse, clicked: it shouts, bolts away from the click (round
+  // water, inside the map) and, if its run passes a zoo, ends up in it - the
+  // server checks the run and pays the zoo's owner (horse_api.catch).
+  function wetAt(x, y) {
+    if (typeof bake === 'undefined' || !bake.kinds) return false;
+    var cx = Math.floor(x / 64), cy = Math.floor(y / 64), cells = bake.cells[cx + ',' + cy];
+    if (!cells) return false;
+    var v = cells[(Math.floor(y) - cy * 64) * 64 + (Math.floor(x) - cx * 64)], k = bake.kinds[v];
+    return !!(k && !k.land);
+  }
+  function zoosHere() {
+    return D.world.filter(function (q) {
+      var a = assetById(q.a);
+      return q.t && a && a.building === LIFE.zoo;
+    }).map(function (q) {
+      return {id: q.id, x: q.x / 100 * terr.world.cells_w, y: q.y / 100 * terr.world.cells_h, r: 5 * (q.s || 1)};
+    });
+  }
+  function herd(w, ev) {
+    var H = D.sizes.horse || {}, f = frame.getBoundingClientRect();
+    var px = (ev.clientX - f.left - view.x) / (nat.w * view.k) * terr.world.cells_w;
+    var py = (ev.clientY - f.top - view.y) / (nat.h * view.k) * terr.world.cells_h;
+    travellerSay(w, horse.line || 'NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!');
+    var spread = (H.spread == null ? 25 : H.spread) * Math.PI / 180, lo = H.min || 6, hi = Math.max(lo, H.max || 11);
+    var a = Math.atan2(w.y - py, w.x - px) + (Math.random() * 2 - 1) * spread, dist = lo + Math.random() * (hi - lo);
+    var nx = w.x, ny = w.y;
+    for (var s = 1; s <= dist; s++) {
+      var tx = w.x + Math.cos(a) * s, ty = w.y + Math.sin(a) * s;
+      if (tx < 1 || ty < 1 || tx > terr.world.cells_w - 1 || ty > terr.world.cells_h - 1 || wetAt(tx, ty)) break;
+      nx = tx; ny = ty;
+    }
+    var from = {x: w.x, y: w.y}, zoo = null, reach = H.reach == null ? 2 : H.reach;
+    zoosHere().some(function (z) {
+      var dx = nx - from.x, dy = ny - from.y, L = dx * dx + dy * dy || 1;
+      var t = Math.max(0, Math.min(1, ((z.x - from.x) * dx + (z.y - from.y) * dy) / L));
+      if (Math.hypot(from.x + dx * t - z.x, from.y + dy * t - z.y) <= z.r + reach) { zoo = z; return true; }
+      return false;
+    });
+    var to = zoo ? {x: zoo.x, y: zoo.y} : {x: nx, y: ny};
+    // Off at a gallop; free of its town from now on, grazing where it stops.
+    w.zone = {type: 'free', cx: to.x, cy: to.y, r: 1.5};
+    w.tx = to.x; w.ty = to.y; w.wait = 0;
+    w.gallop = w.gallop || w.speed; w.speed = 7;
+    w.onArrive = !zoo ? null : function () {
+      fetch(D.ep.horse, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({catch: {zoo: zoo.id,
+          from: {x: from.x / terr.world.cells_w * 100, y: from.y / terr.world.cells_h * 100},
+          to: {x: to.x / terr.world.cells_w * 100, y: to.y / terr.world.cells_h * 100}}})})
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.caught) {
+            var owner = byId[res.caught.owner];
+            travellerSay(w, '\ud83c\udf6c \u00d7 ' + (res.sweetrolls || 0) + ' for ' + (owner ? owner.name : 'the zoo') + '!');
+            w.gone = true; w.el.classList.add('gone');
+            setTimeout(function () { w.el.remove(); walkers = walkers.filter(function (o) { return o !== w; }); }, 3400);
+          } else if (res.refused === 'full') {
+            travellerSay(w, 'The zoo is full for now. Nay!');
+          }
+        }).catch(function () {});
+    };
   }
   // Asked in the capture phase, before anything under the pointer (a town, a
   // building - which keep their presses to themselves) sees the press.
@@ -4478,7 +4550,7 @@ _SCRIPT = r"""
     travellersReset();
   }
   function nextSpot(w) {
-    if (w.zone.type === 'zoo') {
+    if (w.zone.type === 'zoo' || w.zone.type === 'free') {
       var t = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * w.zone.r;
       return {x: w.zone.cx + Math.cos(t) * d, y: w.zone.cy + Math.sin(t) * d * 0.6};
     }
@@ -4505,6 +4577,8 @@ _SCRIPT = r"""
         else {
           var dx = w.tx - w.x, dy = w.ty - w.y, d = Math.sqrt(dx * dx + dy * dy);
           if (d < 0.05) {
+            // A chased horse at the end of its run: back to a trot.
+            if (w.gallop) { w.speed = w.gallop; w.gallop = 0; if (w.onArrive) { var arrive = w.onArrive; w.onArrive = null; arrive(); } }
             var s = nextSpot(w);
             if (s) { w.tx = s.x; w.ty = s.y; }
             w.wait = Math.random() < 0.5 ? Math.random() * 4 : 0;

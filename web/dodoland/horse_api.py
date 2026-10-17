@@ -15,6 +15,13 @@ horse never made. State lives on the server's DodoLand config row
 (``horse``: {x, y, on, back_at}); positions are map percentages like
 everything placed. Settings: ``dodoland_horse_*``.
 
+Every other horse on the map (the ones walking the towns) can be chased too:
+the page bolts it away from the click and, if its run passes a zoo, asks here
+(POST {catch: {zoo, from, to}}); the run is checked (the zoo is real, the run
+is no longer than a bolt and passes it) and paid like the runaway's. After any
+catch the zoos take no more horses for the rest hours (``zoo_rest``), so the
+towns' horses are not a farm either.
+
 Endpoints: GET/POST ``/api/guild/{gid}/dodoland/horse`` (the panel's map) and
 ``.../dodoland/me/horse`` (a member's map); POST {x, y} is a kick from there.
 """
@@ -147,7 +154,8 @@ def kick(bot, gid, fx: float, fy: float) -> dict:
     nx, ny = best
     reach = float(_p(bot, gid, "dodoland_horse_catch", 2.0))
     caught = None
-    for zoo in _zoos(bot, gid):
+    resting = time.time() < float(state.get("zoo_rest") or 0)
+    for zoo in ([] if resting else _zoos(bot, gid)):
         if _segment_gap(zoo["x"], zoo["y"], hx, hy, nx, ny) <= zoo["r"] + reach:
             caught = zoo
             nx, ny = zoo["x"], zoo["y"]
@@ -158,11 +166,37 @@ def kick(bot, gid, fx: float, fy: float) -> dict:
         rest = random.uniform(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
                               max(float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3)),
                                   float(_p(bot, gid, "dodoland_horse_rest_max_hours", 6))))
-        _save(bot, gid, {"on": False, "back_at": time.time() + rest * 3600})
+        _save(bot, gid, {"on": False, "back_at": time.time() + rest * 3600, "zoo_rest": time.time() + rest * 3600})
         out["caught"] = {"zoo": caught["id"], "owner": caught["owner"]}
     else:
-        _save(bot, gid, {"on": True, "x": out["x"], "y": out["y"], "back_at": 0})
+        _save(bot, gid, dict(state, on=True, x=out["x"], y=out["y"], back_at=0))
     return out
+
+
+def catch(bot, gid, zoo_id: str, start: dict, end: dict) -> dict:
+    """A town's horse run into a zoo by the page. Checked: the zoos are not
+    resting, the zoo is a placed zoo, the run is no longer than a bolt can be
+    and passes it. Blocking."""
+    state = _state(bot, gid)
+    if time.time() < float(state.get("zoo_rest") or 0):
+        return {"refused": "full", "back_in": int(float(state["zoo_rest"]) - time.time())}
+    zoo = next((z for z in _zoos(bot, gid) if z["id"] == str(zoo_id)), None)
+    if zoo is None:
+        return {"refused": "no zoo"}
+    cw, ch = _size(bot, gid)
+    try:
+        ax, ay = float(start["x"]) / 100 * cw, float(start["y"]) / 100 * ch
+        bx, by = float(end["x"]) / 100 * cw, float(end["y"]) / 100 * ch
+    except (KeyError, TypeError, ValueError):
+        return {"refused": "unreadable"}
+    longest = float(_p(bot, gid, "dodoland_horse_bolt_max", 11)) * 1.6
+    reach = float(_p(bot, gid, "dodoland_horse_catch", 2.0))
+    if math.hypot(bx - ax, by - ay) > longest or _segment_gap(zoo["x"], zoo["y"], ax, ay, bx, by) > zoo["r"] + reach + 0.5:
+        return {"refused": "missed"}
+    lo = float(_p(bot, gid, "dodoland_horse_rest_min_hours", 3))
+    rest = random.uniform(lo, max(lo, float(_p(bot, gid, "dodoland_horse_rest_max_hours", 6))))
+    _save(bot, gid, dict(state, zoo_rest=time.time() + rest * 3600))
+    return {"caught": {"zoo": zoo["id"], "owner": zoo["owner"]}}
 
 
 def _pay(owner: int, catcher: int, count: int) -> None:
@@ -204,10 +238,14 @@ async def api_horse(request: web.Request):
                                   **await loop.run_in_executor(None, current, bot, guild.id)})
     try:
         body = await request.json()
-        fx, fy = float(body.get("x")), float(body.get("y"))
-    except Exception:  # noqa: BLE001
+        if body.get("catch"):
+            c = body["catch"]
+            out = await loop.run_in_executor(None, catch, bot, guild.id, str(c.get("zoo") or ""),
+                                             c.get("from") or {}, c.get("to") or {})
+        else:
+            out = await loop.run_in_executor(None, kick, bot, guild.id, float(body.get("x")), float(body.get("y")))
+    except (TypeError, ValueError, AttributeError):
         return web.json_response({"ok": False, "error": "Where was it kicked from?"}, status=400)
-    out = await loop.run_in_executor(None, kick, bot, guild.id, fx, fy)
     caught = out.get("caught")
     if caught:
         catcher = int(request.get("uid") or 0)

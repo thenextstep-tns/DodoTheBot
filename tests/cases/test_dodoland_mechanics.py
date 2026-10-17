@@ -79,6 +79,16 @@ assert 3 * 3600 - 5 <= rest <= 6 * 3600, f"it comes back after {rest / 3600:.1f}
 assert not horse_api.current(bot, G)["on"] and horse_api.kick(bot, G, 0, 0) == {"on": False}
 print("horse           run past a zoo it ends up in it, then rests for hours (no farming)")
 
+# A town's horse, chased by the page into a zoo: checked, paid once, then the zoos rest.
+bot.dodoland_buildings.doc["horse"] = {"on": False, "back_at": time.time() + 3600}
+assert horse_api.catch(bot, G, "z1", {"x": 50, "y": 50}, {"x": 51, "y": 80}).get("refused") == "missed"
+assert horse_api.catch(bot, G, "z1", {"x": 10, "y": 50}, {"x": 52, "y": 50}).get("refused") == "missed",     "a run longer than any bolt was paid"
+assert horse_api.catch(bot, G, "nope", {"x": 50, "y": 50}, {"x": 52, "y": 50}).get("refused") == "no zoo"
+got = horse_api.catch(bot, G, "z1", {"x": 49, "y": 50}, {"x": 52, "y": 50})
+assert got.get("caught") == {"zoo": "z1", "owner": "1"}, got
+assert horse_api.catch(bot, G, "z1", {"x": 49, "y": 50}, {"x": 52, "y": 50}).get("refused") == "full",     "the zoos took a second horse straight away"
+print("herding         a town's horse run past a zoo is paid once; a run that misses or is too long is not")
+
 # Turning a piece.
 store = decor_rules.DecorStore(FakeCollection())
 piece = store.place(G, scope=decor_rules.SCOPE_WORLD, asset_id="a", x=10, y=10)
