@@ -76,6 +76,24 @@ def _grown(power: int, biggest: int) -> float:
     return min(1.0, (power / biggest) ** 0.5)
 
 
+# The map's texts in the Strings menu (lang.py, DODOLAND_*), by their names
+# without the prefix; the page reads them as D.str.
+PAGE_STRINGS = ['HORSE_LINE', 'HORSE_BUSY', 'HORSE_PAID', 'HORSE_ZOO_FULL', 'HORSE_THE_ZOO', 'TRAVELLER_ON_ROAD', 'TRAVELLER_RESTING', 'TRAVELLER_NOTE', 'TRAVELLER_NEXT_TOWN', 'FIND_TRAVELLER', 'FIND_TRAVELLER_TIP', 'NO_TRAVELLER', 'LOOK_TITLE', 'LOOK_HEAD', 'LOOK_BODY', 'LOOK_HORSE', 'LOOK_PETS', 'LOOK_SEARCH', 'LOOK_NONE', 'LOOK_NOT_FOUND', 'PET_CAT', 'PET_DOG', 'PET_UNNAMED', 'PLACING', 'MOVING', 'TURN_TIP']
+
+
+def _page_strings(bot, guild) -> dict:
+    """This server's wording of the map's texts (the Strings menu)."""
+    import lang as lang_module
+
+    out = {}
+    for key in PAGE_STRINGS:
+        try:
+            out[key] = str(bot.lang.get("DODOLAND_" + key, guild=guild))
+        except Exception:  # noqa: BLE001 - no lang manager (a test): the default
+            out[key] = str(getattr(lang_module, "DODOLAND_" + key, ""))
+    return out
+
+
 def _avatar_of(guild, user_id) -> str:
     """A member's own picture (Discord's, small), or ""."""
     member = guild.get_member(int(user_id)) if str(user_id).isdigit() else None
@@ -594,7 +612,6 @@ async def map_page(request: web.Request):
         # Real members travelling the busiest roads (0: none), and what a
         # traveller's horse says when somebody tries to herd it.
         "travellers": max(0, int(bot.dodoland_params.get(guild.id, "dodoland_travellers"))),
-        "horse_busy": str(bot.dodoland_params.get(guild.id, "dodoland_horse_busy_line")),
         # How a chased horse runs (the same settings the runaway's server uses).
         "horse": {"min": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_min")),
                   "max": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_max")),
@@ -648,7 +665,7 @@ async def map_page(request: web.Request):
     <button type="button" id="dlout" title="Zoom out">&minus;</button>
     <button type="button" id="dlfit" title="Fit the whole map">&#9634;</button>
     <button type="button" id="dlnames" title="Show every name">A</button>
-    <button type="button" id="dlfindme" title="Find your traveller on the roads">&#128014;</button>
+    <button type="button" id="dlfindme" title="{_e(_page_strings(bot, guild)['FIND_TRAVELLER_TIP'])}">&#128014;</button>
     <span class="dlzsep"></span>
     <button type="button" data-tool="pointer" title="Select (V): click a piece, shift-click to add, drag a box"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3l14 8-6 1.5L10 19z" fill="currentColor"/></svg></button>
     <button type="button" data-tool="hand" title="Hand (H): drag to move around; drag a selected piece to move it"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 11V5.5a1.5 1.5 0 013 0V10m0-5.5a1.5 1.5 0 013 0V10m0-4a1.5 1.5 0 013 0v7c0 4-2.5 7-6.5 7S5 17 4 14l-1.5-3.5a1.4 1.4 0 012.4-1.4L8 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -725,7 +742,7 @@ async def map_page(request: web.Request):
 <aside class="dlcard" id="dlcard" hidden></aside>
 
 <script>window.DL = {json.dumps({"people": data["people"], "sizes": sizes,
-                                 "gid": str(guild.id), "me": viewer,
+                                 "gid": str(guild.id), "me": viewer, "str": _page_strings(bot, guild),
                                  "world": data["world"],
                                  "assets": data["assets"],
                                  "cells_w": data["cells_w"],
@@ -1461,7 +1478,7 @@ _SCRIPT = r"""
   // Your own traveller: the view goes to them and their ring flashes.
   function findTraveller() {
     var t = (typeof travellers !== 'undefined' ? travellers : []).filter(function (q) { return String(q.who.id) === String(D.me); })[0];
-    if (!t || t.x == null) { hint.textContent = 'Your traveller is not on the roads (settle a town and talk to people).'; return; }
+    if (!t || t.x == null) { hint.textContent = txt('NO_TRAVELLER'); return; }
     view.k = Math.max(view.k, Math.min(kMax(), 10 / WS));
     view.x = frame.clientWidth / 2 - t.x / terr.world.cells_w * nat.w * view.k;
     view.y = frame.clientHeight / 2 - t.y / terr.world.cells_h * nat.h * view.k;
@@ -1470,6 +1487,12 @@ _SCRIPT = r"""
     setTimeout(function () { t.el.classList.remove('found'); }, 3000);
   }
   document.getElementById('dlfindme').onclick = findTraveller;
+  // A text from the Strings menu (D.str), its {markers} filled in.
+  function txt(key, fill) {
+    return String((D.str || {})[key] || '').replace(/\{(\w+)\}/g, function (m, n) {
+      return fill && fill[n] != null ? fill[n] : m;
+    });
+  }
   var namesBtn = document.getElementById('dlnames');
   namesBtn.onclick = function () {
     var on = world.classList.toggle('named');
@@ -1714,7 +1737,7 @@ _SCRIPT = r"""
       '<div class="acts">' +
         (D.ep.player ? (mine ? '<button data-act="edit" class="own">Customise your town</button>' : '') +
           (mine && D.ep.settle ? '<button data-act="move">Move my town</button>' : '') : (mine
-          ? '<button data-act="edit" class="own">Customise your town</button><button data-act="findme">Find my traveller</button>'
+          ? '<button data-act="edit" class="own">Customise your town</button><button data-act="findme">' + escapeHtml(txt('FIND_TRAVELLER')) + '</button>'
           : '<button data-act="edit">Admin edit</button>') +
         '<button data-act="move">Move</button>' +
         '<button data-act="remove">Remove Town</button>') +
@@ -1726,13 +1749,13 @@ _SCRIPT = r"""
         '<textarea id="tblurb" maxlength="600">' + escapeHtml(p.blurb) + '</textarea>' +
         '<label>Picture or GIF</label>' +
         '<input id="tpic" type="file" accept="image/png,image/jpeg,image/gif,image/webp">' +
-        '<label style="margin-top:12px"><b>Your traveller on the roads</b></label>' +
-        '<div class="dllook"><label>Head <input type="color" id="lhead" value="' + escapeHtml((p.look || {}).head || '#f2c9a0') + '"></label>' +
-        '<label>Body <input type="color" id="lbody" value="' + escapeHtml((p.look || {}).body || '#ff3b3b') + '"></label>' +
-        '<label>Horse <input type="color" id="lhorse" value="' + escapeHtml((p.look || {}).horse || '#7a4e2c') + '"></label></div>' +
-        '<label>Pets following you (up to 3 cats and 3 dogs)</label>' +
+        '<label style="margin-top:12px"><b>' + escapeHtml(txt('LOOK_TITLE')) + '</b></label>' +
+        '<div class="dllook"><label>' + escapeHtml(txt('LOOK_HEAD')) + ' <input type="color" id="lhead" value="' + escapeHtml((p.look || {}).head || '#f2c9a0') + '"></label>' +
+        '<label>' + escapeHtml(txt('LOOK_BODY')) + ' <input type="color" id="lbody" value="' + escapeHtml((p.look || {}).body || '#ff3b3b') + '"></label>' +
+        '<label>' + escapeHtml(txt('LOOK_HORSE')) + ' <input type="color" id="lhorse" value="' + escapeHtml((p.look || {}).horse || '#7a4e2c') + '"></label></div>' +
+        '<label>' + escapeHtml(txt('LOOK_PETS', {most: 3})) + '</label>' +
         '<div id="lpets" class="dlpets"></div>' +
-        '<input id="lpetq" placeholder="Search your cats and dogs by name\u2026">' +
+        '<input id="lpetq" placeholder="' + escapeHtml(txt('LOOK_SEARCH')) + '">' +
         '<div id="lpetfound" class="dlpets found"></div>' +
         (nameFields ? '<label style="margin-top:12px"><b>Building names</b></label>' +
           nameFields : '') +
@@ -1827,7 +1850,7 @@ _SCRIPT = r"""
       box.innerHTML = chosen.map(function (c, i) {
         return '<button type="button" data-i="' + i + '">' + (c.k === 'dog' ? '\ud83d\udc36 ' : '\ud83d\udc31 ') +
           escapeHtml(c.n) + ' \u00d7</button>';
-      }).join('') || '<small>None yet.</small>';
+      }).join('') || '<small>' + escapeHtml(txt('LOOK_NONE')) + '</small>';
       box.querySelectorAll('button').forEach(function (b) {
         b.onclick = function () { chosen.splice(+b.dataset.i, 1); draw(); };
       });
@@ -1840,7 +1863,7 @@ _SCRIPT = r"""
           found.innerHTML = (res.pets || []).map(function (pet, i) {
             return '<button type="button" data-i="' + i + '">' + (pet.k === 'dog' ? '\ud83d\udc36 ' : '\ud83d\udc31 ') +
               escapeHtml(pet.n) + (pet.t ? ' <small>' + escapeHtml(pet.t) + '</small>' : '') + '</button>';
-          }).join('') || '<small>No cats or dogs by that name.</small>';
+          }).join('') || '<small>' + escapeHtml(txt('LOOK_NOT_FOUND')) + '</small>';
           found.querySelectorAll('button').forEach(function (b) {
             b.onclick = function () {
               var pet = res.pets[+b.dataset.i];
@@ -3049,7 +3072,7 @@ _SCRIPT = r"""
   // turn is round the piece's foot, as the angle from the foot to the pointer.
   var turn = document.createElement('div');
   turn.className = 'dlturn'; turn.textContent = '\u21bb';
-  turn.title = 'Drag round to turn (Shift: 15\u00b0 steps). Double-click: straight.';
+  turn.title = txt('TURN_TIP');
   frame.appendChild(turn);
   function turnFoot(el) {
     var r = el.getBoundingClientRect(), f = frame.getBoundingClientRect();
@@ -3257,7 +3280,7 @@ _SCRIPT = r"""
     var avg = 700;
     try { avg = +localStorage.getItem('dlbusy-' + kind) || avg; } catch (e) {}
     busy.n++;
-    busy.el.querySelector('span').textContent = kind === 'move' ? 'Moving…' : 'Placing…';
+    busy.el.querySelector('span').textContent = txt(kind === 'move' ? 'MOVING' : 'PLACING');
     var bar = busy.el.querySelector('b');
     bar.style.transition = 'none'; bar.style.width = '0';
     busy.el.classList.add('on'); frame.classList.add('busy');
@@ -4082,7 +4105,7 @@ _SCRIPT = r"""
     var f = frame.getBoundingClientRect();
     var fx = (ev.clientX - f.left - view.x) / (nat.w * view.k) * 100;
     var fy = (ev.clientY - f.top - view.y) / (nat.h * view.k) * 100;
-    horseSay(horse.line || 'NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!');
+    horseSay(txt('HORSE_LINE'));
     fetch(D.ep.horse, {method: 'POST', headers: {'Content-Type': 'application/json'},
                        body: JSON.stringify({x: fx, y: fy})})
       .then(function (r) { return r.json(); })
@@ -4091,7 +4114,7 @@ _SCRIPT = r"""
         horseRun(horseCells(res), function () {
           if (!res.caught) return;
           var owner = byId[res.caught.owner];
-          horseSay('🍬 × ' + (res.sweetrolls || 0) + ' for ' + (owner ? owner.name : 'the zoo') + '!', 3200);
+          horseSay(txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}), 3200);
           horse.el.classList.add('gone');
           setTimeout(function () { horseDraw({on: false}); }, 3400);
         });
@@ -4102,7 +4125,6 @@ _SCRIPT = r"""
     if (!D.ep.horse || !terr.world || !nat.w) { setTimeout(horsePoll, 2000); return; }
     fetch(D.ep.horse).then(function (r) { return r.json(); }).then(function (res) {
       if (!res.ok) return;
-      horse.line = res.line || horse.line;
       horseDraw(res);
       setTimeout(horsePoll, res.on ? 20000 : Math.min(600000, Math.max(20000, (res.back_in || 600) * 1000)));
     }).catch(function () { setTimeout(horsePoll, 60000); });
@@ -4243,11 +4265,11 @@ _SCRIPT = r"""
   travelCard.className = 'dltcard';
   frame.appendChild(travelCard);
   function travellerCard(t, ev) {
-    var f = frame.getBoundingClientRect(), going = byId[t.legs[t.leg].to] || {name: 'the next town'};
+    var f = frame.getBoundingClientRect(), going = byId[t.legs[t.leg].to] || {name: txt('TRAVELLER_NEXT_TOWN')};
     travelCard.innerHTML = (t.who.av ? '<img alt="" src="' + t.who.av.replace(/size=\d+/, 'size=256') + '">' : '') +
       '<b>' + escapeHtml(t.who.owner || t.who.name) + '</b>' +
-      '<span>' + (t.rest > 0 ? 'resting before ' : 'on the road to ') + escapeHtml(going.name) + '</span>' +
-      '<small>visiting the towns of the people they talk to most</small>';
+      '<span>' + escapeHtml(txt(t.rest > 0 ? 'TRAVELLER_RESTING' : 'TRAVELLER_ON_ROAD', {town: going.name})) + '</span>' +
+      '<small>' + escapeHtml(txt('TRAVELLER_NOTE')) + '</small>';
     cardOver(t.el);
   }
   frame.addEventListener('pointerdown', function () { travelCard.classList.remove('on'); });
@@ -4272,7 +4294,7 @@ _SCRIPT = r"""
       var t = travellers[i];
       if (getComputedStyle(t.el).display === 'none') continue;
       if (hit(t.el, 4)) return {act: function (ev) {
-        if (t.riding) travellerSay(t, D.sizes.horse_busy || "Nay, I'm on a business trip right now");
+        if (t.riding) travellerSay(t, txt('HORSE_BUSY'));
         travellerCard(t, ev);
       }};
       for (var j = 0; j < (t.pets || []).length; j++) {
@@ -4306,7 +4328,7 @@ _SCRIPT = r"""
     var H = D.sizes.horse || {}, f = frame.getBoundingClientRect();
     var px = (ev.clientX - f.left - view.x) / (nat.w * view.k) * terr.world.cells_w;
     var py = (ev.clientY - f.top - view.y) / (nat.h * view.k) * terr.world.cells_h;
-    travellerSay(w, horse.line || 'NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!');
+    travellerSay(w, txt('HORSE_LINE'));
     var spread = (H.spread == null ? 25 : H.spread) * Math.PI / 180, lo = H.min || 6, hi = Math.max(lo, H.max || 11);
     var a = Math.atan2(w.y - py, w.x - px) + (Math.random() * 2 - 1) * spread, dist = lo + Math.random() * (hi - lo);
     var nx = w.x, ny = w.y;
@@ -4336,11 +4358,11 @@ _SCRIPT = r"""
         .then(function (res) {
           if (res.caught) {
             var owner = byId[res.caught.owner];
-            travellerSay(w, '\ud83c\udf6c \u00d7 ' + (res.sweetrolls || 0) + ' for ' + (owner ? owner.name : 'the zoo') + '!');
+            travellerSay(w, txt('HORSE_PAID', {count: res.sweetrolls || 0, owner: owner ? owner.name : txt('HORSE_THE_ZOO')}));
             w.gone = true; w.el.classList.add('gone');
             setTimeout(function () { w.el.remove(); walkers = walkers.filter(function (o) { return o !== w; }); }, 3400);
           } else if (res.refused === 'full') {
-            travellerSay(w, 'The zoo is full for now. Nay!');
+            travellerSay(w, txt('HORSE_ZOO_FULL'));
           }
         }).catch(function () {});
     };
@@ -4377,7 +4399,7 @@ _SCRIPT = r"""
     var f = frame.getBoundingClientRect(), pet = w.pet;
     travelCard.innerHTML = (pet.u ? '<img class="pet" alt="" src="' + escapeHtml(pet.u) + '">' : '') +
       '<b>' + escapeHtml(pet.n || 'A pet') + '</b><span>' + escapeHtml(pet.t || '') + '</span>' +
-      '<small>' + escapeHtml(w.owner.owner || w.owner.name) + '\'s ' + (pet.k === 'dog' ? 'dog' : 'cat') + '</small>';
+      '<small>' + escapeHtml(txt(pet.k === 'dog' ? 'PET_DOG' : 'PET_CAT', {owner: w.owner.owner || w.owner.name})) + '</small>';
     cardOver(w.el);
   }
   // A town's ordinary houses: scattered through its area, thickest around the

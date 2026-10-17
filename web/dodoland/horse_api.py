@@ -2,7 +2,7 @@
 The runaway horse.
 
 One horse per server, loose somewhere near the towns. Click it and it bolts
-("NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!") away from where you
+(lang.py DODOLAND_HORSE_LINE, in the Strings menu) away from where you
 clicked - click its left side and it runs off to the right - in a slightly
 random direction. Run it into a zoo (a placed zoo building,
 ``dodoland_zoo_building``) and it turns into sweetrolls for that zoo's owner,
@@ -221,8 +221,8 @@ async def _announce(bot, guild, catcher: int, owner: int, count: int) -> None:
         if getattr(bot, "logger", None):
             bot.logger.warning("DodoLand horse: no bot channel set (server settings, Bot channel) to announce in.")
         return
-    line = str(_p(bot, guild.id, "dodoland_horse_message",
-                  "{catcher} just turned a horse into {count} sweetrolls for {owner}!"))
+    # The Strings menu's wording (lang.py DODOLAND_HORSE_CAUGHT), this server's.
+    line = str(bot.lang.get("DODOLAND_HORSE_CAUGHT", guild=guild))
     text = line.format(catcher=f"<@{int(catcher)}>", owner=f"<@{int(owner)}>", count=count)
     try:
         # Named, not pinged.
@@ -237,8 +237,7 @@ async def api_horse(request: web.Request):
     bot, guild = request.app["bot"], request["guild"]
     loop = asyncio.get_running_loop()
     if request.method == "GET":
-        return web.json_response({"ok": True, "line": str(_p(bot, guild.id, "dodoland_horse_line", "")),
-                                  **await loop.run_in_executor(None, current, bot, guild.id)})
+        return web.json_response({"ok": True, **await loop.run_in_executor(None, current, bot, guild.id)})
     try:
         body = await request.json()
         if body.get("catch"):

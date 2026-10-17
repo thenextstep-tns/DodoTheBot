@@ -1077,3 +1077,37 @@ TRIAL_NO_LADDER_POINTS = "from the clears you hold"
 
 TRIAL_ERROR_UNAVAILABLE = "Ranking is not available right now, try again in a minute."
 TRIAL_ERROR_GUILD_ONLY = "This only works inside the server."
+
+
+# --------------------------------------------------------------------------- #
+#  DodoLand map: the horses, the travellers, the map's own little texts
+#  (web/dodoland/mappage.py hands these to the page as D.str; {markers} are
+#  filled in there).
+# --------------------------------------------------------------------------- #
+DODOLAND_HORSE_LINE = "NO!! I am not coming back to the zoo!!! Nay-nay-nay!!!"
+DODOLAND_HORSE_BUSY = "Nay, I'm on a business trip right now"
+DODOLAND_HORSE_PAID = "\U0001F36C \u00d7 {count} for {owner}!"
+DODOLAND_HORSE_ZOO_FULL = "The zoo is full for now. Nay!"
+DODOLAND_HORSE_THE_ZOO = "the zoo"
+DODOLAND_HORSE_CAUGHT = "{catcher} just turned a horse into {count} sweetrolls for {owner}!"
+DODOLAND_TRAVELLER_ON_ROAD = "on the road to {town}"
+DODOLAND_TRAVELLER_RESTING = "resting before {town}"
+DODOLAND_TRAVELLER_NOTE = "visiting the towns of the people they talk to most"
+DODOLAND_TRAVELLER_NEXT_TOWN = "the next town"
+DODOLAND_FIND_TRAVELLER = "Find my traveller"
+DODOLAND_FIND_TRAVELLER_TIP = "Find your traveller on the roads"
+DODOLAND_NO_TRAVELLER = "Your traveller is not on the roads (settle a town and talk to people)."
+DODOLAND_LOOK_TITLE = "Your traveller on the roads"
+DODOLAND_LOOK_HEAD = "Head"
+DODOLAND_LOOK_BODY = "Body"
+DODOLAND_LOOK_HORSE = "Horse"
+DODOLAND_LOOK_PETS = "Pets following you (up to {most} cats and {most} dogs)"
+DODOLAND_LOOK_SEARCH = "Search your cats and dogs by name\u2026"
+DODOLAND_LOOK_NONE = "None yet."
+DODOLAND_LOOK_NOT_FOUND = "No cats or dogs by that name."
+DODOLAND_PET_CAT = "{owner}'s cat"
+DODOLAND_PET_DOG = "{owner}'s dog"
+DODOLAND_PET_UNNAMED = "A pet"
+DODOLAND_PLACING = "Placing\u2026"
+DODOLAND_MOVING = "Moving\u2026"
+DODOLAND_TURN_TIP = "Drag round to turn (Shift: 15\u00b0 steps). Double-click: straight."

@@ -1424,3 +1424,9 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   to}}` -> `horse_api.catch` (zoo real, run <= 1.6x bolt_max, passes within
   r + reach; refused while `zoo_rest`), paid and announced like the runaway.
   Any catch sets `zoo_rest` (rest hours) for all horses.
+- Strings (17 Oct): every text the horses, travellers, traveller editor, Placing
+  bar and turn handle say is a `DODOLAND_*` constant in lang.py (the Strings
+  menu, per server via `bot.lang.get`). The page gets them as `D.str`
+  (`mappage.PAGE_STRINGS`, `_page_strings`) and says them with `txt(key, fill)`;
+  the announcement uses `DODOLAND_HORSE_CAUGHT` and goes to the server's Bot
+  channel (guild config `DODO_CHANNEL`). The horse's text settings are gone.
