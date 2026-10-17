@@ -577,11 +577,16 @@ async def api_my_town(request: web.Request):
             return _bad(error)
         return web.json_response({"ok": True})
     try:
+        look = body.get("look")
+        if isinstance(look, dict):
+            # Only the owner's own cats and dogs follow them.
+            from helpers.dodoland import pets as pet_rules
+            look = dict(look, pets=pet_rules.owned(uid, look.get("pets") or []))
         bot.dodoland_towns.save(
             guild.id, uid,
             name=body.get("name"), blurb=body.get("blurb"),
             building_names=body.get("building_names"),
-            walls=body.get("walls"),
+            walls=body.get("walls"), look=look,
         )
         if body.get("clear_image"):
             bot.dodoland_towns.save_image(guild.id, uid, None)

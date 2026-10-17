@@ -1126,6 +1126,9 @@ SCRIPT = r"""
         var g = document.getElementById('dltroads');
         if (!g) return;
         var w = res.width || 2.4, out = [];
+        // Kept for the travellers who walk them (mappage.py, travellersReset).
+        terr.roads = res.roads || [];
+        if (typeof travellersReset === 'function') setTimeout(travellersReset, 0);
         (res.roads || []).forEach(function (road) {
           out.push('<path class="dlroad" d="' + road.d + '" stroke="#6b5136" stroke-width="' + (w + 0.9) + '"/>');
         });

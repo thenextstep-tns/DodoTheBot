@@ -62,6 +62,8 @@ def dodoland_routes() -> list:
     from web.dodoland import player_map
     from web.dodoland.mappage import map_page
     from web.dodoland.lights_ui import api_tile_lights
+    from web.dodoland.horse_api import api_horse
+    from web.dodoland.look_api import api_my_pets, api_town_pets
     from web.dodoland.tiles_ui import (
         api_guild_tiles, api_tiles, guild_tile_art, tile_art, tiles_page,
     )
@@ -134,6 +136,14 @@ def dodoland_routes() -> list:
         # town and only their own — the handler never reads a user id from the
         # request, and the tier locks are enforced there rather than in the UI.
         web.post("/api/guild/{gid}/dodoland/decor", full(api_world_decor)),
+        # The runaway horse: everybody's map sees and chases the same one.
+        web.get("/api/guild/{gid}/dodoland/horse", full(api_horse)),
+        web.post("/api/guild/{gid}/dodoland/horse", full(api_horse)),
+        web.get("/api/guild/{gid}/dodoland/me/horse", player.require_town(world=True)(api_horse)),
+        # A town owner's cats and dogs, to choose the ones following them.
+        web.get("/api/guild/{gid}/dodoland/pets", full(api_town_pets)),
+        web.get("/api/guild/{gid}/dodoland/me/pets", player.require_town(api_my_pets)),
+        web.post("/api/guild/{gid}/dodoland/me/horse", player.require_town(world=True)(api_horse)),
         web.get("/api/guild/{gid}/dodoland/me/toolkit",
                 player.require_town(api_town_toolkit)),
         web.post("/api/guild/{gid}/dodoland/me/decor",

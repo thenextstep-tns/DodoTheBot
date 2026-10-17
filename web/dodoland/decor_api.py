@@ -156,7 +156,7 @@ async def api_world_decor(request: web.Request):
             for item in moves:
                 moved += bool(bot.dodoland_decor.move(
                     guild.id, (item or {}).get("piece_id"), x=item.get("x"), y=item.get("y"),
-                    scale=item.get("scale"), flip=item.get("flip"),
+                    scale=item.get("scale"), flip=item.get("flip"), rot=item.get("rot"),
                     scale_range=_piece_range(bot, guild, item.get("piece_id"))))
             return web.json_response({"ok": True, "changed": moved})
 
@@ -173,7 +173,7 @@ async def api_world_decor(request: web.Request):
                 return _bad(refused)
             changed = bot.dodoland_decor.move(
                 guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
-                scale=body.get("scale"), flip=body.get("flip"),
+                scale=body.get("scale"), flip=body.get("flip"), rot=body.get("rot"),
                 scale_range=_piece_range(bot, guild, body.get("piece_id")))
             return web.json_response({"ok": True, "changed": bool(changed)})
 
@@ -328,7 +328,7 @@ async def api_town_decor(request: web.Request):
         if action == "move":
             changed = bot.dodoland_decor.move(
                 guild.id, body.get("piece_id"), x=body.get("x"), y=body.get("y"),
-                scale=body.get("scale"), flip=body.get("flip"), owner_id=uid,
+                scale=body.get("scale"), flip=body.get("flip"), rot=body.get("rot"), owner_id=uid,
                 scale_range=_piece_range(bot, guild, body.get("piece_id")))
             return web.json_response({"ok": True, "changed": bool(changed)})
 

@@ -188,6 +188,13 @@ def _person(c="#5b4630", hat: int = 0):
     return out
 
 
+def member_figure(head: str, body: str) -> str:
+    """A real member on the roads: :func:`_person`'s shape, head and coat in
+    their own two colours."""
+    return (f'<circle cx="0" cy="-2.6" r="1.5" fill="{head}"/>'
+            f'<path d="M-1.8,2.6 Q-1.8,-1.2 0,-1.2 Q1.8,-1.2 1.8,2.6 Z" fill="{body}"/>')
+
+
 def _child(c="#5b4630"):
     """Smaller, rounder. Scale alone is what says child at four units."""
     return (f'<circle cx="0" cy="-1.6" r="1.1" fill="{c}"/>'

@@ -74,6 +74,28 @@ WALLS = ("", "palisade", "stone")
 MAX_GATES = 12
 
 
+def clean_look(value) -> dict:
+    """How the owner's traveller looks on the roads: ``{head, body, horse}``
+    colours (#rrggbb, or absent for the default) and ``pets``, ``[{k, n}]``
+    (cat or dog, by name; that they are the owner's is checked by the caller,
+    helpers/dodoland/pets.py)."""
+    if not isinstance(value, dict):
+        raise TownError("A look is a mapping.")
+    out: dict = {}
+    for key in ("head", "body", "horse"):
+        text = str(value.get(key) or "").strip().lower()
+        if text:
+            if not _HEX.match(text):
+                raise TownError(f"{text!r} is not a colour. Use #rrggbb.")
+            out[key] = text
+    pets = []
+    for pet in list(value.get("pets") or [])[:6]:
+        if isinstance(pet, dict) and pet.get("k") in ("cat", "dog") and str(pet.get("n") or "").strip():
+            pets.append({"k": pet["k"], "n": str(pet["n"]).strip()[:80]})
+    out["pets"] = pets
+    return out
+
+
 class TownStore:
     """Per-person town details. ``bot.dodoland_towns``."""
 
@@ -114,7 +136,7 @@ class TownStore:
              blurb: Optional[str] = None,
              building_names: Optional[dict] = None,
              building_colours: Optional[dict] = None,
-             walls: Optional[str] = None) -> dict:
+             walls: Optional[str] = None, look: Optional[dict] = None) -> dict:
         """Set any of the authored fields. Absent ones are left alone.
 
         ``walls`` is how the town is walled — one of :data:`WALLS`, ``""`` for
@@ -123,6 +145,8 @@ class TownStore:
         """
         self._ensure_indexes()
         changes: dict = {}
+        if look is not None:
+            changes["look"] = clean_look(look)
         if walls is not None:
             if str(walls) not in WALLS:
                 raise TownError(f"Walls are one of: none, {', '.join(w for w in WALLS if w)}.")

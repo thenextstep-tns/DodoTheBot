@@ -285,7 +285,7 @@ class DecorStore:
         return int(getattr(result, "modified_count", 0))
 
     def move(self, guild_id: int, piece_id: str, *, x: Any = None, y: Any = None,
-             scale: Any = None, flip: Any = None,
+             scale: Any = None, flip: Any = None, rot: Any = None,
              owner_id: Optional[int] = None,
              scale_range: tuple = (MIN_SCALE, MAX_SCALE)) -> bool:
         """Move, resize or mirror one piece.
@@ -307,6 +307,11 @@ class DecorStore:
                 raise DecorError("That size is not a number.") from None
         if flip is not None:
             changes["flip"] = bool(flip)
+        if rot is not None:
+            try:
+                changes["rot"] = round(float(rot) % 360.0, 1)
+            except (TypeError, ValueError):
+                raise DecorError("That turn is not a number.") from None
         if not changes:
             return False
         query = {"guild_id": int(guild_id), "piece_id": str(piece_id)}

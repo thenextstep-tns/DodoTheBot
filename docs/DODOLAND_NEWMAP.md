@@ -1341,3 +1341,37 @@ guild, want)` is the one way to pick a tile's picture. Routes read off the loop:
 `_off_loop` (tile library art). `first_art` removed. Test:
 test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
 2.9 s cold to build (DB round trips in _collect), and terrain/world 0.3-2.4 s.
+
+### Life on the map: horse, travellers, pets, honours, turning, Placing bar (17 Oct 2026)
+- **Placing bar** (mappage `busyStart/busyEnd` in `decorPost`): place/move
+  requests show "Placing…/Moving…" with a bar filled over this browser's
+  running average (localStorage `dlbusy-*`).
+- **Turning**: decor rows carry `rot` (degrees; `DecorStore.move(rot=)`,
+  move/move_many in both endpoints); payload `r`; `.dlpiece` rotates round its
+  foot (`--rot`, origin 50% 85%). A handle (`.dlturn`) over a lone selected
+  piece; Shift = 15° steps; double-click = straight.
+- **Runaway horse** (`web/dodoland/horse_api.py`, server-authoritative; state
+  on the guild config row `horse`): GET/POST `/api/guild/{gid}/dodoland/horse`
+  and `/me/horse`. A kick bolts it away from the click (± `dodoland_horse_spread`,
+  `bolt_min/max` cells, stops at water/edge); running past a placed zoo
+  (`dodoland_zoo_building` pieces) catches it: `dodoland_horse_sweetrolls`
+  rows in `sweetrolls` (gifted_to zoo owner, gifter = catcher, source
+  dodoland_horse), announced in `dodoland_horse_channel` (named, not pinged),
+  rest `rest_min/max_hours`. Line: `dodoland_horse_line`.
+- **Travellers**: on the `dodoland_travellers` busiest roads (roads_api roads,
+  kept as `terr.roads`), one of the two owners walks to the other's town and
+  back; normal NPC size, bright colours, gold ring, avatar over head (`av`,
+  Discord display_avatar), torch (night light); on horseback outside every
+  town area (`inTown` via #dltinfl fills); their horse says
+  `dodoland_horse_busy_line`. Click: card with avatar.
+- **Look** (town card editor "Your traveller"): head/body/horse colours and up
+  to 3 cats + 3 dogs following (`towns.clean_look`, `helpers/dodoland/pets.py`
+  owned/search/details; pet owners are numbers or text in the pet cog — match
+  both). Search: `/pets?user_id=` (panel) and `/me/pets` (member, own only).
+- **Pets in towns**: `dodoland_pets_per_town` of each settled owner's cats and
+  dogs walk their town (`_pets_of`, $firstN, cached 30 min); click shows photo.
+- **Trophies & banners**: `_honours_of` - vet/hm clear roles held
+  (config vet_clears/hm_clears) and best parse (`parses`); banner = trial rank
+  in its colour (`rank_colour`); drawn over each town (`.dlhonours`) and on
+  its card (`honoursCard`).
+- Kept figures (`.dlkeep`) survive `buildLife`'s clear-out.
