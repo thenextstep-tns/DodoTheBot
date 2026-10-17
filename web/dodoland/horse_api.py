@@ -6,7 +6,7 @@ One horse per server, loose somewhere near the towns. Click it and it bolts
 clicked - click its left side and it runs off to the right - in a slightly
 random direction. Run it into a zoo (a placed zoo building,
 ``dodoland_zoo_building``) and it turns into sweetrolls for that zoo's owner,
-announced in a channel; then it is gone for a few hours, so it is a chase and
+announced in the server's bot channel (its settings' Bot channel); then it is gone for a few hours, so it is a chase and
 not a farm.
 
 The server owns the horse: where it is, every bolt and every catch are worked
@@ -209,28 +209,17 @@ def _pay(owner: int, catcher: int, count: int) -> None:
                                            "source": "dodoland_horse"} for _ in range(count)])
 
 
-def _channel_named(guild, want: str):
-    """A text channel by name, forgivingly: channel names carry emoji and
-    separators ("🦤・general-dodo"), so the letters and digits are compared;
-    an exact match first, then one that contains it."""
-    def bare(text):
-        return "".join(ch for ch in str(text).lower() if ch.isalnum())
-    key = bare(want)
-    channels = list(getattr(guild, "text_channels", []))
-    return (next((c for c in channels if bare(c.name) == key), None)
-            or next((c for c in channels if key and key in bare(c.name)), None))
-
-
 async def _announce(bot, guild, catcher: int, owner: int, count: int) -> None:
     import discord
 
-    want = str(_p(bot, guild.id, "dodoland_horse_channel", "general-dodo") or "").strip().lstrip("#")
-    if not want:
-        return
-    channel = guild.get_channel(int(want)) if want.isdigit() else _channel_named(guild, want)
+    # The server's bot channel (its settings' "Bot channel", DODO_CHANNEL).
+    try:
+        channel = guild.get_channel(int(bot.guild_config.get(guild.id, "DODO_CHANNEL") or 0))
+    except (AttributeError, TypeError, ValueError):
+        channel = None
     if channel is None:
         if getattr(bot, "logger", None):
-            bot.logger.warning(f"DodoLand horse: no channel {want!r} to announce in (dodoland_horse_channel).")
+            bot.logger.warning("DodoLand horse: no bot channel set (server settings, Bot channel) to announce in.")
         return
     line = str(_p(bot, guild.id, "dodoland_horse_message",
                   "{catcher} just turned a horse into {count} sweetrolls for {owner}!"))
