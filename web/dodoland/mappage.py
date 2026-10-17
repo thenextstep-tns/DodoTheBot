@@ -85,54 +85,8 @@ def _avatar_of(guild, user_id) -> str:
         return ""
 
 
-_PETS: dict = {}
 
 
-
-def _pets_of(bot, guild_id: int, owners: list) -> dict:
-    """``{owner id: [{n, t, u, k}]}``: a few of each settled person's cats and
-    dogs (dodoland_pets_per_town, both kinds together) to walk their town -
-    not all of them, some people have thousands. Kept for half an hour."""
-    import time as _time
-
-    import config_py
-
-    try:
-        per = max(0, int(bot.dodoland_params.get(guild_id, "dodoland_pets_per_town")))
-    except Exception:  # noqa: BLE001
-        per = 3
-    owners = sorted({str(o) for o in owners})
-    if per <= 0 or not owners:
-        return {}
-    hit = _PETS.get(guild_id)
-    if hit and _time.time() - hit[0] < 1800 and hit[1] == (per, tuple(owners)):
-        return hit[2]
-    found: dict = {}
-    for coll, kind in ((config_py.catcollection, "cat"), (config_py.dogcollection, "dog")):
-        shape = {"n": "$name", "t": "$type", "u": "$url"}
-        try:
-            # Owners are numbers in some rows, text in others.
-            either = owners + [int(o) for o in owners if o.isdigit()]
-            rows = list(coll.aggregate([{"$match": {"owner": {"$in": either}}},
-                                        {"$group": {"_id": "$owner", "pets": {"$firstN": {"n": per, "input": shape}}}}]))
-        except Exception:  # noqa: BLE001 - an older database without $firstN
-            rows = [{"_id": o, "pets": [{"n": r.get("name"), "t": r.get("type"), "u": r.get("url")}
-                                        for r in coll.find({"owner": {"$in": [o, int(o)]}},
-                                                           {"name": 1, "type": 1, "url": 1}).limit(per)]}
-                    for o in owners]
-        for row in rows:
-            found.setdefault(str(row["_id"]), {})[kind] = [dict(p, k=kind) for p in row.get("pets") or []]
-    out = {}
-    for owner, kinds in found.items():
-        cats, dogs, mixed = kinds.get("cat", []), kinds.get("dog", []), []
-        while (cats or dogs) and len(mixed) < per:
-            if cats:
-                mixed.append(cats.pop(0))
-            if dogs and len(mixed) < per:
-                mixed.append(dogs.pop(0))
-        out[owner] = mixed
-    _PETS[guild_id] = (_time.time(), (per, tuple(owners)), out)
-    return out
 
 
 def _rooms_of(guild, building: dict) -> list[str]:
@@ -261,16 +215,13 @@ def _collect(bot, guild) -> dict:
     # Uploaded building pictures, when the server draws with them: each tier's
     # own picture in place of its generated drawing, wherever one was uploaded.
     upload = uploaded_art(bot, guild, placeable, hall_box, landmarks, bscale)
-    # Settled people: their picture (travellers on the roads wear it) and pets.
+    # Settled people: their picture (travellers wear it), look and chosen pets.
     settled = [p for p in people if p.get("plot")]
-    pets = _pets_of(bot, guild.id, [p["id"] for p in settled])
     looks = {p["id"]: (details.get(int(p["id"])) or details.get(p["id"]) or {}).get("look") or {} for p in settled}
     from helpers.dodoland import pets as pet_rules
     follow = pet_rules.details({uid: lk.get("pets") for uid, lk in looks.items() if lk.get("pets")})
     for p in settled:
         p["av"] = _avatar_of(guild, p["id"])
-        if pets.get(p["id"]):
-            p["pets"] = pets[p["id"]]
         if looks.get(p["id"]):
             p["look"] = looks[p["id"]]
         if follow.get(p["id"]):
@@ -1449,7 +1400,7 @@ _SCRIPT = r"""
   // on pointerdown routes every following event to the frame, so a plain click
   // on a town never reaches the town and nothing opens. That is why towns and
   // dots were unclickable.
-  var down = false, captured = false, moved = 0, last = null, pid = null;
+  var down = false, captured = false, moved = 0, last = null, pid = null, figPress = null;
   var painting = false;
   frame.addEventListener('pointerdown', function (ev) {
     // A brush stroke is a drag and so is a pan. Whichever is armed wins, and
@@ -1468,6 +1419,10 @@ _SCRIPT = r"""
       return;
     }
     if (ev.target.closest && ev.target.closest('.dlzoom')) return;
+    if (ev.button === 0 && typeof figureAt === 'function') {
+      var fig = figureAt(ev.clientX, ev.clientY);
+      if (fig) { figPress = fig; ev.preventDefault(); return; }
+    }
     if (typeof toolDown === 'function' && toolDown(ev)) return;
     down = true; captured = false; moved = 0; pid = ev.pointerId;
     last = {x: ev.clientX, y: ev.clientY};
@@ -2254,6 +2209,7 @@ _SCRIPT = r"""
     });
   }
   frame.addEventListener('click', function (ev) {
+    if (figPress) { var fig = figPress; figPress = null; fig.act(ev); return; }
     if (swallowClick) { swallowClick = false; return; }
     if (moved > 6 || !nat.w) return;
     if (typeof hidePop === 'function') hidePop();
@@ -4094,8 +4050,6 @@ _SCRIPT = r"""
     if (!horse.el) {
       horse.el = standing('dlhorse dlkeep', sprite('horse', '#8a5a34'), WALKER_BOX, 0, 0.42);
       horse.el.title = 'A horse. It does not look like it wants to go back to the zoo.';
-      horse.el.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
-      horse.el.addEventListener('click', horseKick);
       horse.x = at.x; horse.y = at.y;
       stand(horse.el, at.x, at.y);
       return;
@@ -4153,101 +4107,95 @@ _SCRIPT = r"""
   }
   setTimeout(horsePoll, 1500);
   // --- real members on the roads ------------------------------------------- //
-  // A road joins two towns whose people talk (roads_api.py). On the busiest
-  // of them (dodoland_travellers), one of the two travels it: from their own
-  // town to the other's, a rest, and home again - on foot inside a town's
-  // area, on horseback outside them. They are the real members: as big as
-  // anybody, in bright colours, a gold ring at their feet, a torch in hand
-  // and their own picture over their heads; clicking one shows who it is and
-  // where they are going (and their horse is not for the zoo).
-  var travellers = [], travelRaf = null, travelLast = 0;
+  // One traveller per person (travel_api.py), touring the towns of the
+  // people they talk to most: home, one town, the next, and back the same
+  // way, round and round, on ways worked out over the terrain (round the
+  // water, along the paths). As big as anybody, in their own colours (the
+  // town card's "Your traveller"), a gold ring at their feet, their picture
+  // over their heads, a torch from dusk to dawn; on horseback outside the
+  // towns. Only the pets they chose follow them.
+  var travellers = [], travelRaf = null, travelLast = 0, TRAVEL = null;
   function roadPoints(d) {
     var nums = String(d || '').match(/-?\d+(\.\d+)?/g) || [], out = [];
     for (var i = 0; i + 1 < nums.length; i += 2) out.push({x: +nums[i], y: +nums[i + 1]});
     return out;
   }
-  // Who travels and the way they go come from the server (travel_api.py):
-  // one traveller per person, on a way over the terrain that keeps out of
-  // the water and to paths and roads. Asked once the map is up.
-  var TRAVEL = null;
   function travelLoad() {
     if (TRAVEL !== null || !D.ep.base) return;
-    TRAVEL = [];
+    TRAVEL = {tours: [], routes: {}};
     fetch(D.ep.base + '/travel').then(function (r) { return r.ok ? r.json() : {}; })
-      .then(function (res) { TRAVEL = res.travel || []; travellersReset(); })
+      .then(function (res) { TRAVEL = {tours: res.tours || [], routes: res.routes || {}}; travellersReset(); })
       .catch(function () {});
+  }
+  // The legs of a tour in the order walked: out through the stops, then back.
+  function tourLegs(stops) {
+    var out = [];
+    function leg(a, b) {
+      var lo = a < b ? a : b, hi = a < b ? b : a, pts = roadPoints(TRAVEL.routes[lo + '|' + hi]);
+      if (pts.length < 2) return null;
+      if (a !== lo) pts = pts.slice().reverse();
+      var len = [0];
+      for (var j = 1; j < pts.length; j++) len.push(len[j - 1] + Math.hypot(pts[j].x - pts[j - 1].x, pts[j].y - pts[j - 1].y));
+      return {pts: pts, len: len, to: b};
+    }
+    for (var i = 0; i + 1 < stops.length; i++) { var f = leg(stops[i], stops[i + 1]); if (f) out.push(f); }
+    for (var k = stops.length - 1; k > 0; k--) { var g = leg(stops[k], stops[k - 1]); if (g) out.push(g); }
+    return out;
   }
   function travellersReset() {
     travellers.forEach(function (t) { t.el.remove(); (t.pets || []).forEach(function (q) { q.el.remove(); }); });
     travellers = [];
     if (!terr.world) return;
     if (TRAVEL === null) { travelLoad(); return; }
-    TRAVEL.forEach(function (way, n) {
-      var walker = byId[way.w], to = byId[way.t], pts = roadPoints(way.d);
-      if (!walker || !to || pts.length < 2) return;
-      var A = walker, B = to;
-      var len = [0];
-      for (var j = 1; j < pts.length; j++) len.push(len[j - 1] + Math.hypot(pts[j].x - pts[j - 1].x, pts[j].y - pts[j - 1].y));
-      var colour = ['#ff3b3b', '#ffb000', '#00b7ff', '#ff4fd8', '#2fe36b', '#ffe14d'][n % 6];
-      // A torch in the right hand; on a horse outside the towns.
+    TRAVEL.tours.forEach(function (tour, n) {
+      var walker = byId[tour.w], legs = tourLegs(tour.stops || []);
+      if (!walker || !legs.length) return;
+      var look = walker.look || {}, colour = ['#ff3b3b', '#ffb000', '#00b7ff', '#ff4fd8', '#2fe36b', '#ffe14d'][n % 6];
       // The torch is lit from dusk to dawn (.dldark on the world, drawNight).
       var torch = '<g class="dltorch"><line x1="2.6" y1="0" x2="3.4" y2="-5" stroke="#6b4423" stroke-width="0.55"/>' +
                   '<circle class="dlflame" cx="3.5" cy="-5.6" r="0.95" fill="#ffb84d"/></g>';
-      // The gold ring under their feet, in the figure itself so it lies behind it.
       var ring = '<ellipse class="dltring" cx="0" cy="2.6" rx="3.2" ry="0.95" fill="none" stroke="#ffd257" stroke-width="0.45"/>';
-      var look = walker.look || {};
       var me = String(LIFE.member || '').split('@H@').join(look.head || '#f2c9a0').split('@B@').join(look.body || colour) + torch;
       var ride = '<g transform="translate(0 2.6) scale(1.35)">' + sprite('horse', look.horse || '#7a4e2c') + '</g>' +
                  '<g transform="translate(0 -3.2) scale(0.9)">' + me + '</g>';
       var el = standing('dlwalker dltraveller dlkeep',
                         ring + '<g class="tw">' + me + '</g><g class="tr">' + ride + '</g>', WALKER_BOX, 2.6, 0.21, true);
       if (walker.av) el.insertAdjacentHTML('beforeend', '<img class="dltface" alt="" src="' + walker.av + '">');
-      var t = {el: el, who: walker, to: to, pts: pts, len: len,
-               at: Math.random() * len[len.length - 1], dir: 1, rest: 0, speed: 1.1 + Math.random() * 0.4};
-      el.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
-      el.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        if (t.riding) travellerSay(t, D.sizes.horse_busy || "Nay, I'm on a business trip right now");
-        travellerCard(t, ev);
-      });
-      // The pets they chose, trotting behind them.
-      t.pets = (walker.follow && walker.follow.length ? walker.follow : (walker.pets || [])).map(function (pet, j) {
+      // Spread out: each starts somewhere along their round.
+      var start = Math.floor(Math.random() * legs.length);
+      var t = {el: el, who: walker, legs: legs, leg: start, at: Math.random() * legs[start].len[legs[start].len.length - 1],
+               rest: 0, speed: 1.1 + Math.random() * 0.4};
+      t.pets = (walker.follow || []).map(function (pet, j) {
         var furs = ['#8a6a4a', '#d9a066', '#5a5050', '#e8dcc8', '#c47a3a', '#2f2a28'];
         var pel = standing('dlwalker dlpet dlkeep', sprite(pet.k === 'dog' ? 'dog' : 'cat', furs[(pet.n.length + j) % furs.length]),
                            WALKER_BOX, 0, 0.21, true);
         pel.title = pet.n + (pet.t ? ' (' + pet.t + ')' : '');
-        pel.addEventListener('pointerdown', function (ev) { ev.stopPropagation(); });
-        pel.addEventListener('click', function (ev) { ev.stopPropagation(); petCard({pet: pet, owner: walker}, ev); });
-        return {el: pel, lag: 1.1 * (j + 1)};
+        return {el: pel, lag: 1.1 * (j + 1), pet: pet};
       });
       travellers.push(t);
       travellerPlace(t);
     });
     if (travellers.length && !travelRaf) travelRaf = requestAnimationFrame(travelStep);
   }
+  function legAt(leg, s) {
+    s = Math.max(0, Math.min(s, leg.len[leg.len.length - 1]));
+    var i = 1;
+    while (i < leg.len.length - 1 && leg.len[i] < s) i++;
+    var a = leg.pts[i - 1], b = leg.pts[i], f = (s - leg.len[i - 1]) / ((leg.len[i] - leg.len[i - 1]) || 1);
+    return {x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, dx: b.x - a.x};
+  }
   function travellerPlace(t) {
-    var s = Math.max(0, Math.min(t.at, t.len[t.len.length - 1])), i = 1;
-    while (i < t.len.length - 1 && t.len[i] < s) i++;
-    var a = t.pts[i - 1], b = t.pts[i], seg = (t.len[i] - t.len[i - 1]) || 1, f = (s - t.len[i - 1]) / seg;
-    var x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f;
-    var face = (b.x - a.x) * t.dir < 0 ? -1 : 1;
+    var leg = t.legs[t.leg], p = legAt(leg, t.at);
+    var face = p.dx < 0 ? -1 : 1;
     if (face !== t.face) { t.face = face; var art = t.el.querySelector('svg'); if (art) art.style.transform = face < 0 ? 'scaleX(-1)' : ''; }
-    t.x = x; t.y = y;
-    stand(t.el, x, y);
-    (t.pets || []).forEach(function (q) {
-      var keep = t.at;
-      t.at = Math.max(0, Math.min(t.len[t.len.length - 1], keep - t.dir * q.lag));
-      var s2 = t.at, k = 1;
-      while (k < t.len.length - 1 && t.len[k] < s2) k++;
-      var a2 = t.pts[k - 1], b2 = t.pts[k], f2 = (s2 - t.len[k - 1]) / ((t.len[k] - t.len[k - 1]) || 1);
-      stand(q.el, a2.x + (b2.x - a2.x) * f2, a2.y + (b2.y - a2.y) * f2);
-      t.at = keep;
-    });
+    t.x = p.x; t.y = p.y;
+    stand(t.el, p.x, p.y);
+    (t.pets || []).forEach(function (q) { var at = legAt(leg, t.at - q.lag); stand(q.el, at.x, at.y); });
     // Inside a town's area on foot, outside it on horseback; asked twice a second.
     var now = performance.now();
     if (!t.asked || now - t.asked > 500) {
       t.asked = now;
-      var riding = !inTown(x, y);
+      var riding = !inTown(p.x, p.y);
       if (riding !== t.riding) { t.riding = riding; t.el.classList.toggle('riding', riding); }
     }
   }
@@ -4265,13 +4213,6 @@ _SCRIPT = r"""
     }
     return false;
   }
-  function travellerSay(t, text) {
-    var b = t.el.querySelector('.dlhorsesay');
-    if (!b) { b = document.createElement('div'); b.className = 'dlhorsesay'; t.el.appendChild(b); }
-    b.textContent = text; b.classList.add('on');
-    clearTimeout(t.sayT);
-    t.sayT = setTimeout(function () { b.classList.remove('on'); }, 2600);
-  }
   function travelStep(now) {
     travelRaf = null;
     var dt = Math.min(0.1, (now - (travelLast || now)) / 1000);
@@ -4280,30 +4221,64 @@ _SCRIPT = r"""
     if (!world.classList.contains('lifefar') && !document.hidden) {
       travellers.forEach(function (t) {
         if (t.rest > 0) { t.rest -= dt; return; }
-        t.at += t.dir * t.speed * dt;
-        var end = t.len[t.len.length - 1];
-        // At either town a rest, then back the other way.
-        if (t.at >= end || t.at <= 0) { t.at = Math.max(0, Math.min(end, t.at)); t.dir = -t.dir; t.rest = 4 + Math.random() * 6; }
+        t.at += t.speed * dt;
+        var leg = t.legs[t.leg], end = leg.len[leg.len.length - 1];
+        // At each town a rest, then on to the next.
+        if (t.at >= end) { t.leg = (t.leg + 1) % t.legs.length; t.at = 0; t.rest = 3 + Math.random() * 5; }
         travellerPlace(t);
       });
     }
     travelRaf = requestAnimationFrame(travelStep);
   }
+  function travellerSay(t, text) {
+    var b = t.el.querySelector('.dlhorsesay');
+    if (!b) { b = document.createElement('div'); b.className = 'dlhorsesay'; t.el.appendChild(b); }
+    b.textContent = text; b.classList.add('on');
+    clearTimeout(t.sayT);
+    t.sayT = setTimeout(function () { b.classList.remove('on'); }, 2600);
+  }
   var travelCard = document.createElement('div');
   travelCard.className = 'dltcard';
   frame.appendChild(travelCard);
   function travellerCard(t, ev) {
-    var f = frame.getBoundingClientRect(), going = t.dir > 0 ? t.to : t.who;
+    var f = frame.getBoundingClientRect(), going = byId[t.legs[t.leg].to] || {name: 'the next town'};
     travelCard.innerHTML = (t.who.av ? '<img alt="" src="' + t.who.av.replace(/size=\d+/, 'size=256') + '">' : '') +
       '<b>' + escapeHtml(t.who.owner || t.who.name) + '</b>' +
-      '<span>' + (t.rest > 0 ? 'resting at ' : 'on the road to ') + escapeHtml(going.name) + '</span>' +
-      '<small>' + escapeHtml(t.who.owner || t.who.name) + ' and ' + escapeHtml(t.to.owner || t.to.name) + ' have been talking lately</small>';
+      '<span>' + (t.rest > 0 ? 'resting before ' : 'on the road to ') + escapeHtml(going.name) + '</span>' +
+      '<small>visiting the towns of the people they talk to most</small>';
     travelCard.style.left = Math.min(f.width - 220, ev.clientX - f.left + 12) + 'px';
     travelCard.style.top = Math.max(8, ev.clientY - f.top - 140) + 'px';
     travelCard.classList.add('on');
   }
   frame.addEventListener('pointerdown', function () { travelCard.classList.remove('on'); });
-  // A person's pet, walking their town: clicking it shows it.
+  // What a press lands on, among the things that move: checked before the
+  // map's own handling, so whatever lies over them (a forest, the ground
+  // layers) never takes the click. Topmost first: the horse, then travellers,
+  // then their pets.
+  function figureAt(x, y) {
+    function hit(el, pad) {
+      if (!el || !el.isConnected) return false;
+      var r = el.getBoundingClientRect();
+      return r.width > 0 && x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+    }
+    if (horse.el && !horse.el.classList.contains('gone') && hit(horse.el, 6)) return {act: horseKick};
+    for (var i = 0; i < travellers.length; i++) {
+      var t = travellers[i];
+      if (getComputedStyle(t.el).display === 'none') continue;
+      if (hit(t.el, 4)) return {act: function (ev) {
+        if (t.riding) travellerSay(t, D.sizes.horse_busy || "Nay, I'm on a business trip right now");
+        travellerCard(t, ev);
+      }};
+      for (var j = 0; j < (t.pets || []).length; j++) {
+        if (hit(t.pets[j].el, 3)) {
+          var q = t.pets[j];
+          return {act: function (ev) { petCard({pet: q.pet, owner: t.who}, ev); }};
+        }
+      }
+    }
+    return null;
+  }
+  // A traveller's pet: clicking it shows it.
   function petCard(w, ev) {
     var f = frame.getBoundingClientRect(), pet = w.pet;
     travelCard.innerHTML = (pet.u ? '<img class="pet" alt="" src="' + escapeHtml(pet.u) + '">' : '') +

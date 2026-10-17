@@ -1,10 +1,10 @@
 """
 Real members travelling between towns, and the way they go.
 
-Who: the people whose towns talk most (the pair rows over the standing window),
-one traveller per person - each pair sends whichever of the two is not
-already out - up to ``dodoland_travellers``, and always the viewer's own: to
-whoever they talk to most, else the nearest town.
+Who: one traveller per settled person (the busiest first, up to
+``dodoland_travellers``), touring the towns of the people they talk to most
+(the pair rows over the standing window; ``dodoland_travel_stops`` of them,
+else the nearest towns): home, one town, the next, ..., home, round and round.
 
 The way: over the terrain, never through the sea, avoiding water (a river is
 crossed only where there is no way round: ``dodoland_travel_water_cost``) and
@@ -15,8 +15,9 @@ ground). The same coarse grid and A* the Roads layer uses
 the settings or the day change, and at least every hour - not on every paint
 stroke, as working them out takes seconds.
 
-``GET /guild/{gid}/dodoland/travel`` (and the member's reader): ``{travel:
-[{w: walker id, t: destination id, d: path in cells}]}``.
+``GET /guild/{gid}/dodoland/travel`` (and the member's reader): ``{tours:
+[{w: traveller, stops: [town ids, from their own]}], routes: {"a|b": path in
+cells from a's town to b's, a < b}}``.
 """
 
 from __future__ import annotations
@@ -120,10 +121,14 @@ def _route(bot, guild, key, a: str, b: str):
     return points
 
 
-def who_travels(bot, guild, viewer: str) -> list[tuple[str, str]]:
-    """``[(walker, destination)]``: one traveller per person. Blocking."""
+def tours(bot, guild) -> list[tuple[str, list[str]]]:
+    """``[(traveller, [their town, stop, stop, ...])]``: one traveller per
+    settled person (up to ``dodoland_travellers``), each touring round the
+    towns of the people they talk to most (up to ``dodoland_travel_stops``;
+    with nobody, the nearest towns) and home again, round and round. Blocking."""
     params = bot.dodoland_params
     most = max(0, int(params.get(guild.id, "dodoland_travellers")))
+    stops = max(1, int(params.get(guild.id, "dodoland_travel_stops")))
     plots = {str(k): v for k, v in bot.dodoland_buildings.plots(guild.id).items()}
     if most <= 0 or len(plots) < 2:
         return []
@@ -134,46 +139,80 @@ def who_travels(bot, guild, viewer: str) -> list[tuple[str, str]]:
         a, b = str(row.get("a")), str(row.get("b"))
         if a in plots and b in plots and a != b:
             talk[(a, b)] = talk.get((a, b), 0) + int(row.get("n") or 0)
-    ranked = sorted(talk.items(), key=lambda kv: -kv[1])
-    out, out_of_town = [], set()
-
-    def send(walker, to):
-        out.append((walker, to))
-        out_of_town.add(walker)
-    # The viewer's own first, so they are always out.
-    if viewer in plots:
-        mine = next(((a, b) for (a, b), _ in ranked if viewer in (a, b)), None)
-        if mine:
-            send(viewer, mine[1] if mine[0] == viewer else mine[0])
-        else:
-            me = plots[viewer]
-            near = min((u for u in plots if u != viewer),
-                       key=lambda u: (plots[u]["x"] - me["x"]) ** 2 + (plots[u]["y"] - me["y"]) ** 2)
-            send(viewer, near)
-    for (a, b), _ in ranked:
-        if len(out) >= most + (1 if viewer in plots else 0):
-            break
-        if a not in out_of_town:
-            send(a, b)
-        elif b not in out_of_town:
-            send(b, a)
+    busy = {}
+    for (a, b), n in talk.items():
+        busy[a] = busy.get(a, 0) + n
+        busy[b] = busy.get(b, 0) + n
+    out = []
+    for who in sorted(plots, key=lambda u: -busy.get(u, 0))[:most]:
+        friends = sorted(((n, b if a == who else a) for (a, b), n in talk.items() if who in (a, b)), reverse=True)
+        visit = [u for _, u in friends][:stops]
+        if not visit:
+            me = plots[who]
+            visit = sorted((u for u in plots if u != who),
+                           key=lambda u: (plots[u]["x"] - me["x"]) ** 2 + (plots[u]["y"] - me["y"]) ** 2)[:min(2, stops)]
+        out.append((who, [who] + visit))
     return out
 
 
-def travel(bot, guild, viewer: str) -> dict:
-    """The travellers and their ways. Blocking; the routes are cached."""
+def travel(bot, guild) -> dict:
+    """``{tours: [{w, stops}], routes: {"a|b": path}}``: who tours where, and
+    the way between each two towns next to each other on a tour. A tour goes
+    out through its stops and back the same way (home, A, B, C, B, A, home,
+    ...); a town no way leads to is left out. Blocking; routes are cached."""
     key = _key(bot, guild)
-    out = []
-    for walker, to in who_travels(bot, guild, viewer):
-        points = _route(bot, guild, key, walker, to)
-        if points and len(points) >= 2:
-            out.append({"w": walker, "t": to, "d": "M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in points)})
-    return {"travel": out}
+    routes, out = {}, []
+
+    def leg(a, b) -> bool:
+        lo, hi = sorted((a, b))
+        name = f"{lo}|{hi}"
+        if name not in routes:
+            points = _route(bot, guild, key, lo, hi)
+            routes[name] = ("M" + "L".join(f"{x:.1f} {y:.1f}" for x, y in points)) if points and len(points) >= 2 else ""
+        return bool(routes[name])
+    for who, stops in tours(bot, guild):
+        kept = [stops[0]]
+        for town in stops[1:]:
+            if leg(kept[-1], town):
+                kept.append(town)
+        if len(kept) >= 2:
+            out.append({"w": who, "stops": kept})
+    return {"tours": out, "routes": {k: v for k, v in routes.items() if v}}
+
+
+# guild -> (key, payload); and which guilds are being worked out right now.
+_LAST: dict = {}
+_BUSY: set = set()
+
+
+def current(bot, guild) -> dict:
+    """The tours, never waiting on a recalculation once there is one: an old
+    answer is served while a fresh one is worked out in the background
+    (routes take seconds). Blocking only the very first time."""
+    import threading
+
+    key = _key(bot, guild)
+    hit = _LAST.get(guild.id)
+    if hit and hit[0] == key:
+        return hit[1]
+    if hit:
+        if guild.id not in _BUSY:
+            _BUSY.add(guild.id)
+
+            def refresh():
+                try:
+                    _LAST[guild.id] = (key, travel(bot, guild))
+                finally:
+                    _BUSY.discard(guild.id)
+            threading.Thread(target=refresh, name="dodoland-travel", daemon=True).start()
+        return hit[1]
+    payload = travel(bot, guild)
+    _LAST[guild.id] = (key, payload)
+    return payload
 
 
 async def travel_layer(request: web.Request):
-    """``GET .../dodoland/travel``: who travels, and the way they go."""
+    """``GET .../dodoland/travel``: who tours where, and the ways between."""
     bot, guild = request.app["bot"], request["guild"]
-    viewer = str(request.get("uid") or "")
-    payload = await asyncio.get_running_loop().run_in_executor(None, travel, bot, guild, viewer)
+    payload = await asyncio.get_running_loop().run_in_executor(None, current, bot, guild)
     return web.json_response({"ok": True, **payload})

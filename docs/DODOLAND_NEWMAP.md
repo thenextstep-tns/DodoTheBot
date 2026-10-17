@@ -1402,3 +1402,13 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   The page fetches it once (`travelLoad`). Ring is an SVG ellipse under the
   feet (was an absolutely positioned element covering the body); torches show
   only while `.dldark` (set by drawNight at dusk, night, dawn).
+- Travellers v4 (17 Oct): tours. `travel_api.tours`: one traveller per settled
+  person (busiest first, `dodoland_travellers`), stops = home + their top
+  `dodoland_travel_stops` talk partners (else nearest towns). `travel()` returns
+  `{tours: [{w, stops}], routes: {"lo|hi": path}}`; a tour walks out through the
+  stops and back (`tourLegs`), resting 3-8 s at each town. `current()` serves
+  the last answer while recomputing in a background thread (cold ~24 s).
+  Only chosen pets (`follow`) exist, following their traveller; town pets and
+  `_pets_of`/`dodoland_pets_per_town` removed. Clicks: the frame asks
+  `figureAt` (horse, travellers, their pets, by screen rect) before anything
+  else; figures carry no listeners of their own.
