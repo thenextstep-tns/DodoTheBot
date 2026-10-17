@@ -100,7 +100,9 @@ store.move(G, piece["piece_id"], rot=-30)
 assert store.piece(G, piece["piece_id"])["rot"] == 330.0
 store.move(G, piece["piece_id"], x=11)
 assert store.piece(G, piece["piece_id"])["rot"] == 330.0, "moving a piece lost its turn"
-print("turning         a piece keeps its turn (degrees, any way round)")
+store.move(G, piece["piece_id"], yaw=405)
+assert store.piece(G, piece["piece_id"])["yaw"] == 45.0 and store.piece(G, piece["piece_id"])["rot"] == 330.0
+print("turning         a piece keeps its turn and its turn on the ground (degrees, any way round)")
 
 # A traveller's look.
 look = town_rules.clean_look({"head": "#AABBCC", "body": "", "horse": "#112233",

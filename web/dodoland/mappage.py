@@ -78,7 +78,7 @@ def _grown(power: int, biggest: int) -> float:
 
 # The map's texts in the Strings menu (lang.py, DODOLAND_*), by their names
 # without the prefix; the page reads them as D.str.
-PAGE_STRINGS = ['HORSE_LINE', 'HORSE_BUSY', 'HORSE_PAID', 'HORSE_IN_ZOO', 'HORSE_THE_ZOO', 'TRAVELLER_ON_ROAD', 'TRAVELLER_RESTING', 'TRAVELLER_NOTE', 'TRAVELLER_NEXT_TOWN', 'FIND_TRAVELLER', 'FIND_TRAVELLER_TIP', 'NO_TRAVELLER', 'LOOK_TITLE', 'LOOK_HEAD', 'LOOK_BODY', 'LOOK_HORSE', 'LOOK_PETS', 'LOOK_SEARCH', 'LOOK_NONE', 'LOOK_NOT_FOUND', 'PET_CAT', 'PET_DOG', 'PET_UNNAMED', 'PLACING', 'MOVING', 'TURN_TIP']
+PAGE_STRINGS = ['HORSE_LINE', 'HORSE_BUSY', 'HORSE_PAID', 'HORSE_IN_ZOO', 'HORSE_THE_ZOO', 'TRAVELLER_ON_ROAD', 'TRAVELLER_RESTING', 'TRAVELLER_NOTE', 'TRAVELLER_NEXT_TOWN', 'FIND_TRAVELLER', 'FIND_TRAVELLER_TIP', 'NO_TRAVELLER', 'LOOK_TITLE', 'LOOK_HEAD', 'LOOK_BODY', 'LOOK_HORSE', 'LOOK_PETS', 'LOOK_SEARCH', 'LOOK_NONE', 'LOOK_NOT_FOUND', 'PET_CAT', 'PET_DOG', 'PET_UNNAMED', 'PLACING', 'MOVING', 'TURN_TIP', 'YAW_TIP']
 
 
 def _page_strings(bot, guild) -> dict:
@@ -256,6 +256,8 @@ def _collect(bot, guild) -> dict:
                        "f": bool(d.get("flip")),
                        # Turned this many degrees round its foot (the turn handle).
                        **({"r": float(d.get("rot"))} if d.get("rot") else {}),
+                       # Turned this many degrees on the ground (the yaw handle).
+                       **({"yw": float(d.get("yaw"))} if d.get("yaw") else {}),
                        # Who placed it, for the toolkit's Placed list.
                        "by": str(d.get("by") or ""), "bn": str(d.get("by_name") or ""),
                        "t": str(d.get("town") or ""),
@@ -612,6 +614,8 @@ async def map_page(request: web.Request):
         # Real members travelling the busiest roads (0: none), and what a
         # traveller's horse says when somebody tries to herd it.
         "travellers": max(0, int(bot.dodoland_params.get(guild.id, "dodoland_travellers"))),
+        # How much a piece turned on the ground slants (dodoland_turn_depth).
+        "turn_depth": max(0.0, min(1.5, float(bot.dodoland_params.get(guild.id, "dodoland_turn_depth")))),
         # How a chased horse runs (the same settings the runaway's server uses).
         "horse": {"min": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_min")),
                   "max": float(bot.dodoland_params.get(guild.id, "dodoland_horse_bolt_max")),
@@ -984,7 +988,10 @@ body { background: var(--deep); color: var(--ink); overflow: hidden;
    the same reason towns are: re-uploading a redrawn map at another resolution
    must move nothing. */
 /* Turned round its foot: the point it stands on stays where it stands. */
-.dlpiece { position: absolute; transform: translate(-50%, -85%) rotate(var(--rot, 0deg));
+/* ... and turned on the ground (yaw): narrowed by cos and slanted by sin, so
+   a fence can run off into the distance. */
+.dlpiece { position: absolute; transform: translate(-50%, -85%) rotate(var(--rot, 0deg))
+  matrix(var(--ya, 1), var(--yb, 0), 0, 1, 0, 0);
   transform-origin: 50% 85%;
   z-index: 4; cursor: pointer; }
 .dlpiece img { display: block; width: 100%; height: auto;
@@ -1216,6 +1223,9 @@ body.dlcardopen .dlkitdrawer.open, body.dlcardopen .dlterrdrawer.open { left: 37
   border-radius: 50%; background: var(--lantern, #f0a64f); color: #1b130a; font-size: 14px; line-height: 22px;
   text-align: center; cursor: grab; box-shadow: 0 1px 4px rgba(0,0,0,.45); touch-action: none; user-select: none; }
 .dlturn.on { display: block; }
+.dlturn.yaw { border-radius: 4px; transform: rotate(45deg); width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  background: #7fd1ff; line-height: 16px; font-size: 0; }
+.dlturn.yaw::after { display: none; }
 .dlturn::after { content: ""; position: absolute; left: 50%; top: 22px; width: 1px; height: 14px; background: rgba(240,166,79,.7); }
 /* "Placing..." while a place or move is saved: a bar that fills over about
    as long as saving usually takes here, so nobody pulls things about meanwhile. */
@@ -2990,6 +3000,7 @@ _SCRIPT = r"""
     el.className = 'dlpiece L-' + (piece.l || 'objects') + (piece.f ? ' flip' : '') +
       (meta && meta.px ? ' px' : '');
     if (piece.r) el.style.setProperty('--rot', piece.r + 'deg');
+    if (piece.yw) yawStyle(el, piece.yw);
     el.dataset.id = piece.id;
     el.style.left = piece.x + '%';
     el.style.top = piece.y + '%';
@@ -3075,17 +3086,70 @@ _SCRIPT = r"""
   turn.title = txt('TURN_TIP');
   frame.appendChild(turn);
   function turnFoot(el) {
-    var r = el.getBoundingClientRect(), f = frame.getBoundingClientRect();
-    // The foot (50%, 85% of the unturned box) is where the piece stands.
+    // Where the piece stands (its foot): its place on the map, on screen.
     var p = pieceById(el.dataset.id), w = el.offsetWidth * view.k, h = el.offsetHeight * view.k;
-    var cx = r.left + r.width / 2 - f.left, cy = r.top + r.height / 2 - f.top;
-    var a = (p && p.r || 0) * Math.PI / 180, dy = h * 0.35;
-    return {x: cx - Math.sin(a) * dy, y: cy + Math.cos(a) * dy, h: h, w: w};
+    return {x: view.x + (p ? p.x : 50) / 100 * nat.w * view.k, y: view.y + (p ? p.y : 50) / 100 * nat.h * view.k, h: h, w: w};
   }
+  // Turning on the ground: narrowed by the cosine (mirrored past side-on,
+  // never quite edge-on so it stays clickable) and slanted by the sine.
+  function yawStyle(el, deg) {
+    var t = deg * Math.PI / 180, a = Math.cos(t), depth = D.sizes.turn_depth == null ? 0.5 : D.sizes.turn_depth;
+    if (Math.abs(a) < 0.15) a = a < 0 ? -0.15 : 0.15;
+    el.style.setProperty('--ya', a.toFixed(4));
+    el.style.setProperty('--yb', (-Math.sin(t) * depth).toFixed(4));
+  }
+  var yawKnob = document.createElement('div');
+  yawKnob.className = 'dlturn yaw';
+  yawKnob.title = txt('YAW_TIP');
+  frame.appendChild(yawKnob);
+  function placeYaw(id, may) {
+    yawKnob.classList.toggle('on', !!may);
+    if (!may) { yawKnob.dataset.id = ''; return; }
+    var p = pieceById(id), foot = turnFoot(pieces[id]), t = (p.yw || 0) * Math.PI / 180;
+    var depth = D.sizes.turn_depth == null ? 0.5 : D.sizes.turn_depth, R = Math.max(foot.w * 0.6, 36);
+    yawKnob.dataset.id = id;
+    yawKnob.style.left = (foot.x + Math.cos(t) * R) + 'px';
+    yawKnob.style.top = (foot.y - Math.sin(t) * R * Math.max(0.25, depth)) + 'px';
+  }
+  function setYaw(id, deg, save) {
+    var p = pieceById(id), el = pieces[id];
+    if (!p || !el) return;
+    deg = ((Math.round(deg * 10) / 10) % 360 + 360) % 360;
+    p.yw = deg;
+    yawStyle(el, deg);
+    placeYaw(id, true);
+    if (save) decorPost(D.ep.player ? {action: 'move', piece_id: id, yaw: deg}
+                                    : {action: 'move_many', moves: [{piece_id: id, yaw: deg}]}, function () {});
+  }
+  yawKnob.addEventListener('pointerdown', function (ev) {
+    var id = yawKnob.dataset.id, el = id && pieces[id];
+    if (!el) return;
+    ev.preventDefault(); ev.stopPropagation();
+    try { yawKnob.setPointerCapture(ev.pointerId); } catch (e) {}
+    var foot = turnFoot(el), f = frame.getBoundingClientRect(), turned = false;
+    var depth = Math.max(0.25, D.sizes.turn_depth == null ? 0.5 : D.sizes.turn_depth);
+    function move(m) {
+      // The angle round the foot on the ground, seen at a slant.
+      var deg = Math.atan2(-(m.clientY - f.top - foot.y) / depth, m.clientX - f.left - foot.x) * 180 / Math.PI;
+      if (m.shiftKey) deg = Math.round(deg / 15) * 15;
+      turned = true;
+      setYaw(id, deg, false);
+    }
+    function up() {
+      yawKnob.removeEventListener('pointermove', move); yawKnob.removeEventListener('pointerup', up);
+      if (turned) setYaw(id, pieceById(id).yw || 0, true);
+    }
+    yawKnob.addEventListener('pointermove', move); yawKnob.addEventListener('pointerup', up);
+  });
+  yawKnob.addEventListener('dblclick', function (ev) {
+    ev.stopPropagation();
+    if (yawKnob.dataset.id) setYaw(yawKnob.dataset.id, 0, true);
+  });
   function placeTurn(id) {
     var p = id && pieceById(id), el = id && pieces[id];
     var may = p && el && !p.k && (!D.ep.player || String(p.by || '') === String(D.me) || p.t === String(D.me));
     turn.classList.toggle('on', !!may);
+    placeYaw(id, may);
     if (!may) { turn.dataset.id = ''; return; }
     var foot = turnFoot(el), a = (p.r || 0) * Math.PI / 180, reach = foot.h * 0.85 + 26;
     turn.dataset.id = id;

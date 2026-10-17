@@ -1436,3 +1436,9 @@ test_dodoland_pictures.py. Also measured: the map page itself is ~0.5 s warm /
   `catch(horse_id, ...)` refuses one that is away). GET returns `away`; the page
   skips/removes those walkers (`HORSES_AWAY`). Into the zoo the horse says
   `DODOLAND_HORSE_IN_ZOO` (the carrot line), then the payout bubble.
+- Turning on the ground (17 Oct): decor `yaw` (degrees; `DecorStore.move(yaw=)`,
+  both endpoints; payload `yw`). Drawn as `matrix(cos, -sin*depth, 0, 1)` after
+  the in-plane `rotate` (CSS vars --ya/--yb, origin = the foot; |cos| >= 0.15),
+  `dodoland_turn_depth` (0.5). A second handle (blue diamond, `.dlturn.yaw`) on
+  an ellipse round the foot sets it (Shift 15°, double-click resets). Handle
+  feet now come from the piece's map position, not its box.
